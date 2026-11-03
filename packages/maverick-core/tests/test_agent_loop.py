@@ -1080,6 +1080,78 @@ class TestToolLifecycleAudit:
         assert "Result withheld" in output
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("screening", ["allowed", "blocked", "unavailable"])
+    async def test_unknown_connector_outcome_stays_unknown_through_screening(
+        self, ctx, monkeypatch, screening,
+    ):
+        from types import SimpleNamespace
+
+        from maverick.connector_attempts import ConnectorAttempt, ConnectorResult, public_result
+
+        rows: list[tuple[str, dict]] = []
+        monkeypatch.setattr(
+            "maverick.audit.audit_event",
+            lambda kind, **payload: rows.append((str(kind), payload)) or True,
+        )
+
+        class _Shield:
+            def scan_tool_call(self, _name, _args):
+                return SimpleNamespace(allowed=True)
+
+            def scan_output(self, _output):
+                if screening == "unavailable":
+                    raise RuntimeError("screening unavailable")
+                return SimpleNamespace(allowed=screening == "allowed", reasons=["withheld"], severity="high")
+
+        async def _unknown(_name, _args):
+            return public_result(ConnectorResult(
+                "INDETERMINATE: acknowledgment lost",
+                ConnectorAttempt(request_id="write", attempt=1, operation="mutation", outcome_unknown=True),
+            ))
+
+        ctx.shield = _Shield()
+        agent = Agent(ctx=ctx, role="researcher", brief="x")
+        monkeypatch.setattr(agent.tools, "run", _unknown)
+        output = await agent._run_tool("shell", {"cmd": "echo test"})
+
+        results = [payload for kind, payload in rows if kind == "tool_result"]
+        assert len(results) == 1
+        assert results[0]["disposition"] == "execution_unknown"
+        assert "INDETERMINATE" in output
+        assert "Tool executed" not in output
+
+    @pytest.mark.asyncio
+    async def test_post_tool_cancellation_preserves_unknown_effect(self, ctx, monkeypatch):
+        from maverick.connector_attempts import ConnectorAttempt, ConnectorResult, public_result
+        from maverick.hooks import HookEvent
+        from maverick.run_outcome import GoalCancelled
+
+        rows: list[tuple[str, dict]] = []
+        monkeypatch.setattr(
+            "maverick.audit.audit_event",
+            lambda kind, **payload: rows.append((str(kind), payload)) or True,
+        )
+
+        async def _hooks(hook_ctx):
+            if hook_ctx.event is HookEvent.POST_TOOL_USE:
+                raise GoalCancelled("cancelled after dispatch")
+            return True
+
+        async def _unknown(_name, _args):
+            return public_result(ConnectorResult(
+                "INDETERMINATE: acknowledgment lost",
+                ConnectorAttempt(request_id="write", attempt=1, operation="mutation", outcome_unknown=True),
+            ))
+
+        monkeypatch.setattr("maverick.hooks.dispatch", _hooks)
+        agent = Agent(ctx=ctx, role="researcher", brief="x")
+        monkeypatch.setattr(agent.tools, "run", _unknown)
+        with pytest.raises(GoalCancelled) as stopped:
+            await agent._run_tool("shell", {"cmd": "echo test"})
+        assert stopped.value.tool_execution_unknown is True
+        assert [row["disposition"] for kind, row in rows if kind == "tool_result"] == ["execution_unknown"]
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         ("error_factory", "disposition"),
         [

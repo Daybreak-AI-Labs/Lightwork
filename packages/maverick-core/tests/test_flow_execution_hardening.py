@@ -1057,3 +1057,45 @@ def test_default_action_runner_never_scores_governed_non_success_as_success(
     )
     assert result == reserved
     assert outcome == 0.0
+
+
+def test_default_action_runner_preserves_explicit_success_with_error_prefix(monkeypatch):
+    from maverick.tool_results import ToolOutcome, ToolResultState
+    from maverick.tools import Tool, ToolRegistry
+
+    content = "ERROR: ValueError: ordinary document content"
+    registry = ToolRegistry()
+    registry.register(Tool(
+        name="web_search",
+        description="search results",
+        input_schema={"type": "object"},
+        fn=lambda _args: ToolOutcome(ToolResultState.SUCCEEDED, content).as_text(),
+    ))
+    monkeypatch.setattr("maverick.tools.base_registry", lambda *a, **k: registry)
+    result, outcome = execution.default_action_runner(world=None)("web_search", {}, {})
+    assert result == content
+    assert outcome == 1.0
+
+
+def test_redacted_typed_indeterminate_result_is_not_retried(monkeypatch):
+    from maverick.flow.runner import run_flow
+    from maverick.tool_results import ToolOutcome, ToolResultState
+    from maverick.tools import Tool, ToolRegistry
+
+    calls = []
+    registry = ToolRegistry()
+    registry.register(Tool(
+        name="web_search", description="search results", input_schema={"type": "object"},
+        fn=lambda _args: calls.append("called") or ToolOutcome(
+            ToolResultState.INDETERMINATE, "ERROR: RuntimeError: private details",
+        ).as_text(),
+    ))
+    monkeypatch.setattr("maverick.tools.base_registry", lambda *a, **k: registry)
+    action = execution.default_action_runner(world=None)
+    node = FlowNode(id="search", kind=NODE_ACTION, tool="web_search", retries=3)
+    flow = Flow(id="f", name="Example", start="search", nodes={"search": node})
+    result = run_flow(flow, agent_fn=lambda *_args: ("unused", None),
+                      action_fn=lambda node, params, data: action(node.tool, params, data))
+    assert result.status == "indeterminate"
+    assert calls == ["called"]
+    assert "private details" not in result.error

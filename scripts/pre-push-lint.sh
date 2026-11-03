@@ -47,6 +47,16 @@ run() {  # run "<name>" <command...>
 echo "== ruff =="
 run "ruff check ." python -m ruff check .
 
+echo "== mypy (selected boundaries) =="
+run "mypy" python -m mypy
+
+echo "== reviewed dependency patches =="
+run "vendor source integrity" python scripts/check_vendor_patches.py
+run "merge dependency regressions" node --test vendor/tests/deepmerge.test.cjs
+
+echo "== standalone demo support =="
+run "standalone demo support" python scripts/sync_standalone_support.py --check
+
 echo "== vulture (dead code) =="
 run "vulture" python -m vulture
 
@@ -127,8 +137,15 @@ run "grpc contract --check"   python -m maverick.grpc_api.contract --check
 run "a11y_audit --ci"         python -m maverick.a11y_audit --ci
 run "schema_migrations --ci"  python -m maverick.schema_migrations --ci
 
+echo "== signed benchmark evidence matches current source =="
+run "governance-frontier tracked evidence" python benchmarks/eval_governance_frontier.py --verify-tracked-artifacts
+run "harness-overhead tracked evidence" python benchmarks/eval_harness_overhead.py --verify-tracked-artifacts
+
 echo "== release packaging and installer disclosures =="
-run "release packaging" python -m pytest -q packages/maverick-core/tests/test_release_packaging.py
+run "release and supply-chain contracts" python -m pytest -q \
+  packages/maverick-core/tests/test_release_packaging.py \
+  packages/maverick-core/tests/test_install_supply_chain.py \
+  packages/maverick-core/tests/test_vendor_patches.py
 
 echo
 if [ "$fail" -ne 0 ]; then

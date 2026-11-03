@@ -79,7 +79,7 @@ def projected_window(rows, *, offset, after, before, oldest):
 def _world(request, source, **options):
     from maverick.domain import available_domains, suites_for_domain
 
-    from .api import _world as world
+    from ._shared import _world as world
     require_permission(request, "view")
     profiles = available_domains()
     value = world_window(world(), source=source, owner=caller_principal(request) or "",

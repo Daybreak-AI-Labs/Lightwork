@@ -19,6 +19,7 @@ import os
 from typing import Any
 
 from ..fastjson import dumps_compact
+from ..governed_http import guarded_sender as _governed_sender
 from . import Tool
 
 log = logging.getLogger(__name__)
@@ -79,7 +80,7 @@ def _op_track(args: dict) -> str:
             **(args.get("properties") or {}),
         },
     }
-    r = httpx.post(
+    r = _governed_sender(httpx.post)(
         "https://api.mixpanel.com/track",
         data={"data": base64.b64encode(json.dumps(payload).encode()).decode()},
         timeout=15.0,
@@ -100,7 +101,7 @@ def _op_people_set(args: dict) -> str:
         "$distinct_id": did,
         "$set": props,
     }
-    r = httpx.post(
+    r = _governed_sender(httpx.post)(
         "https://api.mixpanel.com/engage",
         data={"data": base64.b64encode(json.dumps(payload).encode()).decode()},
         timeout=15.0,
@@ -118,7 +119,7 @@ def _op_segmentation(args: dict) -> str:
     if not event or not fd or not td:
         return "ERROR: segmentation requires event, from_date, to_date"
     pid = os.environ.get("MIXPANEL_PROJECT_ID", "").strip()
-    r = httpx.get(
+    r = _governed_sender(httpx.get)(
         "https://mixpanel.com/api/2.0/segmentation",
         headers=_service_auth(),
         params={

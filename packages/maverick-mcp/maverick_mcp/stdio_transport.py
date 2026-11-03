@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import threading
 import time
@@ -11,9 +12,19 @@ from concurrent.futures import wait
 from maverick import killswitch
 
 from .execution import ExecutionCancelled, ExecutionHandle, RequestAdmissionError, RequestExecutions
+from .protocol import ProtocolError as _ProtocolError
 from .tasks import TaskError
 
 log = logging.getLogger(__name__)
+
+
+def send_stdio_message(message: dict, *, stream, lock) -> None:
+    """Write one complete JSON-RPC line without interleaving notifications."""
+    line = json.dumps(message) + "\n"
+    with lock:
+        stream.write(line)
+        stream.flush()
+
 
 class StdioSession:
     def __init__(self, server):
@@ -86,8 +97,6 @@ class StdioSession:
             future.exception()
 
     async def _dispatch(self, message, handle):
-        from .server import _ProtocolError
-
         request_id = message.get("id")
         params = message.get("params") or {}
         with self.server.resource_update_scope(set(self.server._subscriptions)):
@@ -171,3 +180,104 @@ class StdioSession:
             # loop. It stops only once its pending coroutine cleanup completes.
             log.warning("stdio dispatch cleanup remains in progress")
         self._thread.join(timeout=2)
+
+
+def dispatch_stdio_message(server, method, request_id, params, is_notification) -> None:
+    """Route a parsed stdio message using the shared protocol method table."""
+    from .protocol import METHOD_HANDLERS
+
+    handler_name = METHOD_HANDLERS.get(method) if isinstance(method, str) else None
+    if handler_name is not None:
+        server._send_result(request_id, getattr(server, handler_name)(params))
+        if method == "tools/call":
+            # Result first, then any resources/updated notifications.
+            server._flush_resource_updates()
+    elif method == "notifications/initialized":
+        pass
+    elif method == "ping":
+        if not is_notification:
+            server._send_result(request_id, {})
+    else:
+        if not is_notification:
+            server._send_error(request_id, -32601, f"method not found: {method}")
+
+
+def handle_stdio_line(server, line: str, *, no_id, logger) -> None:
+    """Parse + dispatch one input line, translating handler exceptions into
+    JSON-RPC error responses. Behavior identical to the prior loop body."""
+    try:
+        msg = json.loads(line)
+    except json.JSONDecodeError as e:
+        logger.warning("bad JSON: %s", e)
+        return
+    # A top-level JSON-RPC message must be an object. A batch (list) or a
+    # scalar would make `msg.get(...)` raise AttributeError and tear down
+    # the stdio loop. Reject with -32600 (Invalid Request); batches are
+    # acknowledged with a null-id error rather than crashing.
+    if not isinstance(msg, dict):
+        server._send_error(None, -32600, "Invalid Request: expected a JSON-RPC object")
+        return
+    if server._stdio_session is not None and server._stdio_session.route(msg):
+        return
+    method = msg.get("method")
+    # Distinguish a MISSING id (notification, no reply) from an explicit
+    # `"id": null` (a request still owed a response). `no_id` is the
+    # missing sentinel; only a missing id marks a notification.
+    request_id = msg.get("id", no_id)
+    is_notification = request_id is no_id
+    if is_notification:
+        request_id = None
+    params = msg.get("params", {}) or {}
+    # A client can send `params` as a non-object (list/string/number).
+    # Handlers call `params.get(...)`, which would raise AttributeError
+    # -- caught below as a scrubbed -32603 "internal error". Coerce to
+    # {} so a malformed-params call yields the correct -32602 invalid-
+    # params response from the handler instead.
+    if not isinstance(params, dict):
+        params = {}
+    try:
+        server._dispatch_stdio_message(method, request_id, params, is_notification)
+    except TaskError as e:
+        if not is_notification:
+            server._send_error(request_id, e.code, e.message)
+    except _ProtocolError as e:
+        if not is_notification:
+            server._send_error(request_id, e.code, e.message)
+    except Exception as e:
+        logger.exception("handler error")  # full traceback stays server-side
+        if not is_notification:
+            # Do NOT ship the traceback to the client: frames/locals/args
+            # can carry secrets (DSNs, tokens, credentialed URLs). Send a
+            # scrubbed one-line message; the server log keeps the detail.
+            try:
+                from maverick.secrets import scrub
+                detail = scrub(f"{type(e).__name__}: {e}")
+            except Exception:  # pragma: no cover
+                detail = type(e).__name__
+            server._send_error(request_id, -32603, f"internal error: {detail}")
+
+
+def serve_stdio(server, *, stdin, protocol_version: str, logger) -> None:
+    """Own the stdin loop and session lifecycle for one MCP client."""
+    if server._requests.snapshot():
+        raise RuntimeError("cannot restart stdio while prior request execution is active")
+    server._requests.shutdown()
+    # One ordinary tool runs at a time while the reader remains available for
+    # cancellation, task controls, and elicitation replies.
+    server._requests = RequestExecutions(workers=1)
+    logger.info("Lightwork MCP server starting (protocol %s)", protocol_version)
+    server._stdio = True
+    server._tasks_enabled = True
+    server._stdio_session = StdioSession(server)
+    try:
+        while True:
+            line = stdin.readline()
+            if not line:
+                break
+            line = line.strip()
+            if line:
+                server._handle_stdio_line(line)
+    finally:
+        server._stdio_session.close()
+        server._stdio_session = None
+        server._stdio = False

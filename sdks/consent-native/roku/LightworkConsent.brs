@@ -50,10 +50,13 @@ function LightworkConsentValidateAuthority(authority as Dynamic) as Boolean
     if not LightworkConsentReference(authority.tenant_id) then return false
     if not LightworkConsentReference(authority.device_id) then return false
     if not LightworkConsentReference(authority.policy_id) then return false
-    if authority.application_id = invalid or Len(authority.application_id) < 3 or Len(authority.application_id) > 255 then return false
+    if not LightworkConsentIdentifier(authority.application_id, 3, 255) then return false
     for each name in ["device_revision", "key_revision", "sdk_version", "public_client_revision", "policy_version"]
-        if authority[name] = invalid or authority[name] < 1 then return false
+        value = authority[name]
+        if type(value) <> "Integer" and type(value) <> "roInt" and type(value) <> "LongInteger" and type(value) <> "roLongInteger" then return false
+        if value < 1 or value > 2147483647 then return false
     end for
+    if authority.sdk_version > 1000000 then return false
     for each name in ["application_authority_sha256", "public_client_record_sha256", "publication_sha256", "publication_bundle_sha256", "configuration_sha256", "policy_sha256", "standards_contract_sha256"]
         if not LightworkConsentDigest(authority[name]) then return false
     end for
@@ -274,7 +277,15 @@ function LightworkConsentDigest(value as Dynamic) as Boolean
 end function
 
 function LightworkConsentReference(value as Dynamic) as Boolean
+    return LightworkConsentIdentifier(value, 1, 128)
+end function
+
+function LightworkConsentIdentifier(value as Dynamic, minimum as Integer, maximum as Integer) as Boolean
     if type(value) <> "roString" and type(value) <> "String" then return false
-    if Len(value) < 1 or Len(value) > 128 then return false
+    if Len(value) < minimum or Len(value) > maximum then return false
+    if Instr(1, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789", Left(value, 1)) = 0 then return false
+    for index = 2 to Len(value)
+        if Instr(1, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.:-", Mid(value, index, 1)) = 0 then return false
+    end for
     return true
 end function

@@ -398,3 +398,33 @@ test("a page named like the words stays above an agent with the same name", asyn
   assert.ok(order.indexOf("/approvals") < order.indexOf("/agents?name=approvals_desk"), order.join(", "));
   ui.dom.window.close();
 });
+
+
+test("late settings under a stationary pointer cannot replace a keyboard command", () => {
+  const ui = menu({composer: true});
+  ui.type("> new task");
+  ui.finder.setSettings([{href: "/settings/all?id=task-limit", title: "New task limit", group: "Work"}]);
+  const setting = ui.doc.getElementById("navfinder-setting-0");
+  // Chromium emits mouseenter when asynchronous results appear under the
+  // pointer left behind by an earlier click, even without pointer movement.
+  setting.dispatchEvent(new ui.window.MouseEvent("mouseenter"));
+  assert.equal(ui.input.getAttribute("aria-activedescendant"), "navfinder-action-new-task");
+  ui.key("Enter");
+  assert.equal(ui.doc.activeElement.id, "composer-field");
+  assert.equal(ui.open(), false);
+  ui.dom.window.close();
+});
+
+test("moving the pointer deliberately selects an arriving setting", () => {
+  const ui = menu();
+  ui.type("> new task");
+  ui.finder.setSettings([{href: "/settings/all?id=task-limit", title: "New task limit", group: "Work"}]);
+  const setting = ui.doc.getElementById("navfinder-setting-0");
+  let clicks = 0;
+  setting.addEventListener("click", event => { event.preventDefault(); clicks += 1; });
+  setting.dispatchEvent(new ui.window.MouseEvent("mousemove", {clientX: 100, clientY: 100}));
+  assert.equal(ui.input.getAttribute("aria-activedescendant"), setting.id);
+  ui.key("Enter");
+  assert.equal(clicks, 1);
+  ui.dom.window.close();
+});

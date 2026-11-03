@@ -23,8 +23,8 @@ import sqlite3
 import threading
 import time
 from collections import OrderedDict
-from collections.abc import Callable, Iterator
-from dataclasses import dataclass, fields
+from collections.abc import Callable, Iterable, Iterator
+from dataclasses import fields
 from pathlib import Path
 from typing import Any
 
@@ -50,6 +50,17 @@ from .metadata_history import SQLITE_INDEXES as _HISTORY_INDEXES
 from .paths import bind_tenant_namespace, current_tenant_id, data_dir
 from .personal_alert_revisions import SQLITE_MIGRATION as _PERSONAL_ALERT_MIGRATION
 from .webhook_subscriptions import SQLITE_SCHEMA as _WEBHOOK_SUBSCRIPTION_SCHEMA
+from .world_model_contracts import GoalLookup, GoalRecord
+from .world_records import Approval as Approval
+from .world_records import ApprovalAuditEvent as ApprovalAuditEvent
+from .world_records import Attachment as Attachment
+from .world_records import Conversation as Conversation
+from .world_records import EpisodeSpend as EpisodeSpend
+from .world_records import FactVersion as FactVersion
+from .world_records import Goal as Goal
+from .world_records import GoalEvent as GoalEvent
+from .world_records import Question as Question
+from .world_records import Turn as Turn
 
 log = logging.getLogger(__name__)
 
@@ -716,81 +727,12 @@ MIGRATIONS: dict[int, list[str]] = {
 }
 
 
-@dataclass
-class Goal:
-    id: int
-    parent_id: int | None
-    title: str
-    description: str | None
-    status: str
-    created_at: float
-    updated_at: float
-    deadline: float | None
-    result: str | None
-    owner: str = ""
-    execution_principal: str = ""
-    domain: str = ""
-    project_id: int | None = None
-    completed_at: float | None = None
 
 
-@dataclass
-class Question:
-    id: int
-    goal_id: int | None
-    question: str
-    asked_at: float
-    answer: str | None
-    answered_at: float | None
 
 
-@dataclass
-class Approval:
-    id: int
-    action: str
-    risk: str
-    scope: str | None
-    detail: str | None
-    provenance: str | None
-    status: str
-    requested_at: float
-    decided_at: float | None
-    claimed_by: str | None = None
-    claimed_at: float | None = None
-    decided_by: str | None = None
-    approvals_required: int = 1
-    requested_by: str | None = None
-    goal_id: int | None = None
-    department: str = ""
-    # "open" while a waiting task holds the decision for undo, "settled" once
-    # it acted; None for every request whose consumer acts at once.
-    undo_hold: str | None = None
 
 
-@dataclass(frozen=True)
-class ApprovalAuditEvent:
-    """One transactionally queued human-approval audit event.
-
-    ``final_status`` is populated by the vote that reaches quorum (or by a
-    denial).  It is deliberately not applied to ``approvals.status`` until all
-    queued events for that approval have a non-null ``delivered_at``.
-    """
-
-    event_id: str
-    approval_id: int
-    status: str
-    decided_by: str
-    final_status: str | None
-    created_at: float
-    delivered_at: float | None
-
-    def matches(self, approval_id: int, status: str, decided_by: str) -> bool:
-        """Whether this row is the exact vote represented by its stable id."""
-        return (
-            self.approval_id == int(approval_id)
-            and self.status == status
-            and self.decided_by == (decided_by or "").strip()
-        )
 
 
 def _approval_audit_event_id(
@@ -864,75 +806,16 @@ _EPISODE_SPEND_COLS = (
 )
 
 
-@dataclass
-class EpisodeSpend:
-    id: int
-    goal_id: int
-    started_at: float
-    ended_at: float | None
-    outcome: str | None
-    cost_dollars: float
-    input_tokens: int
-    output_tokens: int
-    tool_calls: int
-    cache_read_tokens: int = 0
-    cache_write_tokens: int = 0
 
 
-@dataclass
-class GoalEvent:
-    id: int
-    goal_id: int
-    agent: str
-    kind: str
-    content: str
-    ts: float
 
 
-@dataclass
-class Conversation:
-    id: int
-    channel: str
-    user_id: str
-    created_at: float
-    last_seen: float
 
 
-@dataclass
-class Turn:
-    id: int
-    conversation_id: int
-    goal_id: int | None
-    role: str
-    content: str
-    ts: float
 
 
-@dataclass
-class Attachment:
-    id: int
-    goal_id: int
-    filename: str
-    mime: str
-    size_bytes: int
-    sha256: str
-    path: str
-    created_at: float
 
 
-@dataclass
-class FactVersion:
-    """One historical value of a fact (see :meth:`WorldModel.fact_history`).
-
-    ``valid_to is None`` marks the value that is still current. The window is
-    transaction time: ``valid_from`` is when the value became current and
-    ``valid_to`` is when it was superseded or deleted."""
-    value: str | None
-    valid_from: float
-    valid_to: float | None
-    source: str = ""
-    trust_tier: int = 3
-    sensitivity: str = "internal"
 
 
 def _temporal_memory_enabled() -> bool:
@@ -1113,13 +996,13 @@ def _goals_from_rows(rows) -> list[Goal]:
     return [Goal(**_row_for(Goal, d)) for d in records]
 
 
-def goals_by_id(world, goal_ids) -> dict:
+def goals_by_id(world: GoalLookup, goal_ids: Iterable[int]) -> dict[int, GoalRecord]:
     """``{id: goal}`` for the ids that exist, in one read when the world can
     (:meth:`WorldModel.get_goals`), else one :meth:`get_goal` per id."""
     batch = getattr(world, "get_goals", None)
     if callable(batch):
         return batch(goal_ids)
-    found = {}
+    found: dict[int, GoalRecord] = {}
     for goal_id in dict.fromkeys(goal_ids):
         goal = world.get_goal(goal_id)
         if goal is not None:
@@ -2398,6 +2281,21 @@ class WorldModel:
                 conn.execute("DELETE FROM signoffs WHERE goal_id = ?", (int(goal_id),))
         if legacy_refused:
             raise LegacyEventGoalHeld("Earlier event request held for review")
+
+    def block_pending_goal(self, goal_id: int, *, result: str) -> bool:
+        """Atomically block a pending goal without overwriting an execution claim."""
+        with self._writing() as conn:
+            cur = conn.execute(
+                "UPDATE goals SET status = 'blocked', completed_at = NULL, "
+                "updated_at = MAX(updated_at + 0.000001, ?), result = ? "
+                "WHERE id = ? AND status = 'pending'",
+                (time.time(), _enc_field(result), int(goal_id)),
+            )
+            changed = cur.rowcount == 1
+            if changed:
+                conn.execute("DELETE FROM signoffs WHERE goal_id = ?", (int(goal_id),))
+                self._goal_changed(goal_id)
+            return changed
 
     def block_goal_admission(self, goal_id: int, *, result: str) -> bool:
         """Record a pre-dispatch refusal without replacing a terminal outcome."""

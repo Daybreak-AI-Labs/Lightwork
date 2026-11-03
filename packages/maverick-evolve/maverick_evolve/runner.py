@@ -18,7 +18,6 @@ live model and stays decoupled from how the kernel instantiates agents.
 """
 from __future__ import annotations
 
-import json
 import logging
 import math
 import os
@@ -26,15 +25,25 @@ import random
 import re
 import secrets
 import time
-import unicodedata
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass, field
-from hashlib import sha256
-from statistics import NormalDist
 
 from . import config_space
 from .archive import Archive, Candidate
-from .eval_harness import EXECUTION_STOPS, EvalCase, EvalObservation, evaluate, observe_case
+from .confirmation import collect_paired_evidence
+from .confirmation import promotes as confirmation_promotes
+from .eval_harness import EXECUTION_STOPS, EvalCase, evaluate, observe_case
+from .experiment_state import (
+    ConfirmationAuthorize,
+    ConfirmationPermit,
+    ConfirmationRequest,
+    _CandidateSnapshot,
+    _confirmation_request_digest,
+    _ConfirmationAdmission,
+    _ConfirmationPlan,
+    _ExperimentRequest,
+    _normalized_prompt_identity,
+    _PairedEvidence,
+)
 from .metaproductive import MetaproductiveArchive, evolve_metaproductive
 from .search import evolve
 
@@ -43,84 +52,7 @@ log = logging.getLogger(__name__)
 AgentFactory = Callable[[dict], Callable[[str], Awaitable[str]]]
 OutputScorer = Callable[[str, str], float]
 _HEX_256 = re.compile(r"^[0-9a-f]{64}$")
-_REQUEST_ID = re.compile(r"^[0-9a-f]{32}$")
 _MAX_CASE_TEXT = 1_048_576
-
-
-def _confirmation_request_digest(payload: Mapping[str, object]) -> str:
-    encoded = json.dumps(
-        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
-        allow_nan=False,
-    ).encode("utf-8")
-    return sha256(encoded).hexdigest()
-
-
-def _normalized_prompt_identity(prompt: str) -> str:
-    return " ".join(unicodedata.normalize("NFKC", prompt).split()).casefold()
-
-
-@dataclass(frozen=True)
-class ConfirmationRequest:
-    """One nonce-bound request to expose a sealed confirmation family.
-
-    The externally supplied family and evaluator digests bind semantics that
-    Python callables cannot be fingerprinted reliably.  Candidate identities,
-    the distinct case count, and a fresh nonce prevent a permit from being
-    replayed for another comparison.
-    """
-
-    seed_candidate_id: str
-    champion_candidate_id: str
-    case_family_id: str
-    case_snapshot_sha256: str
-    evaluator_id: str
-    case_count: int
-    request_id: str = field(default_factory=lambda: secrets.token_hex(16))
-    request_sha256: str = field(init=False)
-
-    def __post_init__(self) -> None:
-        for label, value in (
-            ("seed_candidate_id", self.seed_candidate_id),
-            ("champion_candidate_id", self.champion_candidate_id),
-            ("case_family_id", self.case_family_id),
-            ("case_snapshot_sha256", self.case_snapshot_sha256),
-            ("evaluator_id", self.evaluator_id),
-        ):
-            if not isinstance(value, str) or not _HEX_256.fullmatch(value):
-                raise ValueError(f"{label} must be a lowercase SHA-256 digest")
-        if (not isinstance(self.case_count, int) or isinstance(self.case_count, bool)
-                or self.case_count <= 0):
-            raise ValueError("case_count must be a positive integer")
-        if not isinstance(self.request_id, str) or not _REQUEST_ID.fullmatch(
-                self.request_id):
-            raise ValueError("request_id must be a 128-bit lowercase hex nonce")
-        payload = {
-            "version": 1,
-            "request_id": self.request_id,
-            "seed_candidate_id": self.seed_candidate_id,
-            "champion_candidate_id": self.champion_candidate_id,
-            "case_family_id": self.case_family_id,
-            "case_snapshot_sha256": self.case_snapshot_sha256,
-            "evaluator_id": self.evaluator_id,
-            "case_count": self.case_count,
-        }
-        object.__setattr__(
-            self, "request_sha256", _confirmation_request_digest(payload))
-
-
-@dataclass(frozen=True)
-class ConfirmationPermit:
-    """A short-lived durable-authority receipt for one exact request."""
-
-    request_sha256: str
-    critical_z: float
-    authorization_id: str
-    ledger_tip_sha256: str
-    issued_at: float
-    expires_at: float
-
-
-ConfirmationAuthorize = Callable[[ConfirmationRequest], ConfirmationPermit]
 
 
 class EvolutionFrozen(RuntimeError):
@@ -355,6 +287,81 @@ def _confirmation_policy(
     return minimum, z
 
 
+
+
+def _confirmation_plan(
+    cases: list[EvalCase] | tuple[EvalCase, ...] | None,
+    scorer: OutputScorer | None,
+    margin: float,
+    *,
+    risk_limited: bool,
+    minimum_cases: int | None,
+    confidence_z: float | None,
+    authorize: ConfirmationAuthorize | None,
+    case_family_id: str | None,
+    evaluator_id: str | None,
+) -> _ConfirmationPlan:
+    """Freeze and validate the confirmation boundary before development."""
+    sealed_cases = _prepare_confirmation(cases, scorer, margin)
+    minimum, z = _confirmation_policy(
+        sealed_cases, risk_limited=risk_limited,
+        minimum_cases=minimum_cases, confidence_z=confidence_z,
+        authorize=authorize, case_family_id=case_family_id,
+        evaluator_id=evaluator_id,
+    )
+    return _ConfirmationPlan(sealed_cases, minimum, z)
+
+
+def _experiment_request(
+    seed_config: dict, cases: list[EvalCase], *, metaproductive: bool,
+    confirmation_cases: list[EvalCase] | tuple[EvalCase, ...] | None,
+    confirmation_scorer: OutputScorer | None, confirmation_margin: float,
+    risk_limited: bool, minimum_cases: int | None, confidence_z: float | None,
+    authorize: ConfirmationAuthorize | None, family_id: str | None,
+    evaluator_id: str | None,
+) -> _ExperimentRequest:
+    """Validate splits and freeze seed identity before development can spend."""
+    development = _snapshot_cases(cases)
+    if metaproductive:
+        if not development:
+            raise ValueError("metaproductive evolution requires development cases")
+        try:
+            weights = [float(case.weight) for case in development]
+        except (TypeError, ValueError) as exc:
+            raise ValueError("development case weights must be finite and positive") from exc
+        if any(not math.isfinite(weight) or weight <= 0.0 for weight in weights):
+            raise ValueError("development case weights must be finite and positive")
+        if any(weight != weights[0] for weight in weights[1:]):
+            raise ValueError("metaproductive evolution requires equal development case weights")
+    elif not development or sum(float(case.weight) for case in development) <= 0.0:
+        raise ValueError("evolution requires positive-weight development cases")
+    confirmation = _confirmation_plan(
+        confirmation_cases, confirmation_scorer, confirmation_margin,
+        risk_limited=risk_limited, minimum_cases=minimum_cases,
+        confidence_z=confidence_z, authorize=authorize, case_family_id=family_id,
+        evaluator_id=evaluator_id,
+    )
+    return _ExperimentRequest(
+        _CandidateSnapshot.capture(Candidate(seed_config)), development, confirmation,
+    )
+
+
+async def _evaluate_development_candidate(
+    config: dict, cases: tuple[EvalCase, ...] | list[EvalCase],
+    factory: AgentFactory, *, scorer: OutputScorer | None,
+):
+    """Score a detached candidate without changing the identity being scored."""
+    snapshot = _CandidateSnapshot.capture(Candidate(config))
+    candidate_config = snapshot.config_copy()
+    agent = factory(candidate_config)
+    if not snapshot.matches_config(candidate_config) or not snapshot.matches_config(config):
+        raise ValueError("development candidate changed before evaluation")
+    report = await evaluate(agent, cases, scorer=scorer)
+    if not snapshot.matches_config(candidate_config) or not snapshot.matches_config(config):
+        raise ValueError("development candidate changed during evaluation")
+    return report
+
+
 def _confirmation_permit_z(
     raw: object, request: ConfirmationRequest, *, require_structured: bool,
 ) -> float:
@@ -423,6 +430,69 @@ def _validate_resumed_config(config: dict, seed_config: dict,
             raise ValueError(f"archive candidate has invalid value for {knob!r}")
 
 
+def _authorize_comparison(
+    seed: _CandidateSnapshot, champion: _CandidateSnapshot,
+    cases: tuple[EvalCase, ...], *, confidence_z: float,
+    authorize: ConfirmationAuthorize | None, require_authorization: bool,
+    case_family_id: str | None, evaluator_id: str | None,
+) -> _ConfirmationAdmission:
+    """Bind a single-use permit to the frozen candidates and case snapshot."""
+    comparison_id = secrets.token_hex(16)
+    if authorize is None:
+        if require_authorization:
+            raise ValueError("sealed confirmation requires authorization")
+        return _ConfirmationAdmission(comparison_id, confidence_z)
+    if require_authorization:
+        assert case_family_id is not None and evaluator_id is not None
+        request = ConfirmationRequest(
+            seed_candidate_id=seed.candidate_id,
+            champion_candidate_id=champion.candidate_id,
+            case_family_id=case_family_id,
+            case_snapshot_sha256=_visible_case_snapshot_digest(cases),
+            evaluator_id=evaluator_id,
+            case_count=len(cases),
+        )
+        comparison_id = request.request_sha256
+        permit_z = _confirmation_permit_z(
+            authorize(request), request, require_structured=True)
+    else:
+        # Legacy development callbacks see a separate copy; mutating it must
+        # not alter the sealed cases that will actually be evaluated.
+        raw = authorize(  # type: ignore[call-arg]
+            seed.candidate_id, champion.candidate_id, _snapshot_cases(cases))
+        request = ConfirmationRequest(
+            seed_candidate_id=seed.candidate_id,
+            champion_candidate_id=champion.candidate_id,
+            case_family_id="0" * 64,
+            case_snapshot_sha256=_visible_case_snapshot_digest(cases),
+            evaluator_id="0" * 64,
+            case_count=len(cases),
+        )
+        permit_z = _confirmation_permit_z(raw, request, require_structured=False)
+    return _ConfirmationAdmission(comparison_id, max(float(confidence_z), permit_z))
+
+
+async def _paired_confirmation_evidence(
+    seed: Candidate, champion: Candidate,
+    seed_snapshot: _CandidateSnapshot, champion_snapshot: _CandidateSnapshot,
+    cases: tuple[EvalCase, ...], factory: AgentFactory, *,
+    admission: _ConfirmationAdmission, scorer: OutputScorer | None,
+    evaluator_id: str | None,
+) -> _PairedEvidence:
+    return await collect_paired_evidence(
+        seed, champion, seed_snapshot, champion_snapshot, cases, factory,
+        admission=admission, scorer=scorer, evaluator_id=evaluator_id,
+        observer=observe_case, logger=log,
+    )
+
+
+def _confirmation_promotes(cases: tuple[EvalCase, ...], evidence: _PairedEvidence,
+                           *, margin: float, confidence_z: float) -> bool:
+    return confirmation_promotes(
+        cases, evidence, margin=margin, confidence_z=confidence_z, logger=log,
+    )
+
+
 async def confirm_candidate(
     seed: Candidate,
     champion: Candidate,
@@ -450,142 +520,62 @@ async def confirm_candidate(
     sealed_cases = _prepare_confirmation(confirmation_cases, scorer, margin)
     assert sealed_cases is not None
     margin = _confirmation_margin(margin)
-    _confirmation_policy(
+    _, effective_z = _confirmation_policy(
         sealed_cases, risk_limited=require_authorization,
         minimum_cases=min_cases, confidence_z=confidence_z,
         authorize=authorize, case_family_id=case_family_id,
         evaluator_id=evaluator_id)
-    if champion.id == seed.id:
+    seed_snapshot = _CandidateSnapshot.capture(seed)
+    champion_snapshot = _CandidateSnapshot.capture(champion)
+    if champion_snapshot.candidate_id == seed_snapshot.candidate_id:
         return seed
 
     if (require_authorization
             and not strict_calibration_ready(evaluator_id=evaluator_id)):
         log.error("strict calibration receipt unavailable; keeping seed")
-        return seed
-
-    comparison_id = secrets.token_hex(16)
-    if authorize is not None:
-        try:
-            if require_authorization:
-                assert case_family_id is not None and evaluator_id is not None
-                request = ConfirmationRequest(
-                    seed_candidate_id=seed.id,
-                    champion_candidate_id=champion.id,
-                    case_family_id=case_family_id,
-                    case_snapshot_sha256=_visible_case_snapshot_digest(sealed_cases),
-                    evaluator_id=evaluator_id,
-                    case_count=len(sealed_cases),
-                )
-                comparison_id = request.request_sha256
-                permit_z = _confirmation_permit_z(
-                    authorize(request), request, require_structured=True)
-            else:
-                # Backward-compatible development seam. Production mode above
-                # deliberately never calls the legacy three-argument callback.
-                permit_z = _confirmation_permit_z(
-                    authorize(seed.id, champion.id, sealed_cases),  # type: ignore[call-arg]
-                    ConfirmationRequest(
-                        seed_candidate_id=seed.id,
-                        champion_candidate_id=champion.id,
-                        case_family_id="0" * 64,
-                        case_snapshot_sha256=_visible_case_snapshot_digest(sealed_cases),
-                        evaluator_id="0" * 64,
-                        case_count=len(sealed_cases),
-                    ),
-                    require_structured=False,
-                )
-            confidence_z = max(float(confidence_z), permit_z)
-        except Exception as exc:
-            log.error("sealed confirmation authorization failed; keeping seed: %s", exc)
-            return seed
-    elif require_authorization:
-        return seed
+        return seed_snapshot.original_or_copy(seed)
 
     try:
-        seed_agent = agent_factory(dict(seed.config))
-        champion_agent = agent_factory(dict(champion.config))
-        seed_outcomes: list[float] = []
-        champion_outcomes: list[float] = []
-        execution_failed = False
+        admission = _authorize_comparison(
+            seed_snapshot, champion_snapshot, sealed_cases, confidence_z=effective_z,
+            authorize=authorize, require_authorization=require_authorization,
+            case_family_id=case_family_id, evaluator_id=evaluator_id,
+        )
+    except Exception as exc:
+        log.error("sealed confirmation authorization failed; keeping seed: %s", exc)
+        return seed_snapshot.original_or_copy(seed)
+    if not (seed_snapshot.matches(seed) and champion_snapshot.matches(champion)):
+        log.error("candidate changed during sealed authorization; keeping seed")
+        return seed_snapshot.original_or_copy(seed)
 
-        async def expose(agent, candidate, case, index) -> EvalObservation:
-            exposure_id = f"{comparison_id}:{candidate.id}:{index}"
-            # This joins cancellation/error observations to the already spent
-            # permit without logging sealed content or grades to development.
-            log.info(
-                "sealed_exposure comparison=%s candidate=%s case_index=%d exposure=%s",
-                comparison_id, candidate.id, index,
-                sha256(exposure_id.encode("utf-8")).hexdigest())
-            return await observe_case(
-                agent, case, scorer=scorer, evaluator_id=evaluator_id,
-                exposure_id=exposure_id)
-
-        # Counterbalance arm order across the immutable case order. Both arms
-        # receive one exposure per case even after an ordinary execution error.
-        # Cancellation or a budget/halt stop instead ends exposure immediately.
-        for index, case in enumerate(sealed_cases):
-            if index % 2 == 0:
-                seed_observation = await expose(seed_agent, seed, case, index)
-                champion_observation = await expose(champion_agent, champion, case, index)
-            else:
-                champion_observation = await expose(champion_agent, champion, case, index)
-                seed_observation = await expose(seed_agent, seed, case, index)
-            execution_failed |= any(
-                observation.execution_status != "succeeded" or observation.grade is None
-                for observation in (seed_observation, champion_observation))
-            seed_outcomes.append(seed_observation.score)
-            champion_outcomes.append(champion_observation.score)
+    try:
+        evidence = await _paired_confirmation_evidence(
+            seed, champion, seed_snapshot, champion_snapshot, sealed_cases,
+            agent_factory, admission=admission, scorer=scorer, evaluator_id=evaluator_id,
+        )
     except EXECUTION_STOPS:
         raise
     except Exception:
         log.error("sealed confirmation failed; rejecting champion")
-        return seed
+        return seed_snapshot.original_or_copy(seed)
 
-    if execution_failed:
+    if evidence.execution_failed:
         log.error("sealed confirmation had an execution failure; keeping seed")
-        return seed
+        return seed_snapshot.original_or_copy(seed)
 
-    # Evaluation can outlive the receipt that was fresh before exposure.  A
-    # stale or replaced evaluator verdict must not authorize publication merely
-    # because it was acceptable when the first case started.
+    # A calibration receipt can expire while the sealed cases are evaluated.
     if (require_authorization
             and not strict_calibration_ready(evaluator_id=evaluator_id)):
         log.error("strict calibration receipt expired during confirmation; keeping seed")
-        return seed
+        return seed_snapshot.original_or_copy(seed)
 
-    weights = [float(case.weight) for case in sealed_cases]
-    total_weight = sum(weights)
-    seed_score = sum(weight * value for weight, value in zip(
-        weights, seed_outcomes, strict=True)) / total_weight
-    champion_score = sum(weight * value for weight, value in zip(
-        weights, champion_outcomes, strict=True)) / total_weight
-    delta = champion_score - seed_score
-    if confidence_z > 0.0:
-        # Distribution-free weighted Hoeffding lower bound for paired bounded
-        # differences in [-1, 1]. It remains valid for fractional scorers and
-        # unequal positive case weights; no normality or variance estimate is
-        # borrowed from a small confirmation sample.
-        alpha = 2.0 * (1.0 - NormalDist().cdf(float(confidence_z)))
-        if not 0.0 < alpha < 1.0:
-            log.error("confirmation critical value is numerically unsupported")
-            return seed
-        normalized = [weight / total_weight for weight in weights if weight > 0.0]
-        radius = math.sqrt(2.0 * sum(weight * weight for weight in normalized)
-                           * math.log(1.0 / alpha))
-        lower = delta - radius
-        if lower > margin:
-            return champion
-        log.info(
-            "sealed confirmation lower bound %.6f did not clear margin %.6f; "
-            "keeping seed", lower, margin)
-        return seed
-
-    # Strict comparison is intentional: at margin=0 a flat confirmation set
-    # still rejects an apparent development winner rather than promoting noise.
-    if champion_score > seed_score + margin:
+    if not (seed_snapshot.matches(seed) and champion_snapshot.matches(champion)):
+        log.error("candidate changed before promotion; keeping seed")
+        return seed_snapshot.original_or_copy(seed)
+    if _confirmation_promotes(sealed_cases, evidence, margin=margin,
+                              confidence_z=admission.confidence_z):
         return champion
-    log.info("sealed confirmation did not clear required margin; keeping seed")
-    return seed
+    return seed_snapshot.original_or_copy(seed)
 
 
 async def evolve_with_eval(
@@ -632,22 +622,18 @@ async def evolve_with_eval(
             "untrustworthy fitness signal (run `maverick calibrate`)"
         )
     rng = rng or random.Random()
-    development_cases = _snapshot_cases(cases)
-    if not development_cases or sum(
-            float(case.weight) for case in development_cases) <= 0.0:
-        raise ValueError("evolution requires positive-weight development cases")
-    sealed_cases = _prepare_confirmation(
-        confirmation_cases,
-        confirmation_scorer,
-        confirmation_margin,
+    request = _experiment_request(
+        seed_config, cases, metaproductive=False,
+        confirmation_cases=confirmation_cases, confirmation_scorer=confirmation_scorer,
+        confirmation_margin=confirmation_margin, risk_limited=risk_limited,
+        minimum_cases=confirmation_min_cases, confidence_z=confirmation_confidence_z,
+        authorize=confirmation_authorize, family_id=confirmation_family_id,
+        evaluator_id=confirmation_evaluator_id,
     )
-    resolved_min_cases, resolved_confidence_z = _confirmation_policy(
-        sealed_cases, risk_limited=risk_limited,
-        minimum_cases=confirmation_min_cases,
-        confidence_z=confirmation_confidence_z,
-        authorize=confirmation_authorize,
-        case_family_id=confirmation_family_id,
-        evaluator_id=confirmation_evaluator_id)
+    seed_config = request.seed.config_copy()
+    development_cases = request.development_cases
+    confirmation = request.confirmation
+    sealed_cases = confirmation.cases
     # A caller-owned archive is a publication-capable object. Adaptive search
     # with sealed confirmation therefore runs on a detached development copy;
     # rejection cannot leave its winner reachable through caller Archive.best.
@@ -662,8 +648,8 @@ async def evolve_with_eval(
 
     async def _score(config: dict) -> float:
         nonlocal development_seed_score
-        agent = agent_factory(config)
-        report = await evaluate(agent, development_cases, scorer=scorer)
+        report = await _evaluate_development_candidate(
+            config, development_cases, agent_factory, scorer=scorer)
         if config == seed_config:
             development_seed_score = report.score
         return report.score
@@ -703,8 +689,8 @@ async def evolve_with_eval(
         agent_factory,
         scorer=confirmation_scorer,
         margin=confirmation_margin,
-        min_cases=resolved_min_cases,
-        confidence_z=resolved_confidence_z,
+        min_cases=confirmation.minimum_cases,
+        confidence_z=confirmation.confidence_z,
         authorize=confirmation_authorize,
         require_authorization=risk_limited,
         case_family_id=confirmation_family_id,
@@ -775,37 +761,18 @@ async def evolve_metaproductive_with_eval(
             "against an untrustworthy fitness signal"
         )
     rng = rng or random.Random()
-    development_cases = _snapshot_cases(cases)
-    if not development_cases:
-        raise ValueError("metaproductive evolution requires development cases")
-    try:
-        development_weights = [float(case.weight) for case in development_cases]
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            "development case weights must be finite and positive") from exc
-    if any(not math.isfinite(weight) or weight <= 0.0
-           for weight in development_weights):
-        raise ValueError("development case weights must be finite and positive")
-    # The metaproductive posterior currently models uniformly sampled Bernoulli
-    # tasks.  Silently accepting unequal EvalCase weights would claim weighted
-    # evidence while selecting cases and updating beliefs uniformly.  Fail
-    # closed until the posterior itself supports weighted observations.
-    # Equality is exact after numeric normalization. Even a tiny difference is
-    # an operator-declared weighting that this uniformly sampled posterior
-    # would silently ignore.
-    if any(weight != development_weights[0]
-           for weight in development_weights[1:]):
-        raise ValueError(
-            "metaproductive evolution requires equal development case weights")
-    sealed_cases = _prepare_confirmation(
-        confirmation_cases, confirmation_scorer, confirmation_margin)
-    resolved_min_cases, resolved_confidence_z = _confirmation_policy(
-        sealed_cases, risk_limited=risk_limited,
-        minimum_cases=confirmation_min_cases,
-        confidence_z=confirmation_confidence_z,
-        authorize=confirmation_authorize,
-        case_family_id=confirmation_family_id,
-        evaluator_id=confirmation_evaluator_id)
+    request = _experiment_request(
+        seed_config, cases, metaproductive=True,
+        confirmation_cases=confirmation_cases, confirmation_scorer=confirmation_scorer,
+        confirmation_margin=confirmation_margin, risk_limited=risk_limited,
+        minimum_cases=confirmation_min_cases, confidence_z=confirmation_confidence_z,
+        authorize=confirmation_authorize, family_id=confirmation_family_id,
+        evaluator_id=confirmation_evaluator_id,
+    )
+    seed_config = request.seed.config_copy()
+    development_cases = request.development_cases
+    confirmation = request.confirmation
+    sealed_cases = confirmation.cases
 
     def _mutate(config: dict) -> dict:
         if mutate is not None:
@@ -813,8 +780,8 @@ async def evolve_metaproductive_with_eval(
         return config_space.mutate(config, rng, space=space)
 
     async def _evaluate_case(config: dict, case: EvalCase) -> float:
-        report = await evaluate(
-            agent_factory(config), [case], scorer=scorer)
+        report = await _evaluate_development_candidate(
+            config, [case], agent_factory, scorer=scorer)
         outcome = float(report.score)
         if not math.isfinite(outcome) or not 0.0 <= outcome <= 1.0:
             raise ValueError("development evaluator returned an invalid task outcome")
@@ -852,8 +819,8 @@ async def evolve_metaproductive_with_eval(
         agent_factory,
         scorer=confirmation_scorer,
         margin=confirmation_margin,
-        min_cases=resolved_min_cases,
-        confidence_z=resolved_confidence_z,
+        min_cases=confirmation.minimum_cases,
+        confidence_z=confirmation.confidence_z,
         authorize=confirmation_authorize,
         require_authorization=risk_limited,
         case_family_id=confirmation_family_id,

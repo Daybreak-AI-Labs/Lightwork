@@ -38,9 +38,10 @@ the costs are concrete:
 - **Memory-safety posture.** We just *moved* C-extension parsing of untrusted
   bytes out of process (`parser_isolation.py`); compiling our own kernel into
   C extensions runs against that direction.
-- **Where speed was needed, narrower fixes already shipped:** orjson behind
-  the `[perf-fastjson]` extra (serialization), prompt caching + the
-  cache-aware DSL (the real latency lever), async/tiered/streaming compaction.
+- **Where speed was needed, narrower fixes already shipped:** prompt caching +
+  the cache-aware DSL (the real latency lever), and async/tiered/streaming
+  compaction. The JSON seam uses the standard library to preserve value
+  semantics even when the optional `[perf-fastjson]` extra is installed.
 
 ## Revisit trigger
 

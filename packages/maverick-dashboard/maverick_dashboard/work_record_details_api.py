@@ -233,7 +233,7 @@ def review(request, body):
 
 
 def _actor(request):
-    from .api import _request_actor
+    from .request_identity import request_actor as _request_actor
 
     return _request_actor(request)
 

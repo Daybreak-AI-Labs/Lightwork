@@ -17,11 +17,15 @@ the annotation dicts. CLI: ``python -m maverick.annotation_export <goal_id>``.
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
+
+from .world_model_contracts import GoalEventReader, GoalEventRecord
+
 _SRT_CUE_SECONDS = 3.0  # each note is shown for 3s, the subtitle convention
 _EXCERPT_CHARS = 160
 
 
-def _ordered_events(world, goal_id: int) -> list:
+def _ordered_events(world: GoalEventReader, goal_id: int) -> Sequence[GoalEventRecord]:
     return world.goal_events(goal_id, limit=10_000)
 
 

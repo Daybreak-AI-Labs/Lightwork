@@ -438,14 +438,14 @@ def _catalog_index() -> tuple[dict[str, tuple[str, str]], list[tuple[str, tuple[
 
 def _switch_index() -> tuple[frozenset[str], dict[str, tuple[str, str]]]:
     """Module sections switched in All settings, and on/off keys with their own page."""
-    from . import api, settings_store
+    from . import module_activation, settings_store
     switched: dict[str, tuple[str, str]] = {}
     for section, key in settings_store.LEARNING_TOGGLES:
         switched[f"{section}.{key}"] = ("/learning", "Learning")
     for section in settings_store.SWITCHABLE_SECTIONS:
         page = ("/security", "Security") if section in _SECURITY_SWITCHES else ("/learning", "Learning")
         switched.setdefault(f"{section}.enable", page)
-    return frozenset(api._MODULE_SWITCHES), switched
+    return frozenset(module_activation._MODULE_SWITCHES), switched
 
 
 def _target(path: str, top: str, index: tuple) -> tuple[tuple[str, str] | None, str]:

@@ -73,8 +73,8 @@ def create_consent_bulk_jobs_page_router(
         if selected is not None and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", selected):
             raise HTTPException(404, "The saved consent job is unavailable.")
         style_nonce = secrets.token_urlsafe(18)
-        from .api import module_activation_enabled
         from .draft_api import context_for
+        from .module_activation import module_activation_enabled
 
         response = templates.TemplateResponse(
             request,

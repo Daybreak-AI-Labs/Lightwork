@@ -29,6 +29,8 @@ from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any
 from urllib.parse import urlparse
 
+from .config_contracts import INTEGER_SETTINGS
+
 # Known top-level sections -> allowed keys, or ``None`` to allow ANY key.
 #
 # ``None`` is used for two kinds of section:
@@ -1520,8 +1522,14 @@ for _provider in (
     ] = {"enable"}
 
 _NESTED_INTEGER_BOUNDS: dict[tuple[tuple[str, ...], str], tuple[int, int]] = {
-    (("agent_tests",), "max_cases_per_specialist"): (1, 200),
-    (("agent_tests",), "canary_percent"): (0, 50),
+    (("agent_tests",), "max_cases_per_specialist"): (
+        INTEGER_SETTINGS["agent_tests.max_cases_per_specialist"].minimum,
+        INTEGER_SETTINGS["agent_tests.max_cases_per_specialist"].maximum,
+    ),
+    (("agent_tests",), "canary_percent"): (
+        INTEGER_SETTINGS["agent_tests.canary_percent"].minimum,
+        INTEGER_SETTINGS["agent_tests.canary_percent"].maximum,
+    ),
     (("governance_inventory",), "retention_seconds"): (86_400, 315_360_000),
     (("governance_inventory",), "max_source_records"): (1, 100_000),
     (("governance_inventory",), "max_entities"): (1, 100_000),
@@ -3354,11 +3362,955 @@ def _lint_trc_stock_collectors(cfg: dict) -> list[Finding]:
     return findings
 
 
-def _lint_product_governance_contracts(  # noqa: C901
+def _lint_product_governance_contracts(
     cfg: dict,
 ) -> list[Finding]:
     """Validate consent and data-use controls that must fail closed."""
 
+    findings: list[Finding] = []
+    findings.extend(_lint_governance_capabilities(cfg))
+    findings.extend(_lint_evidence_analysis(cfg))
+    findings.extend(_lint_custody_and_cloud(cfg))
+    findings.extend(_lint_governed_documents(cfg))
+    findings.extend(_lint_governance_dependencies(cfg))
+    findings.extend(_lint_discovery_scheduler_contracts(cfg))
+    findings.extend(_lint_consent_public_contracts(cfg))
+    findings.extend(_lint_consent_native_contracts(cfg))
+    consent_public = ("consent_preferences", "public_api")
+    consent_publishing = ("consent_preferences", "publishing")
+    findings.extend(_lint_continuous_evidence(cfg))
+    findings.extend(_lint_rights_delivery_contracts(cfg))
+    findings.extend(_lint_portal_identity_storage(cfg, consent_public, consent_publishing))
+    findings.extend(_lint_consent_delivery_destinations(cfg))
+
+    findings.extend(_lint_data_use_provider_contracts(cfg))
+    findings.extend(_lint_third_party_provider_contracts(cfg))
+    findings.extend(_lint_governance_retry_bounds(cfg))
+    findings.extend(_lint_privacy_rights_source_adapters(cfg))
+    findings.extend(_lint_privacy_notice_publication_runtime(cfg))
+    findings.extend(_lint_trc_stock_collectors(cfg))
+    return findings
+
+
+def _lint_custody_and_cloud(cfg: dict) -> list[Finding]:
+    """Check custody and cloud evidence prerequisites."""
+    findings: list[Finding] = []
+    if _table_enabled(cfg, ("audit", "unified", "custody")):
+        try:
+            from .unified_audit_custody import settings_from
+
+            settings_from(cfg, tenant_id="config-lint")
+        except (TypeError, ValueError, RuntimeError):
+            findings.append(
+                _nested_error(
+                    "audit.unified.custody",
+                    "enable",
+                    "unified audit custody authority or tenant namespace is invalid",
+                )
+            )
+    if _table_enabled(cfg, ("assessment_evidence_autopopulation",)) and not _table_enabled(
+        cfg, ("ai_evidence_analysis",)
+    ):
+        findings.append(
+            _nested_error(
+                "assessment_evidence_autopopulation",
+                "enable",
+                "assessment evidence proposals require ai_evidence_analysis.enable = true",
+            )
+        )
+    if _table_enabled(cfg, ("ai_cloud_agent_governance",)):
+        required_cloud_authorities = (
+            ("ai_inventory",),
+            ("ai_policy_management",),
+            ("ai_runtime_guardrails",),
+        )
+        missing = [
+            ".".join(path) for path in required_cloud_authorities if not _table_enabled(cfg, path)
+        ]
+        if missing:
+            findings.append(
+                _nested_error(
+                    "ai_cloud_agent_governance",
+                    "enable",
+                    "cloud-agent governance requires enabled authority: " + ", ".join(missing),
+                )
+            )
+        cloud_table = _at_path(cfg, ("ai_cloud_agent_governance",))
+        if (
+            isinstance(cloud_table, dict)
+            and cloud_table.get("databricks_framework_enable") is True
+            and not _table_enabled(cfg, ("policy_packs",))
+        ):
+            findings.append(
+                _nested_error(
+                    "ai_cloud_agent_governance",
+                    "databricks_framework_enable",
+                    "Databricks framework activation requires policy_packs.enable = true",
+                )
+            )
+    return findings
+
+
+def _lint_discovery_scheduler_contracts(cfg: dict) -> list[Finding]:
+    """Check scanner, discovery, and remediation dependencies."""
+    findings: list[Finding] = []
+    consent_scanner = ("consent_preferences", "scanner")
+    consent_scan_scheduler = (
+        "consent_preferences",
+        "scanner",
+        "scheduler",
+    )
+    consent_scan_notice_proposals = (
+        "consent_preferences",
+        "scanner",
+        "notice_proposals",
+    )
+    privacy_discovery = ("privacy_automation", "data_discovery")
+    privacy_discovery_adapters = privacy_discovery + ("adapters",)
+    privacy_discovery_remediation = privacy_discovery + ("remediation",)
+    privacy_discovery_data_map = privacy_discovery_remediation + ("data_map",)
+    privacy_discovery_scheduler = privacy_discovery_remediation + ("scheduler",)
+    if _table_enabled(cfg, consent_scan_scheduler) and not _table_enabled(cfg, consent_scanner):
+        findings.append(
+            _nested_error(
+                "consent_preferences.scanner.scheduler",
+                "enable",
+                "consent scan scheduler requires consent scanner to be enabled",
+            )
+        )
+    if _table_enabled(cfg, consent_scan_notice_proposals) and not _table_enabled(
+        cfg, consent_scanner
+    ):
+        findings.append(
+            _nested_error(
+                "consent_preferences.scanner.notice_proposals",
+                "enable",
+                "consent scan notice proposals require consent scanner to be enabled",
+            )
+        )
+    if _table_enabled(cfg, privacy_discovery_adapters):
+        if not _table_enabled(cfg, privacy_discovery):
+            findings.append(
+                _nested_error(
+                    "privacy_automation.data_discovery.adapters",
+                    "enable",
+                    "stock discovery adapters require privacy data discovery to be enabled",
+                )
+            )
+        adapters = _at_path(cfg, privacy_discovery_adapters)
+        providers = adapters.get("enabled_providers") if isinstance(adapters, dict) else None
+        admitted = {
+            "aws_s3",
+            "azure_blob",
+            "google_cloud_storage",
+            "snowflake_metadata",
+            "servicenow_cmdb",
+            "entra_assets",
+        }
+        if (
+            not isinstance(providers, list)
+            or not providers
+            or len(providers) > len(admitted)
+            or any(not isinstance(item, str) or item not in admitted for item in providers)
+            or len(set(providers)) != len(providers)
+        ):
+            findings.append(
+                _nested_error(
+                    "privacy_automation.data_discovery.adapters",
+                    "enabled_providers",
+                    "enabled stock discovery providers must be a unique non-empty admitted list",
+                )
+            )
+    if _table_enabled(cfg, privacy_discovery_remediation) and not _table_enabled(
+        cfg, privacy_discovery
+    ):
+        findings.append(
+            _nested_error(
+                "privacy_automation.data_discovery.remediation",
+                "enable",
+                "discovery remediation requires privacy data discovery to be enabled",
+            )
+        )
+    if _table_enabled(cfg, privacy_discovery_data_map) and not _table_enabled(
+        cfg, privacy_discovery_remediation
+    ):
+        findings.append(
+            _nested_error(
+                "privacy_automation.data_discovery.remediation.data_map",
+                "enable",
+                "the discovery data-map target requires remediation to be enabled",
+            )
+        )
+    if _table_enabled(cfg, privacy_discovery_remediation) and not _table_enabled(
+        cfg, privacy_discovery_data_map
+    ):
+        findings.append(
+            _nested_error(
+                "privacy_automation.data_discovery.remediation",
+                "enable",
+                "stock privacy discovery remediation requires data_map.enable = true",
+            )
+        )
+    if _table_enabled(cfg, privacy_discovery_scheduler) and not _table_enabled(
+        cfg, privacy_discovery_remediation
+    ):
+        findings.append(
+            _nested_error(
+                "privacy_automation.data_discovery.remediation.scheduler",
+                "enable",
+                "the discovery remediation scheduler requires remediation to be enabled",
+            )
+        )
+    scheduler_table = _at_path(cfg, privacy_discovery_scheduler)
+    if isinstance(scheduler_table, dict):
+        interval = scheduler_table.get("interval_seconds", 60)
+        jitter = scheduler_table.get("jitter_seconds", 10)
+        if (
+            isinstance(interval, int)
+            and not isinstance(interval, bool)
+            and isinstance(jitter, int)
+            and not isinstance(jitter, bool)
+            and jitter > interval
+        ):
+            findings.append(
+                _nested_error(
+                    "privacy_automation.data_discovery.remediation.scheduler",
+                    "jitter_seconds",
+                    "scheduler jitter_seconds cannot exceed interval_seconds",
+                )
+            )
+    compliance_scoping = ("tech_risk_compliance", "scoping")
+    compliance_scope_actions = ("tech_risk_compliance", "scope_actions")
+    if _table_enabled(cfg, compliance_scope_actions) and not _table_enabled(
+        cfg, compliance_scoping
+    ):
+        findings.append(
+            _nested_error(
+                "tech_risk_compliance.scope_actions",
+                "enable",
+                "compliance scope actions require compliance scoping to be enabled",
+            )
+        )
+    return findings
+
+
+def _lint_consent_public_contracts(cfg: dict) -> list[Finding]:
+    """Check public consent, trust-center, and publishing dependencies."""
+    findings: list[Finding] = []
+    consent_public = ("consent_preferences", "public_api")
+    consent_publishing = ("consent_preferences", "publishing")
+    consent_web_settings = (
+        "consent_preferences",
+        "publishing",
+        "web_settings",
+    )
+    consent_trust_center = ("consent_preferences", "trust_center")
+    consent_trust_center_branding = consent_trust_center + ("branding",)
+    consent_profile_data = ("consent_preferences", "profile_data")
+    consent_custom_index = (
+        "consent_preferences",
+        "profile_data",
+        "custom_index",
+    )
+    consent_global_opt_out = ("consent_preferences", "global_opt_out")
+    if _table_enabled(cfg, consent_public) and not _table_enabled(cfg, consent_publishing):
+        findings.append(
+            _nested_error(
+                "consent_preferences.public_api",
+                "enable",
+                "public consent API requires consent publishing to be enabled",
+            )
+        )
+    if _table_enabled(cfg, consent_web_settings) and not _table_enabled(cfg, consent_publishing):
+        findings.append(
+            _nested_error(
+                "consent_preferences.publishing.web_settings",
+                "enable",
+                "website publish settings require consent publishing to be enabled",
+            )
+        )
+    if _table_enabled(cfg, consent_trust_center) and not (
+        _table_enabled(cfg, consent_public) and _table_enabled(cfg, consent_publishing)
+    ):
+        findings.append(
+            _nested_error(
+                "consent_preferences.trust_center",
+                "enable",
+                "consumer trust center requires consent publishing and the public API",
+            )
+        )
+    if _table_enabled(cfg, consent_custom_index) and not _table_enabled(cfg, consent_profile_data):
+        findings.append(
+            _nested_error(
+                "consent_preferences.profile_data.custom_index",
+                "enable",
+                "custom data-element indexes require consent profile data to be enabled",
+            )
+        )
+    if _table_enabled(cfg, consent_global_opt_out) and not _table_enabled(
+        cfg,
+        ("privacy_automation", "rights_consumer_intake"),
+    ):
+        findings.append(
+            _nested_error(
+                "consent_preferences.global_opt_out",
+                "enable",
+                "Global Opt-Out requires authenticated consumer privacy-rights intake",
+            )
+        )
+    if _table_enabled(cfg, consent_trust_center_branding) and not _table_enabled(
+        cfg, consent_trust_center
+    ):
+        findings.append(
+            _nested_error(
+                "consent_preferences.trust_center.branding",
+                "enable",
+                "Trust Center branding requires the consumer Trust Center",
+            )
+        )
+    branding = _at_path(cfg, consent_trust_center_branding)
+    if isinstance(branding, dict):
+        key_ref = branding.get("key_ref", _MISSING)
+        if key_ref is not _MISSING and (
+            not isinstance(key_ref, str)
+            or key_ref != "env:MAVERICK_TRUST_CENTER_BRAND_ASSET_KEY"
+        ):
+            findings.append(
+                _nested_error(
+                    "consent_preferences.trust_center.branding",
+                    "key_ref",
+                    "Trust Center brand custody uses the deployment-held asset key reference",
+                )
+            )
+        max_width = branding.get("max_width")
+        max_height = branding.get("max_height")
+        max_pixels = branding.get("max_pixels")
+        if all(
+            isinstance(value, int) and not isinstance(value, bool)
+            for value in (max_width, max_height, max_pixels)
+        ) and max_pixels > max_width * max_height:
+            findings.append(
+                _nested_error(
+                    "consent_preferences.trust_center.branding",
+                    "max_pixels",
+                    "Trust Center brand pixel capacity cannot exceed width times height",
+                )
+            )
+    return findings
+
+
+def _lint_consent_native_contracts(cfg: dict) -> list[Finding]:
+    """Check native consent SDK authority and key requirements."""
+    findings: list[Finding] = []
+    consent_native_sdk = ("consent_preferences", "native_sdk")
+    consent_public = ("consent_preferences", "public_api")
+    consent_publishing = ("consent_preferences", "publishing")
+    if _table_enabled(cfg, consent_native_sdk):
+        required_native_authorities = (consent_publishing, consent_public)
+        missing = [
+            ".".join(path)
+            for path in required_native_authorities
+            if not _table_enabled(cfg, path)
+        ]
+        if missing:
+            findings.append(
+                _nested_error(
+                    "consent_preferences.native_sdk",
+                    "enable",
+                    "native consent SDK requires enabled authority: " + ", ".join(missing),
+                )
+            )
+        native = _at_path(cfg, consent_native_sdk)
+        if isinstance(native, dict):
+            key_id = native.get("receipt_key_id")
+            if (
+                not isinstance(key_id, str)
+                or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", key_id) is None
+            ):
+                findings.append(
+                    _nested_error(
+                        "consent_preferences.native_sdk",
+                        "receipt_key_id",
+                        "enabled native consent requires a bounded receipt key id",
+                    )
+                )
+            secret_ref = native.get("receipt_key_secret_ref")
+            if (
+                not isinstance(secret_ref, str)
+                or re.fullmatch(r"[A-Z][A-Z0-9_]{2,127}", secret_ref) is None
+            ):
+                findings.append(
+                    _nested_error(
+                        "consent_preferences.native_sdk",
+                        "receipt_key_secret_ref",
+                        "enabled native consent requires an uppercase environment secret reference",
+                    )
+                )
+            if native.get("require_profile_linking") is True and not _table_enabled(
+                cfg, ("consent_preferences", "identity")
+            ):
+                findings.append(
+                    _nested_error(
+                        "consent_preferences.native_sdk",
+                        "require_profile_linking",
+                        "native profile linking requires consent identity to be enabled",
+                    )
+                )
+            if native.get("require_rights_requests") is True and not _table_enabled(
+                cfg, ("privacy_automation", "rights_consumer_intake")
+            ):
+                findings.append(
+                    _nested_error(
+                        "consent_preferences.native_sdk",
+                        "require_rights_requests",
+                        "native rights requests require authenticated consumer privacy-rights intake",
+                    )
+                )
+    return findings
+
+
+def _lint_continuous_evidence(cfg: dict) -> list[Finding]:
+    """Check continuous evidence and its scheduler."""
+    findings: list[Finding] = []
+    continuous_evidence = ("tech_risk_compliance", "continuous_evidence")
+    continuous_evidence_scheduler = (
+        "tech_risk_compliance",
+        "continuous_evidence",
+        "scheduler",
+    )
+    if _table_enabled(cfg, continuous_evidence_scheduler) and not _table_enabled(
+        cfg, continuous_evidence
+    ):
+        findings.append(
+            _nested_error(
+                "tech_risk_compliance.continuous_evidence.scheduler",
+                "enable",
+                "continuous-evidence scheduler requires continuous evidence to be enabled",
+            )
+        )
+    continuous_table = _at_path(cfg, continuous_evidence)
+    if isinstance(continuous_table, dict) and continuous_table.get("enable") is True:
+        collectors = continuous_table.get("enabled_collectors")
+        if (
+            not isinstance(collectors, list)
+            or not collectors
+            or len(collectors) > 32
+            or any(
+                not isinstance(item, str) or re.fullmatch(r"[a-z][a-z0-9_.-]{0,95}", item) is None
+                for item in collectors
+            )
+            or len(set(collectors)) != len(collectors)
+        ):
+            findings.append(
+                _nested_error(
+                    "tech_risk_compliance.continuous_evidence",
+                    "enabled_collectors",
+                    "enabled continuous evidence requires a unique closed collector allowlist",
+                )
+            )
+    return findings
+
+
+def _lint_rights_delivery_contracts(cfg: dict) -> list[Finding]:
+    """Check privacy-rights delivery, intake, and lifecycle admission."""
+    findings: list[Finding] = []
+    rights_consumer_delivery = (
+        "privacy_automation",
+        "rights_consumer_delivery",
+    )
+    if _table_enabled(cfg, rights_consumer_delivery) and not _table_enabled(
+        cfg,
+        ("privacy_automation", "rights_orchestration"),
+    ):
+        findings.append(
+            _nested_error(
+                "privacy_automation.rights_consumer_delivery",
+                "enable",
+                "rights consumer delivery requires rights orchestration to be enabled",
+            )
+        )
+    if _table_enabled(cfg, rights_consumer_delivery):
+        delivery_table = _at_path(cfg, rights_consumer_delivery)
+        assert isinstance(delivery_table, dict)
+        for key in (
+            "digest_key_ref",
+            "export_signing_key_ref",
+            "package_encryption_key_ref",
+        ):
+            if not _is_rights_delivery_key_reference(delivery_table.get(key)):
+                findings.append(
+                    _nested_error(
+                        "privacy_automation.rights_consumer_delivery",
+                        key,
+                        "enabled rights consumer delivery requires an uppercase "
+                        "env:, vault:, or secret: key reference",
+                    )
+                )
+        for key in ("server_grant_ttl_seconds", "max_package_bytes"):
+            if key not in delivery_table:
+                findings.append(
+                    _nested_error(
+                        "privacy_automation.rights_consumer_delivery",
+                        key,
+                        f"enabled rights consumer delivery requires {key}",
+                    )
+                )
+    rights_consumer_intake = (
+        "privacy_automation",
+        "rights_consumer_intake",
+    )
+    if _table_enabled(cfg, rights_consumer_intake):
+        required_intake_authorities = (
+            ("privacy_automation", "rights_orchestration"),
+            ("consent_preferences", "publishing"),
+            ("consent_preferences", "public_api"),
+            ("consent_preferences", "trust_center"),
+        )
+        missing = [
+            ".".join(path) for path in required_intake_authorities if not _table_enabled(cfg, path)
+        ]
+        if missing:
+            findings.append(
+                _nested_error(
+                    "privacy_automation.rights_consumer_intake",
+                    "enable",
+                    "consumer rights intake requires enabled authority: " + ", ".join(missing),
+                )
+            )
+        tenant_limit = _at_path(cfg, rights_consumer_intake + ("max_active_requests",))
+        subject_limit = _at_path(
+            cfg,
+            rights_consumer_intake + ("max_active_requests_per_subject",),
+        )
+        if (
+            isinstance(tenant_limit, int)
+            and not isinstance(tenant_limit, bool)
+            and isinstance(subject_limit, int)
+            and not isinstance(subject_limit, bool)
+            and subject_limit > tenant_limit
+        ):
+            findings.append(
+                _nested_error(
+                    "privacy_automation.rights_consumer_intake",
+                    "max_active_requests_per_subject",
+                    "per-subject active request limit must not exceed the tenant limit",
+                )
+            )
+    ott_ctv_rights = ("privacy_automation", "ott_ctv_rights")
+    if _table_enabled(cfg, ott_ctv_rights):
+        required_ott_ctv_authorities = (
+            ("privacy_automation", "rights_orchestration"),
+            ("consent_preferences", "publishing"),
+            ("consent_preferences", "public_api"),
+            ("consent_preferences", "identity"),
+            ("consent_preferences", "trust_center"),
+        )
+        missing = [
+            ".".join(path) for path in required_ott_ctv_authorities if not _table_enabled(cfg, path)
+        ]
+        if missing:
+            findings.append(
+                _nested_error(
+                    "privacy_automation.ott_ctv_rights",
+                    "enable",
+                    "OTT/CTV rights require enabled authority: " + ", ".join(missing),
+                )
+            )
+    drop_management = ("privacy_automation", "drop_management")
+    if _table_enabled(cfg, drop_management):
+        if not _table_enabled(cfg, ("privacy_automation", "rights_orchestration")):
+            findings.append(
+                _nested_error(
+                    "privacy_automation.drop_management",
+                    "enable",
+                    "DROP management requires privacy rights orchestration to be enabled",
+                )
+            )
+        principal_key_ref = _at_path(cfg, drop_management + ("principal_binding_key_ref",))
+        if not _is_drop_principal_key_reference(principal_key_ref):
+            findings.append(
+                _nested_error(
+                    "privacy_automation.drop_management",
+                    "principal_binding_key_ref",
+                    "enabled DROP management requires a bounded env/KMS secret-provider reference",
+                )
+            )
+        interval = _at_path(cfg, drop_management + ("scheduler_interval_seconds",))
+        jitter = _at_path(cfg, drop_management + ("scheduler_jitter_seconds",))
+        if (
+            isinstance(interval, int)
+            and not isinstance(interval, bool)
+            and isinstance(jitter, int)
+            and not isinstance(jitter, bool)
+            and jitter >= interval
+        ):
+            findings.append(
+                _nested_error(
+                    "privacy_automation.drop_management",
+                    "scheduler_jitter_seconds",
+                    "DROP scheduler jitter must be smaller than its interval",
+                )
+            )
+    return findings
+
+
+def _lint_portal_identity_storage(cfg: dict, consent_public: tuple, consent_publishing: tuple) -> list[Finding]:
+    """Check consent identity, storage, and portal dependencies."""
+    findings: list[Finding] = []
+    if _table_enabled(cfg, ("consent_preferences", "edge_cache")) and not (
+        _table_enabled(cfg, consent_public)
+    ):
+        findings.append(
+            _nested_error(
+                "consent_preferences.edge_cache",
+                "enable",
+                "consent edge cache requires the public API to be enabled",
+            )
+        )
+    lifecycle_portal = (
+        "third_party_management",
+        "lifecycle",
+        "portal",
+    )
+    if _table_enabled(cfg, lifecycle_portal) and not _table_enabled(
+        cfg,
+        ("third_party_management", "lifecycle"),
+    ):
+        findings.append(
+            _nested_error(
+                "third_party_management.lifecycle.portal",
+                "enable",
+                "third-party collaboration portal requires lifecycle to be enabled",
+            )
+        )
+    third_party_contracts = ("third_party_management", "contracts")
+    if _table_enabled(cfg, third_party_contracts) and not _table_enabled(
+        cfg,
+        ("third_party_management", "intelligence"),
+    ):
+        findings.append(
+            _nested_error(
+                "third_party_management.contracts",
+                "enable",
+                "third-party contracts require the local intelligence vendor authority",
+            )
+        )
+
+    identity = _at_path(cfg, ("consent_preferences", "identity"))
+    if isinstance(identity, dict) and identity.get("enable") is True:
+        if not (_table_enabled(cfg, consent_public) and _table_enabled(cfg, consent_publishing)):
+            findings.append(
+                _nested_error(
+                    "consent_preferences.identity",
+                    "enable",
+                    "consent identity requires consent publishing and the public API",
+                )
+            )
+        for key in ("issuer", "audience"):
+            value = identity.get(key)
+            if not isinstance(value, str) or not value.strip():
+                findings.append(
+                    _nested_error(
+                        "consent_preferences.identity",
+                        key,
+                        f"enabled consent identity requires a non-empty {key}",
+                    )
+                )
+        if not _is_https_origin(identity.get("jwks_origin")):
+            findings.append(
+                _nested_error(
+                    "consent_preferences.identity",
+                    "jwks_origin",
+                    "enabled consent identity requires an exact HTTPS JWKS origin",
+                )
+            )
+        token_ttl = identity.get("token_ttl_seconds", 600)
+        lifecycle_retention = identity.get(
+            "link_lifecycle_retention_seconds",
+            90 * 24 * 60 * 60,
+        )
+        if (
+            isinstance(token_ttl, int)
+            and not isinstance(token_ttl, bool)
+            and isinstance(lifecycle_retention, int)
+            and not isinstance(lifecycle_retention, bool)
+            and lifecycle_retention < token_ttl
+        ):
+            findings.append(
+                _nested_error(
+                    "consent_preferences.identity",
+                    "link_lifecycle_retention_seconds",
+                    "identity link lifecycle retention cannot be shorter than the token TTL",
+                )
+            )
+
+    storage = _at_path(cfg, ("consent_preferences", "storage"))
+    if isinstance(storage, dict):
+        backend = storage.get("backend", _MISSING)
+        if backend is not _MISSING and backend not in {"sqlite", "postgres"}:
+            findings.append(
+                _nested_error(
+                    "consent_preferences.storage",
+                    "backend",
+                    "consent storage backend must be 'sqlite' or 'postgres'",
+                )
+            )
+        secret_ref = storage.get("dsn_secret_ref", _MISSING)
+        if secret_ref is not _MISSING and secret_ref not in ("", None) and (
+            not isinstance(secret_ref, str)
+            or not re.fullmatch(r"\$?[A-Z][A-Z0-9_]{2,63}", secret_ref.strip())
+        ):
+            findings.append(
+                _nested_error(
+                    "consent_preferences.storage",
+                    "dsn_secret_ref",
+                    "consent storage dsn_secret_ref must name an environment variable",
+                )
+            )
+
+    return findings
+
+
+def _lint_evidence_analysis(cfg: dict) -> list[Finding]:
+    """Validate local evidence parser, OCR, and spreadsheet configuration."""
+    findings: list[Finding] = []
+    evidence_table = _at_path(cfg, ("ai_evidence_analysis",))
+    if isinstance(evidence_table, dict):
+        media = evidence_table.get("enabled_media_types")
+        media_values = (
+            {item for item in media if isinstance(item, str)}
+            if isinstance(media, list)
+            else set()
+        )
+        parent_enabled = evidence_table.get("enable") is True
+        maximum_output = evidence_table.get("max_extracted_text_bytes", 1_048_576)
+        parser_sandbox = evidence_table.get("parser_sandbox")
+        parser_sandbox_enabled = (
+            isinstance(parser_sandbox, dict) and parser_sandbox.get("enable") is True
+        )
+        ocr = evidence_table.get("ocr")
+        ocr_enabled = isinstance(ocr, dict) and ocr.get("enable") is True
+        legacy_xls = evidence_table.get("legacy_xls")
+        legacy_enabled = (
+            isinstance(legacy_xls, dict) and legacy_xls.get("enable") is True
+        )
+        findings.extend(_lint_evidence_sandbox(parser_sandbox, parser_sandbox_enabled, ocr_enabled, legacy_enabled))
+        findings.extend(_lint_evidence_ocr(ocr, ocr_enabled, parent_enabled, media_values, maximum_output))
+        findings.extend(_lint_evidence_legacy(legacy_xls, legacy_enabled, parent_enabled, media_values, maximum_output))
+    return findings
+
+
+def _lint_evidence_sandbox(parser_sandbox, parser_sandbox_enabled, ocr_enabled, legacy_enabled) -> list[Finding]:
+    findings: list[Finding] = []
+    if (ocr_enabled or legacy_enabled) and not parser_sandbox_enabled:
+        findings.append(
+            _nested_error(
+                "ai_evidence_analysis.parser_sandbox",
+                "enable",
+                "enabled local parsers require an enforceable parser sandbox",
+            )
+        )
+    if parser_sandbox_enabled and not (ocr_enabled or legacy_enabled):
+        findings.append(
+            _nested_error(
+                "ai_evidence_analysis.parser_sandbox",
+                "enable",
+                "parser sandbox requires at least one enabled local parser worker",
+            )
+        )
+    if parser_sandbox_enabled and isinstance(parser_sandbox, dict):
+        if parser_sandbox.get("mode") != "bubblewrap":
+            findings.append(
+                _nested_error(
+                    "ai_evidence_analysis.parser_sandbox",
+                    "mode",
+                    "local parser sandbox mode must be bubblewrap",
+                )
+            )
+        if not _is_absolute_path(parser_sandbox.get("launcher")):
+            findings.append(
+                _nested_error(
+                    "ai_evidence_analysis.parser_sandbox",
+                    "launcher",
+                    "sandbox launcher must be an absolute path",
+                )
+            )
+        if not _is_lower_sha256(parser_sandbox.get("launcher_sha256")):
+            findings.append(
+                _nested_error(
+                    "ai_evidence_analysis.parser_sandbox",
+                    "launcher_sha256",
+                    "sandbox launcher requires an exact lowercase SHA-256 digest",
+                )
+            )
+        if not _is_exact_dependency_version(parser_sandbox.get("launcher_version")):
+            findings.append(
+                _nested_error(
+                    "ai_evidence_analysis.parser_sandbox",
+                    "launcher_version",
+                    "sandbox launcher requires an exact version",
+                )
+            )
+    return findings
+
+
+def _lint_evidence_ocr(ocr, ocr_enabled, parent_enabled, media_values, maximum_output) -> list[Finding]:
+    findings: list[Finding] = []
+    if ocr_enabled:
+        if not parent_enabled:
+            findings.append(
+                _nested_error(
+                    "ai_evidence_analysis.ocr",
+                    "enable",
+                    "enabled OCR requires ai_evidence_analysis.enable = true",
+                )
+            )
+        if not media_values.intersection({"jpeg", "png"}):
+            findings.append(
+                _nested_error(
+                    "ai_evidence_analysis.ocr",
+                    "enable",
+                    "enabled OCR requires jpeg or png in enabled_media_types",
+                )
+            )
+        for key in ("executable", "traineddata_path"):
+            value = ocr.get(key)
+            if not _is_absolute_path(value):
+                findings.append(
+                    _nested_error(
+                        "ai_evidence_analysis.ocr",
+                        key,
+                        f"enabled OCR requires an absolute {key}",
+                    )
+                )
+        for key in ("tesseract_version", "pillow_version"):
+            if not _is_exact_dependency_version(ocr.get(key)):
+                findings.append(
+                    _nested_error(
+                        "ai_evidence_analysis.ocr",
+                        key,
+                        f"enabled OCR requires an exact bounded {key}",
+                    )
+                )
+        for key in (
+            "executable_sha256",
+            "traineddata_sha256",
+            "runtime_libraries_sha256",
+            "pillow_manifest_sha256",
+        ):
+            if _is_lower_sha256(ocr.get(key)):
+                continue
+            findings.append(
+                _nested_error(
+                    "ai_evidence_analysis.ocr",
+                    key,
+                    f"enabled OCR requires an exact lowercase {key} digest",
+                )
+            )
+        runtime_paths = ocr.get("runtime_library_paths")
+        if (
+            not isinstance(runtime_paths, list)
+            or not 1 <= len(runtime_paths) <= 512
+            or len(runtime_paths) != len(set(runtime_paths))
+            or any(not _is_absolute_path(path) for path in runtime_paths)
+        ):
+            findings.append(
+                _nested_error(
+                    "ai_evidence_analysis.ocr",
+                    "runtime_library_paths",
+                    "enabled OCR requires unique absolute runtime library paths",
+                )
+            )
+        if (
+            isinstance(ocr.get("max_output_bytes"), int)
+            and not isinstance(ocr.get("max_output_bytes"), bool)
+            and isinstance(maximum_output, int)
+            and not isinstance(maximum_output, bool)
+            and ocr["max_output_bytes"] > maximum_output
+        ):
+            findings.append(
+                _nested_error(
+                    "ai_evidence_analysis.ocr",
+                    "max_output_bytes",
+                    "OCR output bound cannot exceed max_extracted_text_bytes",
+                )
+            )
+    return findings
+
+
+def _lint_evidence_legacy(legacy_xls, legacy_enabled, parent_enabled, media_values, maximum_output) -> list[Finding]:
+    findings: list[Finding] = []
+    if "xls" in media_values and not legacy_enabled:
+        findings.append(
+            _nested_error(
+                "ai_evidence_analysis.legacy_xls",
+                "enable",
+                "xls media requires the legacy XLS parser to be explicitly enabled",
+            )
+        )
+    if legacy_enabled and isinstance(legacy_xls, dict):
+        if not parent_enabled or "xls" not in media_values:
+            findings.append(
+                _nested_error(
+                    "ai_evidence_analysis.legacy_xls",
+                    "enable",
+                    "enabled legacy XLS parsing requires AI evidence analysis and xls media",
+                )
+            )
+        for key in ("xlrd_version", "olefile_version"):
+            if not _is_exact_dependency_version(legacy_xls.get(key)):
+                findings.append(
+                    _nested_error(
+                        "ai_evidence_analysis.legacy_xls",
+                        key,
+                        f"enabled legacy XLS parsing requires an exact {key}",
+                    )
+                )
+        for key in ("xlrd_manifest_sha256", "olefile_manifest_sha256"):
+            if not _is_lower_sha256(legacy_xls.get(key)):
+                findings.append(
+                    _nested_error(
+                        "ai_evidence_analysis.legacy_xls",
+                        key,
+                        f"enabled legacy XLS parsing requires an exact {key}",
+                    )
+                )
+        stream_bound = legacy_xls.get("max_workbook_stream_bytes")
+        record_bound = legacy_xls.get("max_record_bytes")
+        if (
+            isinstance(stream_bound, int)
+            and not isinstance(stream_bound, bool)
+            and isinstance(record_bound, int)
+            and not isinstance(record_bound, bool)
+            and record_bound > stream_bound
+        ):
+            findings.append(
+                _nested_error(
+                    "ai_evidence_analysis.legacy_xls",
+                    "max_record_bytes",
+                    "legacy XLS record bound cannot exceed its workbook stream bound",
+                )
+            )
+        xls_output = legacy_xls.get("max_output_bytes")
+        if (
+            isinstance(xls_output, int)
+            and not isinstance(xls_output, bool)
+            and isinstance(maximum_output, int)
+            and not isinstance(maximum_output, bool)
+            and xls_output > maximum_output
+        ):
+            findings.append(
+                _nested_error(
+                    "ai_evidence_analysis.legacy_xls",
+                    "max_output_bytes",
+                    "legacy XLS output bound cannot exceed max_extracted_text_bytes",
+                )
+            )
+    return findings
+
+
+def _lint_governance_capabilities(cfg: dict) -> list[Finding]:
+    """Check enabled governance authorities and closed capability lists."""
     findings: list[Finding] = []
     if _table_enabled(cfg, ("audit", "unified")):
         audit = cfg.get("audit")
@@ -3475,273 +4427,12 @@ def _lint_product_governance_contracts(  # noqa: C901
                 "AI evidence analysis requires evidence_gateway.enable = true",
             )
         )
-    evidence_table = _at_path(cfg, ("ai_evidence_analysis",))
-    if isinstance(evidence_table, dict):
-        media = evidence_table.get("enabled_media_types")
-        media_values = (
-            {item for item in media if isinstance(item, str)}
-            if isinstance(media, list)
-            else set()
-        )
-        parent_enabled = evidence_table.get("enable") is True
-        maximum_output = evidence_table.get("max_extracted_text_bytes", 1_048_576)
-        parser_sandbox = evidence_table.get("parser_sandbox")
-        parser_sandbox_enabled = (
-            isinstance(parser_sandbox, dict) and parser_sandbox.get("enable") is True
-        )
-        ocr = evidence_table.get("ocr")
-        ocr_enabled = isinstance(ocr, dict) and ocr.get("enable") is True
-        legacy_xls = evidence_table.get("legacy_xls")
-        legacy_enabled = (
-            isinstance(legacy_xls, dict) and legacy_xls.get("enable") is True
-        )
-        if (ocr_enabled or legacy_enabled) and not parser_sandbox_enabled:
-            findings.append(
-                _nested_error(
-                    "ai_evidence_analysis.parser_sandbox",
-                    "enable",
-                    "enabled local parsers require an enforceable parser sandbox",
-                )
-            )
-        if parser_sandbox_enabled and not (ocr_enabled or legacy_enabled):
-            findings.append(
-                _nested_error(
-                    "ai_evidence_analysis.parser_sandbox",
-                    "enable",
-                    "parser sandbox requires at least one enabled local parser worker",
-                )
-            )
-        if parser_sandbox_enabled and isinstance(parser_sandbox, dict):
-            if parser_sandbox.get("mode") != "bubblewrap":
-                findings.append(
-                    _nested_error(
-                        "ai_evidence_analysis.parser_sandbox",
-                        "mode",
-                        "local parser sandbox mode must be bubblewrap",
-                    )
-                )
-            if not _is_absolute_path(parser_sandbox.get("launcher")):
-                findings.append(
-                    _nested_error(
-                        "ai_evidence_analysis.parser_sandbox",
-                        "launcher",
-                        "sandbox launcher must be an absolute path",
-                    )
-                )
-            if not _is_lower_sha256(parser_sandbox.get("launcher_sha256")):
-                findings.append(
-                    _nested_error(
-                        "ai_evidence_analysis.parser_sandbox",
-                        "launcher_sha256",
-                        "sandbox launcher requires an exact lowercase SHA-256 digest",
-                    )
-                )
-            if not _is_exact_dependency_version(parser_sandbox.get("launcher_version")):
-                findings.append(
-                    _nested_error(
-                        "ai_evidence_analysis.parser_sandbox",
-                        "launcher_version",
-                        "sandbox launcher requires an exact version",
-                    )
-                )
-        if ocr_enabled:
-            if not parent_enabled:
-                findings.append(
-                    _nested_error(
-                        "ai_evidence_analysis.ocr",
-                        "enable",
-                        "enabled OCR requires ai_evidence_analysis.enable = true",
-                    )
-                )
-            if not media_values.intersection({"jpeg", "png"}):
-                findings.append(
-                    _nested_error(
-                        "ai_evidence_analysis.ocr",
-                        "enable",
-                        "enabled OCR requires jpeg or png in enabled_media_types",
-                    )
-                )
-            for key in ("executable", "traineddata_path"):
-                value = ocr.get(key)
-                if not _is_absolute_path(value):
-                    findings.append(
-                        _nested_error(
-                            "ai_evidence_analysis.ocr",
-                            key,
-                            f"enabled OCR requires an absolute {key}",
-                        )
-                    )
-            for key in ("tesseract_version", "pillow_version"):
-                if not _is_exact_dependency_version(ocr.get(key)):
-                    findings.append(
-                        _nested_error(
-                            "ai_evidence_analysis.ocr",
-                            key,
-                            f"enabled OCR requires an exact bounded {key}",
-                        )
-                    )
-            for key in (
-                "executable_sha256",
-                "traineddata_sha256",
-                "runtime_libraries_sha256",
-                "pillow_manifest_sha256",
-            ):
-                if _is_lower_sha256(ocr.get(key)):
-                    continue
-                findings.append(
-                    _nested_error(
-                        "ai_evidence_analysis.ocr",
-                        key,
-                        f"enabled OCR requires an exact lowercase {key} digest",
-                    )
-                )
-            runtime_paths = ocr.get("runtime_library_paths")
-            if (
-                not isinstance(runtime_paths, list)
-                or not 1 <= len(runtime_paths) <= 512
-                or len(runtime_paths) != len(set(runtime_paths))
-                or any(not _is_absolute_path(path) for path in runtime_paths)
-            ):
-                findings.append(
-                    _nested_error(
-                        "ai_evidence_analysis.ocr",
-                        "runtime_library_paths",
-                        "enabled OCR requires unique absolute runtime library paths",
-                    )
-                )
-            if (
-                isinstance(ocr.get("max_output_bytes"), int)
-                and not isinstance(ocr.get("max_output_bytes"), bool)
-                and isinstance(maximum_output, int)
-                and not isinstance(maximum_output, bool)
-                and ocr["max_output_bytes"] > maximum_output
-            ):
-                findings.append(
-                    _nested_error(
-                        "ai_evidence_analysis.ocr",
-                        "max_output_bytes",
-                        "OCR output bound cannot exceed max_extracted_text_bytes",
-                    )
-                )
-        if "xls" in media_values and not legacy_enabled:
-            findings.append(
-                _nested_error(
-                    "ai_evidence_analysis.legacy_xls",
-                    "enable",
-                    "xls media requires the legacy XLS parser to be explicitly enabled",
-                )
-            )
-        if legacy_enabled and isinstance(legacy_xls, dict):
-            if not parent_enabled or "xls" not in media_values:
-                findings.append(
-                    _nested_error(
-                        "ai_evidence_analysis.legacy_xls",
-                        "enable",
-                        "enabled legacy XLS parsing requires AI evidence analysis and xls media",
-                    )
-                )
-            for key in ("xlrd_version", "olefile_version"):
-                if not _is_exact_dependency_version(legacy_xls.get(key)):
-                    findings.append(
-                        _nested_error(
-                            "ai_evidence_analysis.legacy_xls",
-                            key,
-                            f"enabled legacy XLS parsing requires an exact {key}",
-                        )
-                    )
-            for key in ("xlrd_manifest_sha256", "olefile_manifest_sha256"):
-                if not _is_lower_sha256(legacy_xls.get(key)):
-                    findings.append(
-                        _nested_error(
-                            "ai_evidence_analysis.legacy_xls",
-                            key,
-                            f"enabled legacy XLS parsing requires an exact {key}",
-                        )
-                    )
-            stream_bound = legacy_xls.get("max_workbook_stream_bytes")
-            record_bound = legacy_xls.get("max_record_bytes")
-            if (
-                isinstance(stream_bound, int)
-                and not isinstance(stream_bound, bool)
-                and isinstance(record_bound, int)
-                and not isinstance(record_bound, bool)
-                and record_bound > stream_bound
-            ):
-                findings.append(
-                    _nested_error(
-                        "ai_evidence_analysis.legacy_xls",
-                        "max_record_bytes",
-                        "legacy XLS record bound cannot exceed its workbook stream bound",
-                    )
-                )
-            xls_output = legacy_xls.get("max_output_bytes")
-            if (
-                isinstance(xls_output, int)
-                and not isinstance(xls_output, bool)
-                and isinstance(maximum_output, int)
-                and not isinstance(maximum_output, bool)
-                and xls_output > maximum_output
-            ):
-                findings.append(
-                    _nested_error(
-                        "ai_evidence_analysis.legacy_xls",
-                        "max_output_bytes",
-                        "legacy XLS output bound cannot exceed max_extracted_text_bytes",
-                    )
-                )
-    if _table_enabled(cfg, ("audit", "unified", "custody")):
-        try:
-            from .unified_audit_custody import settings_from
+    return findings
 
-            settings_from(cfg, tenant_id="config-lint")
-        except (TypeError, ValueError, RuntimeError):
-            findings.append(
-                _nested_error(
-                    "audit.unified.custody",
-                    "enable",
-                    "unified audit custody authority or tenant namespace is invalid",
-                )
-            )
-    if _table_enabled(cfg, ("assessment_evidence_autopopulation",)) and not _table_enabled(
-        cfg, ("ai_evidence_analysis",)
-    ):
-        findings.append(
-            _nested_error(
-                "assessment_evidence_autopopulation",
-                "enable",
-                "assessment evidence proposals require ai_evidence_analysis.enable = true",
-            )
-        )
-    if _table_enabled(cfg, ("ai_cloud_agent_governance",)):
-        required_cloud_authorities = (
-            ("ai_inventory",),
-            ("ai_policy_management",),
-            ("ai_runtime_guardrails",),
-        )
-        missing = [
-            ".".join(path) for path in required_cloud_authorities if not _table_enabled(cfg, path)
-        ]
-        if missing:
-            findings.append(
-                _nested_error(
-                    "ai_cloud_agent_governance",
-                    "enable",
-                    "cloud-agent governance requires enabled authority: " + ", ".join(missing),
-                )
-            )
-        cloud_table = _at_path(cfg, ("ai_cloud_agent_governance",))
-        if (
-            isinstance(cloud_table, dict)
-            and cloud_table.get("databricks_framework_enable") is True
-            and not _table_enabled(cfg, ("policy_packs",))
-        ):
-            findings.append(
-                _nested_error(
-                    "ai_cloud_agent_governance",
-                    "databricks_framework_enable",
-                    "Databricks framework activation requires policy_packs.enable = true",
-                )
-            )
+
+def _lint_governed_documents(cfg: dict) -> list[Finding]:
+    """Check governed document and attachment settings."""
+    findings: list[Finding] = []
     document_access = _at_path(cfg, ("administration_document_access",))
     if isinstance(document_access, dict):
         default_ttl = document_access.get("default_ttl_seconds", 300)
@@ -3887,6 +4578,12 @@ def _lint_product_governance_contracts(  # noqa: C901
                         "governed_document_vault.allowed_media_types when the stock vault is enabled",
                     )
                 )
+    return findings
+
+
+def _lint_governance_dependencies(cfg: dict) -> list[Finding]:
+    """Check product governance and inventory dependencies."""
+    findings: list[Finding] = []
     governance_inventory = cfg.get("governance_inventory")
     entity_graph = cfg.get("entity_graph")
     if (
@@ -3982,590 +4679,12 @@ def _lint_product_governance_contracts(  # noqa: C901
                     )
                 )
 
-    consent_public = ("consent_preferences", "public_api")
-    consent_publishing = ("consent_preferences", "publishing")
-    consent_web_settings = (
-        "consent_preferences",
-        "publishing",
-        "web_settings",
-    )
-    consent_trust_center = ("consent_preferences", "trust_center")
-    consent_trust_center_branding = consent_trust_center + ("branding",)
-    consent_profile_data = ("consent_preferences", "profile_data")
-    consent_custom_index = (
-        "consent_preferences",
-        "profile_data",
-        "custom_index",
-    )
-    consent_global_opt_out = ("consent_preferences", "global_opt_out")
-    consent_native_sdk = ("consent_preferences", "native_sdk")
-    consent_scanner = ("consent_preferences", "scanner")
-    consent_scan_scheduler = (
-        "consent_preferences",
-        "scanner",
-        "scheduler",
-    )
-    consent_scan_notice_proposals = (
-        "consent_preferences",
-        "scanner",
-        "notice_proposals",
-    )
-    privacy_discovery = ("privacy_automation", "data_discovery")
-    privacy_discovery_adapters = privacy_discovery + ("adapters",)
-    privacy_discovery_remediation = privacy_discovery + ("remediation",)
-    privacy_discovery_data_map = privacy_discovery_remediation + ("data_map",)
-    privacy_discovery_scheduler = privacy_discovery_remediation + ("scheduler",)
-    if _table_enabled(cfg, consent_scan_scheduler) and not _table_enabled(cfg, consent_scanner):
-        findings.append(
-            _nested_error(
-                "consent_preferences.scanner.scheduler",
-                "enable",
-                "consent scan scheduler requires consent scanner to be enabled",
-            )
-        )
-    if _table_enabled(cfg, consent_scan_notice_proposals) and not _table_enabled(
-        cfg, consent_scanner
-    ):
-        findings.append(
-            _nested_error(
-                "consent_preferences.scanner.notice_proposals",
-                "enable",
-                "consent scan notice proposals require consent scanner to be enabled",
-            )
-        )
-    if _table_enabled(cfg, privacy_discovery_adapters):
-        if not _table_enabled(cfg, privacy_discovery):
-            findings.append(
-                _nested_error(
-                    "privacy_automation.data_discovery.adapters",
-                    "enable",
-                    "stock discovery adapters require privacy data discovery to be enabled",
-                )
-            )
-        adapters = _at_path(cfg, privacy_discovery_adapters)
-        providers = adapters.get("enabled_providers") if isinstance(adapters, dict) else None
-        admitted = {
-            "aws_s3",
-            "azure_blob",
-            "google_cloud_storage",
-            "snowflake_metadata",
-            "servicenow_cmdb",
-            "entra_assets",
-        }
-        if (
-            not isinstance(providers, list)
-            or not providers
-            or len(providers) > len(admitted)
-            or any(not isinstance(item, str) or item not in admitted for item in providers)
-            or len(set(providers)) != len(providers)
-        ):
-            findings.append(
-                _nested_error(
-                    "privacy_automation.data_discovery.adapters",
-                    "enabled_providers",
-                    "enabled stock discovery providers must be a unique non-empty admitted list",
-                )
-            )
-    if _table_enabled(cfg, privacy_discovery_remediation) and not _table_enabled(
-        cfg, privacy_discovery
-    ):
-        findings.append(
-            _nested_error(
-                "privacy_automation.data_discovery.remediation",
-                "enable",
-                "discovery remediation requires privacy data discovery to be enabled",
-            )
-        )
-    if _table_enabled(cfg, privacy_discovery_data_map) and not _table_enabled(
-        cfg, privacy_discovery_remediation
-    ):
-        findings.append(
-            _nested_error(
-                "privacy_automation.data_discovery.remediation.data_map",
-                "enable",
-                "the discovery data-map target requires remediation to be enabled",
-            )
-        )
-    if _table_enabled(cfg, privacy_discovery_remediation) and not _table_enabled(
-        cfg, privacy_discovery_data_map
-    ):
-        findings.append(
-            _nested_error(
-                "privacy_automation.data_discovery.remediation",
-                "enable",
-                "stock privacy discovery remediation requires data_map.enable = true",
-            )
-        )
-    if _table_enabled(cfg, privacy_discovery_scheduler) and not _table_enabled(
-        cfg, privacy_discovery_remediation
-    ):
-        findings.append(
-            _nested_error(
-                "privacy_automation.data_discovery.remediation.scheduler",
-                "enable",
-                "the discovery remediation scheduler requires remediation to be enabled",
-            )
-        )
-    scheduler_table = _at_path(cfg, privacy_discovery_scheduler)
-    if isinstance(scheduler_table, dict):
-        interval = scheduler_table.get("interval_seconds", 60)
-        jitter = scheduler_table.get("jitter_seconds", 10)
-        if (
-            isinstance(interval, int)
-            and not isinstance(interval, bool)
-            and isinstance(jitter, int)
-            and not isinstance(jitter, bool)
-            and jitter > interval
-        ):
-            findings.append(
-                _nested_error(
-                    "privacy_automation.data_discovery.remediation.scheduler",
-                    "jitter_seconds",
-                    "scheduler jitter_seconds cannot exceed interval_seconds",
-                )
-            )
-    compliance_scoping = ("tech_risk_compliance", "scoping")
-    compliance_scope_actions = ("tech_risk_compliance", "scope_actions")
-    if _table_enabled(cfg, compliance_scope_actions) and not _table_enabled(
-        cfg, compliance_scoping
-    ):
-        findings.append(
-            _nested_error(
-                "tech_risk_compliance.scope_actions",
-                "enable",
-                "compliance scope actions require compliance scoping to be enabled",
-            )
-        )
-    if _table_enabled(cfg, consent_public) and not _table_enabled(cfg, consent_publishing):
-        findings.append(
-            _nested_error(
-                "consent_preferences.public_api",
-                "enable",
-                "public consent API requires consent publishing to be enabled",
-            )
-        )
-    if _table_enabled(cfg, consent_web_settings) and not _table_enabled(cfg, consent_publishing):
-        findings.append(
-            _nested_error(
-                "consent_preferences.publishing.web_settings",
-                "enable",
-                "website publish settings require consent publishing to be enabled",
-            )
-        )
-    if _table_enabled(cfg, consent_trust_center) and not (
-        _table_enabled(cfg, consent_public) and _table_enabled(cfg, consent_publishing)
-    ):
-        findings.append(
-            _nested_error(
-                "consent_preferences.trust_center",
-                "enable",
-                "consumer trust center requires consent publishing and the public API",
-            )
-        )
-    if _table_enabled(cfg, consent_custom_index) and not _table_enabled(cfg, consent_profile_data):
-        findings.append(
-            _nested_error(
-                "consent_preferences.profile_data.custom_index",
-                "enable",
-                "custom data-element indexes require consent profile data to be enabled",
-            )
-        )
-    if _table_enabled(cfg, consent_global_opt_out) and not _table_enabled(
-        cfg,
-        ("privacy_automation", "rights_consumer_intake"),
-    ):
-        findings.append(
-            _nested_error(
-                "consent_preferences.global_opt_out",
-                "enable",
-                "Global Opt-Out requires authenticated consumer privacy-rights intake",
-            )
-        )
-    if _table_enabled(cfg, consent_trust_center_branding) and not _table_enabled(
-        cfg, consent_trust_center
-    ):
-        findings.append(
-            _nested_error(
-                "consent_preferences.trust_center.branding",
-                "enable",
-                "Trust Center branding requires the consumer Trust Center",
-            )
-        )
-    branding = _at_path(cfg, consent_trust_center_branding)
-    if isinstance(branding, dict):
-        key_ref = branding.get("key_ref", _MISSING)
-        if key_ref is not _MISSING and (
-            not isinstance(key_ref, str)
-            or key_ref != "env:MAVERICK_TRUST_CENTER_BRAND_ASSET_KEY"
-        ):
-            findings.append(
-                _nested_error(
-                    "consent_preferences.trust_center.branding",
-                    "key_ref",
-                    "Trust Center brand custody uses the deployment-held asset key reference",
-                )
-            )
-        max_width = branding.get("max_width")
-        max_height = branding.get("max_height")
-        max_pixels = branding.get("max_pixels")
-        if all(
-            isinstance(value, int) and not isinstance(value, bool)
-            for value in (max_width, max_height, max_pixels)
-        ) and max_pixels > max_width * max_height:
-            findings.append(
-                _nested_error(
-                    "consent_preferences.trust_center.branding",
-                    "max_pixels",
-                    "Trust Center brand pixel capacity cannot exceed width times height",
-                )
-            )
-    if _table_enabled(cfg, consent_native_sdk):
-        required_native_authorities = (consent_publishing, consent_public)
-        missing = [
-            ".".join(path)
-            for path in required_native_authorities
-            if not _table_enabled(cfg, path)
-        ]
-        if missing:
-            findings.append(
-                _nested_error(
-                    "consent_preferences.native_sdk",
-                    "enable",
-                    "native consent SDK requires enabled authority: " + ", ".join(missing),
-                )
-            )
-        native = _at_path(cfg, consent_native_sdk)
-        if isinstance(native, dict):
-            key_id = native.get("receipt_key_id")
-            if (
-                not isinstance(key_id, str)
-                or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", key_id) is None
-            ):
-                findings.append(
-                    _nested_error(
-                        "consent_preferences.native_sdk",
-                        "receipt_key_id",
-                        "enabled native consent requires a bounded receipt key id",
-                    )
-                )
-            secret_ref = native.get("receipt_key_secret_ref")
-            if (
-                not isinstance(secret_ref, str)
-                or re.fullmatch(r"[A-Z][A-Z0-9_]{2,127}", secret_ref) is None
-            ):
-                findings.append(
-                    _nested_error(
-                        "consent_preferences.native_sdk",
-                        "receipt_key_secret_ref",
-                        "enabled native consent requires an uppercase environment secret reference",
-                    )
-                )
-            if native.get("require_profile_linking") is True and not _table_enabled(
-                cfg, ("consent_preferences", "identity")
-            ):
-                findings.append(
-                    _nested_error(
-                        "consent_preferences.native_sdk",
-                        "require_profile_linking",
-                        "native profile linking requires consent identity to be enabled",
-                    )
-                )
-            if native.get("require_rights_requests") is True and not _table_enabled(
-                cfg, ("privacy_automation", "rights_consumer_intake")
-            ):
-                findings.append(
-                    _nested_error(
-                        "consent_preferences.native_sdk",
-                        "require_rights_requests",
-                        "native rights requests require authenticated consumer privacy-rights intake",
-                    )
-                )
-    continuous_evidence = ("tech_risk_compliance", "continuous_evidence")
-    continuous_evidence_scheduler = (
-        "tech_risk_compliance",
-        "continuous_evidence",
-        "scheduler",
-    )
-    if _table_enabled(cfg, continuous_evidence_scheduler) and not _table_enabled(
-        cfg, continuous_evidence
-    ):
-        findings.append(
-            _nested_error(
-                "tech_risk_compliance.continuous_evidence.scheduler",
-                "enable",
-                "continuous-evidence scheduler requires continuous evidence to be enabled",
-            )
-        )
-    continuous_table = _at_path(cfg, continuous_evidence)
-    if isinstance(continuous_table, dict) and continuous_table.get("enable") is True:
-        collectors = continuous_table.get("enabled_collectors")
-        if (
-            not isinstance(collectors, list)
-            or not collectors
-            or len(collectors) > 32
-            or any(
-                not isinstance(item, str) or re.fullmatch(r"[a-z][a-z0-9_.-]{0,95}", item) is None
-                for item in collectors
-            )
-            or len(set(collectors)) != len(collectors)
-        ):
-            findings.append(
-                _nested_error(
-                    "tech_risk_compliance.continuous_evidence",
-                    "enabled_collectors",
-                    "enabled continuous evidence requires a unique closed collector allowlist",
-                )
-            )
-    rights_consumer_delivery = (
-        "privacy_automation",
-        "rights_consumer_delivery",
-    )
-    if _table_enabled(cfg, rights_consumer_delivery) and not _table_enabled(
-        cfg,
-        ("privacy_automation", "rights_orchestration"),
-    ):
-        findings.append(
-            _nested_error(
-                "privacy_automation.rights_consumer_delivery",
-                "enable",
-                "rights consumer delivery requires rights orchestration to be enabled",
-            )
-        )
-    if _table_enabled(cfg, rights_consumer_delivery):
-        delivery_table = _at_path(cfg, rights_consumer_delivery)
-        assert isinstance(delivery_table, dict)
-        for key in (
-            "digest_key_ref",
-            "export_signing_key_ref",
-            "package_encryption_key_ref",
-        ):
-            if not _is_rights_delivery_key_reference(delivery_table.get(key)):
-                findings.append(
-                    _nested_error(
-                        "privacy_automation.rights_consumer_delivery",
-                        key,
-                        "enabled rights consumer delivery requires an uppercase "
-                        "env:, vault:, or secret: key reference",
-                    )
-                )
-        for key in ("server_grant_ttl_seconds", "max_package_bytes"):
-            if key not in delivery_table:
-                findings.append(
-                    _nested_error(
-                        "privacy_automation.rights_consumer_delivery",
-                        key,
-                        f"enabled rights consumer delivery requires {key}",
-                    )
-                )
-    rights_consumer_intake = (
-        "privacy_automation",
-        "rights_consumer_intake",
-    )
-    if _table_enabled(cfg, rights_consumer_intake):
-        required_intake_authorities = (
-            ("privacy_automation", "rights_orchestration"),
-            ("consent_preferences", "publishing"),
-            ("consent_preferences", "public_api"),
-            ("consent_preferences", "trust_center"),
-        )
-        missing = [
-            ".".join(path) for path in required_intake_authorities if not _table_enabled(cfg, path)
-        ]
-        if missing:
-            findings.append(
-                _nested_error(
-                    "privacy_automation.rights_consumer_intake",
-                    "enable",
-                    "consumer rights intake requires enabled authority: " + ", ".join(missing),
-                )
-            )
-        tenant_limit = _at_path(cfg, rights_consumer_intake + ("max_active_requests",))
-        subject_limit = _at_path(
-            cfg,
-            rights_consumer_intake + ("max_active_requests_per_subject",),
-        )
-        if (
-            isinstance(tenant_limit, int)
-            and not isinstance(tenant_limit, bool)
-            and isinstance(subject_limit, int)
-            and not isinstance(subject_limit, bool)
-            and subject_limit > tenant_limit
-        ):
-            findings.append(
-                _nested_error(
-                    "privacy_automation.rights_consumer_intake",
-                    "max_active_requests_per_subject",
-                    "per-subject active request limit must not exceed the tenant limit",
-                )
-            )
-    ott_ctv_rights = ("privacy_automation", "ott_ctv_rights")
-    if _table_enabled(cfg, ott_ctv_rights):
-        required_ott_ctv_authorities = (
-            ("privacy_automation", "rights_orchestration"),
-            ("consent_preferences", "publishing"),
-            ("consent_preferences", "public_api"),
-            ("consent_preferences", "identity"),
-            ("consent_preferences", "trust_center"),
-        )
-        missing = [
-            ".".join(path) for path in required_ott_ctv_authorities if not _table_enabled(cfg, path)
-        ]
-        if missing:
-            findings.append(
-                _nested_error(
-                    "privacy_automation.ott_ctv_rights",
-                    "enable",
-                    "OTT/CTV rights require enabled authority: " + ", ".join(missing),
-                )
-            )
-    drop_management = ("privacy_automation", "drop_management")
-    if _table_enabled(cfg, drop_management):
-        if not _table_enabled(cfg, ("privacy_automation", "rights_orchestration")):
-            findings.append(
-                _nested_error(
-                    "privacy_automation.drop_management",
-                    "enable",
-                    "DROP management requires privacy rights orchestration to be enabled",
-                )
-            )
-        principal_key_ref = _at_path(cfg, drop_management + ("principal_binding_key_ref",))
-        if not _is_drop_principal_key_reference(principal_key_ref):
-            findings.append(
-                _nested_error(
-                    "privacy_automation.drop_management",
-                    "principal_binding_key_ref",
-                    "enabled DROP management requires a bounded env/KMS secret-provider reference",
-                )
-            )
-        interval = _at_path(cfg, drop_management + ("scheduler_interval_seconds",))
-        jitter = _at_path(cfg, drop_management + ("scheduler_jitter_seconds",))
-        if (
-            isinstance(interval, int)
-            and not isinstance(interval, bool)
-            and isinstance(jitter, int)
-            and not isinstance(jitter, bool)
-            and jitter >= interval
-        ):
-            findings.append(
-                _nested_error(
-                    "privacy_automation.drop_management",
-                    "scheduler_jitter_seconds",
-                    "DROP scheduler jitter must be smaller than its interval",
-                )
-            )
-    if _table_enabled(cfg, ("consent_preferences", "edge_cache")) and not (
-        _table_enabled(cfg, consent_public)
-    ):
-        findings.append(
-            _nested_error(
-                "consent_preferences.edge_cache",
-                "enable",
-                "consent edge cache requires the public API to be enabled",
-            )
-        )
-    lifecycle_portal = (
-        "third_party_management",
-        "lifecycle",
-        "portal",
-    )
-    if _table_enabled(cfg, lifecycle_portal) and not _table_enabled(
-        cfg,
-        ("third_party_management", "lifecycle"),
-    ):
-        findings.append(
-            _nested_error(
-                "third_party_management.lifecycle.portal",
-                "enable",
-                "third-party collaboration portal requires lifecycle to be enabled",
-            )
-        )
-    third_party_contracts = ("third_party_management", "contracts")
-    if _table_enabled(cfg, third_party_contracts) and not _table_enabled(
-        cfg,
-        ("third_party_management", "intelligence"),
-    ):
-        findings.append(
-            _nested_error(
-                "third_party_management.contracts",
-                "enable",
-                "third-party contracts require the local intelligence vendor authority",
-            )
-        )
+    return findings
 
-    identity = _at_path(cfg, ("consent_preferences", "identity"))
-    if isinstance(identity, dict) and identity.get("enable") is True:
-        if not (_table_enabled(cfg, consent_public) and _table_enabled(cfg, consent_publishing)):
-            findings.append(
-                _nested_error(
-                    "consent_preferences.identity",
-                    "enable",
-                    "consent identity requires consent publishing and the public API",
-                )
-            )
-        for key in ("issuer", "audience"):
-            value = identity.get(key)
-            if not isinstance(value, str) or not value.strip():
-                findings.append(
-                    _nested_error(
-                        "consent_preferences.identity",
-                        key,
-                        f"enabled consent identity requires a non-empty {key}",
-                    )
-                )
-        if not _is_https_origin(identity.get("jwks_origin")):
-            findings.append(
-                _nested_error(
-                    "consent_preferences.identity",
-                    "jwks_origin",
-                    "enabled consent identity requires an exact HTTPS JWKS origin",
-                )
-            )
-        token_ttl = identity.get("token_ttl_seconds", 600)
-        lifecycle_retention = identity.get(
-            "link_lifecycle_retention_seconds",
-            90 * 24 * 60 * 60,
-        )
-        if (
-            isinstance(token_ttl, int)
-            and not isinstance(token_ttl, bool)
-            and isinstance(lifecycle_retention, int)
-            and not isinstance(lifecycle_retention, bool)
-            and lifecycle_retention < token_ttl
-        ):
-            findings.append(
-                _nested_error(
-                    "consent_preferences.identity",
-                    "link_lifecycle_retention_seconds",
-                    "identity link lifecycle retention cannot be shorter than the token TTL",
-                )
-            )
 
-    storage = _at_path(cfg, ("consent_preferences", "storage"))
-    if isinstance(storage, dict):
-        backend = storage.get("backend", _MISSING)
-        if backend is not _MISSING and backend not in {"sqlite", "postgres"}:
-            findings.append(
-                _nested_error(
-                    "consent_preferences.storage",
-                    "backend",
-                    "consent storage backend must be 'sqlite' or 'postgres'",
-                )
-            )
-        secret_ref = storage.get("dsn_secret_ref", _MISSING)
-        if secret_ref is not _MISSING and secret_ref not in ("", None) and (
-            not isinstance(secret_ref, str)
-            or not re.fullmatch(r"\$?[A-Z][A-Z0-9_]{2,63}", secret_ref.strip())
-        ):
-            findings.append(
-                _nested_error(
-                    "consent_preferences.storage",
-                    "dsn_secret_ref",
-                    "consent storage dsn_secret_ref must name an environment variable",
-                )
-            )
-
-    findings.extend(_lint_consent_delivery_destinations(cfg))
-
+def _lint_data_use_provider_contracts(cfg: dict) -> list[Finding]:
+    """Validate the compiler, enforcement, and provider authority relationship."""
+    findings: list[Finding] = []
     compiler_enabled = _table_enabled(cfg, ("data_use_governance", "compiler"))
     enforcement_enabled = _table_enabled(cfg, ("data_use_governance", "enforcement"))
     providers_enabled = any(
@@ -4662,6 +4781,12 @@ def _lint_product_governance_contracts(  # noqa: C901
                     "environment-backed credential_secret_ref",
                 )
             )
+    return findings
+
+
+def _lint_third_party_provider_contracts(cfg: dict) -> list[Finding]:
+    """Validate third-party provider and scheduler admission."""
+    findings: list[Finding] = []
     tpi = ("third_party_management", "intelligence")
     tpi_providers = ("third_party_management", "intelligence", "providers")
     tpi_scheduler = (
@@ -4735,6 +4860,12 @@ def _lint_product_governance_contracts(  # noqa: C901
                         f"{host_key} cannot be set while {provider_id} is disabled",
                     )
                 )
+    return findings
+
+
+def _lint_governance_retry_bounds(cfg: dict) -> list[Finding]:
+    """Keep configured maximum retry delays above their corresponding base."""
+    findings: list[Finding] = []
     for path in (
         ("consent_preferences", "delivery"),
         ("data_use_governance", "enforcement"),
@@ -4759,9 +4890,6 @@ def _lint_product_governance_contracts(  # noqa: C901
                     f"{section}.retry_max_seconds must be at least retry_base_seconds",
                 )
             )
-    findings.extend(_lint_privacy_rights_source_adapters(cfg))
-    findings.extend(_lint_privacy_notice_publication_runtime(cfg))
-    findings.extend(_lint_trc_stock_collectors(cfg))
     return findings
 
 

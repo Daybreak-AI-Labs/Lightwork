@@ -59,6 +59,54 @@ def test_goal_search_enforces_owner_and_preserves_project_metadata(world, monkey
                 cursor.execute("DELETE FROM projects WHERE tenant_id=%s", (marker,))
 
 
+def test_shared_goal_lookup_batch_preserves_tenant_scope(world):
+    from maverick.paths import tenant_scope
+    from maverick.world_model import goals_by_id
+
+    tenant = "lookup-" + uuid.uuid4().hex
+    other = tenant + "-other"
+    try:
+        with tenant_scope(tenant=tenant):
+            own = world.create_goal("own goal")
+        with tenant_scope(tenant=other):
+            foreign = world.create_goal("foreign goal")
+        with tenant_scope(tenant=tenant):
+            found = goals_by_id(world, [own, foreign, own])
+            assert set(found) == {own}
+            assert found[own].title == "own goal"
+            assert goals_by_id(world, []) == {}
+        with tenant_scope(tenant=other):
+            assert set(goals_by_id(world, [own, foreign])) == {foreign}
+    finally:
+        with world._tx() as cursor:
+            cursor.execute("DELETE FROM goals WHERE tenant_id IN (%s, %s)", (tenant, other))
+
+
+@pytest.mark.parametrize("encrypted", [False, True])
+def test_goal_batch_limits_queries_and_preserves_encryption(world, monkeypatch, encrypted):
+    from unittest.mock import patch
+
+    from maverick.paths import tenant_scope
+
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1" if encrypted else "0")
+    tenant = "lookup-batch-" + uuid.uuid4().hex
+    try:
+        with tenant_scope(tenant=tenant):
+            own = world.create_goal("batch title", description="private description")
+            # IDs below zero cannot overlap the serial-generated goal IDs.
+            requested = [own, own, *range(-1000, 0)]
+            with patch.object(world, "_tx", wraps=world._tx) as transaction:
+                result = world.get_goals(requested)
+            assert transaction.call_count == 1
+            assert set(result) == {own}
+            assert result[own].title == "batch title"
+            assert result[own].description == "private description"
+            assert world.get_goals([]) == {}
+    finally:
+        with world._tx() as cursor:
+            cursor.execute("DELETE FROM goals WHERE tenant_id=%s", (tenant,))
+
+
 def test_shoring_completion_and_approval_context_are_tenant_scoped(world, monkeypatch):
     from maverick.logging_config import reset_goal_context, set_goal_context
     from maverick.paths import tenant_scope

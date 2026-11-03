@@ -96,7 +96,7 @@ def _object(request: Request | None, kind: str, object_id: str, *, principal: st
 
         if request is not None:
             auth.require_permission(request, "operate")
-            from .api import _load_owned_run
+            from .flows_api import _load_owned_run
 
             run = _load_owned_run(request, object_id)
         else:

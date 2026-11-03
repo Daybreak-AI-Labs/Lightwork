@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import h11
 import httpx
@@ -55,6 +57,24 @@ async def fixture_proxy(stream, **limits):
 
 def url(proxy):
     return f"http://127.0.0.1:{proxy.address[1]}/v1/messages"
+
+
+@pytest.mark.asyncio
+async def test_shared_streaming_parity_fixture():
+    fixture = json.loads(
+        (Path(__file__).resolve().parents[3] / "go/model-proxy/testdata/stream_parity.json")
+        .read_text(encoding="utf-8")
+    )
+    stream = Stream(chunks=tuple(chunk.encode("utf-8") for chunk in fixture["chunks"]))
+    stream.release.set()
+    async with fixture_proxy(stream) as (proxy, calls), httpx.AsyncClient(trust_env=False) as client:
+        response = await client.post(
+            url(proxy), headers={"Authorization": "Bearer fixture-client"}, content=b"{}",
+        )
+    assert response.status_code == 200
+    assert response.headers["Content-Type"] == fixture["content_type"]
+    assert response.content == "".join(fixture["chunks"]).encode("utf-8")
+    assert len(calls) == 1 and stream.closed.is_set()
 
 
 @pytest.mark.asyncio

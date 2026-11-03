@@ -54,7 +54,7 @@ def _service(request: Request):
     from maverick.flow import store
     from maverick.flow.recipe_lineage import RecipeLineageService
 
-    from .api import _assert_flow_access, _require_flows
+    from .flows_api import _assert_flow_access, _require_flows
 
     actor = caller_principal(request)
     if not actor:
@@ -236,7 +236,7 @@ def get_recipe_lineage_detail(request: Request, record_id: RecordPath):
 def draft_recipe_lineage(request: Request, record_id: RecordPath, payload: RecipeLineageDraftIn):
     from maverick.flow import store
 
-    from .api import _assert_flow_access
+    from .flows_api import _assert_flow_access
 
     service, ctx = _call(lambda: _service(request))
 

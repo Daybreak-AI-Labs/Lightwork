@@ -91,6 +91,7 @@ import re
 import unicodedata
 from dataclasses import dataclass
 
+from maverick.config_contracts import BOOLEAN_SETTINGS, INTEGER_SETTINGS
 from maverick.persona import STYLES, style_choices
 
 GROUPS: tuple[str, ...] = (
@@ -670,7 +671,7 @@ SETTINGS: tuple[Setting, ...] = (
       choices=style_choices(), aliases="writing tone personality voice"),
     S("voice", "dashboard_commands", "Voice input in chat",
       "Show a microphone button in Chat that turns spoken requests into text.",
-      "toggle", "AI models", True, "maverick_dashboard.api", env=("MAVERICK_VOICE_COMMANDS",)),
+      "toggle", "AI models", True, "maverick_dashboard.voice_policy", env=("MAVERICK_VOICE_COMMANDS",)),
     S("domains", "discipline", "Department working rules",
       "Give each department's agents and specialists their department's working rules.",
       "toggle", "AI models", True, "maverick.config"),
@@ -695,8 +696,8 @@ SETTINGS: tuple[Setting, ...] = (
       env=("MAVERICK_BUDGET_SELF_TUNING",)),
     S("budget", "strict_pricing", "Require known prices",
       "Stop a task when a model's price is unknown instead of guessing its cost.",
-      "toggle", "Spending & limits", True, "maverick.budget", weaker=False,
-      env=("MAVERICK_BILLING_STRICT",),
+      "toggle", "Spending & limits", BOOLEAN_SETTINGS["budget.strict_pricing"].default,
+      "maverick.budget", weaker=False, env=BOOLEAN_SETTINGS["budget.strict_pricing"].dashboard_env,
       warning="Spending on models with unknown prices will be estimated, so costs may be under-counted."),
     S("quotas", "enforce", "Daily limits per person",
       "Enforce the daily limits below for each person.",
@@ -944,11 +945,12 @@ SETTINGS: tuple[Setting, ...] = (
       "toggle", "Work", True, "maverick.work_record_details"),
     S("durable", "enabled", "Resume tasks after a crash",
       "Save progress as tasks run so they can continue from the last step after an interruption.",
-      "toggle", "Data retention", False, "maverick.config"),
+      "toggle", "Data retention", BOOLEAN_SETTINGS["durable.enabled"].default, "maverick.config"),
     S("durable", "keep_last", "Saved progress points per agent",
       "How many saved progress points to keep for each agent.",
-      "number", "Data retention", 5, "maverick.config", minimum=1, maximum=100,
-      integer=True, unit="points"),
+      "number", "Data retention", INTEGER_SETTINGS["durable.keep_last"].default, "maverick.config",
+      minimum=INTEGER_SETTINGS["durable.keep_last"].minimum,
+      maximum=INTEGER_SETTINGS["durable.keep_last"].maximum, integer=True, unit="points"),
     S("workspace", "journal", "Keep a copy before files change",
       "Save a copy of each file before an agent changes it, so a task's changes can be undone.",
       "toggle", "Data retention", False, "maverick.workspace_journal"),
@@ -1076,11 +1078,12 @@ SETTINGS: tuple[Setting, ...] = (
       warning="Details of every task will be sent to the new address."),
     S("automation_import", "enable", "Import automations from other tools",
       "Bring in existing automations from tools such as n8n, Make, Workato, Power Automate or UiPath.",
-      "toggle", "Integrations", False, "maverick.config", env=("MAVERICK_AUTOMATION_IMPORT",)),
+      "toggle", "Integrations", BOOLEAN_SETTINGS["automation_import.enable"].default, "maverick.config",
+      env=BOOLEAN_SETTINGS["automation_import.enable"].dashboard_env),
     S("automation_import", "create_schedules", "Recreate imported schedules",
       "When an imported automation ran on a schedule, offer to recreate that schedule here, "
       "reviewed once its draft is published.",
-      "toggle", "Integrations", False, "maverick.config"),
+      "toggle", "Integrations", BOOLEAN_SETTINGS["automation_import.create_schedules"].default, "maverick.config"),
     S("event_triggers", "enable", "Start workflows from events",
       "Watch connected services and start the chosen workflow when something new arrives.",
       "toggle", "Integrations", False, "maverick.automation_events",

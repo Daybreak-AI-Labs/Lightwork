@@ -5,8 +5,8 @@ from fastapi import HTTPException
 from maverick.governed_operations import digest
 
 from . import auth
-from .api import _privacy_ops_or_403
 from .plain_labels import datetime_text
+from .privacy_access import privacy_ops_or_403 as _privacy_ops_or_403
 from .product_operations import Adapter, EmptyInput, Preview, Snapshot
 from .product_operations_dsar_handoff import _id
 

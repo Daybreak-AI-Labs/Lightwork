@@ -769,9 +769,9 @@ def test_factory_reuses_an_existing_owned_workflow_with_the_same_business_title(
 def test_factory_can_recover_a_partial_batch_without_duplicating_saved_work(factory, monkeypatch):
     from fastapi import HTTPException
     from maverick.flow import store
-    from maverick_dashboard import api
+    from maverick_dashboard import flows_api
 
-    original = api._save_flow_definition
+    original = flows_api._save_flow_definition
     calls = []
 
     def fail_second(request, payload, **kwargs):
@@ -781,11 +781,11 @@ def test_factory_can_recover_a_partial_batch_without_duplicating_saved_work(fact
         return original(request, payload, **kwargs)
 
     found, body = scan_build("Review supplier contracts\nReconcile invoice totals")
-    monkeypatch.setattr(api, "_save_flow_definition", fail_second)
+    monkeypatch.setattr(flows_api, "_save_flow_definition", fail_second)
     first = build_scan(found, body)
     assert first.status_code == 200, first.text
     assert first.json()["built"] == 1 and first.json()["blocked"] == 1
-    monkeypatch.setattr(api, "_save_flow_definition", original)
+    monkeypatch.setattr(flows_api, "_save_flow_definition", original)
     second = build_scan(found, body)
     assert second.json()["built"] == 1 and second.json()["existing"] == 1
     assert len(store.list_flows()) == 2

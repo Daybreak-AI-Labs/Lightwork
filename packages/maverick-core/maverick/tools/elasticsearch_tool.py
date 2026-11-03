@@ -23,6 +23,7 @@ import os
 from typing import Any
 
 from ..fastjson import dumps_compact
+from ..governed_http import guarded_sender as _governed_sender
 from . import Tool, as_bool
 
 log = logging.getLogger(__name__)
@@ -70,7 +71,7 @@ def _headers() -> dict[str, str]:
 
 def _get(path: str, params: dict | None = None) -> tuple[int, Any]:
     import httpx
-    r = httpx.get(f"{_base()}{path}", headers=_headers(),
+    r = _governed_sender(httpx.get)(f"{_base()}{path}", headers=_headers(),
                   params=params or {}, timeout=30.0)
     try:
         return r.status_code, r.json()
@@ -80,7 +81,7 @@ def _get(path: str, params: dict | None = None) -> tuple[int, Any]:
 
 def _post(path: str, body: dict) -> tuple[int, Any]:
     import httpx
-    r = httpx.post(f"{_base()}{path}", headers=_headers(), json=body, timeout=30.0)
+    r = _governed_sender(httpx.post)(f"{_base()}{path}", headers=_headers(), json=body, timeout=30.0)
     try:
         return r.status_code, r.json()
     except ValueError:
@@ -89,7 +90,7 @@ def _post(path: str, body: dict) -> tuple[int, Any]:
 
 def _put(path: str, body: dict) -> tuple[int, Any]:
     import httpx
-    r = httpx.put(f"{_base()}{path}", headers=_headers(), json=body, timeout=30.0)
+    r = _governed_sender(httpx.put)(f"{_base()}{path}", headers=_headers(), json=body, timeout=30.0)
     try:
         return r.status_code, r.json()
     except ValueError:
@@ -98,7 +99,7 @@ def _put(path: str, body: dict) -> tuple[int, Any]:
 
 def _delete(path: str) -> tuple[int, Any]:
     import httpx
-    r = httpx.delete(f"{_base()}{path}", headers=_headers(), timeout=30.0)
+    r = _governed_sender(httpx.delete)(f"{_base()}{path}", headers=_headers(), timeout=30.0)
     try:
         return r.status_code, r.json()
     except ValueError:

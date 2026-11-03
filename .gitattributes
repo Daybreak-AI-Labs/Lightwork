@@ -46,3 +46,9 @@
 /packages/maverick-dashboard/maverick_dashboard/static/swagger-ui-5.33.1-LICENSE.txt -text
 /packages/maverick-dashboard/maverick_dashboard/static/swagger-ui-5.33.1-NOTICE.txt -text
 /packages/maverick-dashboard/maverick_dashboard/static/swagger-ui-bundle.js.LICENSE.txt -text whitespace=-blank-at-eol
+
+# Reviewed dependency source hashes must survive Windows checkout conversion.
+/vendor/** text eol=lf
+# Preserve upstream source/license whitespace instead of expanding local patches.
+/vendor/rust/** whitespace=-blank-at-eol,-blank-at-eof
+/vendor/patches/*.patch whitespace=-blank-at-eol,-space-before-tab,-blank-at-eof

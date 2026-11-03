@@ -1,7 +1,7 @@
 """Failure-policy classification lint (auditability).
 
-Every broad exception handler in the audit-integrity subsystem must declare its
-intended failure mode, so an auditor (or a reviewer) can see — machine-checked —
+Every broad exception handler in the scoped audit-integrity, egress, sandbox and approval
+code must declare its intended failure mode, so a reviewer can see — machine-checked —
 whether an error path:
 
   - ``fail_closed``           — denies / stops / raises / reports a break;
@@ -17,9 +17,10 @@ on the ``except`` line (as a trailing comment) or on the line immediately above
 it. Anything after the class token (e.g. ``-- reason``) is free text.
 
 Scope is **intentionally narrow** — the audit-log subsystem (``maverick/audit``),
-where a silently-swallowed error is a genuine tamper-evidence gap. flake8-bugbear
-stays off repo-wide on purpose (127 latent, mostly-intentional findings); this is
-a targeted gate, not a codebase-wide except-handler sweep. Expand coverage by
+the egress guard, selected sandbox lifecycle code and flow approval authority
+(``maverick/flow/approvals.py``). Ruff's
+flake8-bugbear rules are enabled repo-wide; this separate failure-policy gate
+is not a codebase-wide except-handler sweep. Expand coverage by
 adding paths to ``SCOPED_FILES`` — every added file must then have all of its
 broad handlers classified.
 
@@ -36,8 +37,14 @@ CLASSES = ("fail_closed", "fail_soft_with_audit", "best_effort")
 MARKER = "# failure-policy:"
 
 _PKG = Path(__file__).resolve().parent
-# Intentionally narrow: the audit-integrity subsystem. Add paths to widen.
-SCOPED_FILES: list[Path] = sorted((_PKG / "audit").glob("*.py"))
+# Audit integrity, egress admission, and approval authority.
+SCOPED_FILES: list[Path] = sorted([
+    *(_PKG / "audit").glob("*.py"),
+    _PKG / "egress_guard.py",
+    _PKG / "flow" / "approvals.py",
+    _PKG / "sandbox" / "local.py",
+    _PKG / "sandbox" / "kubernetes.py",
+])
 
 
 def _is_broad(handler: ast.ExceptHandler) -> bool:

@@ -51,8 +51,8 @@ def _export_source(request, goal_id, *, include_artifacts=False, include_events=
     from maverick.paths import current_tenant_id_strict
 
     from . import auth
-    from .api import _goal_gate
     from .api_flow_operator_review import _workspace_authority
+    from .deliverable_policy import goal_gate as _goal_gate
     from .draft_api import context_for
 
     with auth.fresh_configuration():

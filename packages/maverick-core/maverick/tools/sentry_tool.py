@@ -22,6 +22,7 @@ import logging
 import os
 from typing import Any
 
+from ..governed_http import guarded_sender as _governed_sender
 from . import Tool, as_bool, safe_path_segment
 
 log = logging.getLogger(__name__)
@@ -61,7 +62,7 @@ def _headers() -> dict[str, str]:
 def _get(path: str, params: dict | None = None) -> tuple[int, Any]:
     import httpx
     host, _t, _o, _p = _config()
-    r = httpx.get(f"{host}/api/0{path}", headers=_headers(),
+    r = _governed_sender(httpx.get)(f"{host}/api/0{path}", headers=_headers(),
                   params=params or {}, timeout=30.0)
     try:
         return r.status_code, r.json()
@@ -72,7 +73,7 @@ def _get(path: str, params: dict | None = None) -> tuple[int, Any]:
 def _put(path: str, body: dict) -> tuple[int, Any]:
     import httpx
     host, _t, _o, _p = _config()
-    r = httpx.put(f"{host}/api/0{path}", headers=_headers(),
+    r = _governed_sender(httpx.put)(f"{host}/api/0{path}", headers=_headers(),
                   json=body, timeout=30.0)
     try:
         return r.status_code, r.json()

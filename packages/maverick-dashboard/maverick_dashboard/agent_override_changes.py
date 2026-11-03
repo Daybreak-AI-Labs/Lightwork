@@ -26,7 +26,7 @@ NOTICE = ("This changes the saved definition used for new work. Tasks already in
 
 
 def authority(request, context=None, *, write=False):
-    from .api import _require_pack_editing
+    from .editor_policy import require_pack_editing as _require_pack_editing
 
     require_permission(request, "view")
     current = context_for(request)
@@ -77,7 +77,7 @@ def _damaged_snapshot(request, name):
 
 def _refuse_while_trial_live(name):
     """A live trial keeps the saved definition as it is; a reset or removal waits until it is promoted or rolled back."""
-    from .api import _refuse_while_trial_live as refuse
+    from .editor_policy import refuse_while_trial_live as refuse
 
     refuse(name)
 
@@ -221,7 +221,7 @@ def original(request, operation, *, prepared=None):
 
 def catalog(request):
     context = authority(request)
-    from .api import pack_editing_denial
+    from .editor_policy import pack_editing_denial
 
     allowed = caller_suites(request)
     builtins = domain.builtin_domains()

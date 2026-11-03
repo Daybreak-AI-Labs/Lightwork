@@ -867,6 +867,10 @@ def version() -> None:
         click.echo(f"  shield backend:        {facts['shield_backend']}")
     else:
         click.echo("  shield backend:        (maverick-shield not installed)")
+    native = facts.get("native_acceleration")
+    if native:
+        click.echo(f"  unicode scanner:       {native['unicode']}")
+        click.echo(f"  image hash:            {native['image_hash']}")
     if facts["providers"] is not None:
         click.echo(f"  providers:             {', '.join(facts['providers'])}")
     p = facts["persona"]

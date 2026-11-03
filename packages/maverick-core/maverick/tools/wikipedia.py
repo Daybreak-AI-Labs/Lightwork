@@ -15,6 +15,7 @@ import re
 from typing import Any
 from urllib.parse import quote
 
+from ..governed_http import guarded_sender as _governed_sender
 from . import Tool
 
 log = logging.getLogger(__name__)
@@ -85,7 +86,7 @@ def _run(args: dict[str, Any]) -> str:
             "srlimit": str(limit), "format": "json", "formatversion": "2",
         }
         try:
-            resp = httpx.get(_api_base(lang), params=params, headers=headers, timeout=15.0)
+            resp = _governed_sender(httpx.get)(_api_base(lang), params=params, headers=headers, timeout=15.0)
             resp.raise_for_status()
             data = resp.json()
         except Exception as e:
@@ -112,7 +113,7 @@ def _run(args: dict[str, Any]) -> str:
             "format": "json", "formatversion": "2",
         }
         try:
-            resp = httpx.get(_api_base(lang), params=params, headers=headers, timeout=20.0)
+            resp = _governed_sender(httpx.get)(_api_base(lang), params=params, headers=headers, timeout=20.0)
             resp.raise_for_status()
             data = resp.json()
         except Exception as e:

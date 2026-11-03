@@ -163,7 +163,7 @@ class Blackboard:
         # surfaces, so they must not leak unreceipted model excerpts first.
         # In-memory content remains intact for agent coordination.
         try:
-            from . import ai_evidence_gateway
+            from .ai_evidence import delivery as ai_evidence_gateway
 
             if (
                 ai_evidence_gateway.enabled()

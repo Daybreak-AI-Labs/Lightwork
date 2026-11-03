@@ -31,7 +31,7 @@ from contextvars import ContextVar
 from urllib.parse import urlsplit, urlunsplit
 
 from .approval_cards import ApprovalCardError, digest
-from .connector_attempts import CONTROL_ERRORS
+from .connector_attempts import CONTROL_ERRORS, ConnectorResult
 from .safety.consent import ConsentDenied
 from .tools import Tool
 
@@ -415,6 +415,17 @@ def _safe_connector_result(value: object) -> str:
     except Exception:
         return f"[connector result withheld; sha256={digest(raw)}]"
     return raw
+
+
+def _governed_public_result(result, safe_result: str, state):
+    """Preserve explicit state after redaction and a durable COMMIT receipt."""
+    from .tool_results import ToolOutcome, ToolResultText, classify_tool_result
+
+    if isinstance(result, (ToolOutcome, ToolResultText)):
+        return ToolResultText(safe_result, state)
+    if isinstance(result, ConnectorResult) and classify_tool_result(safe_result) is not state:
+        return ToolResultText(safe_result, state)
+    return safe_result
 
 
 def _connector_revision_contract(tool: Tool, args: dict) -> dict[str, object]:
@@ -891,9 +902,10 @@ def _wrap_connector_executor(
             # connector implementations catch network exceptions internally,
             # after the remote system may have accepted the request. Never
             # convert that uncertainty into an ordinary retryable failure.
-            from .tool_results import ToolResultState, classify_tool_result
+            from .tool_results import ToolOutcome, ToolResultState
 
-            result_state = classify_tool_result(result)
+            outcome = ToolOutcome.from_legacy(result)
+            result_state = outcome.state
             if result_state is not ToolResultState.SUCCEEDED:
                 result_marker = result_state.value
                 try:
@@ -916,7 +928,7 @@ def _wrap_connector_executor(
                     f"result_state={result_marker}"
                 )
 
-            safe_result = _safe_connector_result(result)
+            safe_result = _safe_connector_result(outcome.content)
             try:
                 committed = _receipt(
                     action=f"{action}.commit",
@@ -936,7 +948,7 @@ def _wrap_connector_executor(
                     "succeeded, but its COMMIT receipt could not be persisted. "
                     f"transaction_id={transaction_id}; do not retry automatically."
                 )
-            return safe_result
+            return _governed_public_result(result, safe_result, result_state)
         except CONTROL_ERRORS:
             raise
         except ConsentDenied:

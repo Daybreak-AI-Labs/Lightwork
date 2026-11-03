@@ -133,6 +133,9 @@ class WorkatoImporter:
         page = 1
         with httpx.Client(timeout=30.0) as client:
             for _ in range(100):  # page cap
+                if self.request is None:
+                    from ..governed_http import admit_client_request
+                    admit_client_request(client, f"{self.base_url}/api/recipes")
                 r = (self.request or client.get)(
                     f"{self.base_url}/api/recipes",
                     headers={"Authorization": f"Bearer {self.token}", "Accept": "application/json"},

@@ -12,12 +12,12 @@
 # First run drops you into `maverick init` so the wizard can set up the
 # config inside the mounted ~/.maverick directory.
 
-# Pin the base by digest for a reproducible build: override on the build command
-# with --build-arg PYTHON_DIGEST=@sha256:<digest> (resolve it for your target
-# arch via `docker buildx imagetools inspect python:3.12-slim`). Left as the
-# floating tag by default so the public quickstart still builds unchanged.
-ARG PYTHON_DIGEST=
-FROM debian:bookworm-slim AS kubectl-builder
+# Pin the image index to the reviewed release base, including for local builds.
+# Override with --build-arg PYTHON_DIGEST=@sha256:<digest> when reviewing an
+# update. Apt repositories remain mutable and must also be snapshotted before
+# the complete container can be described as reproducible.
+ARG PYTHON_DIGEST=@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de
+FROM debian:bookworm-slim@sha256:99c0b25c46d0214d5a2091092e7908907dcaecd6a962cde0ac700acee222b6f3 AS kubectl-builder
 ARG KUBECTL_VERSION=v1.36.4
 ARG TARGETARCH=amd64
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \

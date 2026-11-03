@@ -7,7 +7,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from maverick import config, world_model
 from maverick.metadata_history import HistoryChanged, Window, digest
-from maverick_dashboard import api, auth
+from maverick_dashboard import _shared, auth
 from maverick_dashboard import record_history as history
 from maverick_dashboard import record_search_api as search_api
 from maverick_dashboard.app import app
@@ -83,7 +83,7 @@ def test_exact_auth_task_source_and_api_history_dates(monkeypatch):
     with world_model.WorldModel() as world:
         mine = world.create_goal("Alice oldest", owner="user:alice")
         world.create_goal("Bob hidden", owner="user:bob")
-        monkeypatch.setattr(api, "_world", lambda: world)
+        monkeypatch.setattr(_shared, "_world", lambda: world)
         monkeypatch.setattr(history, "caller_principal", lambda request: "user:alice")
         monkeypatch.setattr(auth, "_authorization_principal", lambda request: "user:alice")
         # Bind the same exact test principal at both projection and authorization seams.
@@ -216,6 +216,26 @@ def test_established_principal_drives_exact_owner_without_auth_patches(monkeypat
     with world_model.WorldModel() as world:
         mine = world.create_goal("My visible record", owner="user:alice")
         world.create_goal("Other owner", owner="user:bob")
-        monkeypatch.setattr(api, "_world", lambda: world)
+        monkeypatch.setattr(_shared, "_world", lambda: world)
         value = history._world(request, "tasks", offset=0, after=None, before=None, oldest=False)
         assert [row["id"] for row in value.rows] == [str(mine)]
+
+
+def test_history_resolves_the_shared_world_inside_each_tenant_scope(monkeypatch):
+    from maverick.paths import current_tenant_id, tenant_scope
+
+    worlds = {"tenant-a": object(), "tenant-b": object()}
+    seen = []
+    monkeypatch.setattr(_shared, "_world", lambda: worlds[current_tenant_id()])
+    monkeypatch.setattr(history, "require_permission", lambda *_args: None)
+    monkeypatch.setattr(history, "caller_principal", lambda _request: "user:alice")
+
+    def window(world, **options):
+        seen.append((current_tenant_id(), world, options["owner"]))
+        return Window([], digest([]), None)
+
+    monkeypatch.setattr(history, "world_window", window)
+    for tenant in worlds:
+        with tenant_scope(tenant=tenant):
+            history._world(object(), "tasks", offset=0, after=None, before=None, oldest=False)
+    assert seen == [(tenant, world, "user:alice") for tenant, world in worlds.items()]

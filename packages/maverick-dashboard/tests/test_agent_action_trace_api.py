@@ -11,32 +11,31 @@ from maverick_dashboard import agent_action_trace_api as api
 BASE = "/api/v1/security/governance/agent-actions"
 
 
-class _Goal:
-    def __init__(self, goal_id: int, owner: str) -> None:
-        self.id = goal_id
-        self.owner = owner
-
-
-class _World:
-    goals = {7: _Goal(7, "user:alice"), 8: _Goal(8, "user:alice"), 9: _Goal(9, "user:bob")}
-
-    def get_goal(self, goal_id):
-        return self.goals.get(goal_id)
-
-
 @pytest.fixture()
 def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    from maverick_dashboard import api as dashboard_api
-    from maverick_dashboard import auth
-    monkeypatch.setattr(auth, "_authorization_principal", lambda request: "user:alice")
+    from maverick.world_model import WorldModel
+    from maverick_dashboard import _shared, auth
 
-    monkeypatch.setattr(dashboard_api, "_world", _World)
-    permissions: list[str] = []
-    monkeypatch.setattr(api, "require_permission", lambda _r, p: permissions.append(p))
-    monkeypatch.setattr(governed_actions, "_lineage_dir", lambda store_dir=None: tmp_path)
-    app = FastAPI()
-    app.include_router(api.router, prefix="/api/v1")
-    return TestClient(app), permissions, tmp_path
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(auth, "_authorization_principal", lambda request: "user:alice")
+    monkeypatch.setattr("maverick.personal_notification_recipients.enroll_task_owner", lambda _owner: None)
+    # Source access checks require a real transactional world, not a goal-only
+    # stub. Keep the same IDs and ownership used by the lineage assertions.
+    world = WorldModel(tmp_path / "world.db")
+    try:
+        for goal_id in range(1, 10):
+            owner = "user:bob" if goal_id == 9 else "user:alice"
+            assert world.create_goal(f"Task {goal_id}", owner=owner) == goal_id
+        monkeypatch.setattr(_shared, "_world", lambda: world)
+        permissions: list[str] = []
+        monkeypatch.setattr(api, "require_permission", lambda _r, p: permissions.append(p))
+        monkeypatch.setattr(governed_actions, "_lineage_dir", lambda store_dir=None: tmp_path)
+        app = FastAPI()
+        app.include_router(api.router, prefix="/api/v1")
+        with TestClient(app) as test_client:
+            yield test_client, permissions, tmp_path
+    finally:
+        world.close()
 
 
 def test_policy_check_reports_the_verdict_read_only(client, monkeypatch) -> None:
@@ -102,3 +101,13 @@ def test_lineage_and_impact_follow_the_task_owner_check(client, monkeypatch) -> 
     assert test_client.get(f"{BASE}/lineage/9").json()["count"] == 1
     hits = test_client.get(f"{BASE}/impact", params={"name": "hr/salaries.xlsx"}).json()
     assert [hit["goal_id"] for hit in hits["items"]] == [9]
+
+
+def test_lineage_uses_the_shared_world_without_importing_the_api_facade(client, monkeypatch) -> None:
+    from maverick_dashboard import api as facade
+
+    monkeypatch.setattr(facade, "_world", lambda: pytest.fail("the API facade was consulted"))
+    test_client, _, _ = client
+    response = test_client.get(f"{BASE}/lineage/7")
+    assert response.status_code == 200
+    assert response.json()["chain"] == "missing"

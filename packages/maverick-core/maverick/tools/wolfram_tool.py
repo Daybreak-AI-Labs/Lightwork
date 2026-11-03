@@ -13,6 +13,8 @@ import logging
 import os
 from typing import Any
 
+from ..governed_http import guarded_redirect_get
+from ..governed_http import guarded_sender as _governed_sender
 from . import Tool
 
 log = logging.getLogger(__name__)
@@ -37,8 +39,8 @@ def _app_id() -> str:
 
 def _get_text(url: str, params: dict) -> tuple[int, str]:
     import httpx
-    r = httpx.get(url, params={**params, "appid": _app_id()},
-                  timeout=30.0, follow_redirects=True)
+    r = guarded_redirect_get(httpx.get)(url, params={**params, "appid": _app_id()},
+                                       timeout=30.0, follow_redirects=True)
     return r.status_code, r.text
 
 
@@ -64,7 +66,7 @@ def _op_spoken(query: str) -> str:
 
 def _op_full(query: str) -> str:
     import httpx
-    r = httpx.get(
+    r = _governed_sender(httpx.get)(
         "https://api.wolframalpha.com/v2/query",
         params={"input": query, "appid": _app_id(), "output": "json"},
         timeout=30.0,

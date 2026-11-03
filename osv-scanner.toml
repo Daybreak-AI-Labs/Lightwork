@@ -1,24 +1,2 @@
-# Narrow, expiring exceptions, each for an advisory with no fixed release
-# reachable from the current dependency tree:
-# - Tauri 2's Linux WebKit/GTK3 chain (wry 0.57 pins webkit2gtk =2.0.2, which
-#   requires gtk/glib 0.18). Recheck when webkit2gtk-rs and wry move to gtk 0.19
-#   (still GTK3) and glib >= 0.20, which clears both Tauri entries.
-# - Build-time-only development tooling that never ships in an application
-#   bundle, when neither the package nor its parent has a fixed release.
-# No application or service dependency may be added here; every exception
-# expires rather than silently becoming permanent policy.
-
-[[IgnoredVulns]]
-id = "GHSA-wrw7-89jp-8q8g"
-ignoreUntil = 2027-01-31
-reason = "Tauri 2 Linux transitively pins glib 0.18 (wry 0.57.1 -> webkit2gtk =2.0.2 -> glib ^0.18); the fix is glib 0.20, so migrate when wry supports the fixed glib line."
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2024-0370"
-ignoreUntil = 2027-01-31
-reason = "Unmaintained build-time proc-macro-error is transitive through the gtk/glib 0.18 macros of the current Tauri 2 Linux desktop stack."
-
-[[IgnoredVulns]]
-id = "GHSA-gcqx-w48m-w2h4"
-ignoreUntil = 2027-01-31
-reason = "Build-time only: deepmerge 4.3.1 reaches apps/installer-desktop solely through the @sveltejs/vite-plugin-svelte devDependency, which merges the repo's own Vite/Svelte config; deepmerge has no fixed release and vite-plugin-svelte 7.3.1 still requires it."
+# No advisory exceptions. Reviewed local dependency fixes are checked by
+# scripts/check_vendor_patches.py and the desktop regression harness.

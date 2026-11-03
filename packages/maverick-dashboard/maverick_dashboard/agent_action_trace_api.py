@@ -78,7 +78,7 @@ async def goal_lineage(request: Request, goal_id: int) -> dict[str, object]:
         raise HTTPException(status_code=422, detail="task number is out of range")
     from maverick import governed_actions
 
-    from .api import _world
+    from ._shared import _world
 
     goal = await run_in_threadpool(_world().get_goal, goal_id)
     if goal is None:
@@ -125,7 +125,7 @@ async def impact(
     selected = _name(name, "name")
     from maverick import governed_actions
 
-    from .api import _world
+    from ._shared import _world
 
     def _visible_hits() -> list[dict]:
         world = _world()

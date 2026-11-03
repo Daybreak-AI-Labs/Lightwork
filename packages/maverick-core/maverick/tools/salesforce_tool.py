@@ -26,6 +26,7 @@ import re
 from typing import Any
 
 from ..fastjson import dumps_compact
+from ..governed_http import guarded_sender as _governed_sender
 from . import Tool, as_bool
 
 log = logging.getLogger(__name__)
@@ -94,7 +95,7 @@ def _base(version: str) -> str:
 
 def _get(path: str, version: str, params: dict | None = None) -> tuple[int, Any]:
     import httpx
-    r = httpx.get(f"{_base(version)}{path}", headers=_headers(),
+    r = _governed_sender(httpx.get)(f"{_base(version)}{path}", headers=_headers(),
                   params=params or {}, timeout=30.0)
     try:
         return r.status_code, r.json()
@@ -104,7 +105,7 @@ def _get(path: str, version: str, params: dict | None = None) -> tuple[int, Any]
 
 def _post(path: str, body: dict, version: str) -> tuple[int, Any]:
     import httpx
-    r = httpx.post(f"{_base(version)}{path}", headers=_headers(),
+    r = _governed_sender(httpx.post)(f"{_base(version)}{path}", headers=_headers(),
                    json=body, timeout=30.0)
     try:
         return r.status_code, r.json()
@@ -114,14 +115,14 @@ def _post(path: str, body: dict, version: str) -> tuple[int, Any]:
 
 def _patch(path: str, body: dict, version: str) -> int:
     import httpx
-    r = httpx.patch(f"{_base(version)}{path}", headers=_headers(),
+    r = _governed_sender(httpx.patch)(f"{_base(version)}{path}", headers=_headers(),
                     json=body, timeout=30.0)
     return r.status_code
 
 
 def _delete(path: str, version: str) -> int:
     import httpx
-    r = httpx.delete(f"{_base(version)}{path}", headers=_headers(),
+    r = _governed_sender(httpx.delete)(f"{_base(version)}{path}", headers=_headers(),
                      timeout=30.0)
     return r.status_code
 

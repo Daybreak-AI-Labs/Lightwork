@@ -103,6 +103,21 @@ def test_budget_warning_thresholds_are_written_as_numbers_the_kernel_accepts(mon
     assert budget_guidance.policy()["warning_thresholds"] == [0.8, 0.95, 1.0]
 
 
+def test_budget_contract_defaults_are_shared_with_the_settings_page():
+    from maverick.config_contracts import BOOLEAN_SETTINGS, NUMBER_LIST_SETTINGS
+    from maverick_dashboard.settings_catalog import BY_ID
+
+    for path in ("budget.strict_pricing", "budget.guidance", "budget.warnings"):
+        row, contract = BY_ID[path], BOOLEAN_SETTINGS[path]
+        assert row.default == contract.default
+        assert row.env == contract.dashboard_env
+    contract = NUMBER_LIST_SETTINGS["budget.warning_thresholds"]
+    row = BY_ID[contract.setting]
+    assert row.default == list(contract.default)
+    assert row.max_items == contract.max_items
+    assert row.max_length == contract.dashboard_max_length
+
+
 def test_list_values_keep_their_type_in_the_config_file():
     lines: list[str] = []
     wizard._emit_kv(lines, "mixed", [0.5, 2, True, "text", "12345"])

@@ -184,6 +184,8 @@ class RemotePRM:
         }
         try:
             with httpx.Client(timeout=2.0) as client:
+                from .governed_http import admit_client_request
+                admit_client_request(client, self.endpoint + "/score")
                 r = client.post(self.endpoint + "/score",
                                 headers=headers, json=body)
                 if r.status_code >= 300:

@@ -47,6 +47,14 @@ def _backend(monkeypatch, tmp_path, operation, *, export_fails=False):
     return KubernetesBackend(workdir=local, allow_network=True), local, calls
 
 
+def test_failed_pod_cleanup_is_visible_without_masking_execution(monkeypatch, tmp_path, caplog):
+    backend, _, _ = _backend(monkeypatch, tmp_path, lambda remote, local: None)
+    monkeypatch.setattr("subprocess.run", lambda *args, **kwargs: SimpleNamespace(returncode=1))
+
+    assert backend._delete_pod("sandbox-pod") is None
+    assert "failed to delete pod sandbox-pod" in caplog.text
+
+
 def test_archive_capture_limits_bytes_before_disk_grows(tmp_path, monkeypatch):
     monkeypatch.setattr(transfer, "MAX_ARCHIVE_BYTES", 128 * 1024)
     archive = tmp_path / "archive.tar"

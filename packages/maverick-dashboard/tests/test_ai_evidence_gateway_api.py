@@ -563,7 +563,7 @@ def test_gateway_admin_mutations_are_global_admin_only(monkeypatch):
     seeded_response = client.post(f"{prefix}/demo-seed")
     assert seeded_response.status_code == 200
     assert seeded_response.json() == {"demo": True}
-    assert seeded == [{"actor": "local:dashboard"}]
+    assert seeded == [{"actor": "user:analyst"}]
 
 
 def test_empty_assurance_cockpit_has_safe_synthetic_demo_path(monkeypatch):

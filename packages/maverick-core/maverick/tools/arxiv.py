@@ -14,6 +14,7 @@ import logging
 import re
 from typing import Any
 
+from ..governed_http import guarded_sender as _governed_sender
 from . import Tool
 
 log = logging.getLogger(__name__)
@@ -120,7 +121,7 @@ def _run(args: dict[str, Any]) -> str:
             "sortOrder": "descending",
         }
         try:
-            resp = httpx.get(_API_URL, params=params, timeout=20.0)
+            resp = _governed_sender(httpx.get)(_API_URL, params=params, timeout=20.0)
             resp.raise_for_status()
         except Exception as e:
             return f"ERROR: arXiv API call failed: {type(e).__name__}: {e}"
@@ -137,7 +138,7 @@ def _run(args: dict[str, Any]) -> str:
         arxiv_id = re.sub(r"^https?://arxiv\.org/(?:abs|pdf)/", "", arxiv_id)
         arxiv_id = re.sub(r"v\d+$", "", arxiv_id)
         try:
-            resp = httpx.get(
+            resp = _governed_sender(httpx.get)(
                 _API_URL,
                 params={"id_list": arxiv_id, "max_results": "1"},
                 timeout=20.0,

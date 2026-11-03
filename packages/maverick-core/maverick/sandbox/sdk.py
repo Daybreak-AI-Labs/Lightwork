@@ -7,7 +7,7 @@ run. v2 makes the contract explicit and loadable:
 
 * :class:`SandboxV2` — a ``runtime_checkable`` Protocol: ``workdir``,
   ``exec(cmd, timeout=None) -> ExecResult``-shaped result. Optional
-  capabilities (``put_file``, ``close``) are *declared*, not guessed:
+  capabilities (``put_file``, ``close`` and workspace locality) are *declared*:
   :func:`capabilities` reports what a backend supports.
 * :func:`conformance` — static checks a backend class/instance against the
   contract (presence, call signature, timeout kwarg) and returns the list of
@@ -115,12 +115,25 @@ class SandboxV2(Protocol):
 
 
 def capabilities(backend: Any) -> set[str]:
-    """The capability set a backend declares (by having the method)."""
+    """Return execution, declared workspace and optional method capabilities."""
     caps = {"exec"}
+    if workdir_is_local(backend):
+        caps.add("local_workdir")
     for name in _OPTIONAL:
         if callable(getattr(backend, name, None)):
             caps.add(name)
     return caps
+
+
+def workdir_is_local(backend: Any) -> bool:
+    """Whether local workspace tools may use the backend's workdir path.
+
+    Existing SDK v2 backends default to local for compatibility. Backends
+    whose workdir lives on another host must explicitly declare
+    ``workdir_is_local = False``; this declaration is inherited by subclasses.
+    Treat invalid declarations as unavailable rather than guessing.
+    """
+    return getattr(backend, "workdir_is_local", True) is True
 
 
 def conformance(backend: Any) -> list[str]:
@@ -237,6 +250,7 @@ __all__ = [
     "LegacySandboxAdapter",
     "execution_callable",
     "capabilities",
+    "workdir_is_local",
     "conformance",
     "installed_entry_point_names",
     "load_entry_point_backend",

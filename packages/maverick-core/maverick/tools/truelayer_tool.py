@@ -22,6 +22,7 @@ import logging
 import os
 from typing import Any
 
+from ..governed_http import guarded_sender as _governed_sender
 from . import Tool, safe_path_segment
 
 log = logging.getLogger(__name__)
@@ -49,7 +50,7 @@ def _base() -> str:
 
 def _get(path: str, access_token: str, params: dict | None = None) -> tuple[int, Any]:
     import httpx
-    r = httpx.get(
+    r = _governed_sender(httpx.get)(
         f"{_base()}{path}",
         headers={"Authorization": f"Bearer {access_token}"},
         params=params or {},

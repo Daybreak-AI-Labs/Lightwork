@@ -19,6 +19,7 @@ import logging
 import os
 from typing import Any
 
+from ..governed_http import guarded_sender as _governed_sender
 from . import Tool
 
 log = logging.getLogger(__name__)
@@ -71,7 +72,7 @@ def _op_run_report(args: dict) -> str:
         "dimensions": [{"name": d} for d in (args.get("dimensions") or ["country"])],
         "metrics":    [{"name": m} for m in (args.get("metrics") or ["activeUsers"])],
     }
-    r = httpx.post(
+    r = _governed_sender(httpx.post)(
         f"https://analyticsdata.googleapis.com/v1beta/properties/{pid}:runReport",
         headers={"Authorization": f"Bearer {tok}",
                  "Content-Type": "application/json"},
@@ -100,7 +101,7 @@ def _op_realtime(args: dict) -> str:
     body = {
         "metrics": [{"name": m} for m in (args.get("metrics") or ["activeUsers"])],
     }
-    r = httpx.post(
+    r = _governed_sender(httpx.post)(
         f"https://analyticsdata.googleapis.com/v1beta/properties/{pid}:runRealtimeReport",
         headers={"Authorization": f"Bearer {tok}",
                  "Content-Type": "application/json"},
@@ -135,7 +136,7 @@ def _op_send_event(args: dict) -> str:
             "params": args.get("params") if isinstance(args.get("params"), dict) else {},
         }],
     }
-    r = httpx.post(
+    r = _governed_sender(httpx.post)(
         "https://www.google-analytics.com/mp/collect",
         params={"measurement_id": mid, "api_secret": sec},
         json=body, timeout=15.0,

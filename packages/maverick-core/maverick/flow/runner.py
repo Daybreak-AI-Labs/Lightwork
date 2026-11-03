@@ -17,7 +17,6 @@ is where human-in-the-loop lives.
 from __future__ import annotations
 
 import copy
-import re
 import threading
 import time
 from collections.abc import Callable
@@ -25,10 +24,20 @@ from contextvars import copy_context
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..approval_cards import ApprovalCardError
 from ..audit.errors import AuditRefused
 from ..budget import BudgetExceeded
 from ..killswitch import Halted
+from .continuation_frame import ContinuationFrame
+from .expressions import (
+    FlowRegexRefused,
+    _CREDENTIAL_REPAIR,
+    _FN_CALL,
+    _as_text,
+    _dig,
+    _split_args,
+    eval_condition,
+    render,
+)
 from .ir import (
     MAX_FLOW_NODE_RETRY_SLEEP,
     NODE_ACTION,
@@ -50,496 +59,40 @@ from .ir import (
     max_node_retries,
     validate_learned_operator,
 )
-
-# Run statuses ----------------------------------------------------------------
-STATUS_QUEUED = "queued"
-STATUS_CLAIMED = "claimed"
-STATUS_RUNNING = "running"
-STATUS_RESUMING = "resuming"
-STATUS_COMPLETED = "completed"
-STATUS_PAUSED_APPROVAL = "paused_approval"
-STATUS_PAUSED_DELAY = "paused_delay"
-STATUS_PAUSED_EVENT = "paused_event"
-STATUS_REJECTED = "rejected"
-STATUS_FAILED = "failed"
-STATUS_INDETERMINATE = "indeterminate"
-STATUS_BUDGET_LIMITED = "budget_limited"
-
-# The single source of truth for "which statuses mean a run is parked and
-# resumable" and "which statuses mean a run is still in flight". Every gate that
-# used to hand-list these literals (the resume/retry endpoints, the sweep, the
-# JS overlay) should consume these instead -- a new pause status is then added
-# in one place, not six.
-PAUSED_STATUSES = frozenset({
-    STATUS_PAUSED_APPROVAL, STATUS_PAUSED_DELAY, STATUS_PAUSED_EVENT,
-})
-ACTIVE_STATUSES = frozenset({
-    STATUS_QUEUED, STATUS_CLAIMED, STATUS_RUNNING, STATUS_RESUMING,
-}) | PAUSED_STATUSES
-# A quarantined run may have committed an external side effect, but no reliable
-# acknowledgement reached the engine.  It is deliberately neither active nor
-# retryable: an operator must reconcile the external system before choosing a
-# compensating or replacement action.
-QUARANTINED_STATUSES = frozenset({STATUS_INDETERMINATE})
+from .resume_plan import prepare_resume
+from .run_events import (
+    FlowApprovalStale,
+    FlowBudgetExceeded,
+    FlowCredentialRefused,
+    _Indeterminate,
+    _NodeError,
+    _Pause,
+    _Reject,
+    _safe_error_text,
+)
+from .run_result import execute_chain_result
+from .run_state import (
+    ACTIVE_STATUSES,
+    PAUSED_STATUSES,
+    QUARANTINED_STATUSES,
+    STATUS_BUDGET_LIMITED,
+    STATUS_CLAIMED,
+    STATUS_COMPLETED,
+    STATUS_FAILED,
+    STATUS_INDETERMINATE,
+    STATUS_PAUSED_APPROVAL,
+    STATUS_PAUSED_DELAY,
+    STATUS_PAUSED_EVENT,
+    STATUS_QUEUED,
+    STATUS_REJECTED,
+    STATUS_RESUMING,
+    STATUS_RUNNING,
+    FlowRunResult,
+)
+from .work_policy import explicit_unknown, needs_reconciliation, work_policy
 
 _WHILE_DEFAULT_CAP = 100   # while-loop iterations when the node sets no limit
 _PARALLEL_MAX_WORKERS = 8   # cap fan-out threads for the whole flow run
-
-_COND = re.compile(r"^\s*(\S+)\s*(==|!=|>=|<=|>|<|contains)\s*(.+?)\s*$")
-_FN_CALL = re.compile(r"^([a-zA-Z_]\w*)\s*\((.*)\)$")
-
-
-def render(text: str, data: dict, *, allow_secrets: bool = False) -> str:
-    """Substitute ``{{expr}}`` from ``data``. ``expr`` is a dotted key
-    (``{{a.b}}``) or a transform call over keys/literals (``{{upper(name)}}``,
-    ``{{default(x, "n/a")}}``, ``{{concat(first, " ", last)}}``). An unfilled bare
-    key stays literal (unchanged); a function always resolves (missing args are
-    empty).
-
-    ``allow_secrets`` is retained for caller compatibility, but never grants
-    deployment-secret access. Legacy secret expressions in action parameters
-    are refused. Native connectors resolve their own scoped credentials after
-    authorization, without putting raw credentials in arbitrary parameters.
-    """
-    src = str(text)
-    out: list[str] = []
-    pos = 0
-    while True:
-        start = src.find("{{", pos)
-        if start < 0:
-            out.append(src[pos:])
-            break
-        end = src.find("}}", start + 2)
-        if end < 0:
-            out.append(src[pos:])
-            break
-        out.append(src[pos:start])
-        raw = src[start:end + 2]
-        expr = src[start + 2:end].strip()
-        v = _eval_expr(expr, data, allow_secrets=allow_secrets)
-        out.append(raw if v is None else _as_text(v))
-        pos = end + 2
-    return "".join(out)
-
-
-def _as_text(v: Any) -> str:
-    if isinstance(v, bool):
-        return "true" if v else "false"
-    if isinstance(v, float) and v.is_integer():
-        return str(int(v))          # render add(2,3) as "5", not "5.0"
-    return str(v)
-
-
-def _num(x: Any) -> float:
-    try:
-        return float(x)
-    except (TypeError, ValueError):
-        return 0.0
-
-
-def _fn_slice(a: list) -> Any:
-    """slice(value, start[, end]) -- substring or sublist. Missing end = to the
-    end. Works on a string or a list; out-of-range indices clamp like Python."""
-    if not a:
-        return ""
-    seq = a[0]
-    if not isinstance(seq, (str, list, tuple)):
-        seq = _as_text(seq)
-    start = int(_num(a[1])) if len(a) > 1 else 0
-    end = int(_num(a[2])) if len(a) > 2 else len(seq)
-    return seq[start:end]
-
-
-# Python's backtracking ``re`` engine has no match timeout. Keep flow regexes
-# intentionally small and conservative: permit literal/character-class searches
-# and simple capture groups used for extraction. Allow at most one simple
-# quantifier and no counted repetitions: adjacent or nested repetitions can
-# otherwise make even a short pattern catastrophically expensive.
-_REGEX_MAX_PATTERN = 200
-_REGEX_MAX_SUBJECT = 2000
-_GROUP_QUANTIFIERS = frozenset("*+?")
-
-
-class FlowRegexRefused(ValueError):
-    """A pattern cannot be evaluated within the flow's safe regex subset."""
-
-
-def _regex_is_safe(pattern: str) -> bool:
-    """Return whether ``pattern`` stays within the flow-safe regex subset."""
-    in_class = False
-    escaped = False
-    groups: list[dict[str, bool]] = []
-    last_group_had_quantifier = False
-    quantifiers = 0
-
-    for i, ch in enumerate(pattern):
-        if escaped:
-            if ch.isdigit() or ch in {"g", "k"}:
-                return False
-            escaped = False
-            last_group_had_quantifier = False
-            continue
-        if ch == "\\":
-            escaped = True
-            continue
-        if in_class:
-            if ch == "]":
-                in_class = False
-            continue
-        if ch == "[":
-            in_class = True
-            last_group_had_quantifier = False
-            continue
-        if ch == "|":
-            return False
-        if ch == "(":
-            if groups:
-                return False
-            if pattern[i + 1:i + 2] == "?":
-                return False
-            groups.append({"has_quantifier": False})
-            last_group_had_quantifier = False
-            continue
-        if ch == ")":
-            if not groups:
-                return False
-            last_group_had_quantifier = groups.pop()["has_quantifier"]
-            continue
-        if ch in "{}":
-            return False
-        if ch in _GROUP_QUANTIFIERS:
-            quantifiers += 1
-            if quantifiers > 1:
-                return False
-            if groups:
-                groups[-1]["has_quantifier"] = True
-            elif last_group_had_quantifier:
-                return False
-            last_group_had_quantifier = False
-            continue
-        last_group_had_quantifier = False
-
-    return not escaped and not in_class and not groups
-
-
-def _fn_regex(a: list) -> str:
-    """regex(value, pattern) -- the first match; group 1 if the pattern has a
-    capture group, else the whole match. Empty on no match or invalid syntax;
-    unsupported patterns fail the flow instead of changing its branch result.
-    Guarded against ReDoS: the pattern is length-capped and rejected
-    if it has more than one quantifier or counted repetition, and the subject
-    is length-capped. Existing flows with more complex patterns must be revised."""
-    if len(a) < 2:
-        return ""
-    pattern = str(a[1])
-    if len(pattern) > _REGEX_MAX_PATTERN or not _regex_is_safe(pattern):
-        raise FlowRegexRefused("flow regex pattern exceeds the supported safe subset")
-    subject = _as_text(a[0])[:_REGEX_MAX_SUBJECT]
-    try:
-        m = re.search(pattern, subject)
-    except re.error:
-        return ""
-    if not m:
-        return ""
-    return m.group(1) if m.groups() else m.group(0)
-
-
-def _fn_datefmt(a: list) -> str:
-    """datefmt(value, fmt) -- format an epoch-seconds number or an ISO-8601
-    string with a strftime pattern (UTC). Bad input yields ''. Default fmt is
-    ISO date. E.g. datefmt(now(), "%Y-%m-%d")."""
-    if not a:
-        return ""
-    import datetime as _dt
-    fmt = str(a[1]) if len(a) > 1 else "%Y-%m-%d"
-    val = a[0]
-    try:
-        if isinstance(val, (int, float)) or (isinstance(val, str) and val.strip().replace(".", "", 1).isdigit()):
-            dt = _dt.datetime.fromtimestamp(_num(val), tz=_dt.timezone.utc)
-        else:
-            dt = _dt.datetime.fromisoformat(str(val).replace("Z", "+00:00"))
-        return dt.strftime(fmt)
-    except (ValueError, OverflowError, OSError):
-        return ""
-
-
-def _now_utc():
-    import datetime as _dt
-    return _dt.datetime.now(_dt.timezone.utc)
-
-
-def _add_days(value: Any, n: Any) -> str:
-    """``value`` (an ISO date/datetime, or '' for today) plus ``n`` days, as an ISO
-    date (YYYY-MM-DD) -- so "due in 3 days" is ``{{add_days('', 3)}}`` and it
-    orders correctly against other ISO dates. A bad date -> ''."""
-    import datetime as _dt
-    s = str(value or "").strip()
-    try:
-        base = _dt.date.fromisoformat(s[:10]) if s else _now_utc().date()
-        return (base + _dt.timedelta(days=int(_num(n)))).isoformat()
-    except (TypeError, ValueError):
-        return ""
-
-
-class FlowCredentialRefused(ValueError):
-    """Legacy credential interpolation needs an explicit reviewed migration."""
-
-
-_CREDENTIAL_REPAIR = (
-    "This flow uses legacy secret expressions. No action was authorized by this expression. "
-    "Open Connections to review an account for the intended service, then replace the step "
-    "with its authorized connector action and review a new flow version. "
-    "Server secrets cannot be used as flow parameters; no credential or grant was migrated."
-)
-
-
-def _resolve_secret(name: Any) -> str:
-    # This is the shared sink for literal, computed, nested and direct render
-    # callers. Never consult the deployment provider, even for missing names.
-    del name
-    raise FlowCredentialRefused(_CREDENTIAL_REPAIR)
-
-
-# Safe transform functions usable inside {{ }} -- no eval, pure string/collection/
-# arithmetic helpers. Each takes the evaluated arg list.
-_FUNCS: dict[str, Callable[[list], Any]] = {
-    "upper": lambda a: str(a[0]).upper() if a else "",
-    "lower": lambda a: str(a[0]).lower() if a else "",
-    "trim": lambda a: str(a[0]).strip() if a else "",
-    "title": lambda a: str(a[0]).title() if a else "",
-    "length": lambda a: (len(a[0]) if a and hasattr(a[0], "__len__") else 0),
-    "concat": lambda a: "".join(_as_text(x) for x in a),
-    "replace": lambda a: (str(a[0]).replace(str(a[1]), str(a[2])) if len(a) >= 3 else (str(a[0]) if a else "")),
-    "default": lambda a: (a[0] if (a and a[0] not in (None, "", [], {})) else (a[1] if len(a) > 1 else "")),
-    "json": lambda a: (__import__("json").dumps(a[0]) if a else ""),
-    # date/time (UTC): enable "due in N days" / "older than a week" workflows,
-    # ISO-formatted so they order correctly with the lexical comparison above.
-    "now": lambda a: _now_utc().isoformat(timespec="seconds"),
-    "today": lambda a: _now_utc().date().isoformat(),
-    "add_days": lambda a: _add_days(a[0], a[1]) if len(a) >= 2 else "",
-    "first": lambda a: (a[0][0] if a and isinstance(a[0], (list, tuple)) and a[0] else ""),
-    "last": lambda a: (a[0][-1] if a and isinstance(a[0], (list, tuple)) and a[0] else ""),
-    # string / collection transforms
-    "split": lambda a: (str(a[0]).split(str(a[1])) if len(a) >= 2 else str(a[0]).split() if a else []),
-    "join": lambda a: (str(a[1]).join(_as_text(x) for x in a[0]) if len(a) >= 2 and isinstance(a[0], (list, tuple)) else (_as_text(a[0]) if a else "")),
-    "slice": _fn_slice,
-    "index": lambda a: (a[0][int(_num(a[1]))] if a and isinstance(a[0], (list, tuple)) and -len(a[0]) <= int(_num(a[1])) < len(a[0]) else ""),
-    "regex": _fn_regex,
-    "keys": lambda a: (list(a[0].keys()) if a and isinstance(a[0], dict) else []),
-    # arithmetic
-    "add": lambda a: sum(_num(x) for x in a),
-    "sub": lambda a: (_num(a[0]) - _num(a[1])) if len(a) >= 2 else _num(a[0] if a else 0),
-    "mul": lambda a: (_num(a[0]) * _num(a[1])) if len(a) >= 2 else _num(a[0] if a else 0),
-    "div": lambda a: (_num(a[0]) / _num(a[1])) if (len(a) >= 2 and _num(a[1])) else 0,
-    "round": lambda a: round(_num(a[0]), int(_num(a[1])) if len(a) > 1 else 0) if a else 0,
-    "abs": lambda a: abs(_num(a[0])) if a else 0,
-    "int": lambda a: int(_num(a[0])) if a else 0,
-    "datefmt": _fn_datefmt,
-}
-
-
-def _split_args(s: str) -> list[str]:
-    """Comma-split respecting quotes AND nested parens, so a literal comma or a
-    nested call's arguments (``default(x, "y")``) survive as one argument."""
-    out, cur, q, depth = [], "", None, 0
-    for ch in s:
-        if q:
-            cur += ch
-            if ch == q:
-                q = None
-        elif ch in "'\"":
-            q = ch
-            cur += ch
-        elif ch == "(":
-            depth += 1
-            cur += ch
-        elif ch == ")":
-            depth = max(0, depth - 1)
-            cur += ch
-        elif ch == "," and depth == 0:
-            out.append(cur)
-            cur = ""
-        else:
-            cur += ch
-    if s.strip():
-        out.append(cur)
-    return [a.strip() for a in out]
-
-
-def _arg_value(tok: str, data: dict, *, allow_secrets: bool = False) -> Any:
-    """A function argument: a quoted/number/bool literal, a NESTED transform call
-    (evaluated recursively), else a data key (missing -> '')."""
-    tok = tok.strip()
-    if len(tok) >= 2 and tok[0] in "'\"" and tok[-1] == tok[0]:
-        return tok[1:-1]
-    low = tok.lower()
-    if low in ("true", "false"):
-        return low == "true"
-    for cast in (int, float):
-        try:
-            return cast(tok)
-        except ValueError:
-            pass
-    m = _FN_CALL.match(tok)
-    funcs = _funcs(allow_secrets=allow_secrets)
-    if m and m.group(1) in funcs:          # nested call: {{upper(default(x,"y"))}}
-        return _eval_expr(tok, data, allow_secrets=allow_secrets)
-    return _dig(data, tok, "")
-
-
-def _funcs(*, allow_secrets: bool = False) -> dict[str, Callable[[list], Any]]:
-    if not allow_secrets:
-        return _FUNCS
-    return {**_FUNCS, "secret": lambda a: _resolve_secret(a[0] if a else None)}
-
-
-def _eval_expr(expr: str, data: dict, *, allow_secrets: bool = False) -> Any:
-    """Evaluate a ``{{ }}`` expression: a transform call (args may themselves be
-    transform calls), else a dotted-key dig (``None`` for a missing bare key so
-    render keeps it literal)."""
-    m = _FN_CALL.match(expr.strip())
-    funcs = _funcs(allow_secrets=allow_secrets)
-    if m and m.group(1) in funcs:
-        args = [_arg_value(a, data, allow_secrets=allow_secrets) for a in _split_args(m.group(2))]
-        try:
-            return funcs[m.group(1)](args)
-        except (FlowCredentialRefused, FlowRegexRefused):
-            raise
-        except Exception:  # a bad transform never breaks rendering
-            return ""
-    return _dig(data, expr.strip())
-
-
-def _dig(data: dict, dotted: str, default: Any = None) -> Any:
-    cur: Any = data
-    for part in dotted.split("."):
-        if isinstance(cur, dict) and part in cur:
-            cur = cur[part]
-        else:
-            return default
-    return cur
-
-
-def _coerce(token: str) -> Any:
-    token = token.strip()
-    if len(token) >= 2 and token[0] in "'\"" and token[-1] == token[0]:
-        return token[1:-1]
-    low = token.lower()
-    if low in ("true", "false"):
-        return low == "true"
-    try:
-        return int(token)
-    except ValueError:
-        pass
-    try:
-        return float(token)
-    except ValueError:
-        return token
-
-
-def _eval_predicate(expr: str, data: dict) -> bool:
-    """One ``<key> <op> <value>`` comparison (or a bare truthiness test)."""
-    m = _COND.match(str(expr or ""))
-    if not m:
-        return bool(_dig(data, str(expr).strip()))
-    key, op, rhs = m.group(1), m.group(2), _coerce(m.group(3))
-    lhs = _dig(data, key)
-    try:
-        if op == "==":
-            return lhs == rhs
-        if op == "!=":
-            return lhs != rhs
-        if op == "contains":
-            return str(rhs) in str(lhs) if lhs is not None else False
-        # Ordering: numeric when BOTH sides are numbers, else lexical -- so an ISO
-        # date/string comparison (`created >= '2026-01-01'`) is honoured instead of
-        # silently false. A None lhs (missing key) is never ordered-true.
-        if lhs is None:
-            return False
-        lo, ro = _order_operands(lhs, rhs)
-        return {">": lo > ro, "<": lo < ro, ">=": lo >= ro, "<=": lo <= ro}[op]
-    except (TypeError, ValueError):
-        return False
-
-
-def _order_operands(lhs: Any, rhs: Any) -> tuple[Any, Any]:
-    """Coerce a pair for an ordering comparison: floats when both parse as numbers
-    (so `10 > 9` isn't the string-wise `'10' > '9'` == False), else strings (so
-    dates and other text order lexically instead of raising / being dropped)."""
-    try:
-        return float(lhs), float(rhs)
-    except (TypeError, ValueError):
-        return str(lhs), str(rhs)
-
-
-def _split_bool_ops(expr: str, op: str) -> list[str]:
-    """Split on a boolean operator only when it appears outside quotes."""
-    out: list[str] = []
-    cur: list[str] = []
-    quote: str | None = None
-    i = 0
-    op_len = len(op)
-    while i < len(expr):
-        ch = expr[i]
-        if quote:
-            cur.append(ch)
-            if ch == quote:
-                quote = None
-            i += 1
-            continue
-        if ch in "'\"":
-            quote = ch
-            cur.append(ch)
-            i += 1
-            continue
-        if (
-            expr[i : i + op_len].lower() == op
-            and (i == 0 or expr[i - 1].isspace())
-            and (i + op_len == len(expr) or expr[i + op_len].isspace())
-        ):
-            out.append("".join(cur).strip())
-            cur = []
-            i += op_len
-            continue
-        cur.append(ch)
-        i += 1
-    out.append("".join(cur).strip())
-    return out
-
-
-def eval_condition(expr: str, data: dict) -> bool:
-    """A safe boolean predicate over flow data (no eval).
-
-    A predicate is ``<key> <op> <value>`` (``<value>`` a number / 'quoted' /
-    bareword / true|false), or a bare key (truthiness). Predicates compose with
-    ``and`` / ``or`` (``or`` of ``and`` groups, standard precedence), e.g.
-    ``amount > 100 and region == 'EU'``. Unparsable predicates are falsey."""
-    s = str(expr or "").strip()
-    for or_part in _split_bool_ops(s, "or"):
-        parts = [p for p in _split_bool_ops(or_part, "and") if p.strip()]
-        if parts and all(_eval_predicate(p, data) for p in parts):
-            return True
-    return False
-
-
-@dataclass
-class FlowRunResult:
-    status: str
-    data: dict = field(default_factory=dict)
-    cursor: str | None = None       # node paused/rejected at (for resume)
-    resume_at: float | None = None  # epoch for a delay pause
-    prompt: str = ""                # approval prompt for the UI
-    error: str = ""
-    continuation: dict = field(default_factory=dict)
-
-
-class FlowBudgetExceeded(BudgetExceeded):
-    """A flow allowance refused an invocation before it dispatched any work."""
-
-
-class FlowApprovalStale(ApprovalCardError):
-    """The authority behind a paused approval changed before an effect."""
-
 
 # Executor signatures (injected):
 #   agent_fn(node, rendered_brief, data) -> (result: str, outcome: float | None)
@@ -548,47 +101,6 @@ class FlowApprovalStale(ApprovalCardError):
 #   on_node(node, status: str, outcome: float | None) -> None   (telemetry/grounding)
 AgentFn = Callable[[FlowNode, str, dict], tuple[Any, float | None]]
 ActionFn = Callable[[FlowNode, dict, dict], tuple[Any, float | None]]
-
-
-def _safe_error_text(value: Any, *, limit: int = 500) -> str:
-    """Redact untrusted executor text before persistence or catch routing."""
-    try:
-        from .redact import redact
-
-        safe = str(redact(str(value)))
-    except Exception:  # pragma: no cover - error reporting must fail closed
-        safe = "execution failed (details redacted)"
-    return safe[:limit]
-
-
-class _Pause(Exception):
-    def __init__(self, kind: str, node: FlowNode, data: dict, resume_at: float | None = None):
-        self.kind, self.node, self.data, self.resume_at = kind, node, data, resume_at
-
-
-class _Reject(Exception):
-    def __init__(self, node: FlowNode, data: dict, *, error: str = ""):
-        self.node, self.data, self.error = node, data, error
-
-
-class _NodeError(Exception):
-    """An executor raised inside a specific node -- carries the node id so a
-    failed run records WHERE it failed (the retry-from-failure entry point)."""
-
-    def __init__(self, node_id: str, cause: Exception):
-        super().__init__(f"node {node_id!r}: {_safe_error_text(cause)}")
-        self.node_id = node_id
-        self.cause = cause
-
-
-class _Indeterminate(Exception):
-    """A work boundary may have committed an effect without proving its state."""
-
-    def __init__(self, node_id: str, detail: str, *, boundary: str = "high-risk action"):
-        super().__init__(
-            f"{boundary} {node_id!r} is indeterminate: {_safe_error_text(detail)}"
-        )
-        self.node_id = node_id
 
 
 @dataclass
@@ -1019,23 +531,8 @@ def _run_work(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     outcome: float | None = None
     last_exc: Exception | None = None
     explicit_indeterminate = False
-    retries = min(max(0, node.retries), max_node_retries())
-    high_risk_action = False
-    ambiguous_agent = node.kind == NODE_AGENT and node.learned_fallback is not False
-    if node.kind == NODE_AGENT:
-        # An agent attempt may already have invoked a mutating tool before its
-        # goal failed.  Without a replay ledger for the whole agent trajectory,
-        # automatically creating a second goal is never side-effect safe.
-        retries = 0
-    elif node.kind == NODE_ACTION:
-        # High-risk tools may have committed before a response was lost.  The
-        # registry deliberately executes them once; a flow-level retry must not
-        # bypass that exactly-once safety boundary.
-        from ..tool_reliability import is_retry_safe
-        high_risk_action = not is_retry_safe(node.tool)
-        if high_risk_action:
-            retries = 0
-    for attempt in range(retries + 1):
+    policy = work_policy(node, max_retries=max_node_retries())
+    for attempt in range(policy.retries + 1):
         if ctx.deadline is not None and ctx.now() > ctx.deadline:
             raise RuntimeError("flow exceeded its wall-clock deadline during node retries")
         if attempt and backoff:
@@ -1043,22 +540,15 @@ def _run_work(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
         try:
             result, outcome = _invoke_work(node, data, ctx)
             last_exc = None
-        except (BudgetExceeded, Halted, FlowApprovalStale, AuditRefused, FlowCredentialRefused):
+        except (BudgetExceeded, Halted, FlowApprovalStale, AuditRefused, FlowCredentialRefused, FlowRegexRefused):
             raise
         except Exception as e:   # a raising executor is a retryable failure, not instant death
             last_exc, outcome = e, 0.0
             continue
-        if node.kind == NODE_ACTION and outcome == 0.0:
-            from ..tool_results import ToolResultState, classify_tool_result
-
-            explicit_indeterminate = (
-                classify_tool_result(result) is ToolResultState.INDETERMINATE
-            )
-            if explicit_indeterminate:
-                # The executor says an effect may already have happened. Retrying
-                # because its evidence/acknowledgement was lost duplicates that
-                # effect even when the tool is normally classified retry-safe.
-                break
+        if explicit_unknown(node, result, outcome):
+            # Unknown effects must not be re-driven even for normally safe tools.
+            explicit_indeterminate = True
+            break
         if outcome != 0.0:
             break
     # A hard exception that survived every retry stays terminal (records WHERE it
@@ -1068,22 +558,8 @@ def _run_work(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     # dry-run preview). Those are terminal failures, not reconciliation cases.
     # Ordinary ERROR/exception results remain ambiguous for a high-risk tool
     # because the remote system may have committed before acknowledgement loss.
-    definitive_no_effect = False
-    if high_risk_action and last_exc is None and outcome == 0.0:
-        from ..tool_results import ToolResultState, classify_tool_result
-
-        definitive_no_effect = classify_tool_result(result) in {
-            ToolResultState.PREVIEW,
-            ToolResultState.REFUSED,
-        }
-    if (
-        explicit_indeterminate
-        or (
-            (high_risk_action or ambiguous_agent)
-            and not definitive_no_effect
-            and (last_exc is not None or outcome == 0.0)
-        )
-    ):
+    if needs_reconciliation(policy, result=result, outcome=outcome,
+                            error=last_exc, unknown=explicit_indeterminate):
         detail = _safe_error_text(
             f"{type(last_exc).__name__}: {last_exc}"
             if last_exc is not None else result
@@ -1096,7 +572,7 @@ def _run_work(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
             detail[:500],
             boundary=(
                 "agent trajectory"
-                if ambiguous_agent
+                if policy.ambiguous_agent
                 else "action evidence"
                 if explicit_indeterminate
                 else "high-risk action"
@@ -1649,16 +1125,8 @@ def _run_chain(flow: Flow, data: dict, ctx: _Ctx, start: str | None) -> None:
     elif (flow.recipe_lineage is not None or flow.recipe_teaching is not None
           or any(node.recipe_step is not None for node in flow.nodes.values())):
         raise ValueError("learned action node is missing its parent recipe")
-    frame = ctx.frame
-    if frame:
-        if frame.get("flow_id") != flow.id or not isinstance(frame.get("data"), dict):
-            raise ValueError("flow continuation does not match its graph")
-        data.clear()
-        data.update(copy.deepcopy(frame["data"]))
-    else:
-        frame.update(flow_id=flow.id, cursor=start, data=copy.deepcopy(data), seen=0)
-    cursor = frame["cursor"]
-    seen = int(frame.get("seen", 0))
+    frame = ContinuationFrame(ctx.frame, flow.id)
+    cursor, seen = frame.start(data, start)
     limit = max(1000, len(flow.nodes) * 100)   # cycle backstop
     while cursor is not None:
         if ctx.control_stop:
@@ -1681,7 +1149,7 @@ def _run_chain(flow: Flow, data: dict, ctx: _Ctx, start: str | None) -> None:
                         following, data, ctx, following.recipe_step, record=False,
                     )
             cursor = _run_node(node, data, ctx)
-        except (BudgetExceeded, Halted, FlowApprovalStale, AuditRefused, FlowCredentialRefused) as exc:
+        except (BudgetExceeded, Halted, FlowApprovalStale, AuditRefused, FlowCredentialRefused, FlowRegexRefused) as exc:
             ctx.control_stop.append(exc)
             raise
         except (_Pause, _Reject, _NodeError, _Indeterminate):
@@ -1689,10 +1157,9 @@ def _run_chain(flow: Flow, data: dict, ctx: _Ctx, start: str | None) -> None:
         except Exception as e:
             raise _NodeError(node.id, e) from e
         finally:
-            frame["data"] = copy.deepcopy(data)
+            frame.checkpoint_data(data)
         seen += 1
-        frame.clear()
-        frame.update(flow_id=flow.id, cursor=cursor, data=copy.deepcopy(data), seen=seen)
+        frame.advance(cursor, data, seen)
         if seen > limit:
             raise RuntimeError(f"flow {flow.id!r} exceeded {limit} steps (cycle?)")
 
@@ -1703,38 +1170,6 @@ def _run_chain_with_parallel_slot(flow: Flow, data: dict, ctx: _Ctx, start: str 
     finally:
         if ctx.parallel_slots is not None:
             ctx.parallel_slots.release()
-
-
-def _legacy_cursor_ambiguous(flow: Flow, node: FlowNode, resolve_flow) -> bool:
-    """A legacy leaf ID must identify exactly one non-container invocation."""
-    pending = [flow]
-    visited = set()
-    ambiguous = node.kind in {"scope", "foreach", "parallel", "while", "subflow"}
-    while pending and not ambiguous:
-        candidate = pending.pop()
-        if id(candidate) in visited:
-            continue
-        visited.add(id(candidate))
-        for child_node in candidate.nodes.values():
-            children = list(child_node.branches or [])
-            if child_node.body is not None:
-                children.append(child_node.body)
-            if child_node.kind == "subflow":
-                sub = resolve_flow(child_node.flow_ref) if resolve_flow else None
-                if sub is None:
-                    ambiguous = True
-                    break
-                children.append(sub)
-            for child in children:
-                if child.node(node.id) is not None:
-                    ambiguous = True
-                pending.append(child)
-    return ambiguous
-
-
-def _valid_continuation(resume: dict, continuation: object) -> bool:
-    return (isinstance(continuation, dict) and resume.get("rerun") is True and continuation.get("version") == 1
-            and isinstance(continuation.get("frame"), dict))
 
 
 def run_flow(flow: Flow, *, agent_fn: AgentFn, action_fn: ActionFn,
@@ -1776,126 +1211,20 @@ def run_flow(flow: Flow, *, agent_fn: AgentFn, action_fn: ActionFn,
                deadline=(_now() + flow.max_seconds if flow.max_seconds and flow.max_seconds > 0 else None),
                parallel_slots=threading.BoundedSemaphore(_PARALLEL_MAX_WORKERS),
                run_id=run_id)
-    if resume and resume.get("continuation"):
-        continuation = copy.deepcopy(resume["continuation"])
-        if not _valid_continuation(resume, continuation):
-            return FlowRunResult(status=STATUS_FAILED, error="unsupported flow continuation")
-        ctx.frame = continuation["frame"]
-        data = dict(data or {})
-        start = flow.start
-    elif resume:
-        data = dict(resume.get("data") or data or {})
-        node = flow.node(resume.get("node_id"))
-        decision = resume.get("decision")
-        # Ground the HUMAN verdict on resume too (B7) -- the approval node's handler
-        # isn't re-run (we resume AFTER it), so without this the decision signal
-        # is lost on the resume path exactly as it is captured on the auto path.
-        if node is not None and (decision in ("approved", "rejected") or decision in node.choices):
-            (on_node or (lambda *_: None))(node, decision, _approval_outcome(decision))
-        # The paused/failed node must still exist in this (current) flow version.
-        # If an edit or rollback removed or replaced it between pause and resume,
-        # fail CLOSED -- silently falling back to flow.start would re-execute the
-        # whole flow and re-drive every pre-pause side effect.
-        if node is None:
-            return FlowRunResult(
-                status=STATUS_FAILED, data=data, cursor=resume.get("node_id"),
-                error=(f"cannot resume: node {resume.get('node_id')!r} no longer "
-                       "exists in this flow version"))
-        if resume.get("rerun"):
-            # Older checkpoints named only a leaf. A duplicate nested ID or a
-            # container cursor cannot identify which invocation already acted.
-            # Refuse reconstruction rather than repeating a completed prefix.
-            ambiguous = _legacy_cursor_ambiguous(flow, node, resolve_flow)
-            if ambiguous:
-                return FlowRunResult(
-                    status=STATUS_INDETERMINATE, data=data, cursor=node.id,
-                    error="legacy failure lacks invocation history; reconcile completed work before creating a replacement",
-                )
-        if decision == "rejected":
-            return FlowRunResult(status=STATUS_REJECTED, data=data, cursor=node.id)
-        # Default continuation: a pause resumes AFTER its node (the approval/
-        # delay is done); a failure retry re-enters AT the node ("rerun").
-        start = node.id if resume.get("rerun") else node.next
-        if resume.get("expired") and node.kind == NODE_APPROVAL:
-            # The approval's expiry lapsed (the sweep resumed it with the
-            # OUT-OF-BAND ``expired`` flag -- never a decision string a caller
-            # could forge). Route to `on_expire` if set (an escalation lane),
-            # else fail closed (reject). The lane runs through the chain below.
-            if node.on_expire is None:
-                return FlowRunResult(status=STATUS_REJECTED, data=data, cursor=node.id)
-            if node.output:
-                data[node.output] = "expired"
-            start = node.on_expire
-        elif node.kind == NODE_APPROVAL and not resume.get("rerun"):
-            # Resuming an approval gate: accept ONLY the literal "approved" or one
-            # of the node's explicitly declared choices. Anything else fails
-            # CLOSED (rejected), so a loosened decision string can never wave a
-            # run past a human gate. The accepted verdict is recorded to the
-            # node's output for downstream routing (matches the inline path).
-            if decision == "approved" or (decision and decision in node.choices):
-                if node.output:
-                    data[node.output] = decision
-            else:
-                return FlowRunResult(status=STATUS_REJECTED, data=data, cursor=node.id)
-    else:
-        data = dict(data or {})
-        start = flow.start
+    plan = prepare_resume(
+        flow, data=data, resume=resume, resolve_flow=resolve_flow,
+        on_node=on_node, approval_outcome=_approval_outcome,
+    )
+    if plan.result is not None:
+        return plan.result
+    if plan.frame is not None:
+        ctx.frame = plan.frame
+    data, start = plan.data, plan.start
     return _execute_chain_result(flow, data, ctx, start)
 
 
 def _execute_chain_result(flow: Flow, data: dict, ctx: _Ctx, start: str | None) -> FlowRunResult:
-    try:
-        _run_chain(flow, data, ctx, start)
-        return FlowRunResult(status=STATUS_COMPLETED, data=data)
-    except _Pause as p:
-        status = {"approval": STATUS_PAUSED_APPROVAL,
-                  "event": STATUS_PAUSED_EVENT}.get(p.kind, STATUS_PAUSED_DELAY)
-        prompt = p.node.prompt
-        if p.kind in {"approval", "event"}:
-            from .redact import redact
-
-            try:
-                # This snapshot is what the person sees and approves. Never
-                # interpolate a credential from the unredacted execution data.
-                prompt = redact(render(prompt, redact(p.data, strict=True)),
-                                strict=True)
-            except ValueError:
-                return FlowRunResult(
-                    status=STATUS_FAILED, data=p.data, cursor=p.node.id,
-                    error="Could not safely prepare the review question.",
-                )
-        return FlowRunResult(status=status, data=p.data, cursor=p.node.id,
-                             resume_at=p.resume_at, prompt=prompt)
-    except _Reject as r:
-        return FlowRunResult(status=STATUS_FAILED if r.error else STATUS_REJECTED,
-                             data=r.data, cursor=r.node.id, error=r.error)
-    except _NodeError as e:  # an executor blew up inside a known node -- keep the
-        # node id as the cursor so the run can be retried from right there.
-        return FlowRunResult(status=STATUS_FAILED, data=data,
-                              error=_safe_error_text(e, limit=2000),
-                              cursor=ctx.frame.get("cursor") or e.node_id,
-                              continuation={"version": 1, "frame": ctx.frame})
-    except _Indeterminate as e:
-        return FlowRunResult(status=STATUS_INDETERMINATE, data=data,
-                              error=_safe_error_text(e, limit=2000),
-                              cursor=e.node_id)
-    except FlowBudgetExceeded as e:
-        return FlowRunResult(
-            status=STATUS_BUDGET_LIMITED, data=data, cursor=ctx.frame.get("cursor"),
-            error=_safe_error_text(e, limit=2000),
-            continuation={"version": 1, "frame": ctx.frame},
-        )
-    except FlowCredentialRefused as exc:
-        # A policy refusal is not a retryable business failure or a catchable
-        # scope error. Keep the saved definition/data for explicit migration.
-        return FlowRunResult(status=STATUS_FAILED, data=data, error=str(exc))
-    except (BudgetExceeded, Halted, FlowApprovalStale, AuditRefused):
-        raise
-    except Exception as e:  # a node executor blew up -> surface, don't crash the caller
-        return FlowRunResult(
-            status=STATUS_FAILED, data=data,
-            error=_safe_error_text(e, limit=2000),
-        )
+    return execute_chain_result(flow, data, ctx, start, run_chain=_run_chain, render=render)
 
 
 __all__ = [

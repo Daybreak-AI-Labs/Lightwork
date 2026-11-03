@@ -110,7 +110,7 @@ def test_shipped_app_mounts_page_api_and_private_asset(monkeypatch) -> None:
 
 
 def test_turned_off_studio_shows_its_gate_instead_of_loaders(monkeypatch) -> None:
-    from maverick_dashboard import api
+    from maverick_dashboard import module_activation
 
     monkeypatch.setattr(page, "require_permission", lambda *_: None)
     monkeypatch.setattr(page, "_tenant_selected", lambda: None)
@@ -119,7 +119,7 @@ def test_turned_off_studio_shows_its_gate_instead_of_loaders(monkeypatch) -> Non
     app = FastAPI()
     app.include_router(page.create_no_code_grc_studio_page_router(templates()))
     for enabled in (False, True):
-        monkeypatch.setattr(api, "module_activation_enabled", lambda _section, enabled=enabled: enabled)
+        monkeypatch.setattr(module_activation, "module_activation_enabled", lambda _section, enabled=enabled: enabled)
         body = TestClient(app).get(page.PAGE_PATH).text
         main = body[body.index('<div class="grcs-shell"'):body.index(page.ASSET_PATH)]
         assert f'data-module-enabled="{"true" if enabled else "false"}"' in main

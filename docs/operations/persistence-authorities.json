@@ -187,20 +187,20 @@
     "a2a": 4,
     "preferences": 8,
     "learning": 61,
-    "sqlite_domain": 81,
+    "sqlite_domain": 82,
     "configuration": 75,
     "read_projection": 24,
     "coordinator": 1,
     "audit": 26,
     "transient": 25,
     "business_records": 22,
-    "execution": 46,
+    "execution": 47,
     "recovery": 12,
-    "derived": 17,
+    "derived": 19,
     "composition": 62,
     "external": 18,
     "key_custody": 4,
-    "storage_primitive": 10,
+    "storage_primitive": 12,
     "world": 5,
     "mixed_api": 8,
     "knowledge": 4,
@@ -645,7 +645,7 @@
       "path": "packages/maverick-core/maverick/agent_trust.py",
       "contract": "configuration",
       "owner": "packages/maverick-core/maverick/agent_trust.py",
-      "purpose": "Agent Trust Plane — the single registry + decision point for talking to\n*external* agents.",
+      "purpose": "Agent Trust Plane \u2014 the single registry + decision point for talking to\n*external* agents.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -2729,7 +2729,7 @@
       "path": "packages/maverick-core/maverick/benchmark_reproducibility.py",
       "contract": "artifact",
       "owner": "packages/maverick-core/maverick/benchmark_reproducibility.py",
-      "purpose": "Benchmark reproducibility audits — manifests for recorded benchmark runs.",
+      "purpose": "Benchmark reproducibility audits \u2014 manifests for recorded benchmark runs.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -2771,7 +2771,7 @@
       "path": "packages/maverick-core/maverick/billing.py",
       "contract": "read_projection",
       "owner": "delegated; inspect source callsites below",
-      "purpose": "Metering → billing & entitlements.",
+      "purpose": "Metering \u2192 billing & entitlements.",
       "referenced_store_owners": [
         ".quotas"
       ],
@@ -3007,7 +3007,7 @@
       "path": "packages/maverick-core/maverick/channel_federation.py",
       "contract": "execution",
       "owner": "packages/maverick-core/maverick/channel_federation.py",
-      "purpose": "Channel federation — forward channel messages between Lightwork instances.",
+      "purpose": "Channel federation \u2014 forward channel messages between Lightwork instances.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -3088,7 +3088,7 @@
       "path": "packages/maverick-core/maverick/client.py",
       "contract": "read_projection",
       "owner": "delegated; inspect source callsites below",
-      "purpose": "Client binding — one Lightwork deployment, exactly one enterprise client.",
+      "purpose": "Client binding \u2014 one Lightwork deployment, exactly one enterprise client.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -5076,7 +5076,7 @@
       "path": "packages/maverick-core/maverick/donation.py",
       "contract": "artifact",
       "owner": "packages/maverick-core/maverick/donation.py",
-      "purpose": "Opt-in trajectory donation — the Tesla data-engine analog.",
+      "purpose": "Opt-in trajectory donation \u2014 the Tesla data-engine analog.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -5264,7 +5264,7 @@
       "path": "packages/maverick-core/maverick/dsar_fulfillment.py",
       "contract": "governed",
       "owner": "packages/maverick-core/maverick/dsar_fulfillment.py",
-      "purpose": "DSAR fulfillment: verify identity, collect, redact, deliver — governed.",
+      "purpose": "DSAR fulfillment: verify identity, collect, redact, deliver \u2014 governed.",
       "referenced_store_owners": [
         ".governed_records"
       ],
@@ -5547,7 +5547,7 @@
       "path": "packages/maverick-core/maverick/entitlements.py",
       "contract": "configuration",
       "owner": "packages/maverick-core/maverick/entitlements.py",
-      "purpose": "Signed-license entitlements — control which features/tiers a deployment runs.",
+      "purpose": "Signed-license entitlements \u2014 control which features/tiers a deployment runs.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -6225,7 +6225,7 @@
       "path": "packages/maverick-core/maverick/golden_path.py",
       "contract": "artifact",
       "owner": "packages/maverick-core/maverick/golden_path.py",
-      "purpose": "Golden path — a five-minute walkthrough of governance with its audit trail.",
+      "purpose": "Golden path \u2014 a five-minute walkthrough of governance with its audit trail.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -7297,7 +7297,7 @@
       "path": "packages/maverick-core/maverick/license_registry.py",
       "contract": "business_records",
       "owner": "packages/maverick-core/maverick/license_registry.py",
-      "purpose": "Regulatory license & renewals register — the state-by-state patchwork.",
+      "purpose": "Regulatory license & renewals register \u2014 the state-by-state patchwork.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -7421,7 +7421,7 @@
       "path": "packages/maverick-core/maverick/mcp_analytics.py",
       "contract": "derived",
       "owner": "packages/maverick-core/maverick/mcp_analytics.py",
-      "purpose": "Opt-in MCP-client language analytics — a local tally of the languages MCP clients use.",
+      "purpose": "Opt-in MCP-client language analytics \u2014 a local tally of the languages MCP clients use.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -7553,7 +7553,7 @@
       "path": "packages/maverick-core/maverick/migration_governance.py",
       "contract": "artifact",
       "owner": "packages/maverick-core/maverick/migration_governance.py",
-      "purpose": "Migration governance — the Alembic-grade ratchet over the world-model\nmigration ladders.",
+      "purpose": "Migration governance \u2014 the Alembic-grade ratchet over the world-model\nmigration ladders.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -7958,7 +7958,7 @@
       "path": "packages/maverick-core/maverick/oauth_vault.py",
       "contract": "configuration",
       "owner": "packages/maverick-core/maverick/oauth_vault.py",
-      "purpose": "Per-tenant OAuth token vault — refresh tokens sealed at rest.",
+      "purpose": "Per-tenant OAuth token vault \u2014 refresh tokens sealed at rest.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -8145,7 +8145,7 @@
       "path": "packages/maverick-core/maverick/paths.py",
       "contract": "storage_primitive",
       "owner": "packages/maverick-core/maverick/paths.py",
-      "purpose": "Tenant-aware data paths — the P1 multi-tenancy primitive.",
+      "purpose": "Tenant-aware data paths \u2014 the P1 multi-tenancy primitive.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested) Tenant lifecycle recovery review: installation-wide immutable claims and deletion tombstones are protected anti-reuse authority, outside purged tenant directories. Exact snapshot comparison, atomic no-replace restore publication and monotonic rollback preserve current barriers; bootstrap retains bytes under startup hold. No restored absence grants current admission.",
       "governed_namespaces": [],
@@ -9744,7 +9744,7 @@
       "path": "packages/maverick-core/maverick/proof_guarantees.py",
       "contract": "artifact",
       "owner": "packages/maverick-core/maverick/proof_guarantees.py",
-      "purpose": "Canonical product-guarantee proofs — the real roster through the real\nenforcement code.",
+      "purpose": "Canonical product-guarantee proofs \u2014 the real roster through the real\nenforcement code.",
       "referenced_store_owners": [
         ".bus_handoff"
       ],
@@ -9769,7 +9769,7 @@
       "path": "packages/maverick-core/maverick/proof_pack.py",
       "contract": "artifact",
       "owner": "packages/maverick-core/maverick/proof_pack.py",
-      "purpose": "Lightwork Proof Pack — one signed, reproducible evidence bundle.",
+      "purpose": "Lightwork Proof Pack \u2014 one signed, reproducible evidence bundle.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -9935,7 +9935,7 @@
       "path": "packages/maverick-core/maverick/push_v2.py",
       "contract": "configuration",
       "owner": "packages/maverick-core/maverick/push_v2.py",
-      "purpose": "Mobile push v2 — device registry + per-device routing.",
+      "purpose": "Mobile push v2 \u2014 device registry + per-device routing.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -10049,7 +10049,7 @@
       "path": "packages/maverick-core/maverick/quotas.py",
       "contract": "execution",
       "owner": "packages/maverick-core/maverick/quotas.py",
-      "purpose": "Per-principal usage quotas — the P2 \"cost as a managed resource\" primitive.",
+      "purpose": "Per-principal usage quotas \u2014 the P2 \"cost as a managed resource\" primitive.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -10402,7 +10402,7 @@
       "path": "packages/maverick-core/maverick/release_update.py",
       "contract": "recovery",
       "owner": "packages/maverick-core/maverick/release_update.py",
-      "purpose": "Governed release updates — verify + plan upgrades, offline-capable.",
+      "purpose": "Governed release updates \u2014 verify + plan upgrades, offline-capable.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -10705,7 +10705,7 @@
       "path": "packages/maverick-core/maverick/role_stats.py",
       "contract": "learning",
       "owner": "packages/maverick-core/maverick/role_stats.py",
-      "purpose": "Per-role credit tracking — routing memory fed by CSCA.",
+      "purpose": "Per-role credit tracking \u2014 routing memory fed by CSCA.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -11867,7 +11867,7 @@
       "path": "packages/maverick-core/maverick/soc2.py",
       "contract": "read_projection",
       "owner": "delegated; inspect source callsites below",
-      "purpose": "SOC 2 evidence collector — a machine-readable posture snapshot.",
+      "purpose": "SOC 2 evidence collector \u2014 a machine-readable posture snapshot.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -12062,7 +12062,7 @@
       "path": "packages/maverick-core/maverick/support_bundle.py",
       "contract": "artifact",
       "owner": "packages/maverick-core/maverick/support_bundle.py",
-      "purpose": "``maverick support`` — a redacted diagnostics bundle for a support ticket.",
+      "purpose": "``maverick support`` \u2014 a redacted diagnostics bundle for a support ticket.",
       "referenced_store_owners": [
         ".job_queue"
       ],
@@ -13739,7 +13739,7 @@
       "path": "packages/maverick-core/maverick/voice_macros.py",
       "contract": "configuration",
       "owner": "packages/maverick-core/maverick/voice_macros.py",
-      "purpose": "Voice macros — named multi-step command sequences for the voice surface.",
+      "purpose": "Voice macros \u2014 named multi-step command sequences for the voice surface.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -13775,7 +13775,7 @@
       "path": "packages/maverick-core/maverick/voice_models.py",
       "contract": "derived",
       "owner": "packages/maverick-core/maverick/voice_models.py",
-      "purpose": "Local Whisper (whisper.cpp GGML) model management — the built-in STT path.",
+      "purpose": "Local Whisper (whisper.cpp GGML) model management \u2014 the built-in STT path.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -13796,7 +13796,7 @@
       "path": "packages/maverick-core/maverick/voice_unlock.py",
       "contract": "configuration",
       "owner": "packages/maverick-core/maverick/voice_unlock.py",
-      "purpose": "Voice biometric unlock — companion factor ONLY.",
+      "purpose": "Voice biometric unlock \u2014 companion factor ONLY.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -13922,7 +13922,7 @@
           "line": 235,
           "function": "_record_inner",
           "kind": "write_text",
-          "expression": "(gdir / _CAP_MARKER).write_text(f'cap reached at {count} entries / {total} bytes; later writes are NOT journaled — full revert will refuse without --partial\\n', encoding='utf-8')"
+          "expression": "(gdir / _CAP_MARKER).write_text(f'cap reached at {count} entries / {total} bytes; later writes are NOT journaled \u2014 full revert will refuse without --partial\\n', encoding='utf-8')"
         },
         {
           "line": 460,
@@ -15315,7 +15315,7 @@
       "path": "packages/maverick-core/maverick/compaction/hybrid.py",
       "contract": "learning",
       "owner": "packages/maverick-core/maverick/compaction/hybrid.py",
-      "purpose": "Compaction v6 hybrid — a learned-from-ledger STRATEGY picker.",
+      "purpose": "Compaction v6 hybrid \u2014 a learned-from-ledger STRATEGY picker.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -15411,7 +15411,7 @@
       "path": "packages/maverick-core/maverick/cost/router_v3.py",
       "contract": "learning",
       "owner": "packages/maverick-core/maverick/cost/router_v3.py",
-      "purpose": "Cost-aware routing v3 — contextual bandit.",
+      "purpose": "Cost-aware routing v3 \u2014 contextual bandit.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -15929,7 +15929,7 @@
       "path": "packages/maverick-core/maverick/marketplace/federation.py",
       "contract": "sqlite_domain",
       "owner": "packages/maverick-core/maverick/marketplace/federation.py",
-      "purpose": "Skill-marketplace federation — signed listing bundles between instances.",
+      "purpose": "Skill-marketplace federation \u2014 signed listing bundles between instances.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -15965,7 +15965,7 @@
       "path": "packages/maverick-core/maverick/marketplace/ratings.py",
       "contract": "business_records",
       "owner": "packages/maverick-core/maverick/marketplace/ratings.py",
-      "purpose": "Marketplace ratings — local ledger.",
+      "purpose": "Marketplace ratings \u2014 local ledger.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -16599,7 +16599,7 @@
       "path": "packages/maverick-core/maverick/tenant/kms.py",
       "contract": "key_custody",
       "owner": "packages/maverick-core/maverick/tenant/kms.py",
-      "purpose": "Per-tenant envelope encryption — a DEK per tenant, wrapped by a KMS KEK.",
+      "purpose": "Per-tenant envelope encryption \u2014 a DEK per tenant, wrapped by a KMS KEK.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -16638,7 +16638,7 @@
       "path": "packages/maverick-core/maverick/tenant/registry.py",
       "contract": "configuration",
       "owner": "packages/maverick-core/maverick/tenant/registry.py",
-      "purpose": "Tenant lifecycle / provisioning registry — the hosted control plane's roster.",
+      "purpose": "Tenant lifecycle / provisioning registry \u2014 the hosted control plane's roster.",
       "referenced_store_owners": [
         "..quotas"
       ],
@@ -16845,7 +16845,7 @@
       "path": "packages/maverick-core/maverick/tools/database_tool.py",
       "contract": "external",
       "owner": "packages/maverick-core/maverick/tools/database_tool.py",
-      "purpose": "Relational database tool — SQL via SQLAlchemy (any driver).",
+      "purpose": "Relational database tool \u2014 SQL via SQLAlchemy (any driver).",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -17089,7 +17089,7 @@
       "path": "packages/maverick-core/maverick/tools/sanctions_screen.py",
       "contract": "external",
       "owner": "packages/maverick-core/maverick/tools/sanctions_screen.py",
-      "purpose": "Sanctions / watchlist screening — gate every payment + vendor-onboarding path.",
+      "purpose": "Sanctions / watchlist screening \u2014 gate every payment + vendor-onboarding path.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -17163,7 +17163,7 @@
       "path": "packages/maverick-core/maverick/tools/sql_query.py",
       "contract": "external",
       "owner": "packages/maverick-core/maverick/tools/sql_query.py",
-      "purpose": "SQL query tool — read-only by default, over a local SQLite database.",
+      "purpose": "SQL query tool \u2014 read-only by default, over a local SQLite database.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -17202,7 +17202,7 @@
       "path": "packages/maverick-core/maverick/tools/voice.py",
       "contract": "external",
       "owner": "packages/maverick-core/maverick/tools/voice.py",
-      "purpose": "Voice tools — speech-to-text (Whisper) and text-to-speech.",
+      "purpose": "Voice tools \u2014 speech-to-text (Whisper) and text-to-speech.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -19363,7 +19363,7 @@
       "path": "packages/maverick-dashboard/maverick_dashboard/invites.py",
       "contract": "configuration",
       "owner": "packages/maverick-dashboard/maverick_dashboard/invites.py",
-      "purpose": "Email invite links — how a client admin adds people to the dashboard.",
+      "purpose": "Email invite links \u2014 how a client admin adds people to the dashboard.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -19644,7 +19644,7 @@
       "path": "packages/maverick-dashboard/maverick_dashboard/partner_store.py",
       "contract": "configuration",
       "owner": "packages/maverick-dashboard/maverick_dashboard/partner_store.py",
-      "purpose": "Partner fleet registry — the client deployments a partner operates.",
+      "purpose": "Partner fleet registry \u2014 the client deployments a partner operates.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
@@ -30395,6 +30395,111 @@
           "function": "module",
           "kind": "GovernedRecordStore",
           "expression": "GovernedRecordStore('specialist-canary-goals', 'SCG', 'specialist_canary_goal', archive_when_full=False)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/cache/epoch.py",
+      "contract": "derived",
+      "owner": "packages/maverick-core/maverick/cache/tool.py",
+      "purpose": "Coordinate disposable tool-cache generations across workers sharing a workspace; never an authorization authority.",
+      "referenced_store_owners": [
+        "packages/maverick-core/maverick/cache/tool.py"
+      ],
+      "review": "read and atomic replacement reviewed; subprocess invalidation and unavailable-coordinator behavior covered",
+      "governed_namespaces": [],
+      "literal_path_hints": [
+        "tool_cache_epoch"
+      ],
+      "observed_mechanism_markers": {
+        "atomic_replace": 1
+      },
+      "source_sites": [
+        {
+          "line": 15,
+          "function": "local_epoch",
+          "kind": "data_dir",
+          "expression": "data_dir('tool_cache_epoch')"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/data_use_sqlite.py",
+      "contract": "storage_primitive",
+      "owner": "delegated; inspect calling data-use or consent authority",
+      "purpose": "Private SQLite connection and immediate transaction mechanics for data-use and consent stores.",
+      "referenced_store_owners": [
+        ".data_use_governance",
+        ".data_use_provider_adapters",
+        ".consent_storage"
+      ],
+      "review": "Reviewed file permissions, authority connection policy, transaction boundaries, rollback and guaranteed closure; the caller owns tenant routing and recovery.",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {
+        "begin_immediate": 1
+      },
+      "source_sites": [
+        {
+          "line": 24,
+          "function": "private_connection",
+          "kind": "connect",
+          "expression": "sqlite3.connect(str(path), timeout=10.0, isolation_level=None)"
+        },
+        {
+          "line": 35,
+          "function": "immediate_transaction",
+          "kind": "connect",
+          "expression": "connect()"
+        },
+        {
+          "line": 43,
+          "function": "immediate_transaction",
+          "kind": "commit",
+          "expression": "conn.commit()"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/sqlite_authority.py",
+      "contract": "storage_primitive",
+      "owner": "delegated; inspect calling data-use or consent authority",
+      "purpose": "Shared SQLite authority durability, secure-delete, and foreign-key connection configuration.",
+      "referenced_store_owners": [
+        ".data_use_sqlite",
+        ".consent_storage"
+      ],
+      "review": "Reviewed connection configuration order and each caller\u2019s foreign-key choice; the caller owns connection creation, transactions, namespace and recovery.",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 15,
+          "function": "configure_authority_connection",
+          "kind": "execute",
+          "expression": "connection.execute(\"PRAGMA busy_timeout=10000\")"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-dashboard/maverick_dashboard/template_runtime.py",
+      "contract": "derived",
+      "owner": "packages/maverick-dashboard/maverick_dashboard/template_runtime.py",
+      "purpose": "Jinja bytecode cache derived from deployed templates; unavailable cache falls back to in-process compilation.",
+      "referenced_store_owners": [],
+      "review": "Reviewed template checksum invalidation and cache location. Cache is derived executable presentation data, not an independent authorization grant; clear and rebuild after deployment or restore.",
+      "governed_namespaces": [],
+      "literal_path_hints": [
+        "cache/templates"
+      ],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 45,
+          "function": "_template_bytecode_cache",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
         }
       ]
     }

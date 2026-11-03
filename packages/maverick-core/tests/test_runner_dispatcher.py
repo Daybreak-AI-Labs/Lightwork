@@ -5,6 +5,7 @@ queue/worker backend is a ``set_dispatcher`` call, not a caller rewrite.
 """
 from __future__ import annotations
 
+import asyncio
 import threading
 from types import SimpleNamespace
 
@@ -62,12 +63,38 @@ async def test_async_dispatcher_wrapper_runs_submission_off_event_loop(monkeypat
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("dispatcher_result", "expected_result"),
-    [(None, "dispatch unavailable"), (RuntimeError("broker down"), "dispatch failed")],
-)
-async def test_async_dispatch_failure_blocks_pending_goal_without_local_fallback(
-    monkeypatch, dispatcher_result, expected_result,
+async def test_cancelling_async_waiter_does_not_stop_started_dispatch(monkeypatch):
+    started = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+
+    class BlockingDispatcher:
+        def submit(self, goal_id, **kwargs):
+            started.set()
+            try:
+                if not release.wait(timeout=5):
+                    raise TimeoutError("test did not release dispatcher")
+                return "done"
+            finally:
+                finished.set()
+
+    monkeypatch.setattr(runner, "_dispatcher", BlockingDispatcher())
+    task = asyncio.create_task(runner.run_goal_in_background_async(9))
+    try:
+        assert await asyncio.to_thread(started.wait, 3)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert not finished.is_set()
+    finally:
+        release.set()
+    assert await asyncio.to_thread(finished.wait, 3)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("dispatcher_result", [None, RuntimeError("broker down")])
+async def test_unknown_dispatch_does_not_block_pending_goal_or_fall_back(
+    monkeypatch, dispatcher_result,
 ):
     from maverick import world_model
 
@@ -77,8 +104,9 @@ async def test_async_dispatch_failure_blocks_pending_goal_without_local_fallback
         def get_goal(self, goal_id):
             return SimpleNamespace(status="pending")
 
-        def set_goal_status(self, goal_id, status, *, result):
-            updates.append((goal_id, status, result))
+        def block_pending_goal(self, goal_id, *, result):
+            updates.append((goal_id, "blocked", result))
+            return True
 
     class FailingDispatcher:
         def submit(self, goal_id, **kw):
@@ -98,7 +126,35 @@ async def test_async_dispatch_failure_blocks_pending_goal_without_local_fallback
     out = await runner.run_goal_in_background_async(41)
 
     assert out == ("error" if isinstance(dispatcher_result, Exception) else None)
-    assert updates == [(41, "blocked", expected_result)]
+    assert updates == []
+
+
+@pytest.mark.asyncio
+async def test_definitive_nonacceptance_does_not_overwrite_other_submissions(monkeypatch):
+    from maverick import world_model
+
+    updates = []
+
+    class FakeWorld:
+        def block_pending_goal(self, goal_id, *, result):
+            updates.append((goal_id, result))
+            return True
+
+    class RejectedDispatcher:
+        def submit_observed(self, goal_id, **kw):
+            return runner.DispatchObservation(
+                goal_id, runner.DispatchState.NOT_ACCEPTED, None,
+                reason="test_preflight",
+            )
+
+        def submit(self, goal_id, **kw):
+            pytest.fail("structured adapter must be called only once")
+
+    monkeypatch.setattr(runner, "_dispatcher", RejectedDispatcher())
+    monkeypatch.setattr(world_model, "open_world", lambda: FakeWorld())
+    monkeypatch.setattr(world_model, "close_world_if_owned", lambda world: None)
+    assert await runner.run_goal_in_background_async(41) is None
+    assert updates == []
 
 
 def test_local_dispatcher_delegates_to_run_goal_in_thread(monkeypatch):

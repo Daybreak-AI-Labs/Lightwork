@@ -214,7 +214,7 @@ def profile_data_enabled_for_page() -> bool:
 
 
 def _principal_ref(request: Request, tenant_id: str) -> str:
-    from .api import _request_actor
+    from .request_identity import request_actor as _request_actor
 
     actor = _request_actor(request)
     return (

@@ -20,6 +20,7 @@ import os
 from typing import Any
 
 from ..fastjson import dumps_compact
+from ..governed_http import guarded_sender as _governed_sender
 from . import Tool, as_bool
 
 log = logging.getLogger(__name__)
@@ -61,7 +62,7 @@ def _op_get(path: str, params: dict) -> str:
         return "ERROR: get requires path"
     import httpx
     base, _t = _config()
-    r = httpx.get(f"{base}{_norm(path)}", headers=_headers(),
+    r = _governed_sender(httpx.get)(f"{base}{_norm(path)}", headers=_headers(),
                   params=params or {}, timeout=30.0)
     try:
         data = r.json()
@@ -79,7 +80,7 @@ def _op_post(path: str, body: dict, confirm: bool) -> str:
         return f"DRY RUN: would POST {_norm(path)}. Re-run with confirm=true."
     import httpx
     base, _t = _config()
-    r = httpx.post(f"{base}{_norm(path)}", headers=_headers(),
+    r = _governed_sender(httpx.post)(f"{base}{_norm(path)}", headers=_headers(),
                    json=body or {}, timeout=30.0)
     try:
         data = r.json()

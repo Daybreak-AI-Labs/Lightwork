@@ -52,7 +52,6 @@ from fastapi.responses import (
     Response,
     StreamingResponse,
 )
-from fastapi.templating import Jinja2Templates
 from maverick import a2a
 from maverick.flow.payloads import FlowPayloadError
 from maverick.oidc import VerifiedPrincipal
@@ -124,6 +123,7 @@ from .draft_api import context_for as _conversation_context
 from .draft_api import page_context as _draft_page_context
 from .draft_api import router as draft_router
 from .employee_activation import router as employee_activation_router
+from .flow_dependencies import _services as _flow_services
 from .health_routes import (
     health_response as _health_response,
 )
@@ -156,9 +156,21 @@ from .route_identity import (
 from .settings_experience import router as settings_experience_router
 from .settings_runtime_status import router as settings_runtime_router
 from .specialist_drafts_api import router as specialist_drafts_router
-from .static_asset_versioning import AssetVersionExtension, cache_response
+from .static_asset_versioning import AssetVersionExtension, AssetVersions, StaticCacheMiddleware
 from .task_diagnostics import router as task_diagnostics_router
 from .task_handoffs_api import router as task_handoffs_router
+from .template_runtime import (
+    _format_datetime as _format_datetime,
+)
+from .template_runtime import (
+    _template_bytecode_cache as _template_bytecode_cache,
+)
+from .template_runtime import (
+    _Templates as _Templates,
+)
+from .template_runtime import (
+    _templates_auto_reload as _templates_auto_reload,
+)
 from .workspace_erasure_api import router as workspace_erasure_router
 
 _MAX_USER_SPEND_METRIC_SERIES = _health_routes.MAX_USER_SPEND_METRIC_SERIES
@@ -198,107 +210,11 @@ if not any(getattr(item, "_lightwork_callback_redaction", False) for item in _ac
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 
 
-def _templates_auto_reload() -> bool:
-    """Whether Jinja re-checks template files on every render.
-
-    Off outside development: with 120+ templates the per-render stat calls
-    and recompiles are pure overhead, and a deployment changes templates only
-    by upgrading the package (a restart). ``MAVERICK_DEBUG=1``, the
-    ``MAVERICK_TEMPLATE_AUTO_RELOAD`` environment variable or
-    ``[dashboard] template_auto_reload = true`` turn it on for template work.
-    """
-    if os.environ.get("MAVERICK_DEBUG", "").strip():
-        return True
-    from maverick.env_setting import env_or_config
-
-    raw = env_or_config("MAVERICK_TEMPLATE_AUTO_RELOAD", "dashboard",
-                        "template_auto_reload", "0") or "0"
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _template_bytecode_cache():
-    """Compiled-template cache under ``MAVERICK_HOME`` (fail-open: ``None``).
-
-    Jinja compiles each template on first use; the first page after a start
-    paid ~1.2 s compiling the shell, the page finder and the page itself. The
-    on-disk cache is keyed on the template source checksum, so an upgraded
-    template is recompiled, never served stale.
-    """
-    try:
-        from jinja2 import FileSystemBytecodeCache
-        from maverick.paths import maverick_home
-
-        cache_dir = maverick_home() / "cache" / "templates"
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        return FileSystemBytecodeCache(str(cache_dir))
-    except Exception:  # pragma: no cover - an unwritable home just compiles per process
-        log.debug("template bytecode cache unavailable", exc_info=True)
-        return None
-
-
-class _Templates(Jinja2Templates):
-    """Page templates whose shell reads the deployment configuration once.
-
-    The context processors (navigation, theme, help, drafts, search, ...) and
-    the template each asked the configuration again: about 60 reads per page.
-    One render is one ``config.single_read()``; the route's own gates ran
-    before it with their own reads, and the next page reads the files again.
-    """
-
-    def TemplateResponse(self, *args, **kwargs):  # noqa: N802 -- Starlette's name
-        from maverick.config import single_read
-
-        with single_read():
-            return super().TemplateResponse(*args, **kwargs)
-
-
 templates = _Templates(directory=str(TEMPLATES_DIR))
 # Starlette builds the Environment itself; both are plain Environment
 # attributes read at get_template time.
 templates.env.auto_reload = _templates_auto_reload()
 templates.env.bytecode_cache = _template_bytecode_cache()
-
-
-def _format_datetime(ts, mode: str = "relative"):
-    """Jinja filter: epoch seconds or ISO 8601 text -> a ``<time>`` the viewer
-    reads in their zone.
-
-    The server text is the full date, time and zone ("4 Oct 2026, 14:01 UTC"),
-    so a page without JavaScript still says when; ``lightwork-ui.js``
-    (``mvFormatTimes``) then rewrites it in the viewer's time zone -- relative
-    with the absolute time on hover (default), absolute with
-    ``mode="absolute"``, or the calendar date alone with ``mode="date"`` (a
-    ``YYYY-MM-DD`` value stays that calendar day). Never a bare ``HH:MM:SS``,
-    an ISO string or a raw epoch.
-    """
-    import datetime as _dt
-
-    from markupsafe import Markup, escape
-
-    if ts is None or ts == "":
-        return "-"
-    if mode == "date" and isinstance(ts, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", ts.strip()):
-        try:
-            day = _dt.date.fromisoformat(ts.strip())
-        except ValueError:
-            return str(ts)
-        return Markup(f'<time datetime="{day.isoformat()}" data-mv-time="{day.isoformat()}"'
-                      f' data-mv-time-mode="date">{_plain_labels.day_text(day)}</time>')
-    try:
-        if isinstance(ts, str) and not re.fullmatch(r"\s*-?\d+(?:\.\d+)?\s*", ts):
-            when = _dt.datetime.fromisoformat(ts.strip().replace("Z", "+00:00"))
-            when = (when if when.tzinfo else when.replace(tzinfo=_dt.timezone.utc)).astimezone(_dt.timezone.utc)
-            stamp = when.timestamp()
-        else:
-            stamp = float(ts)
-            when = _dt.datetime.fromtimestamp(stamp, tz=_dt.timezone.utc)
-    except (TypeError, ValueError, OverflowError, OSError):
-        return str(ts)
-    text = _plain_labels.datetime_text(stamp, date_only=mode == "date")
-    return Markup(
-        f'<time datetime="{when.isoformat()}" data-mv-time="{stamp:.3f}"'
-        f' data-mv-time-mode="{escape(mode)}">{text}</time>'
-    )
 
 
 templates.env.filters["datetime"] = _format_datetime
@@ -345,41 +261,14 @@ templates.env.globals.setdefault("dir", "ltr")
 # Content-versioned static URLs refresh when bundled file metadata changes.
 # Matching public versions may be cached for a year; canonical/stale script
 # and stylesheet URLs revalidate. Missing files are checked again next time.
-_SHELL_STATIC_DIR = Path(__file__).parent / "static"
-_STATIC_VERSIONS: dict[str, tuple[tuple, str]] = {}
+_asset_versions = AssetVersions(Path(__file__).parent / "static")
 STATIC_IMMUTABLE_CACHE = "public, max-age=31536000, immutable"
 STATIC_SHORT_CACHE = "public, max-age=300"
 
 
 def static_version(name: str) -> str:
-    """Content hash cached against file identity, size and modification times.
-
-    An unreadable/changing file stays unversioned and is retried next time.
-    Public page controllers then use native revalidation rather than immutable
-    caching; other static routes retain their existing native cache policy.
-    """
-    if not name or "/" in name or "\\" in name or name.startswith("."):
-        return ""
-    path = _SHELL_STATIC_DIR / name
-    try:
-        before = path.stat()
-        identity = (str(path), before.st_dev, before.st_ino, before.st_size,
-                    before.st_mtime_ns, before.st_ctime_ns)
-        cached = _STATIC_VERSIONS.get(name)
-        if cached is not None and cached[0] == identity:
-            return cached[1]
-        contents = path.read_bytes()
-        after = path.stat()
-        if identity != (str(path), after.st_dev, after.st_ino, after.st_size,
-                        after.st_mtime_ns, after.st_ctime_ns) or len(contents) != after.st_size:
-            _STATIC_VERSIONS.pop(name, None)
-            return ""
-        version = hashlib.sha256(contents).hexdigest()[:8]
-        _STATIC_VERSIONS[name] = identity, version
-        return version
-    except OSError:
-        _STATIC_VERSIONS.pop(name, None)
-        return ""
+    """Return the current content hash for a bundled public asset."""
+    return _asset_versions.version(name)
 
 
 def static_url(name: str) -> str:
@@ -416,41 +305,6 @@ def _suggestions_enabled() -> bool:
 
 
 templates.env.globals["suggestions_enabled"] = _suggestions_enabled
-
-
-class StaticCacheMiddleware:
-    """Cache matching public asset versions; revalidate public page controllers.
-
-    Public fixed script/style routes are admitted normally before conditional
-    responses; all private, denied and unknown assets keep native behavior.
-    """
-
-    def __init__(self, app) -> None:
-        self.app = app
-
-    async def __call__(self, scope, receive, send) -> None:
-        if scope.get("type") != "http" or not scope.get("path", "").startswith("/static/"):
-            await self.app(scope, receive, send)
-            return
-        name = scope["path"].rsplit("/", 1)[-1]
-        query = scope.get("query_string", b"").decode("latin-1")
-        unchanged = False
-        async def send_cached(message) -> None:
-            nonlocal unchanged
-            if message.get("type") == "http.response.start":
-                # Route authorization and any file-response wait happened first.
-                wanted = static_version(name)
-                immutable = bool(wanted) and any(
-                    part == f"v={wanted}" for part in query.split("&")
-                )
-                message, unchanged = cache_response(scope, message, wanted, immutable)
-            elif unchanged:
-                if message.get("type") == "http.response.pathsend" or not message.get("more_body", False):
-                    await send({"type": "http.response.body", "body": b""})
-                return
-            await send(message)
-
-        await self.app(scope, receive, send_cached)
 
 
 from .i18n import t as _i18n_t  # noqa: E402
@@ -635,10 +489,10 @@ def _page_role(request: Request, *, global_scope: bool = False) -> str | None:
 
 def _switched_off_pages() -> frozenset[str]:
     """Registry pages whose in-app module switch is off right now: the same
-    effective gate chain as each page's banner (api._module_switch_enabled),
+    effective gate chain as each page's banner (module_activation._module_switch_enabled),
     with every enable gate read once per render."""
     from . import ui_visibility
-    from .api import _MODULE_SWITCHES, _load_module_config, _module_path_enabled
+    from .module_activation import _MODULE_SWITCHES, _load_module_config, _module_path_enabled
 
     try:
         loaded = _load_module_config()
@@ -691,8 +545,8 @@ def _nav_context(request: Request) -> dict:
 
 def _nav_context_now(request: Request) -> dict:
     from . import ui_visibility
-    from .api import _shared_halt_backend
     from .auth import api_key_permissions, api_key_scopes
+    from .halt_policy import shared_halt_backend as _shared_halt_backend
 
     role = _page_role(request)
     scope_roles = {"global": _page_role(request, global_scope=True)}
@@ -1617,6 +1471,7 @@ app = FastAPI(
     # The request span (below) is the server span; see request_spans.
     **request_spans.fastapi_telemetry_kwargs(),
 )
+app.state.flow_dependencies = _flow_services()
 from .administration_document_access_composition import (  # noqa: E402
     attach_administration_document_access_composition,
 )
@@ -1987,7 +1842,7 @@ def _compress_enabled() -> bool:
 # middleware skips text/event-stream and already-compressed media types.
 # Level 6 (zlib's default) instead of Starlette's 9: on the rendered pages
 # it halves the per-response CPU cost for a 1-3% larger body.
-app.add_middleware(StaticCacheMiddleware)
+app.add_middleware(StaticCacheMiddleware, version_for=static_version)
 if _compress_enabled():
     from starlette.middleware.gzip import GZipMiddleware
 
@@ -4583,13 +4438,18 @@ async def learning_page(request: Request) -> HTMLResponse:
     per-tenant judgement the workforce has accumulated (Operating Record +
     grounded outcomes + self-taught capabilities). Read-only; same numbers as
     /api/v1/learning."""
-    from .api import _learning_snapshot
+    from . import auth
+    from .learning_snapshot import learning_snapshot
 
+    snap = learning_snapshot(
+        request, world_factory=_world, owner_filter=goal_owner_filter,
+        permission_check=auth.has_global_permission,
+    )
     return templates.TemplateResponse(
         request,
         "learning.html",
         {
-            "snap": _learning_snapshot(request),
+            "snap": snap,
             "learning_can_manage": has_global_permission(request, "admin"),
             "agent_feedback": _agent_feedback_summary(),
             "flow_feedback": _flow_feedback_summary(),
@@ -8176,8 +8036,8 @@ async def agents_page(request: Request) -> HTMLResponse:
         from maverick.domain import rejected_workspace_domains
         from maverick.domain_edit import list_agents, rejected_override_view, resolved_view
 
-        from .api import pack_editing_denial
         from .auth import caller_suites
+        from .editor_policy import pack_editing_denial
 
         editable = pack_editing_denial(request) is None
         # Job-function scoping: mirror GET /api/v1/agents — a caller with a
@@ -13404,7 +13264,7 @@ def _goal_deliverable(g, *, strict: bool = False):
 
 def _require_chat_answer_download(w, goal) -> None:
     """Apply the persisted deliverable release policy to a saved-answer export."""
-    from .api import _goal_gate
+    from .deliverable_policy import goal_gate as _goal_gate
 
     if goal.status in ("blocked", "failed"):
         raise HTTPException(status_code=409, detail="this task stopped before producing an answer to download")
@@ -13443,7 +13303,7 @@ def _chat_answer_text(goal) -> str:
 
 
 def _historical_chat_answer_text(w, goal, turn) -> str:
-    from .api import _goal_gate
+    from .deliverable_policy import goal_gate as _goal_gate
 
     if goal.status in ("blocked", "failed"):
         raise HTTPException(status_code=409, detail="this task stopped before producing an answer to download")
@@ -15032,7 +14892,7 @@ async def workflow_builder_page(
     # an existing pack remains the admin-only control-plane boundary. Compute
     # this before loading the requested agent so a non-admin deep-link cannot
     # receive pack internals embedded in page JavaScript.
-    from .api import pack_editing_denial
+    from .editor_policy import pack_editing_denial
 
     pack_editing_allowed = pack_editing_denial(request) is None
     edit_agent_denied = str(edit_agent or "") if edit_agent and not pack_editing_allowed else ""

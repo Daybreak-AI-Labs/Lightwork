@@ -82,3 +82,14 @@ def test_view_image_returns_bytes_and_mime_on_normal_body(monkeypatch):
     _patch(monkeypatch, resp)
     out = vi._load_image("https://example.com/ok.png")
     assert out == (b"\x89PNGdata", "image/png")
+def test_local_image_uses_the_supplied_workspace(tmp_path, monkeypatch):
+    from maverick.tools.view_image import _load_image
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "image.png").write_bytes(b"workspace image")
+    (tmp_path / "outside.png").write_bytes(b"outside image")
+    monkeypatch.chdir(tmp_path)
+
+    assert _load_image("image.png", workdir=workspace) == (b"workspace image", "image/png")
+    assert _load_image("../outside.png", workdir=workspace) is None

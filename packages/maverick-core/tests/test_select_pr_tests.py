@@ -138,6 +138,16 @@ def test_deleted_test_file_selects_nothing_to_run(tree):
     assert _select(tree, "packages/maverick-dashboard/tests/test_gone.py")["mode"] == "none"
 
 
+def test_test_only_changes_do_not_scan_all_test_contents(tree, monkeypatch):
+    def unexpected_scan(root):
+        raise AssertionError("test-only selection must not scan the entire test tree")
+
+    monkeypatch.setattr(select_pr_tests, "test_files", unexpected_scan)
+    result = _select(tree, "packages/maverick-dashboard/tests/test_app.py")
+    assert result["mode"] == "paths"
+    assert result["paths"] == ["packages/maverick-dashboard/tests/test_app.py"]
+
+
 def test_other_files_select_the_tests_that_name_them(tree):
     claims = ["packages/maverick-core/tests/test_claims_docs.py"]
     by_path = _select(tree, "docs/OPEN_ITEMS.md")
@@ -291,6 +301,44 @@ def test_git_range_is_the_merge_base_to_head_change_set(repo):
     # names so tests naming either are selected.
     assert sorted(changed) == sorted(["README.md", "READ_ME.md", "docs/OPEN_ITEMS.md"])
     assert _select(repo, *changed)["paths"] == ["packages/maverick-core/tests/test_claims_docs.py"]
+
+
+def test_git_range_preserves_non_ascii_paths_for_full_suite_selection(repo):
+    _git(repo, "checkout", "-q", "feature")
+    path = repo / "packages/maverick-core/maverick/caf\u00e9.py"
+    path.write_text("value = 1\n", encoding="utf-8")
+    _git(repo, "add", str(path.relative_to(repo)))
+    _git(repo, "commit", "-q", "-m", "add non-ascii kernel path")
+
+    changed, _merge_base = select_pr_tests.changed_files_from_git("main", "feature", repo)
+
+    assert "packages/maverick-core/maverick/caf\u00e9.py" in changed
+    assert _select(repo, *changed)["mode"] == "full"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows does not support newline in filenames")
+def test_git_ambiguous_path_falls_back_to_full_suite(repo):
+    _git(repo, "checkout", "-q", "feature")
+    path = repo / "docs" / "new\nline.md"
+    path.write_text("# documentation\n", encoding="utf-8")
+    _git(repo, "add", str(path.relative_to(repo)))
+    _git(repo, "commit", "-q", "-m", "add unusual path")
+
+    changed, reason = select_pr_tests.changed_files_from_git("main", "feature", repo)
+
+    assert changed is None
+    assert "full suite" in reason
+
+
+def test_git_undecodable_path_falls_back_to_full_suite(repo, monkeypatch):
+    def undecodable(*args, **kwargs):
+        raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid byte")
+
+    monkeypatch.setattr(select_pr_tests.subprocess, "run", undecodable)
+    changed, reason = select_pr_tests.changed_files_from_git("main", "feature", repo)
+
+    assert changed is None
+    assert "could not diff" in reason
 
 
 def test_git_failure_selects_the_full_suite(repo):

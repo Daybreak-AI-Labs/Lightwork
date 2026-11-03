@@ -8,6 +8,7 @@ const vm = require("node:vm");
 const templates = path.resolve(__dirname, "../../maverick_dashboard/templates");
 const readTemplate = name => fs.readFileSync(path.join(templates, name), "utf8").replace(/\r\n/g, "\n");
 const FDCore = require(path.join(templates, "flow_designer_core.js"));
+const FDSchedule = require(path.join(templates, "flow_designer_schedule.js"));
 
 async function receiveTemplateFixture(draft, existing = {}, serverContext = "ctx") {
   const details = { open: false }, title = { value: existing.title || "" };
@@ -94,7 +95,7 @@ function scheduleFixture(value = "") {
     "fd-sched-time-row": { hidden: true }, "fd-sched-tz-row": { hidden: true },
   };
   // A changed timetable is one undoable edit (the designer's pushHistory).
-  const context = { Intl, document: { getElementById: id => fields[id], querySelectorAll: () => days }, edits: 0 };
+  const context = { Intl, FDSchedule, document: { getElementById: id => fields[id], querySelectorAll: () => days }, edits: 0 };
   context.pushHistory = () => { context.edits += 1; };
   const source = readTemplate("flow_designer.js");
   vm.runInNewContext(source.slice(source.indexOf("  // ---- schedule picker"),

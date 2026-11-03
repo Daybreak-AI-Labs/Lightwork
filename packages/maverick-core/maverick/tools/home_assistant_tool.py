@@ -19,6 +19,7 @@ import logging
 import os
 from typing import Any
 
+from ..governed_http import guarded_sender as _governed_sender
 from . import Tool, as_bool
 
 log = logging.getLogger(__name__)
@@ -59,7 +60,7 @@ def _headers() -> dict[str, str]:
 def _get(path: str) -> tuple[int, Any]:
     import httpx
     url, _ = _config()
-    r = httpx.get(f"{url}{path}", headers=_headers(), timeout=15.0)
+    r = _governed_sender(httpx.get)(f"{url}{path}", headers=_headers(), timeout=15.0)
     try:
         return r.status_code, r.json()
     except ValueError:
@@ -69,7 +70,7 @@ def _get(path: str) -> tuple[int, Any]:
 def _post(path: str, body: dict) -> tuple[int, Any]:
     import httpx
     url, _ = _config()
-    r = httpx.post(f"{url}{path}", headers=_headers(),
+    r = _governed_sender(httpx.post)(f"{url}{path}", headers=_headers(),
                    json=body, timeout=15.0)
     try:
         return r.status_code, r.json()

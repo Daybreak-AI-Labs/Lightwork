@@ -3,7 +3,7 @@
 # The performance-critical engine is written in Rust; the ecosystem stays in
 # Python + TypeScript. One pure-logic core crate (`mvk-scan`) is exposed to
 # BOTH runtimes via thin bindings:
-#   - `mvk-scan-py`   -> PyO3 module `maverick_native` (Python; GIL-free hot path)
+#   - `mvk-scan-py`   -> PyO3 module `maverick_native` (Python)
 #   - `mvk-scan-wasm` -> wasm-bindgen package (TypeScript / edge / Workers)
 #
 # Pilot module: the unicode safety scanner (pure, security-critical, runs on

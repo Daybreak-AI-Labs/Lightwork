@@ -298,7 +298,9 @@ def test_complexity_waivers_do_not_grow():
     waivers = 0
     for root in ("packages", "apps"):
         for path in (REPO_ROOT / root).rglob("*.py"):
-            if "/tests/" in path.as_posix() or "/.venv/" in path.as_posix():
+            if {"tests", ".venv", "build", "node_modules", "target"}.intersection(
+                path.relative_to(REPO_ROOT / root).parts
+            ):
                 continue
             waivers += path.read_text(encoding="utf-8", errors="ignore").count("noqa: C901")
     assert waivers <= COMPLEXITY_WAIVER_CEILING, (

@@ -2,6 +2,22 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { source } = require('./helpers.cjs');
 
+test('cancelled write settles with no automatic replay even if transport ignores abort', async () => {
+  const contract = require('../../client-contract-tests/contracts/goal-submission-recovery-v1.json');
+  let calls = 0, resolveLate;
+  const api = source('src/api.ts', {fetch: () => {
+    calls++; return new Promise(resolve => { resolveLate = resolve; });
+  }});
+  const controller = new AbortController();
+  const pending = api.beginPairing('https://dashboard.example.test', 'Device', controller.signal);
+  const rejected = assert.rejects(pending, error => error.kind === 'cancelled');
+  controller.abort();
+  await rejected;
+  resolveLate(new Response('{"pairing_token":"late"}', {status: 200}));
+  await Promise.resolve();
+  assert.equal(calls, contract.write_count_after_interruption);
+});
+
 test('legacy invalid addresses cannot send a token before settings are corrected', async () => {
   const api = source('src/api.ts', { fetch: () => assert.fail('invalid connection must never request') });
   for (const baseUrl of ['http://remote.example.test', 'ftp://localhost',

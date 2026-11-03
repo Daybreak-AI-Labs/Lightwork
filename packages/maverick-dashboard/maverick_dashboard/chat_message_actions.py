@@ -15,7 +15,7 @@ from maverick.governed_operations import digest
 from maverick.knowledge_task_context import SourceContextUnavailable
 from maverick.paths import current_tenant_id_strict
 
-from . import api, auth
+from . import _shared, api, auth
 from .api_flow_operator_review import _workspace_authority
 from .api_schemas import GoalIn
 from .draft_api import context_for
@@ -75,11 +75,11 @@ def _source(request, goal, action, at_turn=None, *, connection=None):
         if (value.owner or "") != (auth.caller_principal(request) or ""):
             raise HTTPException(404, "Only your own conversation can be continued here.")
         from maverick.task_handoffs import closure
-        if closure(api._world(), value.id):
+        if closure(_shared._world(), value.id):
             raise HTTPException(409, "This task was handed off and cannot be copied into new work. Open its handoff to review current responsibilities.")
     try:
         with auth.fresh_configuration():
-            return native.source(api._world(), goal, action, at_turn=at_turn,
+            return native.source(_shared._world(), goal, action, at_turn=at_turn,
                 owner=auth.caller_principal(request) or "", authorize=authorize, connection=connection)
     except (PermissionError, SourceContextUnavailable) as exc:
         raise HTTPException(403, "A copied source is no longer permitted for this account. Private conversation choices must be cleared; open currently permitted work.") from exc
@@ -142,7 +142,7 @@ def original(request, token):
     before = authority(request, value["authority"]["context"])
     if before["actor"] != value["authority"]["actor"]:
         raise HTTPException(404, "This original request belongs to another account.")
-    receipt = SubmissionStore(api._world()).lookup(token=value["operation"], owner=before["actor"])
+    receipt = SubmissionStore(_shared._world()).lookup(token=value["operation"], owner=before["actor"])
     if receipt is None:
         return {"context": before["context"], "confirmed": False,
             "message": "This original request has no confirmed admission. It may still be in flight. Nothing was repeated; keep this request and check again."}
@@ -150,7 +150,7 @@ def original(request, token):
                        "answer_only": value["answer_only"], "caps": value["caps"], "admission": _admission(value)})
     if receipt["fingerprint"] != expected:
         raise HTTPException(409, "This original identity belongs to a different request.")
-    goal = api._world().get_goal(receipt["goal_id"])
+    goal = _shared._world().get_goal(receipt["goal_id"])
     if goal is None or goal.owner != before["actor"]:
         raise HTTPException(409, "The retained admission's conversation is unavailable. Nothing was repeated.")
     authority(request, before["context"])
@@ -195,7 +195,7 @@ def apply(request, token):
                     or time.time() >= value["expires"]):
                 raise HTTPException(409, "This review expired or your access changed while waiting. Nothing was started; review current choices again.")
         try:
-            receipt = native.create(api._world(), value["source"], token=value["operation"],
+            receipt = native.create(_shared._world(), value["source"], token=value["operation"],
                 message=value["message"], answer_only=value["answer_only"], caps=value["caps"],
                 admission=_admission(value), before_create=guard)
         except SubmissionConflict as exc:
@@ -206,7 +206,7 @@ def apply(request, token):
 
             from .attachment_submission import dispatch
             caps = value["caps"]
-            background.add_task(dispatch, api._world(), receipt, run_goal_in_background_async, receipt["goal_id"],
+            background.add_task(dispatch, _shared._world(), receipt, run_goal_in_background_async, receipt["goal_id"],
                 **caps, conversation_id=receipt["detail"]["conversation_id"], channel="dashboard",
                 user_id=auth.execution_user_id_from_request(request), allowed_suites=auth.caller_suites(request))
         return original(request, token), background

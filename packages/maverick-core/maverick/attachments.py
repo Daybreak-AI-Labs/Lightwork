@@ -924,7 +924,9 @@ def _transcribe_media(path: Path) -> str | None:
         out = _run_transcribe({"source": str(path)}, None)
     except Exception:  # noqa: BLE001 -- companion generation never raises
         return None
-    if not out or out.startswith("ERROR"):
+    from .tool_results import tool_result_failed
+
+    if not out or tool_result_failed(out):
         return None
     return out.strip() or None
 

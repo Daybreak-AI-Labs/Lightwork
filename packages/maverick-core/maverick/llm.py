@@ -46,6 +46,11 @@ from .pricing import (
     load_pricing_evidence_pack,
 )
 from .providers.configuration import ProviderConfig as _ProviderClientConfig
+from .providers.conversation import (
+    ConversationMessage,
+    anthropic_messages,
+    assistant_content_from_response,
+)
 from .runtime_overrides import RuntimeOverridesSecurityError
 
 # Latest Claude family as of 2026-05.
@@ -457,6 +462,13 @@ class LLMResponse:
                 self.thinking_blocks = [(self.thinking, self.thinking_signature)]
             else:
                 self.thinking_blocks = []
+
+    def as_conversation_message(self, *, final_dropped_tools: bool = False) -> ConversationMessage:
+        """Return an ordered provider-neutral turn for the next conversation."""
+        return ConversationMessage.from_anthropic({
+            "role": "assistant",
+            "content": assistant_content_from_response(self, final_dropped_tools=final_dropped_tools),
+        })
 
 
 class ModelNotAllowedError(PermissionError):
@@ -2142,7 +2154,7 @@ class LLM:
     def complete(
         self,
         system: str,
-        messages: list[dict],
+        messages: list[dict | ConversationMessage],
         tools: list[dict] | None = None,
         budget: Budget | None = None,
         max_tokens: int = 4096,
@@ -2167,6 +2179,7 @@ class LLM:
         Either option requires a tool-free request; provider tool-compatibility
         resends are not yet individually observed, so tools fail closed here.
         """
+        messages = anthropic_messages(messages)
         _require_tool_free_guarded_dispatch(tools, dispatch_guard, max_physical_attempts)
         _check_dispatch_guard(dispatch_guard)
         raw_requested_model = model or self.model
@@ -2365,7 +2378,7 @@ class LLM:
     async def complete_async(
         self,
         system: str,
-        messages: list[dict],
+        messages: list[dict | ConversationMessage],
         tools: list[dict] | None = None,
         budget: Budget | None = None,
         max_tokens: int = 4096,
@@ -2380,6 +2393,7 @@ class LLM:
         max_physical_attempts: int | None = None,
     ) -> LLMResponse:
         """Async twin of :meth:`complete`, with the same dispatch guards."""
+        messages = anthropic_messages(messages)
         _require_tool_free_guarded_dispatch(tools, dispatch_guard, max_physical_attempts)
         _check_dispatch_guard(dispatch_guard)
         raw_requested_model = model or self.model

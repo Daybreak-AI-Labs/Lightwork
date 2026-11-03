@@ -167,7 +167,7 @@ def analysis_prepare(request, selection, arguments):
 
 
 def analysis_recover(request, selection, arguments, native, operation):
-    from .api import _world
+    from ._shared import _world
     from .auth import caller_principal
     from .goal_submission import lookup_receipt
     try:

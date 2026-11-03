@@ -108,9 +108,11 @@ def _transcribe_track(src: str, tmpdir: str, sandbox) -> str | None:
     )
     if code != 0 or not audio.exists():
         return None
+    from ..tool_results import tool_result_failed
     from .voice import _run_transcribe
+
     text = _run_transcribe({"source": str(audio)})
-    if not text or text.startswith("ERROR"):
+    if not text or tool_result_failed(text):
         return None
     return text
 

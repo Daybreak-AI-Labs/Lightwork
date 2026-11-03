@@ -229,8 +229,8 @@ def _plain_check(check: dict[str, Any], switchable: frozenset[str]) -> dict[str,
 
 def _with_plain_checks(payload: dict[str, Any]) -> dict[str, Any]:
     try:
-        from . import api as _api
-        switchable = frozenset(_api._MODULE_SWITCHES)
+        from .module_activation import _MODULE_SWITCHES
+        switchable = frozenset(_MODULE_SWITCHES)
     except Exception:  # pragma: no cover -- fall back to links only
         switchable = frozenset()
     checks = [_plain_check(check, switchable) for check in payload.get("checks") or []]

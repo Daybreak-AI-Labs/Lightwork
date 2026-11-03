@@ -324,13 +324,33 @@ def _default_reader(config: Mapping[str, Any]) -> Callable[..., str]:
     return read
 
 
-def _remote_id_from(response: str) -> str | None:
-    """Extract the created/updated remote record id, or None if unparseable."""
+def _confirmed_response_text(response: object) -> str | None:
+    """Unwrap explicitly successful responses without reinterpreting content.
 
+    Legacy strings retain their original `ERROR:` convention. Explicit
+    failure/unknown states never become successful merely because their
+    display text looks ordinary.
+    """
+    from .connector_attempts import ConnectorResult
+    from .tool_results import ToolOutcome, ToolResultText, tool_result_failed
+
+    if isinstance(response, (ConnectorResult, ToolOutcome, ToolResultText)):
+        if tool_result_failed(response):
+            return None
+        return response.content if isinstance(response, ToolOutcome) else str(response)
     if not isinstance(response, str) or response.startswith("ERROR:"):
         return None
+    return response
+
+
+def _remote_id_from(response: object) -> str | None:
+    """Extract the created/updated remote record id, or None if unparseable."""
+
+    response_text = _confirmed_response_text(response)
+    if response_text is None:
+        return None
     try:
-        data = json.loads(response)
+        data = json.loads(response_text)
     except ValueError:
         return None
     if not isinstance(data, Mapping):
@@ -348,9 +368,14 @@ def _remote_id_from(response: str) -> str | None:
 
 def _response_is_uncertain(response: Any, *, op: str) -> bool:
     from .connector_attempts import ConnectorResult
+    from .tool_results import ToolOutcome, ToolResultText, tool_result_failed
 
     if isinstance(response, ConnectorResult):
         return response.attempt.outcome_unknown
+    if isinstance(response, (ToolOutcome, ToolResultText)):
+        # A failed/denied mutation may still need reconciliation; explicit
+        # successful data can safely contain reserved legacy text prefixes.
+        return tool_result_failed(response)
     if not isinstance(response, str):
         return True
     if response.startswith("INDETERMINATE:"):
@@ -449,8 +474,9 @@ def _deliver_one(
     except Exception as exc:  # noqa: BLE001 - every failure is recorded, bounded
         response = f"ERROR: writer failed ({type(exc).__name__})"
         uncertain = True
-    succeeded = isinstance(response, str) and not response.startswith("ERROR:")
-    remote_id = _remote_id_from(response) if succeeded else None
+    response_text = _confirmed_response_text(response)
+    succeeded = response_text is not None
+    remote_id = _remote_id_from(response_text) if succeeded else None
 
     def mutate(value: dict[str, Any]) -> None:
         value["payload_sha256"] = payload_sha
@@ -624,11 +650,12 @@ def _attempted_payload(record: dict, config: dict) -> tuple[dict, str]:
     raise GRCSyncStateError("Original delivery content is unavailable; keep the delivery held for review.")
 
 
-def _remote_rows(response: str) -> list[dict]:
-    if not isinstance(response, str) or response.startswith("ERROR:"):
+def _remote_rows(response: object) -> list[dict]:
+    response_text = _confirmed_response_text(response)
+    if response_text is None:
         raise GRCSyncStateError("The external system could not verify the delivery.")
     try:
-        value = json.loads(response)
+        value = json.loads(response_text)
     except (TypeError, ValueError) as exc:
         raise GRCSyncStateError("The external system returned an unreadable record.") from exc
     if isinstance(value, dict) and "result" in value:

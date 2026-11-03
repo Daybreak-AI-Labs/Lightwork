@@ -42,7 +42,7 @@ from maverick.runner import (
     requested_goal_wall_seconds,
 )
 from maverick.runner import (
-    configured_goal_ceiling_dollars as configured_goal_ceiling_dollars,  # used by _api_seams
+    configured_goal_ceiling_dollars as configured_goal_ceiling_dollars,  # public facade compatibility
 )
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import (
@@ -53,7 +53,7 @@ from starlette.responses import (
 )
 
 from . import step_up
-from ._event_stream import TERMINAL_RUN_STATUSES, event_page, replay_cursor
+from ._event_stream import TERMINAL_RUN_STATUSES, replay_cursor
 from ._shared import (
     _any_provider_key_set,
     _get_sse_semaphore,
@@ -121,7 +121,6 @@ from .api_schemas import (
     FulfillmentIdentityIn,
     FulfillmentResponseIn,
     FulfillmentSourceIn,
-    GoalEventOut,
     GoalEventsResponse,
     GoalIn,
     GoalOut,
@@ -244,7 +243,6 @@ from .auth import (
     caller_principal,
     caller_suites,
     can_access_goal,
-    constant_time_equals,
     durable_automation_owner,
     execution_user_id_from_request,
     goal_owner_filter,
@@ -259,7 +257,71 @@ from .auth import (
     stored_automation_identity,
 )
 from .auth import (
-    auth_genuinely_off as auth_genuinely_off,  # used by _api_seams
+    auth_genuinely_off as auth_genuinely_off,  # public facade compatibility
+)
+from .auth import (
+    constant_time_equals as constant_time_equals,
+)
+from .board_data import (
+    _board_day_list as _board_day_list,
+)
+from .board_data import (
+    _board_days as _board_days,
+)
+from .board_data import (
+    _board_oversight as _oversight_board_data,
+)
+from .board_data import (
+    _board_overview as _board_overview,
+)
+from .board_data import (
+    _board_savings as _board_savings,
+)
+from .board_data import (
+    _board_spend as _board_spend,
+)
+from .board_data import (
+    _board_workforce as _board_workforce,
+)
+from .board_data import (
+    _board_workspace as _workspace_board_data,
+)
+from .board_data import (
+    _external_platform_spend as _external_platform_spend,
+)
+from .board_data import (
+    _external_platform_workforce as _external_platform_workforce,
+)
+from .halt_policy import shared_halt_backend as _shared_halt_backend
+from .module_activation import (
+    _MODULE_FINGERPRINT_KEY as _MODULE_FINGERPRINT_KEY,
+)
+from .module_activation import (
+    _MODULE_SWITCHES as _MODULE_SWITCHES,
+)
+from .module_activation import (
+    _load_module_config as _load_module_config,
+)
+from .module_activation import (
+    _module_activation_state as _module_activation_state,
+)
+from .module_activation import (
+    _module_config_fingerprint as _module_config_fingerprint,
+)
+from .module_activation import (
+    _module_path_enable_state as _module_path_enable_state,
+)
+from .module_activation import (
+    _module_path_enabled as _module_path_enabled,
+)
+from .module_activation import (
+    _module_switch_enabled as _module_switch_enabled,
+)
+from .module_activation import (
+    _ModuleConfigurationUnavailable as _ModuleConfigurationUnavailable,
+)
+from .module_activation import (
+    module_activation_enabled as module_activation_enabled,
 )
 from .product_errors import next_action, product_error
 
@@ -291,23 +353,6 @@ def _deliverable_edit_similarity(original: str, revised: str) -> float:
         original = _sample_deliverable_text(original)
         revised = _sample_deliverable_text(revised)
     return difflib.SequenceMatcher(None, original, revised).ratio()
-
-
-def _shared_halt_backend() -> bool:
-    """Resolve whether the shared-store halt is authoritative.
-
-    This is a security decision, so an unreadable backend configuration must
-    propagate to callers rather than silently becoming the less-privileged
-    local path.
-    """
-
-    from maverick.config import config_source_errors, load_config
-    from maverick.world_model_backends import is_postgres_configured
-
-    load_config()
-    if config_source_errors():
-        raise RuntimeError("halt backend configuration is unavailable")
-    return bool(is_postgres_configured())
 
 
 def _halt_backend_or_503() -> bool:
@@ -358,37 +403,10 @@ def _active_cache_context() -> tuple[str, str]:
     return current_tenant_id_strict() or "__shared__", os.fspath(data_dir())
 
 
-def _goal_reason_code(g, open_ids: list[int]) -> str | None:
-    """One stable cause across task details and event polling."""
-    if open_ids:
-        return "awaiting_input"
-    from maverick.stop_reasons import stop_payload
-
-    stop = stop_payload(g.status, g.result)
-    return stop["kind"] if stop else None
-
-
 def _to_goal_out(g, *, limits: dict | None = None) -> GoalOut:
-    from .goal_waiting import open_question_ids
-    from .plain_labels import risk_label
+    from .goal_event_pages import goal_summary
 
-    open_ids = open_question_ids(_world(), g)
-    risk = risk_label(g) or {}
-    return GoalOut(
-        id=g.id,
-        status=g.status,
-        title=g.title,
-        description=g.description,
-        result=g.result,
-        limits=limits,
-        reason_code=_goal_reason_code(g, open_ids),
-        risk_tier=risk.get("tier"),
-        risk_reasons=risk.get("reasons"),
-        needs_input=bool(open_ids),
-        open_question_ids=open_ids,
-        created_at=g.created_at,
-        updated_at=g.updated_at,
-    )
+    return goal_summary(_world(), g, limits=limits)
 
 
 # --- Tenant provisioning (admin only) ----------------------------------------
@@ -617,490 +635,29 @@ def workforce_posture(request: Request) -> dict:
 # ``outcome`` is encrypted at rest, so the outcome mix is counted in Python
 # over the decrypted recent slice.
 
-_BOARD_DAYS = (30, 90, 180, 365)
-
-
-def _board_days(days: int | None) -> int:
-    return days if days in _BOARD_DAYS else 90
-
-
-def _board_day_list(days: int):
-    from datetime import datetime, timedelta, timezone
-
-    # SQLite's date(..., 'unixepoch') buckets timestamps in UTC. Use the same
-    # clock here so late-evening requests west of UTC do not build a local-day
-    # key set that drops today's UTC rows.
-    today = datetime.now(timezone.utc).date()
-    day_list = [today - timedelta(days=i) for i in range(days - 1, -1, -1)]
-    since = datetime.combine(day_list[0], datetime.min.time(), tzinfo=timezone.utc).timestamp()
-    return day_list, since, since - days * 86400
-
-
-def _owner_sql(owner, column: str = "owner"):
-    """(extra WHERE clause, params) for goal-owner scoping."""
-    return ("", ()) if owner is None else (f" AND {column} = ?", (owner,))
-
-
-def _board_overview(w, owner, days: int) -> dict:
-    day_list, since, prev_since = _board_day_list(days)
-    own, params = _owner_sql(owner)
-    by_status = {
-        r[0]: int(r[1])
-        for r in w.query(
-            "SELECT status, COUNT(*) FROM goals WHERE 1=1" + own + " GROUP BY status", params
-        )
-    }
-    daily = {d.isoformat(): {"d": d.isoformat(), "started": 0, "delivered": 0} for d in day_list}
-    for col, key, extra in (
-        ("created_at", "started", ""),
-        ("updated_at", "delivered", " AND status = 'done'"),
-    ):
-        rows = w.query(
-            f"SELECT {w.sql_day_from_epoch(col)} AS day, COUNT(*) FROM goals "
-            f"WHERE {col} >= ?" + extra + own + " GROUP BY day",
-            (since, *params),
-        )
-        for day, n in rows:
-            if day in daily:
-                daily[day][key] += int(n)
-
-    def _count(col: str, lo: float, hi: float, extra: str = "") -> int:
-        return int(
-            w.query(
-                f"SELECT COUNT(*) FROM goals WHERE {col} >= ? AND {col} < ?" + extra + own,
-                (lo, hi, *params),
-            )[0][0]
-        )
-
-    now = time.time()
-    window = {
-        "started": _count("created_at", since, now),
-        "delivered": _count("updated_at", since, now, " AND status = 'done'"),
-        "started_prev": _count("created_at", prev_since, since),
-        "delivered_prev": _count("updated_at", prev_since, since, " AND status = 'done'"),
-    }
-    from maverick.departments import department_title
-    from maverick.domain import suite_for
-
-    domains: dict[str, dict] = {}
-    for dom, total, done in w.query(
-        "SELECT domain, COUNT(*), SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) FROM goals "
-        "WHERE 1=1" + own + " GROUP BY domain",
-        params,
-    ):
-        suite = suite_for(dom or "") if dom else None
-        label = department_title(suite) if suite else "General"
-        row = domains.setdefault(label, {"label": label, "total": 0, "done": 0})
-        row["total"] += int(total)
-        row["done"] += int(done or 0)
-    recent = [
-        {"id": g.id, "title": g.title, "status": g.status, "updated_at": g.updated_at}
-        for g in w.list_goals(owner=owner, limit=12, order="desc")
-    ]
-    return {
-        "totals": {
-            "total": sum(by_status.values()),
-            "active": by_status.get("active", 0),
-            "done": by_status.get("done", 0),
-            "blocked": by_status.get("blocked", 0),
-        },
-        # Every status with its own count, so the page can show queued, failed,
-        # cancelled and draft goals separately instead of lumping the rest.
-        "by_status": by_status,
-        "window": window,
-        "daily": list(daily.values()),
-        "domains": sorted(domains.values(), key=lambda r: r["total"], reverse=True)[:8],
-        "recent": recent,
-    }
-
-
-def _board_spend(w, owner, days: int) -> dict:
-    day_list, since, prev_since = _board_day_list(days)
-    join = (
-        "FROM episodes e JOIN goals g ON e.goal_id = g.id"
-        if owner is not None
-        else "FROM episodes e"
-    )
-    own, params = ("", ()) if owner is None else (" AND g.owner = ?", (owner,))
-    ended = " WHERE e.ended_at IS NOT NULL"
-
-    daily = {d.isoformat(): {"d": d.isoformat(), "cost": 0.0, "runs": 0} for d in day_list}
-    for day, cost, runs in w.query(
-        "SELECT " + w.sql_day_from_epoch("e.started_at") + " AS day, "
-        "SUM(COALESCE(e.cost_dollars, 0)), COUNT(*) "
-        + join
-        + ended
-        + " AND e.started_at >= ?"
-        + own
-        + " GROUP BY day",
-        (since, *params),
-    ):
-        if day in daily:
-            daily[day] = {"d": day, "cost": float(cost or 0), "runs": int(runs)}
-
-    def _tot(lo: float) -> dict:
-        r = w.query(
-            "SELECT COALESCE(SUM(e.cost_dollars), 0), COUNT(*), "
-            "COALESCE(SUM(e.input_tokens), 0), COALESCE(SUM(e.output_tokens), 0), "
-            "COALESCE(SUM(e.tool_calls), 0) "
-            + join
-            + ended
-            + " AND e.started_at >= ? AND e.started_at < ?"
-            + own,
-            (lo, lo + days * 86400 + 1, *params),
-        )[0]
-        return {
-            "dollars": float(r[0]),
-            "runs": int(r[1]),
-            "input_tokens": int(r[2]),
-            "output_tokens": int(r[3]),
-            "tool_calls": int(r[4]),
-        }
-
-    totals, prev = _tot(since), _tot(prev_since)
-    episodes = w.list_episodes(limit=200, owner=owner)
-    outcomes = {"success": 0, "failed": 0, "running": 0}
-    from maverick.episode_reporting import iter_episodes
-    from maverick.workforce_value import _is_done
-    for e in iter_episodes(w, owner=owner, since=since, until=since + days * 86400 + 1):
-        if e.ended_at is None:
-            outcomes["running"] += 1
-        elif _is_done(e.outcome):
-            outcomes["success"] += 1
-        else:
-            outcomes["failed"] += 1
-    per_run = [
-        {"id": e.id, "goal_id": e.goal_id, "cost": float(e.cost_dollars or 0)}
-        for e in episodes[:60]
-    ]
-    top_goals = []
-    for gid, cost, runs in w.query(
-        "SELECT e.goal_id, SUM(COALESCE(e.cost_dollars, 0)) AS c, COUNT(*) "
-        + join
-        + ended
-        + " AND e.started_at >= ?"
-        + own
-        + " GROUP BY e.goal_id ORDER BY c DESC LIMIT 8",
-        (since, *params),
-    ):
-        g = w.get_goal(int(gid)) if gid is not None else None
-        top_goals.append(
-            {
-                "goal_id": gid,
-                "title": g.title if g else f"#{gid}",
-                "cost": float(cost or 0),
-                "runs": int(runs),
-            }
-        )
-    return {
-        "totals": totals,
-        "prev": prev,
-        "daily": list(daily.values()),
-        "outcomes": outcomes,
-        "outcomes_population": "All authorized episode attempts started in the selected period; running attempts are separate from the finished-attempt cost totals.",
-        "per_run": per_run,
-        "top_goals": top_goals,
-        "by_platform": _external_platform_spend(w, owner, since),
-    }
-
-
-def _external_platform_spend(w, owner, since: float) -> list[dict]:
-    """Spend by external-agent platform (bring-your-own-agent runs).
-
-    Forces the episodes⋈goals join unconditionally — the admin/auth-off view
-    passes ``owner is None``, and that is precisely the view where
-    ``agent:*`` rows exist. Individual humans keep owner scoping and simply
-    see an empty segment."""
-    if owner is not None:
-        return []
-    from maverick.external_agents import PLATFORMS, roster
-
-    platform_of = {f"agent:{r['id']}": r["platform"] for r in roster()}
-    if not platform_of:
-        return []
-    agg: dict[str, dict] = {}
-    for own_id, cost, runs in w.query(
-        "SELECT g.owner, SUM(COALESCE(e.cost_dollars, 0)), COUNT(*) "
-        "FROM episodes e JOIN goals g ON e.goal_id = g.id "
-        "WHERE e.ended_at IS NOT NULL AND e.started_at >= ? "
-        "AND g.owner LIKE 'agent:%' GROUP BY g.owner",
-        (since,),
-    ):
-        platform = platform_of.get(str(own_id))
-        if platform is None:
-            continue
-        row = agg.setdefault(
-            platform, {"label": PLATFORMS.get(platform, platform), "cost": 0.0, "runs": 0}
-        )
-        row["cost"] += float(cost or 0)
-        row["runs"] += int(runs)
-    return sorted(agg.values(), key=lambda r: r["cost"], reverse=True)[:8]
-
-
-def _board_workforce(w, owner, days: int) -> dict:
-    from maverick.departments import list_departments
-    from maverick.marketplace.storefront import connector_marketplace
-    from maverick.operating_record import assemble
-    from maverick.outcomes import firm_totals, worker_cards
-
-    _, since, prev_since = _board_day_list(days)
-    own, params = _owner_sql(owner)
-    # One Operating Record for both (each assembly decodes up to 5,000 approvals).
-    records = assemble(w, owner=owner)
-    firm = firm_totals(records).to_dict()
-    cards = worker_cards(w, owner=owner, records=records)
-    depts: dict[str, dict] = {}
-    for c in cards:
-        row = depts.setdefault(
-            c.suite_title or "General",
-            {"label": c.suite_title or "General", "completed": 0, "total": 0, "spend": 0.0},
-        )
-        row["completed"] += c.goals_completed
-        row["total"] += c.goals_total
-        row["spend"] += c.spend_dollars
-
-    def _delivered(lo: float, hi: float) -> int:
-        return int(
-            w.query(
-                "SELECT COUNT(*) FROM goals WHERE status = 'done' "
-                "AND updated_at >= ? AND updated_at < ?" + own,
-                (lo, hi, *params),
-            )[0][0]
-        )
-
-    return {
-        "kpis": {
-            "departments": len(depts),
-            "specialists": sum(d.headcount for d in list_departments()),
-            "connectors": connector_marketplace()["total"],
-            "goals_completed": firm["goals_completed"],
-            "goals_total": firm["goals_total"],
-            "spend_dollars": firm["spend_dollars"],
-            "delivered_window": _delivered(since, time.time()),
-            "delivered_prev": _delivered(prev_since, since),
-        },
-        "depts": sorted(depts.values(), key=lambda r: (r["completed"], r["total"]), reverse=True)[
-            :8
-        ],
-        "leaders": [c.to_dict() for c in cards[:6]],
-        "platforms": _external_platform_workforce(w, owner),
-    }
-
-
-def _external_platform_workforce(w, owner) -> list[dict]:
-    """Goals by external-agent platform for the workforce board. Same
-    admin-view-only rule as the spend segment: individual humans keep owner
-    scoping and see an empty segment."""
-    if owner is not None:
-        return []
-    from maverick.external_agents import PLATFORMS, roster
-
-    platform_of = {f"agent:{r['id']}": r["platform"] for r in roster()}
-    if not platform_of:
-        return []
-    agg: dict[str, dict] = {}
-    for own_id, completed, total, spend in w.query(
-        "SELECT g.owner, "
-        "SUM(CASE WHEN g.status = 'done' THEN 1 ELSE 0 END), COUNT(*), "
-        "(SELECT COALESCE(SUM(e.cost_dollars), 0) FROM episodes e "
-        " JOIN goals g2 ON e.goal_id = g2.id WHERE g2.owner = g.owner) "
-        "FROM goals g WHERE g.owner LIKE 'agent:%' GROUP BY g.owner"
-    ):
-        platform = platform_of.get(str(own_id))
-        if platform is None:
-            continue
-        row = agg.setdefault(
-            platform,
-            {"label": PLATFORMS.get(platform, platform), "completed": 0, "total": 0, "spend": 0.0},
-        )
-        row["completed"] += int(completed or 0)
-        row["total"] += int(total or 0)
-        row["spend"] += float(spend or 0)
-    return sorted(agg.values(), key=lambda r: (r["completed"], r["total"]), reverse=True)[:8]
 
 
 def _board_workspace(department: str) -> dict:
-    """Compact department board (privacy / finance / security): the same
-    assessment records the workspace pages list, rolled into KPIs, a residual-
-    risk mix, a 12-month opened-vs-decided series, and per-framework volume.
-    The deep executive view stays /privacy/board; this is the at-a-glance."""
-    from datetime import datetime, timezone
-
-    from maverick.assessment import custom_template_records, list_saved
-
     from .app import (
         FINANCE_ASSESSMENT_TYPES,
         PRIVACY_ASSESSMENT_TYPES,
         SECURITY_ASSESSMENT_TYPES,
     )
 
-    base = {
+    return _workspace_board_data(department, base={
         "privacy": PRIVACY_ASSESSMENT_TYPES,
         "finance": FINANCE_ASSESSMENT_TYPES,
         "security": SECURITY_ASSESSMENT_TYPES,
-    }[department]
-    types = set(base) | {
-        t
-        for t, rec in custom_template_records().items()
-        if rec.get("department", "privacy") == department
-    }
-    sessions = [x for x in list_saved() if x.get("type") in types]
-
-    kpis = {
-        "total": len(sessions),
-        "open": 0,
-        "needs_more": 0,
-        "approved": 0,
-        "rejected": 0,
-        "due_review": 0,
-    }
-    for x in sessions:
-        st = x.get("status")
-        if st == "pending_review":
-            kpis["open"] += 1
-        elif st in ("needs_more", "needs_answers"):
-            kpis["needs_more"] += 1
-        elif st in kpis:
-            kpis[st] += 1
-        if x.get("review_due"):
-            kpis["due_review"] += 1
-
-    risk = {"high": 0, "medium": 0, "low": 0, "minimal": 0, "unrated": 0}
-    for x in sessions:
-        risk[x.get("residual_risk") if x.get("residual_risk") in risk else "unrated"] += 1
-
-    def _month(ts: float) -> str:
-        d = datetime.fromtimestamp(ts, tz=timezone.utc)
-        return f"{d.year}-{d.month:02d}"
-
-    now = datetime.now(tz=timezone.utc)
-    months: list[str] = []
-    y, m = now.year, now.month
-    for _ in range(12):
-        months.insert(0, f"{y}-{m:02d}")
-        m -= 1
-        if m == 0:
-            y, m = y - 1, 12
-    monthly = {k: {"d": k, "opened": 0, "decided": 0} for k in months}
-    for x in sessions:
-        for field, key in (("created_at", "opened"), ("decided_at", "decided")):
-            ts = x.get(field)
-            if ts and _month(float(ts)) in monthly:
-                monthly[_month(float(ts))][key] += 1
-
-    by_type: dict[str, dict] = {}
-    for x in sessions:
-        row = by_type.setdefault(
-            x.get("type") or "?",
-            {"label": (x.get("type") or "?").replace("_", " "), "total": 0, "approved": 0},
-        )
-        row["total"] += 1
-        if x.get("status") == "approved":
-            row["approved"] += 1
-    return {
-        "kpis": kpis,
-        "risk": risk,
-        "monthly": list(monthly.values()),
-        "types": sorted(by_type.values(), key=lambda r: r["total"], reverse=True)[:6],
-    }
-
-
-def _board_savings(w, owner, days: int) -> dict:
-    """The value board: the same honest math as /savings (client-set
-    assumptions x completed work - agent spend), plus a daily delivered
-    series so the page can show work over time."""
-    from maverick import savings as savings_mod
-    from maverick.config import get_value
-
-    day_list, since, _prev = _board_day_list(days)
-    own, params = _owner_sql(owner)
-    daily = {d.isoformat(): {"d": d.isoformat(), "n": 0} for d in day_list}
-    for day, n in w.query(
-        "SELECT " + w.sql_day_from_epoch("updated_at") + " AS day, COUNT(*) FROM goals "
-        "WHERE status = 'done' AND updated_at >= ?" + own + " GROUP BY day",
-        (since, *params),
-    ):
-        if day in daily:
-            daily[day]["n"] = int(n)
-    report = savings_mod.to_dict(savings_mod.compute(w, window_days=days, cfg=get_value(), owner=owner))
-    return {"report": report, "daily_done": list(daily.values())}
+    }[department])
 
 
 def _board_oversight(w, owner, days: int, request=None) -> dict:
-    """Scoped guardrail metadata with explicit availability for each source."""
-    from datetime import datetime, timedelta, timezone
-
     from .app import _audit_event_visible_to_caller, _is_intervention
 
-    day_list, since, _prev = _board_day_list(days)
-    daily = {d.isoformat(): {"d": d.isoformat(), "n": 0} for d in day_list}
-    by_kind: dict[str, int] = {}
-    total = 0
-    owner_cache = {}
-    sources = {name: {"state": "available", "checked_at": time.time(), "repair_href": href}
-               for name, href in (("audit", "/audit"), ("approvals", "/action-center"), ("halt", "/oversight"))}
-    try:
-        from maverick.audit.export import iter_audit_events
-        from maverick.audit.segments import ReadReport
-
-        since_day = (datetime.now(timezone.utc).date() - timedelta(days=days)).isoformat()
-        report = ReadReport()
-        scanned = 0
-        for e in iter_audit_events(since=since_day, report=report):
-            scanned += 1
-            if scanned > 100_000:
-                sources["audit"]["state"] = "partial"
-                break
-            if not _is_intervention(e) or not _audit_event_visible_to_caller(
-                e, principal=owner, owner_filter=owner, world=w, goal_owner_cache=owner_cache,
-            ):
-                continue
-            total += 1
-            kind = str(e.get("kind") or "event")
-            by_kind[kind] = by_kind.get(kind, 0) + 1
-            ts = e.get("ts")
-            if ts:
-                day = datetime.fromtimestamp(float(ts), tz=timezone.utc).date().isoformat()
-                if day in daily:
-                    daily[day]["n"] += 1
-        if report.as_dict().get("failures"):
-            sources["audit"]["state"] = "partial"
-    except Exception:  # pragma: no cover -- fail-soft like the page
-        total = None
-        sources["audit"]["state"] = "unavailable"
-    try:
-        clauses = "a.status = 'pending'"
-        values = ()
-        if owner is not None:
-            clauses += " AND COALESCE(a.requested_by, '') = ?"
-            values = (owner,)
-        if request is None:
-            pending = int(w.query("SELECT COUNT(*) FROM approvals a WHERE " + clauses, values)[0][0])
-        else:
-            from .content_access import can_read_approval
-            pending = sum(can_read_approval(request, row, world=w) for row in w.pending_approvals())
-    except Exception:  # pragma: no cover
-        pending = None
-        sources["approvals"]["state"] = "unavailable"
-    try:
-        halted = bool(w.active_halt())
-    except Exception:  # pragma: no cover
-        halted = None
-        sources["halt"]["state"] = "unavailable"
-    kinds = sorted(
-        ({"kind": k.replace("_", " "), "n": n} for k, n in by_kind.items()),
-        key=lambda r: r["n"],
-        reverse=True,
-    )[:8]
-    return {
-        "interventions": total,
-        "by_kind": kinds,
-        "daily": list(daily.values()),
-        "pending_approvals": pending,
-        "halted": halted,
-        "sources": sources,
-        "degraded": any(source["state"] != "available" for source in sources.values()),
-    }
+    return _oversight_board_data(
+        w, owner, days, request=request,
+        visible=_audit_event_visible_to_caller, is_intervention=_is_intervention,
+    )
 
 
 @router.get("/dashboards/{board}")
@@ -2125,32 +1682,9 @@ def goal_events(
     if g is None:
         raise HTTPException(status_code=404, detail="no such goal")
     assert_goal_access(request, g)
-    from maverick.stop_reasons import stop_payload
+    from .goal_event_pages import goal_event_page
 
-    since = replay_cursor(since)
-    events, has_more = event_page(w, goal_id, since, limit)
-    from .goal_waiting import open_question_ids
-
-    open_ids = open_question_ids(w, g)
-    stop = stop_payload(g.status, g.result)
-    from ._event_stream import event_payload
-
-    return GoalEventsResponse(
-        status=g.status,
-        result=stop["message"] if stop else g.result,
-        reason_code=_goal_reason_code(g, open_ids),
-        stop=stop,
-        next_id=events[-1].id if events else since,
-        events=[
-            GoalEventOut(**event_payload(e))
-            for e in events
-        ],
-        has_more=has_more,
-        # A goal waiting for an answer is blocked but not finished.
-        terminal=g.status in TERMINAL_RUN_STATUSES and not has_more and not open_ids,
-        needs_input=bool(open_ids),
-        open_question_ids=open_ids,
-    )
+    return goal_event_page(w, g, since=since, limit=limit)
 
 
 def _sse_event(e) -> str:
@@ -2346,116 +1880,30 @@ async def upload_attachment(
 
 
 def _privacy_auth_genuinely_off() -> bool:
-    """Strict auth-off decision for privacy credential and mutation boundaries."""
-    if _dashboard_token():
-        return False
-    try:
-        from maverick.config import config_source_errors, load_config
+    from .request_identity import privacy_auth_genuinely_off
 
-        config = load_config() or {}
-        if config_source_errors():
-            return False
-    except Exception:
-        return False
-    if not isinstance(config, dict):
-        return False
-
-    def _env_override(name: str) -> bool | None:
-        raw = os.environ.get(name)
-        if raw is None or not raw.strip():
-            return None
-        value = raw.strip().lower()
-        if value in {"1", "true", "yes", "on"}:
-            return True
-        if value in {"0", "false", "no", "off"}:
-            return False
-        # Invalid auth policy is uncertainty, never permission to use ambient
-        # credentials or mint an unattributed privacy mutation.
-        return True
-
-    dashboard = config.get("dashboard") or {}
-    auth = config.get("auth") or {}
-    if not isinstance(dashboard, dict) or not isinstance(auth, dict):
-        return False
-
-    configured = []
-    for env_name, section_value in (
-        ("MAVERICK_DASHBOARD_REQUIRE_AUTH", dashboard.get("require_auth", False)),
-        ("MAVERICK_DASHBOARD_INVITES", dashboard.get("invites", False)),
-    ):
-        override = _env_override(env_name)
-        if override is None:
-            if not isinstance(section_value, bool):
-                return False
-            configured.append(section_value)
-        else:
-            configured.append(override)
-
-    oidc = auth.get("oidc") or {}
-    proxy = auth.get("proxy") or {}
-    saml = auth.get("saml") or {}
-    if not all(isinstance(section, dict) for section in (oidc, proxy, saml)):
-        return False
-    for env_name, section in (
-        ("MAVERICK_OIDC_ENABLED", oidc),
-        ("MAVERICK_PROXY_AUTH", proxy),
-    ):
-        override = _env_override(env_name)
-        if override is None:
-            enabled = section.get("enabled", False)
-            if not isinstance(enabled, bool):
-                return False
-            configured.append(enabled)
-        else:
-            configured.append(override)
-    # SAML has no enable flag: any configured surface is an auth mechanism;
-    # a partial section is still uncertainty and therefore denies ambient use.
-    configured.append(bool(saml))
-    return not any(configured)
+    return privacy_auth_genuinely_off(dashboard_token=_dashboard_token)
 
 
 def _request_identity(request: Request) -> str | None:
-    """Verified identity; ``None`` only in genuine local auth-off mode."""
-    principal = str(caller_principal(request) or "")
-    if principal:
-        return principal
-    expected = _dashboard_token()
-    if expected:
-        authorization = request.headers.get("authorization", "")
-        supplied = authorization[7:] if authorization.startswith("Bearer ") else ""
-        if supplied and constant_time_equals(supplied, expected):
-            return "auth:dashboard-token"
-        raise HTTPException(
-            status_code=401,
-            detail="authenticated caller identity required",
-        )
-    if _privacy_auth_genuinely_off():
-        return None
-    raise HTTPException(
-        status_code=401,
-        detail="authenticated caller identity required",
+    from .request_identity import request_identity
+
+    return request_identity(
+        request, caller=caller_principal, dashboard_token=_dashboard_token,
+        auth_off=_privacy_auth_genuinely_off,
     )
 
 
 def _request_actor(request: Request) -> str:
-    """Stable attributable actor for dashboard-originated durable writes."""
-    identity = _request_identity(request) or "local:dashboard"
-    if len(identity) <= 256:
-        return identity
-    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
-    return f"{identity[:183]}#sha256:{digest}"
+    from .request_identity import request_actor
+
+    return request_actor(request, identity=_request_identity)
 
 
 def _document_source_principal(request: Request) -> str | None:
-    """Credential-use principal; local auth-off keeps operator semantics."""
-    principal = _request_identity(request)
-    if principal is not None and len(principal) > 256:
-        raise HTTPException(
-            status_code=403,
-            detail="authenticated principal is too long for connection grants",
-        )
-    return principal
+    from .request_identity import document_source_principal
 
+    return document_source_principal(request, identity=_request_identity)
 
 @router.post("/docs/discover")
 async def discover_documents(request: Request, body: DocDiscoverIn) -> dict:
@@ -2657,14 +2105,9 @@ async def graph_rebuild(request: Request) -> dict:
 
 
 def _privacy_ops_or_403():
-    from maverick import privacy_ops
+    from .privacy_access import privacy_ops_or_403
 
-    from .feature_gate import feature_off
-
-    if not privacy_ops.enabled():
-        raise feature_off("privacy_ops", "The privacy register")
-    return privacy_ops
-
+    return privacy_ops_or_403()
 
 @router.get("/privacy/dpa-reviews")
 async def list_dpa_reviews(request: Request) -> dict:
@@ -2703,30 +2146,15 @@ _PAPER_MAX_BYTES = 16 * 1024 * 1024
 
 
 def _safe_filename(name: str) -> str:
-    """A Content-Disposition-safe name: no quotes, no path separators, no
-    control characters that could forge a second header."""
-    cleaned = "".join(ch if (ch.isalnum() or ch in "-_. ") else "-" for ch in (name or ""))
-    return cleaned.strip(" .-")[:120] or "document"
+    from .attachment_headers import safe_filename
+
+    return safe_filename(name)
 
 
 def _attachment_content_disposition(name: str) -> str:
-    """RFC 6266/5987 attachment header with an ASCII fallback.
+    from .attachment_headers import attachment_content_disposition
 
-    Starlette encodes response headers as latin-1.  Putting a Unicode filename
-    directly inside ``filename=`` therefore raises before the response can be
-    sent.  ``filename*`` carries the exact UTF-8 name while old clients retain a
-    conservative ASCII fallback.
-    """
-    from urllib.parse import quote
-
-    safe_name = _safe_filename(name)
-    fallback = safe_name.encode("ascii", "ignore").decode("ascii").strip(" .-")
-    fallback = fallback or "document"
-    disposition = f'attachment; filename="{fallback}"'
-    if fallback != safe_name:
-        disposition += f"; filename*=UTF-8''{quote(safe_name, safe='')}"
-    return disposition
-
+    return attachment_content_disposition(name, filename=_safe_filename)
 
 @router.get("/privacy/paper-reviews")
 async def list_paper_reviews(request: Request) -> dict:
@@ -6298,13 +5726,9 @@ async def oauth_disconnect(request: Request, provider: str) -> None:
 
 
 def _require_connections() -> None:
-    from maverick import connections
+    from .connection_dependencies import require_connections
 
-    if not connections.enabled():
-        raise HTTPException(
-            status_code=403,
-            detail={"code": "connections_disabled", "message": "Connections are turned off. An administrator can enable them in Settings."},
-        )
+    require_connections()
 
 
 @router.get("/connections")
@@ -6920,6 +6344,28 @@ async def delete_assessment_endpoint(
 # ---- flows: a deterministic skeleton over agentic + tool steps ---------------
 
 
+# Bind workflow services at the composition root; workflow handlers never
+# import the API facade. Late lookup preserves the facade's public overrides.
+from .flow_dependencies import FlowDependencies  # noqa: E402
+from .flow_dependencies import configure as _configure_flow_dependencies  # noqa: E402
+
+_configure_flow_dependencies(FlowDependencies(
+    _dashboard_token_authenticated=lambda *args, **kwargs: _dashboard_token_authenticated(*args, **kwargs),
+    _event_trigger_allowed_owners=lambda *args, **kwargs: _event_trigger_allowed_owners(*args, **kwargs),
+    _live_tool_index=lambda *args, **kwargs: _live_tool_index(*args, **kwargs),
+    _live_tool_schemas=lambda *args, **kwargs: _live_tool_schemas(*args, **kwargs),
+    _supervisor=lambda *args, **kwargs: _supervisor(*args, **kwargs),
+    auth_genuinely_off=lambda *args, **kwargs: auth_genuinely_off(*args, **kwargs),
+    caller_principal=lambda *args, **kwargs: caller_principal(*args, **kwargs),
+    caller_suites=lambda *args, **kwargs: caller_suites(*args, **kwargs),
+    configured_goal_ceiling_dollars=lambda *args, **kwargs: configured_goal_ceiling_dollars(*args, **kwargs),
+    execution_user_id_from_request=lambda *args, **kwargs: execution_user_id_from_request(*args, **kwargs),
+    goal_owner_filter=lambda *args, **kwargs: goal_owner_filter(*args, **kwargs),
+    require_permission=lambda *args, **kwargs: require_permission(*args, **kwargs),
+    run_in_threadpool=lambda *args, **kwargs: run_in_threadpool(*args, **kwargs),
+))
+
+
 # flows_api: these routes moved out of this module. The router is included
 # HERE, where the handlers used to be, so route precedence is unchanged, and
 # every name is re-exported so ``maverick_dashboard.api.<name>`` keeps working
@@ -7049,28 +6495,9 @@ def _live_tool_index(
         ).all()
     except Exception:  # pragma: no cover -- registry build varies by env
         live = []
-    from maverick.flow.ir import action_tool_policy_error
+    from .tool_catalog_projection import project_tools
 
-    from .tool_categories import categorize
-
-    idx = []
-    schemas: dict[str, dict] = {}
-    for t in live:
-        if action_tool_policy_error(t.name):
-            continue
-        params = []
-        if isinstance(t.input_schema, dict):
-            params = list((t.input_schema.get("properties") or {}).keys())[:12]
-            schemas[t.name] = dict(t.input_schema)
-        desc = (t.description or "")[:200]
-        idx.append(
-            {
-                "name": t.name,
-                "description": desc,
-                "params": params,
-                "category": categorize(t.name, desc),
-            }
-        )
+    idx, schemas = project_tools(live)
     with _TOOL_INDEX_LOCK:
         _TOOL_CATALOG_CACHE[scope] = (time.monotonic(), idx, schemas)
     return idx
@@ -7355,20 +6782,9 @@ def templates_suggested(request: Request, k: int = 5) -> dict:
 
 
 def _voice_commands_enabled() -> bool:
-    """Dashboard voice-command input. ON by default; off via
-    MAVERICK_VOICE_COMMANDS=0 / [voice] dashboard_commands = false."""
-    import os as _os
+    from .voice_policy import voice_commands_enabled
 
-    raw = (_os.environ.get("MAVERICK_VOICE_COMMANDS") or "").strip().lower()
-    if raw:
-        return raw not in {"0", "false", "no", "off"}
-    try:
-        from maverick.config import load_config
-
-        return bool((load_config().get("voice") or {}).get("dashboard_commands", True))
-    except Exception:  # pragma: no cover -- config never blocks the endpoint
-        return True
-
+    return voice_commands_enabled()
 
 # Audio container suffixes the STT backends accept; browsers record webm/ogg.
 _VOICE_SUFFIXES = {
@@ -9050,43 +8466,15 @@ def goal_open_questions(request: Request, goal_id: int) -> dict:
 
 
 def _goal_gate(domain: str) -> str | None:
-    """The persisted release gate for a goal's pack, or ``None``.
+    from .deliverable_policy import goal_gate
 
-    A terminal playbook gate is promoted here even when an AI-generated pack
-    omitted ``output.gate``. Intermediate prompt gates remain non-executable.
-    """
-    if not domain:
-        return None
-    try:
-        from maverick.domain import available_domains, enforced_gate
-
-        prof = available_domains().get(domain)
-    except Exception as exc:  # pragma: no cover -- factory layer unavailable
-        # A policy-read failure is not evidence that a deliverable is ungated.
-        # Release callers all funnel through this helper, so fail closed.
-        raise HTTPException(
-            status_code=503,
-            detail="deliverable release policy is temporarily unavailable",
-        ) from exc
-    if prof is None:
-        raise HTTPException(
-            status_code=409,
-            detail="the goal's domain policy is no longer available",
-        )
-    return enforced_gate(prof)
+    return goal_gate(domain)
 
 
 def _goal_shape(domain: str) -> str:
-    """The render shape the goal's pack declares, defaulting to 'prose'."""
-    if not domain:
-        return "prose"
-    try:
-        from maverick.domain import available_domains
+    from .deliverable_policy import goal_shape
 
-        prof = available_domains().get(domain)
-        return prof.output.shape if prof else "prose"
-    except Exception:  # pragma: no cover -- factory layer unavailable
-        return "prose"
+    return goal_shape(domain)
 
 
 @router.get("/goals/{goal_id}/signoff")
@@ -9505,16 +8893,9 @@ def list_tools(request: Request) -> dict:
 
 
 def _require_scheduling() -> None:
-    from maverick.config import get_features
+    from .schedule_policy import require_scheduling
 
-    if not get_features().get("scheduling", True):
-        raise HTTPException(
-            status_code=403,
-            detail=(
-                "scheduling is disabled ([features] scheduling = false). "
-                "Re-enable it in config, or use `maverick schedule` on the host."
-            ),
-        )
+    require_scheduling()
 
 
 def _schedule_out(job) -> ScheduleOut:
@@ -10657,32 +10038,15 @@ def automation_runs(request: Request, kind: str, ref: str, limit: int = 8) -> di
 
 
 def pack_editing_denial(request: Request) -> str | None:
-    """Why this caller may NOT edit domain packs (agent playbooks), or ``None``
-    if it may. One predicate for both consumers -- the enforce path
-    (:func:`_require_pack_editing`) raises it as a 403 detail, and the builder
-    page reads ``is None`` to decide whether to offer playbook mode -- so the two
-    can't drift. Mirrors the ``*_denial`` pattern used for enterprise egress."""
-    principal = caller_principal(request)
-    if principal is not None and not is_dashboard_admin(principal):
-        return "pack editing requires a dashboard admin"
-    # A pinned admin's API key is still capped by the scopes it was given.
-    if principal is not None and not has_permission(request, "admin"):
-        return "pack editing requires an API key with the administrator scope"
-    from maverick.config import get_features
+    from .editor_policy import pack_editing_denial as denial
 
-    if not get_features().get("pack_editing", True):
-        return (
-            "Editing agents and specialists is turned off by this installation's policy. "
-            "Ask an installation administrator to turn it on."
-        )
-    return None
+    return denial(request, caller=caller_principal, is_admin=is_dashboard_admin, has_permission=has_permission)
 
 
 def _require_pack_editing(request: Request) -> None:
-    require_permission(request, "admin")  # key scopes and the owner's role cap
-    denial = pack_editing_denial(request)
-    if denial is not None:
-        raise HTTPException(status_code=403, detail=denial)
+    from .editor_policy import require_pack_editing
+
+    require_pack_editing(request, permission=require_permission, denial=pack_editing_denial)
 
 
 @router.get("/agents")
@@ -10984,466 +10348,6 @@ async def set_feature_switch(request: Request, body: FeatureSwitchIn) -> dict:
     return {"section": body.section, "enabled": effective}
 
 
-# In-app governance-module switches. Each key is the dotted config path of a
-# fail-closed [section] enable gate; "requires" is the full requirement chain
-# in order (parents first). Turning a module ON enables every path in the
-# chain -- one click must open a WORKING workbench, never a child under a
-# dead parent -- while turning it OFF disables only the module itself, so
-# siblings keep running. Labels are user-facing; config keys stay out of the
-# UI (the learning page set that precedent).
-_MODULE_SWITCHES: dict[str, dict] = {
-    "consent_preferences": {
-        "label": "Consent preferences",
-        "requires": (),
-    },
-    "consent_preferences.analytics": {
-        "label": "Consent analytics",
-        "requires": ("consent_preferences",),
-    },
-    "consent_preferences.application_scanner": {
-        "label": "App tracking checks",
-        "requires": ("consent_preferences",),
-    },
-    "consent_preferences.bulk_jobs": {
-        "label": "Bulk consent changes",
-        "requires": ("consent_preferences",),
-    },
-    "consent_preferences.delivery": {
-        "label": "Consent delivery",
-        "requires": ("consent_preferences",),
-    },
-    "consent_preferences.experiments": {
-        "label": "Consent experiments",
-        "requires": ("consent_preferences",),
-    },
-    "consent_preferences.profile_data": {
-        "label": "Consent profile data",
-        "requires": ("consent_preferences",),
-    },
-    "consent_preferences.publishing": {
-        "label": "Consent publishing",
-        "requires": ("consent_preferences",),
-    },
-    "consent_preferences.public_api": {
-        "label": "Consent public clients",
-        "requires": ("consent_preferences", "consent_preferences.publishing"),
-    },
-    "consent_preferences.native_sdk": {
-        "label": "Native consent SDK",
-        "requires": (
-            "consent_preferences",
-            "consent_preferences.publishing",
-            "consent_preferences.public_api",
-        ),
-    },
-    "consent_preferences.scanner": {
-        "label": "Consent application scanning",
-        "requires": ("consent_preferences",),
-    },
-    "consent_preferences.publishing.web_settings": {
-        "label": "Website banner settings",
-        "requires": ("consent_preferences", "consent_preferences.publishing"),
-    },
-    "consent_preferences.profile_data.custom_index": {
-        "label": "Find people by preference",
-        "requires": ("consent_preferences", "consent_preferences.profile_data"),
-    },
-    "consent_preferences.global_opt_out": {
-        "label": "Global opt-out",
-        "requires": ("consent_preferences",),
-    },
-    "consent_preferences.scanner.notice_proposals": {
-        "label": "Scan notice proposals",
-        "requires": ("consent_preferences", "consent_preferences.scanner"),
-    },
-    "consent_preferences.trust_center": {
-        "label": "Consumer Trust Center",
-        "requires": ("consent_preferences",),
-    },
-    "consent_registry": {
-        "label": "Consent registry",
-        "requires": (),
-    },
-    "data_map": {
-        "label": "Data map",
-        "requires": (),
-    },
-    "data_use_governance": {
-        "label": "Data-use governance",
-        "requires": (),
-    },
-    "data_use_governance.compiler": {
-        "label": "Data-use policy compiler",
-        "requires": ("data_use_governance",),
-    },
-    "data_use_governance.enforcement": {
-        "label": "Data-use enforcement",
-        "requires": ("data_use_governance", "data_use_governance.compiler"),
-    },
-    "data_use_governance.snowflake": {
-        "label": "Snowflake data-use enforcement",
-        "requires": (
-            "data_use_governance",
-            "data_use_governance.compiler",
-            "data_use_governance.enforcement",
-        ),
-    },
-    "data_use_governance.databricks": {
-        "label": "Databricks data-use enforcement",
-        "requires": (
-            "data_use_governance",
-            "data_use_governance.compiler",
-            "data_use_governance.enforcement",
-        ),
-    },
-    "dsar_fulfillment": {
-        "label": "DSAR fulfillment",
-        "requires": (),
-    },
-    "finance_operations": {
-        "label": "Finance operations",
-        "requires": (),
-    },
-    "external_agents": {
-        "label": "External-agent governance",
-        "requires": (),
-    },
-    "ai_evidence_analysis": {
-        "label": "AI evidence analysis",
-        "requires": (),
-    },
-    "ai_inventory": {
-        "label": "AI inventory",
-        "requires": (),
-    },
-    "ai_entity_tasks": {
-        "label": "AI entity tasks",
-        "requires": ("ai_inventory",),
-    },
-    "governed_document_vault": {
-        "label": "Governed document vault",
-        "requires": (),
-    },
-    "tech_risk_compliance.grc_studio": {
-        "label": "Compliance studio",
-        "requires": ("tech_risk_compliance",),
-    },
-    "third_party_management.contracts": {
-        "label": "Contracts and engagements",
-        "requires": ("third_party_management",),
-    },
-    "assessment_evidence_autopopulation": {
-        "label": "Assessment evidence proposals",
-        "requires": ("ai_evidence_analysis",),
-    },
-    "governance_agents": {
-        "label": "Governance agents",
-        "requires": (),
-    },
-    "privacy_automation": {
-        "label": "Privacy automation",
-        "requires": (),
-    },
-    "privacy_automation.data_discovery": {
-        "label": "Privacy data discovery",
-        "requires": ("privacy_automation",),
-    },
-    "privacy_automation.notice_governance": {
-        "label": "Privacy notice governance",
-        "requires": ("privacy_automation",),
-    },
-    "privacy_automation.regulatory_intelligence": {
-        "label": "Privacy regulatory intelligence",
-        "requires": ("privacy_automation",),
-    },
-    "privacy_automation.rights_orchestration": {
-        "label": "Privacy-rights orchestration",
-        "requires": ("privacy_automation",),
-    },
-    "privacy_automation.public_rights_form": {
-        "label": "Rights request form",
-        "requires": ("privacy_automation",),
-    },
-    "privacy_automation.rights_consumer_delivery": {
-        "label": "Privacy-rights consumer delivery",
-        "requires": (
-            "privacy_automation",
-            "privacy_automation.rights_orchestration",
-        ),
-    },
-    "tech_risk_compliance": {
-        "label": "Tech-risk compliance",
-        "requires": (),
-    },
-    "tech_risk_compliance.scoping": {
-        "label": "Compliance scoping",
-        "requires": ("tech_risk_compliance",),
-    },
-    "tech_risk_compliance.scope_actions": {
-        "label": "Compliance scope actions",
-        "requires": ("tech_risk_compliance",),
-    },
-    "tech_risk_compliance.policy_publication_links": {
-        "label": "Policy publication links",
-        "requires": ("tech_risk_compliance",),
-    },
-    "tech_risk_compliance.continuous_evidence": {
-        "label": "Continuous evidence",
-        "requires": ("tech_risk_compliance",),
-    },
-    "third_party_management": {
-        "label": "Third-party management",
-        "requires": (),
-    },
-    "third_party_management.lifecycle": {
-        "label": "Third-party lifecycle",
-        "requires": ("third_party_management",),
-    },
-    "third_party_management.lifecycle.portal": {
-        "label": "Third-party collaboration portal",
-        "requires": ("third_party_management", "third_party_management.lifecycle"),
-    },
-    "third_party_management.intelligence": {
-        "label": "Third-party intelligence",
-        "requires": ("third_party_management",),
-    },
-    "third_party_management.executive_reports": {
-        "label": "Executive vendor reports",
-        "requires": ("third_party_management",),
-    },
-    "vendor_management": {
-        "label": "Vendor management",
-        "requires": (),
-    },
-    "connections": {
-        "label": "Saved connections",
-        "requires": (),
-    },
-    "evidence_graph": {
-        "label": "Evidence records",
-        "requires": (),
-    },
-    "model_risk_assurance": {
-        "label": "Model assurance",
-        "requires": ("evidence_graph",),
-    },
-    "ai_vendor_risk": {
-        "label": "AI vendor risk",
-        "requires": ("evidence_graph", "model_risk_assurance"),
-    },
-    "codebase": {
-        "label": "Code projects",
-        "requires": (),
-    },
-    "vendor_onboarding": {
-        "label": "AI vendor onboarding",
-        "requires": ("connections", "vendor_management", "evidence_graph", "model_risk_assurance", "ai_vendor_risk"),
-    },
-    # Each gate below is a boolean ``enable`` at this exact path, and each
-    # "requires" chain mirrors the kernel module's own enabled() check.
-    "control_plane": {  # config.get_control_plane
-        "label": "Agent control",
-        "requires": (),
-    },
-    "eu_conformity": {  # eu_conformity.enabled
-        "label": "EU AI Act conformity",
-        "requires": (),
-    },
-    "ai_literacy": {  # ai_literacy.enabled
-        "label": "AI literacy register",
-        "requires": (),
-    },
-    "policy_packs": {  # policy_packs.enabled
-        "label": "Policy packs",
-        "requires": (),
-    },
-    "evidence_gateway": {  # ai_evidence_gateway.enabled
-        "label": "AI evidence gateway",
-        "requires": (),
-    },
-    "drift_monitoring": {  # drift_monitoring.enabled -> model_risk_assurance.enabled
-        "label": "Model drift monitoring",
-        "requires": ("evidence_graph", "model_risk_assurance"),
-    },
-    "ai_incident_reporting": {  # ai_incident_reporting.enabled -> model_risk_assurance
-        "label": "AI incident reporting",
-        "requires": ("evidence_graph", "model_risk_assurance"),
-    },
-    "explainability": {  # explainability.enabled
-        "label": "Decision explanations",
-        "requires": (),
-    },
-    "content_provenance": {  # content_provenance.enabled
-        "label": "Content credentials",
-        "requires": (),
-    },
-    "breach_notification": {  # breach_notification.enabled
-        "label": "Breach notifications",
-        "requires": (),
-    },
-    "ediscovery": {  # ediscovery.enable
-        "label": "Legal holds and matter export",
-        "requires": (),
-    },
-    "privacy_automation.drop_management": {  # privacy_drop_management.enabled
-        "label": "Data broker deletion requests",
-        "requires": ("privacy_automation", "privacy_automation.rights_orchestration"),
-    },
-    "ai_regulatory_feed": {  # ai_regulatory_feed.enabled -> finance_operations + evidence_gateway
-        "label": "AI regulation updates",
-        "requires": ("finance_operations", "evidence_gateway"),
-    },
-    "ai_business_intake": {  # ai_business_intake.enabled -> model_risk_assurance
-        "label": "AI project intake",
-        "requires": ("evidence_graph", "model_risk_assurance"),
-    },
-    "ai_dynamic_risk": {  # ai_dynamic_risk.enabled
-        "label": "Changing AI risk scores",
-        "requires": (),
-    },
-    "ai_policy_management": {  # ai_policy_management.enabled
-        "label": "AI policy library",
-        "requires": (),
-    },
-    "ai_runtime_guardrails": {  # ai_runtime_guardrails.enabled
-        "label": "AI guardrails while running",
-        "requires": (),
-    },
-    "ai_explainability": {  # ai_explainability.enabled
-        "label": "AI explanation records",
-        "requires": (),
-    },
-    "ai_conformity_workflow": {  # ai_conformity_workflow.enabled -> model_risk_assurance
-        "label": "AI conformity reviews",
-        "requires": ("evidence_graph", "model_risk_assurance"),
-    },
-    "ai_insurability": {  # ai_insurability.enabled
-        "label": "AI insurance readiness",
-        "requires": (),
-    },
-    "ai_regulated_verticals": {  # ai_regulated_verticals.enabled
-        "label": "AI rules for regulated industries",
-        "requires": (),
-    },
-    "ai_bank_mrm": {  # ai_bank_mrm.enabled
-        "label": "Bank model risk management",
-        "requires": (),
-    },
-    "ai_discovery_sensors": {  # ai_discovery_sensors.enabled
-        "label": "Find unlisted AI use",
-        "requires": (),
-    },
-    "portfolio_risk": {  # portfolio_risk.enabled -> model_risk_assurance
-        "label": "AI portfolio risk",
-        "requires": ("evidence_graph", "model_risk_assurance"),
-    },
-    "ai_cost_roi": {  # ai_cost_roi.enabled
-        "label": "AI cost and return",
-        "requires": (),
-    },
-    "eu_ai_incidents": {  # eu_ai_incidents.enabled
-        "label": "EU AI incident reports",
-        "requires": (),
-    },
-    "grc_outbound_sync": {  # grc_outbound_sync.policy_from_config
-        "label": "Outbound assurance records",
-        "requires": (),
-    },
-    "incident_attachment_metadata": {  # incident_attachment_metadata.enabled
-        "label": "Incident attachments",
-        "requires": (),
-    },
-    # agent_topology.enabled -> entity_graph (on by default) + model_risk_assurance
-    "agent_topology": {
-        "label": "Agent dependency map",
-        "requires": ("evidence_graph", "model_risk_assurance"),
-    },
-}
-
-
-# Readiness receipts are process-local and bound to an HMAC of the exact
-# effective configuration roots for the module.  The random key means the
-# public fingerprint cannot be used to test guesses about stored secrets, and
-# a restart intentionally returns to ``unverified`` until a fresh probe runs.
-_MODULE_FINGERPRINT_KEY = os.urandom(32)
-
-
-class _ModuleConfigurationUnavailable(RuntimeError):
-    """Module state cannot be read without inventing a safe-looking default."""
-
-
-def _module_path_enable_state(loaded: dict, path: str) -> str:
-    node: object = loaded
-    for part in path.split("."):
-        if not isinstance(node, dict):
-            return "invalid"
-        if part not in node:
-            return "disabled"
-        node = node[part]
-    if not isinstance(node, dict):
-        return "invalid"
-    enabled = node.get("enable", False)
-    if type(enabled) is not bool:
-        return "invalid"
-    return "enabled" if enabled else "disabled"
-
-
-def _module_path_enabled(loaded: dict, path: str) -> bool:
-    return _module_path_enable_state(loaded, path) == "enabled"
-
-
-def _module_switch_enabled(loaded: dict, section: str) -> bool:
-    chain = (*_MODULE_SWITCHES[section]["requires"], section)
-    return all(_module_path_enabled(loaded, p) for p in chain)
-
-
-def _module_config_fingerprint(loaded: dict, section: str) -> str:
-    chain = (*_MODULE_SWITCHES[section]["requires"], section)
-    roots = sorted({path.split(".", 1)[0] for path in chain})
-    material = {root: loaded.get(root) for root in roots}
-    encoded = json.dumps(
-        material,
-        sort_keys=True,
-        separators=(",", ":"),
-        default=str,
-    ).encode("utf-8")
-    return hmac.new(_MODULE_FINGERPRINT_KEY, encoded, hashlib.sha256).hexdigest()
-
-
-def _module_activation_state(loaded: dict, section: str) -> dict:
-    requirements = tuple(_MODULE_SWITCHES[section]["requires"])
-    chain = (*requirements, section)
-    path_states = {path: _module_path_enable_state(loaded, path) for path in chain}
-    invalid = [path for path, state in path_states.items() if state == "invalid"]
-    missing = [path for path in requirements if path_states[path] != "enabled"]
-    target_enabled = path_states[section] == "enabled"
-    if invalid:
-        status = "failed"
-        detail = "One or more enable gates have an invalid configuration shape."
-    elif not target_enabled:
-        status = "disabled"
-        detail = "The module's own enable gate is off."
-    elif missing:
-        status = "incomplete"
-        detail = "The module is on, but one or more required parent gates are off."
-    else:
-        status = "enabled"
-        detail = (
-            "The complete enable-gate chain is on. This does not prove runtime "
-            "readiness."
-        )
-    return {
-        "status": status,
-        "enabled": status == "enabled",
-        "target_enabled": target_enabled,
-        "requirements": list(requirements),
-        "missing_requirements": missing,
-        "invalid_paths": invalid,
-        "detail": detail,
-        "fingerprint": _module_config_fingerprint(loaded, section),
-    }
-
-
 def _module_configuration_state(loaded: dict, section: str) -> dict:
     """Validate known closed config contracts without opening a runtime store."""
 
@@ -11602,35 +10506,6 @@ def _module_state(request: Request, loaded: dict, section: str, meta: dict) -> d
             activation,
         ),
     }
-
-
-def _load_module_config() -> dict:
-    from maverick import config as config_module
-
-    try:
-        loaded = config_module.load_config()
-        source_errors = config_module.config_source_errors(include_tenant=True)
-    except (KeyboardInterrupt, SystemExit):
-        raise
-    except Exception as exc:
-        raise _ModuleConfigurationUnavailable from exc
-    if source_errors or not isinstance(loaded, dict):
-        raise _ModuleConfigurationUnavailable
-    return loaded
-
-
-def module_activation_enabled(section: str) -> bool:
-    """Fail-closed effective gate state for server-rendered module banners."""
-
-    if section not in _MODULE_SWITCHES:
-        return False
-    try:
-        loaded = _load_module_config()
-    except (KeyboardInterrupt, SystemExit):
-        raise
-    except _ModuleConfigurationUnavailable:
-        return False
-    return _module_activation_state(loaded, section)["enabled"] is True
 
 
 @router.get("/features/modules")
@@ -12576,11 +11451,9 @@ def delete_agent_override(request: Request, name: str, expected_generation: str 
 
 
 def _refuse_while_trial_live(name: str) -> None:
-    """A trial keeps the current definition as it is; it is promoted or rolled back first."""
-    from maverick import specialist_canary
+    from .editor_policy import refuse_while_trial_live
 
-    if specialist_canary.live(name) is not None:
-        raise HTTPException(status_code=409, detail="A trial version of this specialist is live. Promote it or roll it back in Workforce first. Nothing was changed.")
+    refuse_while_trial_live(name)
 
 
 def _record_agent_change(request: Request, name: str, before: dict | None, after: dict | None) -> None:
@@ -12767,21 +11640,9 @@ async def draft_agent_from_jd(request: Request, payload: JDDraftIn) -> dict:
 
 
 def _require_role_editing(request: Request) -> None:
-    principal = caller_principal(request)
-    if principal is not None and not is_dashboard_admin(principal):
-        raise HTTPException(status_code=403, detail="role editing requires dashboard admin")
-    require_permission(request, "admin")  # key scopes and the owner's role cap
+    from .editor_policy import require_role_editing
 
-    from maverick.config import get_features
-
-    if not get_features().get("role_editing", True):
-        raise HTTPException(
-            status_code=403,
-            detail=(
-                "role editing is disabled ([features] role_editing = false). "
-                "Edit roles.toml on the host, or re-enable it in config."
-            ),
-        )
+    require_role_editing(request, caller=caller_principal, is_admin=is_dashboard_admin, permission=require_permission)
 
 
 @router.get("/roles")
@@ -15582,182 +14443,14 @@ def outcomes_api(request: Request, top: int = 0) -> dict:
     }
 
 
-def _learning_components(subsystems: list[dict], on_by_key: dict) -> list[dict]:
-    """One row per learning system for its own switch on the Learning page.
-
-    ``on`` is the live state; ``wanted`` what this installation's settings ask
-    for (it differs when a system waits on another one, ``waiting_on``);
-    ``managed`` means a deployment variable decides and the switch is locked.
-    """
-    from maverick.config import governed_learning_default, load_config
-
-    try:
-        cfg = load_config() or {}
-    except Exception:  # pragma: no cover -- the status view never 500s on config
-        cfg = {}
-    labels = {s["key"]: s["label"] for s in subsystems}
-    rows = []
-    for s in subsystems:
-        on = bool(on_by_key.get(s["key"], False))
-        managed = bool(s.get("env")) and s["env"] in os.environ
-        section = cfg.get(s["section"]) if isinstance(cfg.get(s["section"]), dict) else {}
-        raw = section.get(s["config_key"])
-        wanted = on if managed else (raw if isinstance(raw, bool) else s.get("default", governed_learning_default()))
-        needs = s.get("needs")
-        waiting = bool(wanted and not on and needs and not on_by_key.get(needs, False))
-        rows.append({
-            "key": s["key"],
-            "label": s["label"],
-            "description": s.get("description", ""),
-            "section": s["section"],
-            "on": on,
-            "wanted": bool(wanted),
-            "managed": managed,
-            "waiting_on": labels.get(needs, "") if waiting else "",
-            "how": s["how"],
-        })
-    return rows
-
-
 def _learning_snapshot(request: Request) -> dict:
-    """Learning-engine status + accumulated moat. Shared by the JSON endpoint
-    and the /learning page so both render identical numbers."""
-    from maverick import (
-        consequence,
-        credit,
-        data_engine,
-        dreaming,
-        evaluator_evolution,
-        experience,
-        factory_learning,
-        failure_telemetry,
-        jit_rl,
-        operations_scientist,
-        prm_guidance,
-        reasoning_reward,
-        reflexion,
-        rehearsal,
-        self_harness,
-        self_improvement,
-        self_learning,
-        self_tuning_budget,
-        trajectory_store,
-    )
-    from maverick.config import get_self_improvement
-    from maverick.operating_record import assemble, stats
-    from maverick.skill import distillation_local, synthesis
-
-    from maverick_dashboard.settings_store import LEARNING_SUBSYSTEMS
-
-    def _causal_promotion_on() -> bool:
-        try:
-            return bool(
-                self_improvement.enabled() and get_self_improvement().get("causal_promotion", False)
-            )
-        except Exception:  # pragma: no cover - config never blocks the view
-            return False
-
-    # Live enabled() per subsystem key -- paired with the shared registry so the
-    # label/how/config metadata stays single-sourced in settings_store.
-    on_by_key = {
-        "self_learning": self_learning.enabled(),
-        "distill_local": distillation_local.enabled(),
-        "failure_telemetry": failure_telemetry.enabled(),
-        "budget_tuning": self_tuning_budget.enabled(),
-        "consequence": consequence.enabled(),
-        "reflexion": reflexion.enabled(),
-        "dreaming": dreaming.enabled(),
-        "experience": experience.enabled(),
-        "skill_synthesis": synthesis.enabled(),
-        "self_improvement": self_improvement.enabled(),
-        "prm_guidance": prm_guidance.enabled(),
-        "capture": trajectory_store.enabled(),
-        "causal_promotion": _causal_promotion_on(),
-        "factory_learning": factory_learning.enabled(),
-        "evaluator_evolution": evaluator_evolution.enabled(),
-        "self_harness": self_harness.enabled(),
-        "data_engine": data_engine.enabled(),
-        "operations_scientist": operations_scientist.enabled(),
-        "rehearsal": rehearsal.enabled(),
-        "credit": credit.enabled(),
-        "reasoning_reward": reasoning_reward.enabled(),
-        "reward_audit": reasoning_reward.audit_rewards_enabled(),
-        "jit_rl": jit_rl.enabled(),
-    }
-    components = _learning_components(LEARNING_SUBSYSTEMS, on_by_key)
-
-    w = _world()
-    owner = goal_owner_filter(request)
-    st = stats(assemble(w, owner=owner))
-    accumulated = {
-        "decisions": st.n_records,
-        "human_decisions": st.n_human_decisions,
-        "approvals": st.n_approvals,
-        "departments": len(st.departments),
-    }
-    # Learned skills and grounded outcomes are deployment-level assets (neither is
-    # stored per-tenant), so only surface them on an unscoped/admin view -- a
-    # single tenant must never see deployment-wide totals as if they were its own.
-    if owner is None:
-        try:
-            # Count the ledger directly -- _learned_snapshot would also build
-            # the whole harness/provenance/pending view just to be discarded.
-            # The stat is a TOTAL, so don't inherit the page's display limit
-            # (the old path silently capped the count at 50).
-            from maverick import self_learning
-
-            learned_n = len(self_learning.history(limit=1_000_000, path=self_learning.LEARNED_PATH, owner=goal_owner_filter(request)))
-        except Exception:  # pragma: no cover - the moat view never 500s on a sub-read
-            learned_n = 0
-        accumulated["grounded_outcomes"] = consequence.count()
-        accumulated["learned_capabilities"] = learned_n
-        # Flows that improved themselves -- forward self-rewrites the loop enacted,
-        # a tangible "your automations got better on their own" moat number.
-        try:
-            from maverick.flow import evolution_log
-
-            improvements = evolution_log.improvement_count()
-        except Exception:  # pragma: no cover -- the moat view never 500s on a sub-read
-            improvements = 0
-        if improvements:
-            accumulated["flow_self_improvements"] = improvements
-    # Autonomous flow self-improvement: its own opt-in, deliberately NOT folded
-    # into the blanket "turn learning on" button -- autonomously rewriting a live
-    # workflow is a heavier consequence than passive learning. Policy visibility
-    # uses installation authority separately from private content ownership.
     from .auth import has_global_permission
-    can_manage = has_global_permission(request, "admin")
-    flow_autonomy = None
-    if can_manage:
-        try:
-            from maverick import flow as _flow_mod
+    from .learning_snapshot import learning_snapshot
 
-            flow_autonomy = {
-                "engine_on": _flow_mod.enabled(),
-                "auto_evolve": _flow_mod.auto_evolve_enabled(),  # revert regressions
-                "auto_apply": _flow_mod.auto_apply_enabled(),  # apply improvements
-            }
-        except Exception:  # pragma: no cover -- the moat view never 500s on a sub-read
-            flow_autonomy = None
-    dgm = None
-    if can_manage:
-        try:
-            from maverick import self_modify
-
-            dgm = self_modify.production_status()
-        except Exception:  # pragma: no cover -- status is fail-closed in core
-            dgm = None
-    from .automation_queue import nightly_learning_status
-
-    return {
-        "overnight": nightly_learning_status() if can_manage else None,
-        "components": components,
-        "dgm": dgm,
-        "flow_autonomy": flow_autonomy,
-        "accumulated": accumulated,
-        "components_on": sum(1 for c in components if c["on"]),
-        "components_total": len(components),
-    }
+    return learning_snapshot(
+        request, world_factory=_world, owner_filter=goal_owner_filter,
+        permission_check=has_global_permission,
+    )
 
 
 @router.get("/learning")

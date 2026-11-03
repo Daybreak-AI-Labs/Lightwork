@@ -86,7 +86,7 @@ class FeedbackIn(BaseModel):
 
 def _owned_run(request: Request, run_id: str):
     # The run's own owner-scoped read: someone else's run is "not found".
-    from .api import _load_owned_run, _require_flows
+    from .flows_api import _load_owned_run, _require_flows
 
     require_permission(request, "operate")
     _require_flows()

@@ -42,15 +42,35 @@ import hmac
 import ipaddress
 import json
 import logging
-import secrets
 import threading
 import time
 from collections import OrderedDict, deque
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
 from functools import partial
 from urllib.parse import urlparse
 
+from .http_sessions import (
+    _SESSION_BINDING_KEY as _SESSION_BINDING_KEY,
+)
+from .http_sessions import (
+    _caller_scope,
+    _MCPAuthorization,
+    _quota_scope,
+    _resource_session_id,
+    _ResourceSession,
+    _session_plan,
+    _supplied_session_id,
+)
+from .http_sessions import (
+    _mint_session_id as _mint_session_id,
+)
+from .http_sessions import (
+    _store_session as _store_session_impl,
+)
+from .http_sessions import (
+    _task_owner as _task_owner,
+)
+from .protocol import METHOD_HANDLERS
 from .settings import mcp_setting
 
 log = logging.getLogger(__name__)
@@ -62,35 +82,6 @@ _DEFAULT_MAX_RESOURCE_SESSIONS = 1024
 # must retain its caller-bound session for the entire lifetime of a valid task.
 _SESSION_COOKIE_MAX_AGE = 7 * 24 * 60 * 60
 _LOOPBACK_PEERS = frozenset({"127.0.0.1", "::1", "localhost", "testclient"})
-_SESSION_BINDING_KEY = secrets.token_bytes(32)
-
-
-@dataclass(frozen=True)
-class _MCPAuthorization:
-    """Authenticated HTTP caller plus its non-bypassable tool ceiling.
-
-    ``caller_identity`` is empty for the legacy shared bearer because that
-    credential cannot distinguish individual callers.  When Agent Trust is
-    enforced, the shared bearer is nevertheless admitted as the explicit
-    surface principal ``mcp`` and carries that entry's capability.  A
-    per-agent bearer always carries its own registry capability, even when the
-    trust plane's default-deny admission switch is disengaged: authenticating
-    *as* a scoped agent must never discard the scope attached to that token.
-    """
-
-    caller_identity: str
-    trust_principal: str
-    capability: object | None
-    credential_kind: str
-    credential_fingerprint: str
-
-
-@dataclass
-class _ResourceSession:
-    """Resource-subscription state bound to one authenticated credential."""
-
-    caller_scope: str
-    subscriptions: set[str]
 
 
 try:
@@ -399,8 +390,8 @@ def _authorization_for_bearer(
 
     # A keyed, process-local digest can be retained for session ownership and
     # queued-task rotation checks without retaining/logging a reusable bearer.
-    from .server import _credential_fingerprint
-    fingerprint = _credential_fingerprint(given)
+    from .authorization import credential_fingerprint
+    fingerprint = credential_fingerprint(given)
 
     if agent is not None:
         # Per-agent authentication is itself an explicit scoped credential.
@@ -441,12 +432,14 @@ def _check_bearer(authorization: str | None) -> tuple[bool, str]:
 
 
 def _result_envelope(request_id, result: dict) -> dict:
-    return {"jsonrpc": "2.0", "id": request_id, "result": result}
+    from .protocol import result_envelope
+
+    return result_envelope(request_id, result)
 
 
 def _error_envelope(request_id, exc: Exception) -> dict:
     from .execution import ExecutionCancelled, RequestAdmissionError
-    from .server import _ProtocolError
+    from .protocol import ProtocolError as _ProtocolError
     from .tasks import TaskError
     # Both _ProtocolError and TaskError carry an explicit JSON-RPC (code,
     # message); preserve them so a task error (e.g. -32602 task not found)
@@ -468,8 +461,9 @@ def _error_envelope(request_id, exc: Exception) -> dict:
         except Exception:  # pragma: no cover - scrub must never mask the error
             detail = type(exc).__name__
         code, message = -32603, f"internal error: {detail}"
-    return {"jsonrpc": "2.0", "id": request_id,
-            "error": {"code": code, "message": message}}
+    from .protocol import error_envelope
+
+    return error_envelope(request_id, code, message)
 
 
 def _sse(obj: dict) -> str:
@@ -610,130 +604,11 @@ def _sse_stream(
     return _stream()
 
 
-def _caller_scope(caller: _MCPAuthorization) -> str:
-    """Opaque session scope for one authenticated principal + credential."""
-    material = "\0".join((
-        "mcp-caller-v1",
-        caller.credential_kind,
-        caller.trust_principal,
-        caller.credential_fingerprint,
-    ))
-    return hashlib.sha256(material.encode("utf-8")).hexdigest()
-
-
-def _quota_scope(caller: _MCPAuthorization) -> str:
-    """Stable per-principal quota scope, independent of token/session churn."""
-    material = "\0".join((
-        "mcp-quota-v1",
-        caller.credential_kind,
-        caller.trust_principal,
-    ))
-    return hashlib.sha256(material.encode("utf-8")).hexdigest()
-
-
-def _task_owner(sid: str, caller_scope: str) -> str:
-    """Bind task ownership to both the unguessable session and its caller."""
-    material = f"mcp-task-owner-v1\0{caller_scope}\0{sid}"
-    return hashlib.sha256(material.encode("utf-8")).hexdigest()
-
-
-def _mint_session_id(caller_scope: str) -> str:
-    """Mint a self-authenticating process-local session for this caller."""
-    nonce = secrets.token_urlsafe(24)
-    mac = hmac.new(
-        _SESSION_BINDING_KEY,
-        f"mcp-session-v1\0{caller_scope}\0{nonce}".encode(),
-        hashlib.sha256,
-    ).hexdigest()
-    return f"{nonce}.{mac}"
-
-
-def _supplied_session_id(
-    request,
-    caller_scope: str,
-) -> str | None:
-    """Return a valid caller-bound session without consulting any LRU state."""
-    supplied = (
-        request.headers.get("Mcp-Session-Id")
-        or request.cookies.get("maverick_mcp_session")
+def _store_session(resource_sessions, sid, caller_scope, subscriptions) -> None:
+    _store_session_impl(
+        resource_sessions, sid, caller_scope, subscriptions,
+        max_sessions=_max_resource_sessions(),
     )
-    if not supplied or len(supplied) > 128:
-        return None
-    try:
-        nonce, presented_mac = supplied.rsplit(".", 1)
-    except ValueError:
-        return None
-    if (
-        not 20 <= len(nonce) <= 64
-        or not all(char.isalnum() or char in "_-" for char in nonce)
-        or len(presented_mac) != 64
-        or not all(char in "0123456789abcdef" for char in presented_mac)
-    ):
-        return None
-    expected_mac = hmac.new(
-        _SESSION_BINDING_KEY,
-        f"mcp-session-v1\0{caller_scope}\0{nonce}".encode(),
-        hashlib.sha256,
-    ).hexdigest()
-    return supplied if hmac.compare_digest(presented_mac, expected_mac) else None
-
-
-def _resource_session_id(
-    sid: str | None,
-    resource_sessions: OrderedDict[str, _ResourceSession],
-    caller_scope: str,
-) -> str | None:
-    """Return ``sid`` only when its evictable subscription state exists."""
-    session = resource_sessions.get(sid) if sid else None
-    if session is None or not hmac.compare_digest(
-        session.caller_scope,
-        caller_scope,
-    ):
-        return None
-    resource_sessions.move_to_end(sid)
-    return sid
-
-
-def _session_plan(
-    *,
-    supplied_sid: str | None,
-    resource_sid: str | None,
-    caller_scope: str,
-    method: str,
-    is_task_request: bool,
-) -> tuple[str | None, str | None, bool, str | None]:
-    """Plan response, resource persistence, and task ownership independently."""
-    response_sid = supplied_sid
-    if response_sid is None and (
-        is_task_request or method == "resources/subscribe"
-    ):
-        response_sid = _mint_session_id(caller_scope)
-    if method == "resources/subscribe" and resource_sid is None:
-        resource_sid = response_sid
-    should_persist_resource = resource_sid is not None
-    task_owner = (
-        _task_owner(response_sid, caller_scope)
-        if is_task_request and response_sid is not None else None
-    )
-    return response_sid, resource_sid, should_persist_resource, task_owner
-
-
-def _store_session(
-    resource_sessions: OrderedDict[str, _ResourceSession],
-    sid: str,
-    caller_scope: str,
-    subscriptions: set[str],
-) -> None:
-    existing = resource_sessions.get(sid)
-    if existing is not None and not hmac.compare_digest(
-        existing.caller_scope, caller_scope
-    ):
-        # A stolen/colliding id must never overwrite another caller's state.
-        return
-    resource_sessions[sid] = _ResourceSession(caller_scope, subscriptions)
-    resource_sessions.move_to_end(sid)
-    while len(resource_sessions) > _max_resource_sessions():
-        resource_sessions.popitem(last=False)
 
 
 def _attach_session(response, sid: str | None, request):
@@ -1052,23 +927,7 @@ async def _dispatch_async(server, method, params, *, execution_owner, request_id
     return await asyncio.to_thread(_dispatch, server, method, params, **kwargs)
 
 
-_METHOD_MAP = {
-    "initialize":      "handle_initialize",
-    "tools/list":      "handle_tools_list",
-    "tools/call":      "handle_tools_call",
-    "resources/list":  "handle_resources_list",
-    "resources/read":  "handle_resources_read",
-    "resources/subscribe":   "handle_resources_subscribe",
-    "resources/unsubscribe": "handle_resources_unsubscribe",
-    "prompts/list":    "handle_prompts_list",
-    "prompts/get":     "handle_prompts_get",
-    # Tasks (async, pollable). The handlers self-gate on _tasks_enabled and
-    # return -32601 when tasks aren't enabled for this transport.
-    "tasks/get":       "handle_tasks_get",
-    "tasks/result":    "handle_tasks_result",
-    "tasks/cancel":    "handle_tasks_cancel",
-    "tasks/list":      "handle_tasks_list",
-}
+_METHOD_MAP = dict(METHOD_HANDLERS)
 
 
 def _dispatch(
@@ -1098,7 +957,7 @@ def _dispatch(
         return {}
     handler_name = _METHOD_MAP.get(method)
     if not handler_name:
-        from .server import _ProtocolError
+        from .protocol import ProtocolError as _ProtocolError
         raise _ProtocolError(-32601, f"method not found: {method}")
     handler = getattr(server, handler_name)
     from maverick.fleet_memory import bind_caller

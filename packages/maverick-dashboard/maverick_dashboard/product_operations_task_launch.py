@@ -12,7 +12,7 @@ from maverick.runner import (
 from maverick.task_model_selection import EFFORT_LABELS
 from pydantic import Field
 
-from . import api, auth, task_search
+from . import _shared, api, auth, task_search
 from ._shared import require_task_settings_or_400, task_step_readiness
 from .api_schemas import GoalIn
 from .draft_api import context_for
@@ -283,7 +283,7 @@ def start_recover(request, selection, arguments, prepared, operation_id):
 
     auth.require_permission(request, "operate")
     try:
-        _receipt, goal = lookup_receipt(api._world(), key=operation_id,
+        _receipt, goal = lookup_receipt(_shared._world(), key=operation_id,
             owner=auth.caller_principal(request) or "", kind="api")
     except HTTPException as exc:
         if exc.status_code == 404:

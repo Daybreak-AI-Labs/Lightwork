@@ -1,5 +1,6 @@
 import type { ClientRequest, IncomingMessage } from "http";
 import { StringDecoder } from "string_decoder";
+import type { GoalEventsResponse } from "./generated/dashboard-contracts";
 
 type Options = {
   url: URL;
@@ -98,7 +99,7 @@ export function watchEvents(options: Options): () => void {
           if (!data.length) continue; // heartbeat comments refresh idle only
           if (event === "timeout") { reconnect("stream lifetime reached"); return; }
           if (event === "error") { stop("Run visibility changed or its stream is unavailable."); return; }
-          let value: {next_id?: number; terminal?: boolean; status?: string};
+          let value: Partial<Pick<GoalEventsResponse, "next_id" | "terminal" | "status">>;
           try { value = JSON.parse(data.join("\n")); }
           catch { stop("Stream event is unreadable."); return; }
           if (event === "end") {

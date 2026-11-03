@@ -41,6 +41,8 @@ import threading
 from collections.abc import Iterator, Mapping
 from typing import Any
 
+from .config_contracts import TEXT_SETTINGS
+
 log = logging.getLogger(__name__)
 
 
@@ -356,7 +358,7 @@ def _initialize() -> None:
                 return
             endpoint = _setting(
                 "MAVERICK_OTEL_ENDPOINT", "otel_endpoint"
-            ) or "http://localhost:4318/v1/traces"
+            ) or TEXT_SETTINGS["observability.otel_endpoint"].runtime_default
             headers = _otlp_headers()
             resource = Resource.create({"service.name": "maverick"})
             provider = TracerProvider(resource=resource)

@@ -25,6 +25,7 @@ import os
 import re
 from typing import Any
 
+from ..governed_http import guarded_sender as _governed_sender
 from . import Tool
 
 log = logging.getLogger(__name__)
@@ -96,7 +97,7 @@ def _as_bool(value: Any) -> bool:
 
 def _get(path: str, params: dict | None = None) -> tuple[int, Any]:
     import httpx
-    r = httpx.get(f"{_API}/{path}", headers=_headers(),
+    r = _governed_sender(httpx.get)(f"{_API}/{path}", headers=_headers(),
                   params=params or {}, timeout=30.0)
     try:
         return r.status_code, r.json()
@@ -112,7 +113,7 @@ def _post(path: str, data: dict, *, idempotency_key: str | None = None) -> tuple
         # retried request (network blip, agent re-run) does not create a
         # second object. https://stripe.com/docs/api/idempotent_requests
         headers["Idempotency-Key"] = idempotency_key
-    r = httpx.post(f"{_API}/{path}", headers=headers,
+    r = _governed_sender(httpx.post)(f"{_API}/{path}", headers=headers,
                    data=data, timeout=30.0)
     try:
         return r.status_code, r.json()

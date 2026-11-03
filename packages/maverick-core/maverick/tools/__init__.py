@@ -20,6 +20,7 @@ from typing import Any
 from .. import killswitch
 from ..budget import BudgetExceeded, UsageAccountingError
 from ..config import load_config
+from ..tool_results import ToolOutcome
 
 # Host scope is trusted execution context, never a model-supplied argument.
 _TOOL_HOST_SCOPE: ContextVar[tuple[str, ...] | None] = ContextVar("tool_host_scope", default=None)
@@ -278,9 +279,22 @@ async def _execute_tool_fn(fn, args: dict[str, Any], stream_chunk) -> str:
     return await execute_tool(fn, args, stream_chunk)
 
 
-def _store_bounded_cached(store, tool, args, result, namespace):
+def _store_bounded_cached(store, tool, args, result, namespace, generation=None):
+    # Snapshots and shared caches store plain strings and would discard the
+    # explicit state. Do not let a restored value acquire a different meaning.
+    from ..tool_results import ToolResultText, classify_tool_result
+
+    if isinstance(result, ToolResultText):
+        # A plain-string snapshot is safe only when restoring it preserves the
+        # explicit state; otherwise skip the cache rather than changing meaning.
+        if classify_tool_result(str(result)) is not result.state:
+            return
+        result = str(result)
     if len(result) <= 64_000:
-        store(tool, args, result, namespace=namespace)
+        if generation is None:
+            store(tool, args, result, namespace=namespace)
+        else:
+            store(tool, args, result, namespace=namespace, generation=generation)
 
 
 def _tool_error_result(error, name):
@@ -300,7 +314,7 @@ def _tool_error_result(error, name):
     return f"ERROR: {type(error).__name__}: {error}"
 
 
-ToolFn = Callable[[dict[str, Any]], str | Awaitable[str]]
+ToolFn = Callable[[dict[str, Any]], str | ToolOutcome | Awaitable[str | ToolOutcome]]
 
 
 @dataclass
@@ -459,6 +473,14 @@ class ToolRegistry:
 
     def all(self) -> list[Tool]:
         return [t for n, t in self._tools.items() if self._mcp_binding_current(n)]
+
+    def catalog_metadata(self) -> list[dict[str, Any]]:
+        """Describe registered, discoverable tools without exposing hidden names."""
+        return [
+            {"name": tool.name, "deferred_eligible": tool.name in self.deferrable_names}
+            for tool in self.all()
+            if tool.name not in self._hidden and self._acl_allows(tool.name)
+        ]
 
     def _mcp_binding_current(self, name: str) -> bool:
         check = self._mcp_bindings.get(name)
@@ -621,10 +643,19 @@ class ToolRegistry:
         if denial := _ambient_credential_denial(name, self._principal):
             return denial
         with bind_principal(self._principal):
-            return await _execute_tool_fn(
-                self._tools[name].fn, args,
-                lambda count: _forward_progress(self._chunk_listener, name, count),
-            )
+            try:
+                return await _execute_tool_fn(
+                    self._tools[name].fn, args,
+                    lambda count: _forward_progress(self._chunk_listener, name, count),
+                )
+            finally:
+                # Once dispatched, even an exception or cancellation can leave
+                # a write committed. Invalidate after each retry attempt.
+                try:
+                    from ..cache.tool import note_side_effect
+                    note_side_effect(expected_tool)
+                except Exception:  # pragma: no cover -- cache is best effort
+                    pass
 
     async def run(self, name: str, args: dict[str, Any]) -> str:
         # Flow actions and library callers can reach the registry without the
@@ -685,6 +716,8 @@ class ToolRegistry:
                         except Exception:  # pragma: no cover
                             pass
                         return _cached
+                from ..cache.tool import generation as _cache_generation
+                _read_generation = _cache_generation()
                 try:
                     from ..chaos import maybe_fail
                     maybe_fail("tool_dispatch",
@@ -708,11 +741,8 @@ class ToolRegistry:
                     try:
                         _store_bounded_cached(
                             store_cached, _tool, args, result, _cache_namespace,
+                            _read_generation,
                         )
-                        # A side-effectful tool may have changed what any
-                        # cached read returned; drop stale reads.
-                        from ..cache.tool import note_side_effect
-                        note_side_effect(_tool)
                     except Exception:  # pragma: no cover
                         pass
                 try:
@@ -905,6 +935,27 @@ def _deferred_loading_enabled() -> bool:
         return True  # a failed policy read must not widen the visible catalog
 
 
+def _register_local_workspace_tool(reg, sandbox, factory, has_local_workdir):
+    """Register a local path tool only for a locally accessible workspace."""
+    if has_local_workdir:
+        reg.register(factory(sandbox))
+
+
+def _registry_principal(user_id: str | None) -> str:
+    """Capture the user or authenticated caller identity for registry dispatch."""
+    principal = str(user_id or "").strip()
+    if principal and not principal.startswith("user:"):
+        return f"user:{principal}"
+    if principal:
+        return principal
+    # Network adapters bind the authenticated principal in a ContextVar.
+    # Capture it so worker threads and nested agents retain the caller's
+    # credential and output-cache namespace even after the context exits.
+    from ..connections import current_principal
+
+    return str(current_principal() or "").strip()
+
+
 def base_registry(
     world,
     sandbox,
@@ -956,26 +1007,14 @@ def base_registry(
     from .shell import shell
     from .str_edit import str_replace_editor
 
-    principal = str(user_id or "").strip()
-    if principal and not principal.startswith("user:"):
-        principal = f"user:{principal}"
-    if not principal:
-        # Network adapters (notably the MCP server) bind the authenticated
-        # execution principal before they enter the orchestrator.  The agent's
-        # human-facing ``user_id`` remains optional, but connector resolution
-        # and the output-cache namespace must still retain the remote caller's
-        # identity.  Copy the ContextVar value onto the registry so worker
-        # threads cannot lose it and nested/child agents inherit the same
-        # authorization boundary.
-        from ..connections import current_principal
-
-        principal = str(current_principal() or "").strip()
+    principal = _registry_principal(user_id)
     reg = ToolRegistry(principal=principal or None)
-    # SSHBackend executes shell commands remotely, but filesystem tools
-    # are local pathlib operations. Registering read/write/list for SSH
-    # would access the Lightwork host filesystem instead of the remote
-    # sandbox host.
-    if sandbox.__class__.__name__ != "SSHBackend":
+    from ..sandbox.sdk import workdir_is_local
+
+    # These tools use local pathlib operations rather than sandbox.exec().
+    # A remote workspace path would refer to an unrelated host directory.
+    has_local_workdir = workdir_is_local(sandbox)
+    if has_local_workdir:
         reg.register(read_file(sandbox))
         reg.register(write_file(sandbox, goal_id=goal_id))
         reg.register(list_dir(sandbox))
@@ -986,11 +1025,9 @@ def base_registry(
 
     reg.register(read_tool_result(goal_id=goal_id, principal=principal or None))
     reg.register(read_attachment_tool(world, goal_id))
-    reg.register(repo_map(sandbox))
-    # Surgical exact-match editor. OpenHands' biggest
-    # single contribution to SWE-bench scores — eliminates ~30% of
-    # apply-fail failures by side-stepping hand-authored diffs.
-    reg.register(str_replace_editor(sandbox))
+    if has_local_workdir:
+        reg.register(repo_map(sandbox))
+        reg.register(str_replace_editor(sandbox))
     # Governed session kernel. Registered ONLY when the operator has turned
     # it on: an unregistered tool costs no catalog tokens and cannot be
     # called, so the default deployment is unchanged.
@@ -1237,13 +1274,14 @@ def base_registry(
     reg.register(http_fetch())
     from .control_tools import find_controls_tool
     reg.register(find_controls_tool())
-    reg.register(read_pdf(sandbox))
-    reg.register(view_image(sandbox, budget=budget))
-    reg.register(view_video(sandbox, budget=budget))
-    reg.register(dep_graph(sandbox))
-    reg.register(ast_edit(sandbox))
+    _register_local_workspace_tool(reg, sandbox, read_pdf, has_local_workdir)
+    if has_local_workdir:
+        reg.register(view_image(sandbox, budget=budget))
+        reg.register(view_video(sandbox, budget=budget))
+    _register_local_workspace_tool(reg, sandbox, dep_graph, has_local_workdir)
+    _register_local_workspace_tool(reg, sandbox, ast_edit, has_local_workdir)
     reg.register(clipboard())
-    reg.register(preview_diff(sandbox))
+    _register_local_workspace_tool(reg, sandbox, preview_diff, has_local_workdir)
     reg.register(kv_memory(world, goal_id))
     # Grounded-outcome linking: only offered once the learning loop is on, so the
     # default tool surface (and the plugin matrix) is unchanged (kernel rule 1).
@@ -1258,13 +1296,13 @@ def base_registry(
     reg.register(arxiv())
     reg.register(semantic_scholar())
     reg.register(wikipedia())
-    reg.register(apply_patch(sandbox))
+    _register_local_workspace_tool(reg, sandbox, apply_patch, has_local_workdir)
     reg.register(compute())
-    reg.register(sql_query(sandbox))
-    reg.register(sql_query_read(sandbox))
+    _register_local_workspace_tool(reg, sandbox, sql_query, has_local_workdir)
+    _register_local_workspace_tool(reg, sandbox, sql_query_read, has_local_workdir)
     reg.register(email_tool())
-    reg.register(pandas_query(sandbox))
-    reg.register(git_advanced(sandbox))
+    _register_local_workspace_tool(reg, sandbox, pandas_query, has_local_workdir)
+    _register_local_workspace_tool(reg, sandbox, git_advanced, has_local_workdir)
     reg.register(calendar_tool())
     reg.register(capability_delegation())
     reg.register(coordinated_disclosure())
@@ -1274,7 +1312,7 @@ def base_registry(
     reg.register(decision_explainer())
     reg.register(rectification())
     reg.register(redact_tool())
-    reg.register(file_watcher(sandbox))
+    _register_local_workspace_tool(reg, sandbox, file_watcher, has_local_workdir)
     reg.register(format_money_tool())
     reg.register(linear())
     reg.register(jira())
@@ -1294,8 +1332,8 @@ def base_registry(
     reg.register(youtube())
     reg.register(notion())
     reg.register(obsidian())
-    reg.register(spreadsheet(sandbox))
-    reg.register(spreadsheet_read(sandbox))
+    _register_local_workspace_tool(reg, sandbox, spreadsheet, has_local_workdir)
+    _register_local_workspace_tool(reg, sandbox, spreadsheet_read, has_local_workdir)
     reg.register(translate())
     reg.register(slack_bot())
     reg.register(stripe_tool())
@@ -1304,7 +1342,7 @@ def base_registry(
     from .finance_anomaly import finance_anomaly
     reg.register(finance_anomaly())
     reg.register(currency())
-    reg.register(a11y(sandbox))
+    _register_local_workspace_tool(reg, sandbox, a11y, has_local_workdir)
     reg.register(discord_bot())
     reg.register(hackernews())
     reg.register(dns_lookup())
@@ -1312,7 +1350,7 @@ def base_registry(
     reg.register(geofence())
     reg.register(knowledge_graph())
     reg.register(citation_verifier())
-    reg.register(cross_repo_deps(sandbox))
+    _register_local_workspace_tool(reg, sandbox, cross_repo_deps, has_local_workdir)
     reg.register(test_gen())
     reg.register(two_person_rule())
     reg.register(compaction_classifier())
@@ -1414,10 +1452,10 @@ def base_registry(
     reg.register(smart_goal_completion())
     reg.register(unified_inbox())
     reg.register(smart_nl_filter())
-    reg.register(semantic_code_search(sandbox))
+    _register_local_workspace_tool(reg, sandbox, semantic_code_search, has_local_workdir)
     reg.register(mutation_test())
     reg.register(constrained_output())
-    reg.register(model3d_inspect(sandbox))
+    _register_local_workspace_tool(reg, sandbox, model3d_inspect, has_local_workdir)
     reg.register(synthetic_data())
     reg.register(web_recorder())
     reg.register(watermark_detector())
@@ -1444,7 +1482,7 @@ def base_registry(
     from .oauth_helper import oauth_helper
     # template_generator / web_archive / anki: registered once above
     # (parallel-built on both branches; unified at merge).
-    reg.register(image_content_classifier(sandbox))
+    _register_local_workspace_tool(reg, sandbox, image_content_classifier, has_local_workdir)
     reg.register(lsp_bridge(sandbox))
     reg.register(oauth_helper())
     reg.register(github_search())
@@ -1452,32 +1490,30 @@ def base_registry(
     reg.register(a11y_tree())
     reg.register(ai_act_classifier())
     reg.register(cache_admin())
-    reg.register(openapi_runner(sandbox))
-    reg.register(ocr(sandbox))
-    reg.register(container_build(sandbox))
-    def _defer(tool):
-        # Register a third-party SaaS connector as deferred-eligible: with
-        # [capabilities] deferred_tools on (default), its schema stays out of
-        # the model's per-turn catalog until find_tools activates it. run()
-        # executes it regardless of exposure.
-        reg.register(tool)
-        reg.deferrable_names.add(tool.name)
+    _register_local_workspace_tool(reg, sandbox, openapi_runner, has_local_workdir)
+    _register_local_workspace_tool(reg, sandbox, ocr, has_local_workdir)
+    _register_local_workspace_tool(reg, sandbox, container_build, has_local_workdir)
+    from .catalog import ToolDescriptor, register_descriptors
 
-    _defer(posthog_tool())
+    # Declarations retain registration order and defer factory invocation
+    # until this point, preserving credential and optional-dependency behavior.
+    register_descriptors(reg, (ToolDescriptor("posthog", posthog_tool, True),))
     reg.register(privacy_budget())
-    _defer(shopify_tool())
-    _defer(mongodb_tool())
-    _defer(redis_tool())
-    _defer(sentry_tool())
-    _defer(pagerduty_tool())
-    _defer(salesforce_tool())
-    _defer(cloudflare_tool())
-    _defer(datadog_tool())
-    _defer(hubspot_tool())
-    _defer(twilio_tool())
-    _defer(s3_tool())
+    register_descriptors(reg, (
+        ToolDescriptor("shopify", shopify_tool, True),
+        ToolDescriptor("mongodb", mongodb_tool, True),
+        ToolDescriptor("redis", redis_tool, True),
+        ToolDescriptor("sentry", sentry_tool, True),
+        ToolDescriptor("pagerduty", pagerduty_tool, True),
+        ToolDescriptor("salesforce", salesforce_tool, True),
+        ToolDescriptor("cloudflare", cloudflare_tool, True),
+        ToolDescriptor("datadog", datadog_tool, True),
+        ToolDescriptor("hubspot", hubspot_tool, True),
+        ToolDescriptor("twilio", twilio_tool, True),
+        ToolDescriptor("s3", s3_tool, True),
+    ))
     reg.register(serial_tool())
-    _defer(elasticsearch_tool())
+    register_descriptors(reg, (ToolDescriptor("elasticsearch", elasticsearch_tool, True),))
     reg.register(github_actions())
     # Strategic-fit connectors (ITSM / data / cloud-ML / GRC). Explicit-token
     # auth (no ambient creds), so registered unconditionally like salesforce.
@@ -1491,16 +1527,18 @@ def base_registry(
     from .snowflake_tool import snowflake_tool
     from .vertex_tool import vertex_tool
     from .workday_tool import workday_tool
-    _defer(servicenow_tool())
-    _defer(snowflake_tool())
-    _defer(databricks_tool())
-    _defer(onetrust_tool())
-    _defer(vertex_tool())
-    _defer(oracle_tool())
-    _defer(sap_tool())
-    _defer(workday_tool())
-    _defer(bigquery_tool())
-    _defer(dynamics_tool())
+    register_descriptors(reg, (
+        ToolDescriptor("servicenow", servicenow_tool, True),
+        ToolDescriptor("snowflake", snowflake_tool, True),
+        ToolDescriptor("databricks", databricks_tool, True),
+        ToolDescriptor("onetrust", onetrust_tool, True),
+        ToolDescriptor("vertex", vertex_tool, True),
+        ToolDescriptor("oracle", oracle_tool, True),
+        ToolDescriptor("sap", sap_tool, True),
+        ToolDescriptor("workday", workday_tool, True),
+        ToolDescriptor("bigquery", bigquery_tool, True),
+        ToolDescriptor("dynamics", dynamics_tool, True),
+    ))
     # The long tail of token-authed REST connectors (one spec each, built on
     # make_rest_tool). Same house rules: explicit env auth, confirm-gated writes.
     from .enterprise_connectors import enterprise_connectors
@@ -1530,45 +1568,49 @@ def base_registry(
         reg.register(dynamodb_tool())
         reg.register(vercel_tool())
         reg.register(gdrive_tool())
-    _defer(trello_tool())
-    _defer(confluence_tool())
-    _defer(replicate_tool())
-    _defer(newsapi_tool())
-    _defer(wolfram_tool())
-    _defer(dropbox_tool())
-    _defer(msgraph_tool())
-    _defer(gmail_tool())
-    _defer(plausible_tool())
-    _defer(mixpanel_tool())
-    _defer(calendly_tool())
-    _defer(zoom_tool())
-    _defer(spotify_tool())
-    _defer(home_assistant_tool())
-    _defer(reddit_tool())
-    _defer(bitbucket_tool())
-    _defer(ses_tool())
-    _defer(sns_tool())
-    reg.register(ffmpeg_tool(sandbox))
-    reg.register(pandoc_tool(sandbox))
-    reg.register(office_convert(sandbox))
-    reg.register(wasm_run(sandbox))
+    register_descriptors(reg, (
+        ToolDescriptor("trello", trello_tool, True),
+        ToolDescriptor("confluence", confluence_tool, True),
+        ToolDescriptor("replicate", replicate_tool, True),
+        ToolDescriptor("newsapi", newsapi_tool, True),
+        ToolDescriptor("wolfram", wolfram_tool, True),
+        ToolDescriptor("dropbox", dropbox_tool, True),
+        ToolDescriptor("msgraph", msgraph_tool, True),
+        ToolDescriptor("gmail", gmail_tool, True),
+        ToolDescriptor("plausible", plausible_tool, True),
+        ToolDescriptor("mixpanel", mixpanel_tool, True),
+        ToolDescriptor("calendly", calendly_tool, True),
+        ToolDescriptor("zoom", zoom_tool, True),
+        ToolDescriptor("spotify", spotify_tool, True),
+        ToolDescriptor("home_assistant", home_assistant_tool, True),
+        ToolDescriptor("reddit", reddit_tool, True),
+        ToolDescriptor("bitbucket", bitbucket_tool, True),
+        ToolDescriptor("ses", ses_tool, True),
+        ToolDescriptor("sns", sns_tool, True),
+    ))
+    _register_local_workspace_tool(reg, sandbox, ffmpeg_tool, has_local_workdir)
+    _register_local_workspace_tool(reg, sandbox, pandoc_tool, has_local_workdir)
+    _register_local_workspace_tool(reg, sandbox, office_convert, has_local_workdir)
+    _register_local_workspace_tool(reg, sandbox, wasm_run, has_local_workdir)
     if _hardware_sensors_enabled():
         reg.register(hardware_sensors())
-    reg.register(imagemagick_tool(sandbox))
-    reg.register(audio_understanding(sandbox))
-    reg.register(image_edit(sandbox))
-    reg.register(embedded_device(sandbox))
-    _defer(ga4_tool())
-    _defer(plaid_tool())
-    _defer(truelayer_tool())
-    _defer(erp_tool())  # read-only ERP system-of-record access (Ops/Finance)
+    _register_local_workspace_tool(reg, sandbox, imagemagick_tool, has_local_workdir)
+    _register_local_workspace_tool(reg, sandbox, audio_understanding, has_local_workdir)
+    _register_local_workspace_tool(reg, sandbox, image_edit, has_local_workdir)
+    _register_local_workspace_tool(reg, sandbox, embedded_device, has_local_workdir)
+    register_descriptors(reg, (
+        ToolDescriptor("ga4", ga4_tool, True),
+        ToolDescriptor("plaid", plaid_tool, True),
+        ToolDescriptor("truelayer", truelayer_tool, True),
+        ToolDescriptor("erp_read", erp_tool, True),
+    ))
 
     # Voice tools (opt-in extra; tool factories raise ImportError only
     # when called without the required API key OR SDK; registering is
     # cheap).
     from .voice import speak, transcribe_audio
-    reg.register(transcribe_audio(sandbox))
-    reg.register(speak(sandbox))
+    _register_local_workspace_tool(reg, sandbox, transcribe_audio, has_local_workdir)
+    _register_local_workspace_tool(reg, sandbox, speak, has_local_workdir)
 
     # Capability tools that live in the parent package (maverick/), not the
     # tools subpackage.
@@ -1582,11 +1624,11 @@ def base_registry(
     from ..workspace_snapshot import workspace_snapshot
     reg.register(dom_diff())
     reg.register(license_scan())
-    reg.register(workspace_snapshot(sandbox))
+    _register_local_workspace_tool(reg, sandbox, workspace_snapshot, has_local_workdir)
     reg.register(task_graph())
     reg.register(browser_device())
     reg.register(bench_track())
-    reg.register(html_to_app(sandbox))
+    _register_local_workspace_tool(reg, sandbox, html_to_app, has_local_workdir)
     reg.register(browser_auth_vault())
 
     # Subpackage capability tools. The sandbox-backed ones
@@ -1596,9 +1638,9 @@ def base_registry(
     from .notebook_exec import notebook_exec
     from .teams_tool import teams_tool
     from .websocket_tool import websocket_tool
-    reg.register(notebook_exec(sandbox))
-    reg.register(latex_tool(sandbox))
-    reg.register(diagram_tool(sandbox))
+    _register_local_workspace_tool(reg, sandbox, notebook_exec, has_local_workdir)
+    _register_local_workspace_tool(reg, sandbox, latex_tool, has_local_workdir)
+    _register_local_workspace_tool(reg, sandbox, diagram_tool, has_local_workdir)
     reg.register(websocket_tool())
     # webrtc is NOT registered by default. Its own module docstring has always
     # said "Factory exported, NOT registered in the default tool set: callers

@@ -345,8 +345,12 @@ data class NativeConsentAuthority(
 ) {
     fun validate() {
         require(platform in LightworkConsentClient.SUPPORTED_PLATFORMS)
-        require(applicationId.length in 3..255)
-        require(listOf(deviceRevision, keyRevision, sdkVersion, publicClientRevision, policyVersion).all { it > 0 })
+        require(applicationId.matches(Regex("[A-Za-z0-9][A-Za-z0-9_.:-]{2,254}")))
+        require(listOf(applicationRef, tenantId, deviceId, policyId).all {
+            it.matches(Regex("[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}"))
+        })
+        require(listOf(deviceRevision, keyRevision, publicClientRevision, policyVersion).all { it > 0 })
+        require(sdkVersion in 1..1_000_000)
         listOf(
             applicationAuthoritySha256, publicClientRecordSha256, publicationSha256,
             publicationBundleSha256, configurationSha256, policySha256,

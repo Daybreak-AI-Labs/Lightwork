@@ -493,7 +493,9 @@
     }
 
     function hover(option) {
-      option.addEventListener("mouseenter", function () {
+      // Late results can appear under a stationary pointer. A boundary-enter
+      // event then belongs to layout, not a new choice by the person typing.
+      option.addEventListener("mousemove", function () {
         var index = visibleOptions().indexOf(option);
         if (index >= 0) setActive(index, false);
       });

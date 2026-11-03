@@ -55,7 +55,7 @@ def create_governed_document_vault_page_router(
     )
     async def workbench(request: Request) -> HTMLResponse:
         require_permission(request, "view")
-        from .api import module_activation_enabled
+        from .module_activation import module_activation_enabled
         workspace_selected = _tenant_selected() is not False
         if any(
             key not in {"theme", "density", "font", "lang", "document"}

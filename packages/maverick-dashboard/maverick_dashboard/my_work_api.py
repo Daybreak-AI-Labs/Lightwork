@@ -77,7 +77,7 @@ def _workflow_source(request, owner):
         from maverick import flow
         from maverick.flow import store
 
-        from .api import _assert_flow_access
+        from .flows_api import _assert_flow_access
 
         if not flow.enabled():
             coverage.append({"source": "Workflow runs", "state": "disabled"})

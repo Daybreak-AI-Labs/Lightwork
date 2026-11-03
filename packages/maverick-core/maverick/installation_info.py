@@ -42,6 +42,26 @@ def package_versions() -> list[tuple[str, str | None]]:
     return out
 
 
+def native_acceleration_status(unicode_filter: Any, perceptual_hash: Any) -> dict[str, str]:
+    """Describe the optional native wrappers selected when each module loaded.
+
+    The wrappers can still fall back to Python for an individual input if
+    the native function raises; this reports availability, not a speed claim.
+    """
+    unicode_native = getattr(unicode_filter, "_native", None)
+    image_native = getattr(perceptual_hash, "_native", None)
+    return {
+        "unicode": "native with Python fallback" if (
+            callable(getattr(unicode_native, "normalize", None))
+            and callable(getattr(unicode_filter, "_normalize_py", None))
+        ) else "Python",
+        "image_hash": "native with Python fallback" if (
+            callable(getattr(image_native, "average_hash_from_pixels", None))
+            and callable(getattr(perceptual_hash, "_average_hash_from_pixels_py", None))
+        ) else "Python",
+    }
+
+
 def runtime_facts() -> dict[str, Any]:
     """Runtime details shown under "Runtime" by ``maverick version``.
 
@@ -74,6 +94,12 @@ def runtime_facts() -> dict[str, Any]:
         facts["persona"] = dict(load_persona())
     except Exception:
         pass
+    try:
+        from . import perceptual_hash
+        from .safety import unicode_filter
+        facts["native_acceleration"] = native_acceleration_status(unicode_filter, perceptual_hash)
+    except Exception:
+        facts["native_acceleration"] = None
     return facts
 
 
@@ -107,5 +133,5 @@ def encryption_key_digest(environ: dict[str, str] | None = None) -> str:
     return "sha256:" + hashlib.sha256(key).hexdigest()
 
 
-__all__ = ["PACKAGES", "package_versions", "runtime_facts", "KeyDigestError",
+__all__ = ["PACKAGES", "package_versions", "runtime_facts", "native_acceleration_status", "KeyDigestError",
            "encryption_key_digest"]

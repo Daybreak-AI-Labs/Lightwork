@@ -95,7 +95,7 @@ def snapshot(request, selection, *, action):
     context = _authority(request, write=action not in {"search", "inspect"})
     if action in {"search", "create"}:
         # Catalog metadata only; no ambient read of all fact values or history.
-        from .api import _world
+        from ._shared import _world
         revision = _world().fact_catalog_revision()
         fields = ([_field("key", "New shared fact name", required=True),
                    _field("value", "Detail", kind="textarea", required=True, max_length=20000)] if action == "create" else
@@ -151,7 +151,7 @@ def prepare(request, selection, arguments, *, action):
         key = arguments["key"].strip()
         if not key or is_private_fact_key(key):
             raise HTTPException(422, "Choose a shared business fact name, without a reserved personal or task prefix.")
-        from .api import _world
+        from ._shared import _world
         if _world().fact_record(key) is not None:
             raise HTTPException(409, "This name is already saved. Open its current detail before editing.")
         return Preview("Create one shared business fact. Workspace viewers can read it; do not put secrets in shared memory.",

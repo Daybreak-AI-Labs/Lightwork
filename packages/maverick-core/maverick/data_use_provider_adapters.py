@@ -28,7 +28,6 @@ import hashlib
 import hmac
 import json
 import math
-import os
 import re
 import sqlite3
 import time
@@ -41,6 +40,7 @@ from urllib.parse import quote, urlsplit
 
 from .data_use_policy_compiler import _COMPILER_SHA256 as COMPILER_AUTHORITY_SHA256
 from .data_use_policy_compiler import COMPILER_VERSION, CONTROL_IR_SCHEMA
+from .data_use_sqlite import immediate_transaction, private_connection
 from .file_lock import ensure_private_directory, ensure_private_file
 from .paths import canonical_tenant_id
 
@@ -559,39 +559,15 @@ class ProviderBindingStore:
 
     @contextlib.contextmanager
     def _connect(self):
-        ensure_private_directory(self.path.parent)
-        if not self.path.exists():
-            try:
-                fd = os.open(self.path, os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o600)
-            except FileExistsError:
-                pass
-            else:
-                os.close(fd)
-        ensure_private_file(self.path, 0o600)
-        conn = sqlite3.connect(str(self.path), timeout=10.0, isolation_level=None)
-        try:
-            conn.row_factory = sqlite3.Row
-            conn.execute("PRAGMA busy_timeout=10000")
-            conn.execute("PRAGMA journal_mode=DELETE")
-            conn.execute("PRAGMA synchronous=FULL")
-            conn.execute("PRAGMA foreign_keys=ON")
-            conn.execute("PRAGMA trusted_schema=OFF")
-            conn.execute("PRAGMA secure_delete=ON")
+        with private_connection(
+            self.path, ensure_directory=ensure_private_directory, ensure_file=ensure_private_file,
+        ) as conn:
             yield conn
-        finally:
-            conn.close()
 
     @contextlib.contextmanager
     def _transaction(self):
-        with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            try:
-                yield conn
-            except BaseException:
-                conn.rollback()
-                raise
-            else:
-                conn.commit()
+        with immediate_transaction(self._connect) as conn:
+            yield conn
 
     def _initialize(self) -> None:
         with self._connect() as conn:

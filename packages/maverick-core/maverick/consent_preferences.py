@@ -27,7 +27,6 @@ import hashlib
 import hmac
 import json
 import math
-import os
 import re
 import secrets
 import sqlite3
@@ -493,30 +492,11 @@ class ConsentPreferenceStore:
 
     @contextlib.contextmanager
     def _connect(self):
-        if consent_storage.shared():
-            conn = consent_storage.connect(self.path, timeout=10.0)
-        else:
-            ensure_private_directory(self.path.parent)
-            if not self.path.exists():
-                try:
-                    fd = os.open(self.path, os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o600)
-                except FileExistsError:
-                    pass
-                else:
-                    os.close(fd)
-            ensure_private_file(self.path, 0o600)
-            conn = sqlite3.connect(str(self.path), timeout=10.0, isolation_level=None)
-        try:
-            conn.row_factory = sqlite3.Row
-            conn.execute("PRAGMA busy_timeout=10000")
-            conn.execute("PRAGMA journal_mode=DELETE")
-            conn.execute("PRAGMA synchronous=FULL")
-            conn.execute("PRAGMA foreign_keys=ON")
-            conn.execute("PRAGMA trusted_schema=OFF")
-            conn.execute("PRAGMA secure_delete=ON")
-            yield conn
-        finally:
-            conn.close()
+        with consent_storage.authority_connection(
+            self.path, ensure_directory=ensure_private_directory,
+            ensure_file=ensure_private_file,
+        ) as connection:
+            yield connection
 
     def _initialize(self) -> None:
         with self._connect() as conn:

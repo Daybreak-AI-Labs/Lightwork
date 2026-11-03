@@ -1,5 +1,6 @@
 package dev.maverick
 
+import com.google.gson.JsonParser
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
 import java.net.InetSocketAddress
@@ -55,6 +56,22 @@ private fun end(cursor: Long) = "event: end\ndata: {\"terminal\":true,\"next_id\
 
 fun main() {
     var tests = 0
+    val sharedPages = JsonParser.parseString(sharedGoalEventsFixture).asJsonObject.getAsJsonArray("pages")
+    val sharedEvents = sharedPages.flatMap { it.asJsonObject.getAsJsonArray("events").toList() }
+    val sharedLast = sharedPages.last().asJsonObject
+    Fixture { exchange, _ ->
+        val frames = sharedEvents.joinToString("") { item ->
+            val id = item.asJsonObject.get("id").asLong
+            "id: $id\ndata: $item\n\n"
+        }
+        val cursor = sharedLast.get("next_id").asLong
+        val terminal = "event: end\ndata: {\"terminal\":true,\"next_id\":$cursor}\n\n"
+        exchange.stream(frames + terminal)
+    }.use { f ->
+        f.start(); f.finished()
+        check(f.cursors.toList() == listOf(1L, 2L, 3L) && f.lines.last() == "[Run complete.]")
+        tests++
+    }
     Fixture { exchange, _ -> exchange.stream((1L..401L).joinToString("") { event(it) } + end(401)) }.use { f ->
         f.start(); f.finished()
         check(f.lines.count { it.startsWith("{") } == 401)

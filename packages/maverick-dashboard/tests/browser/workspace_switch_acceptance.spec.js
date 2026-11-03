@@ -10,7 +10,11 @@ test('a real switch in one tab pauses another tab draft and approval without cro
     expect(created.status(),await created.text()).toBe(201);
     const draft=app.page,approval=await app.context.newPage(),picker=await app.context.newPage();
     await draft.goto('/workflow-builder?edit=workspace-draft');
+    await expect(draft.locator('.draft-recovery > [role=status]')).toContainText('Draft recovery is ready');
     await draft.locator('#wf-steps').fill('Unsaved workspace A draft');
+    // Finish the legitimate debounced save in A before observing writes across
+    // the switch. Navigation in the other tab does not synchronize autosave.
+    await expect(draft.locator('.draft-recovery > [role=status]')).toContainText('Recovery copy saved');
     await approval.goto('/approvals');
     const reject=approval.locator(`button[data-id="${original.approvals['workspace-a']}"][data-action=deny]`);
     await expect(reject).toBeEnabled();
@@ -31,12 +35,15 @@ test('a real switch in one tab pauses another tab draft and approval without cro
     expect(noticeBounds.x).toBeGreaterThanOrEqual(0);
     expect(noticeBounds.x+noticeBounds.width).toBeLessThanOrEqual(320);
     await expect(draft.locator('#wf-steps')).toHaveValue('Unsaved workspace A draft');
+    // Exercise autosave after the switch as well as the explicit save action.
+    await draft.locator('#wf-steps').fill('Edited after workspace switch');
+    await expect(draft.locator('.draft-recovery > [role=status]')).toContainText('Your editor contents have been kept. Check your connection and try again.');
     await draft.locator('#wf-save-btn').click();
     await reject.click();
     await expect(approval.locator('#mv-form')).toBeVisible();
     await approval.locator('#mv-form-ok').click();
     await expect(draft.locator('#wf-status')).toContainText('Could not save the workflow');
-    await expect(draft.locator('#wf-steps')).toHaveValue('Unsaved workspace A draft');
+    await expect(draft.locator('#wf-steps')).toHaveValue('Edited after workspace switch');
     await expect(approval.locator('#approval-msg')).toContainText('Could not');
     expect(approvalPosts).toEqual([]);
     expect(writes).toEqual([]);

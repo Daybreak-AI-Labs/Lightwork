@@ -1171,6 +1171,25 @@ def connect(path: str | os.PathLike[str], *, timeout: float = 10.0, read_only: b
 
 
 @contextlib.contextmanager
+def authority_connection(path, *, ensure_directory, ensure_file, foreign_keys: bool = True):
+    """Open an authority's private file or shared connection under its policy."""
+    from .data_use_sqlite import private_connection
+    from .sqlite_authority import configure_authority_connection
+
+    if not shared():
+        with private_connection(path, ensure_directory=ensure_directory,
+                                ensure_file=ensure_file, foreign_keys=foreign_keys) as connection:
+            yield connection
+        return
+    connection = connect(path, timeout=10.0)
+    try:
+        configure_authority_connection(connection, foreign_keys=foreign_keys)
+        yield connection
+    finally:
+        connection.close()
+
+
+@contextlib.contextmanager
 def reading(path: str | os.PathLike[str]) -> Iterator[Any]:
     """Read-only access to a store: its private file here, or its shared schema."""
     if shared():

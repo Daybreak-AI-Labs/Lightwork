@@ -24,6 +24,7 @@ import shlex
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
+from typing import ClassVar
 
 from .local import ExecResult, scrub_env
 
@@ -54,6 +55,8 @@ _VALID_HOST_KEY_POLICIES = {"accept-new", "yes", "no"}
 
 @dataclass
 class SSHBackend:
+    # The workspace path names a location on the SSH host, not this machine.
+    workdir_is_local: ClassVar[bool] = False
     host: str
     # The workdir lives on the REMOTE host, which is POSIX -- use
     # PurePosixPath, never the platform Path: on a Windows client

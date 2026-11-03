@@ -122,7 +122,7 @@ def second_person_approval(request, name: str, profile: dict, reason: str, *, us
 def may_decide(request) -> bool:
     """Whether this caller may read and decide a bypass request: the same pack-editing check publishing makes."""
     from . import auth
-    from .api import pack_editing_denial
+    from .editor_policy import pack_editing_denial
 
     return auth.has_permission(request, "admin") and pack_editing_denial(request) is None
 
@@ -144,7 +144,7 @@ def require_decider(request, approval, who: str, *, approving: bool) -> None:
     and never the person who asked for it."""
     if not is_bypass(approval):
         return
-    from .api import _require_pack_editing
+    from .editor_policy import require_pack_editing as _require_pack_editing
 
     _require_pack_editing(request)
     if approving and approval.requested_by and who == approval.requested_by:

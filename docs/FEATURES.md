@@ -1768,6 +1768,8 @@ Settings and the installation wizard.
   tenant, and forces a visible readiness gap. See
   [`AI_EVIDENCE_GATEWAY.md`](./AI_EVIDENCE_GATEWAY.md) and the
   [governance benchmark report](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/benchmarks/GOVERNANCE_FRONTIER_RESULTS.md).
+  Runtime delivery consumers use the `maverick.ai_evidence.delivery` boundary;
+  the `maverick.ai_evidence_gateway` import remains supported.
 - **Four reduced standalone security agents** (`demo/grc-concierge/`,
   `demo/platform-threat-hunter/`, `demo/environment-threat-hunter/`,
   `demo/model-risk-ai-assurance-officer/`) — each has
@@ -3228,6 +3230,14 @@ refuses a non-conformant backend rather than falling through to unsandboxed
 local exec) — so third parties ship backends without forking. All in-tree
 backends conform (the check surfaced and fixed a real gap: devcontainer
 lacked `workdir`, crashing path-confined tools).
+Backends whose execution workspace is not the host path declare
+`workdir_is_local = False`. For such backends the registry omits workspace
+tools that inspect or modify local paths; their remote workspace support
+requires an explicit file-transfer interface. The SSH, Modal and Firecracker
+backends declare this today. For compatibility, legacy third-party SDK v2
+backends that omit this declaration retain the existing local-workspace
+assumption; their authors should set it explicitly. This declaration does not
+by itself establish complete remote sandbox isolation.
 Dispatch never retries a backend because an invocation raised `TypeError`.
 Legacy `exec(cmd)` backends can explicitly declare a backend-enforced finite
 execution policy; admission rejects a caller deadline shorter than that fixed
@@ -3343,13 +3353,11 @@ partials, and only the top `keep` run to completion; the rest are cancelled
 before they finish, so the budget concentrates on the strongest candidates
 rather than N full runs. Distinct from latency best-of-N (the kill signal is
 early *quality*, not time); the scorer only ever sees the cheap partials.
-**Fast JSON seam** (`fastjson.py`, opt-in `[perf-fastjson]` extra): a
-stdlib-compatible `dumps`/`loads` that prefers **orjson** (~5-10x faster) when
-installed and falls back to stdlib `json` otherwise — `dumps` returns `str`,
-honors `sort_keys`, and degrades on any value orjson rejects, so it's a safe
-drop-in for round-trip/transport paths (wired into the tool-output cache
-snapshot). Deliberately NOT used for cache keys/signatures, where exact bytes
-must stay backend-stable. **Self-tuning budget suggestions**
+**JSON seam** (`fastjson.py`): stdlib `dumps`/`loads` with a compact serializer
+for tool output and cache snapshots. It returns `str`, honors `sort_keys`, and
+stringifies unsupported values. It uses the same backend regardless of whether
+the legacy `[perf-fastjson]` extra is installed, preserving values such as
+large integers and non-finite floats. **Self-tuning budget suggestions**
 (`self_tuning_budget.py`, governed `[budget] self_tuning`): retains observed
 spending and can suggest a cap for a caller that explicitly requests a *coarse
 task class*

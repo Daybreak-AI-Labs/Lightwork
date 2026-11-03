@@ -392,7 +392,7 @@ def task_policy(request: Request, response: Response):
 def source_analysis(request: Request, response: Response, goal_id: int):
     from maverick.knowledge_task_context import SourceContextUnavailable, read_analysis
 
-    from .api import _world
+    from ._shared import _world
     _, actor, context = _binding(request, response)
     try:
         value = read_analysis(_world(), goal_id, actor)

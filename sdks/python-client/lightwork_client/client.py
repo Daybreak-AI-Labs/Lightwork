@@ -17,6 +17,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from .dashboard_contracts import GoalEventsResponse, GoalOut
+
 DEFAULT_TIMEOUT = 30.0
 
 # (method, url, headers, body, timeout) -> (status, response headers, body bytes).
@@ -245,15 +247,15 @@ class Lightwork:
         return self._call("GET", "/api/v1/goal-submissions/receipt", params={"kind": kind},
                           headers={"Idempotency-Key": idempotency_key, "Cache-Control": "no-cache"})
 
-    def get_goal(self, goal_id: int) -> dict[str, Any]:
+    def get_goal(self, goal_id: int) -> GoalOut:
         """``GET /api/v1/goals/{id}``: status, ``result``, ``reason_code``, ``needs_input``."""
         return self._call("GET", f"/api/v1/goals/{goal_id}")
 
-    def list_goals(self, *, status: str | None = None, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+    def list_goals(self, *, status: str | None = None, limit: int = 50, offset: int = 0) -> list[GoalOut]:
         """``GET /api/v1/goals``, newest first."""
         return self._call("GET", "/api/v1/goals", params={"status": status, "limit": limit, "offset": offset})
 
-    def goal_events(self, goal_id: int, *, since: int = 0, limit: int = 200) -> dict[str, Any]:
+    def goal_events(self, goal_id: int, *, since: int = 0, limit: int = 200) -> GoalEventsResponse:
         """One page of ``GET /api/v1/goals/{id}/events`` after cursor ``since``.
 
         The page has ``events``, ``next_id`` (save it as the next ``since``),

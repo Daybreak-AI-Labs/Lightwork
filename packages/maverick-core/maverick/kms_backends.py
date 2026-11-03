@@ -44,6 +44,7 @@ import re
 from typing import Any
 from urllib.parse import urlsplit
 
+from .config_contracts import TEXT_SETTINGS
 from .crypto_at_rest import EncryptionUnavailable
 
 _AWS_MAGIC = b"MVKKMS-AWS1\n"
@@ -163,7 +164,7 @@ class VaultTransitKMS:
                                or cfg.get("key_id"), "key_id")
         self.address = address or cfg.get("address") or os.environ.get("VAULT_ADDR")
         self.token = token or os.environ.get("VAULT_TOKEN")
-        self.mount = mount or cfg.get("mount") or "transit"
+        self.mount = mount or cfg.get("mount") or TEXT_SETTINGS["kms.mount"].runtime_default
         self._client = client
 
     def _vault(self):

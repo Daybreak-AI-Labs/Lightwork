@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import base64
 import json
+import math
 import time
 
 PREFIX = "LW1"
@@ -106,8 +107,21 @@ def verify_license(token: str, public_pem: str) -> dict:
         payload = json.loads(body)
     except ValueError as exc:  # pragma: no cover - signed bytes are json
         raise LicenseError("license payload is not JSON") from exc
-    if float(payload.get("expires_at") or 0) <= time.time():
+    if not isinstance(payload, dict):
+        raise LicenseError("license payload must be an object")
+    try:
+        expires = float(payload.get("expires_at") or 0)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise LicenseError("license expiry must be finite") from exc
+    if not math.isfinite(expires):
+        raise LicenseError("license expiry must be finite")
+    if expires <= time.time():
         raise LicenseError("license has expired")
+    capabilities = payload.get("capabilities")
+    if capabilities is not None and (
+        not isinstance(capabilities, list) or not all(isinstance(item, str) for item in capabilities)
+    ):
+        raise LicenseError("license capabilities must be a list of strings")
     return payload
 
 

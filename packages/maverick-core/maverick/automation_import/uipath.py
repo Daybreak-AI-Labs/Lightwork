@@ -89,6 +89,9 @@ class UiPathImporter:
         self.token = "" if request is not None else (token or os.environ.get("UIPATH_TOKEN", "")).strip()
 
     def _get(self, client, path: str):
+        if self.request is None:
+            from ..governed_http import admit_client_request
+            admit_client_request(client, f"{self.base_url}{path}")
         return (self.request or client.get)(
             f"{self.base_url}{path}",
             headers={"Authorization": f"Bearer {self.token}", "Accept": "application/json"},

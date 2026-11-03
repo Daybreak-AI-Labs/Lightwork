@@ -22,7 +22,7 @@ def records(request: Request, response: Response, query: str = Query("", max_len
             tag: str = Query("", max_length=64), snapshot: str = Query("", max_length=64),
             offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100)):
     require_permission(request, "view")
-    from .api import _world
+    from ._shared import _world
     world = _world()
     ctx = context_for(request)
     binding = [ctx, query, source, updated_before, tag, world.fact_catalog_revision()]
@@ -45,7 +45,7 @@ def record(request: Request, response: Response, key: str = Query(..., max_lengt
     require_permission(request, "view")
     if is_private_fact_key(key):
         raise HTTPException(404, "This fact is not available in shared workspace facts.")
-    from .api import _world
+    from ._shared import _world
     world = _world()
     item = world.fact_record(key)
     if item is None:
@@ -77,7 +77,7 @@ def update_fact_tags(request: Request, key: str, tags: list[str],
         raise HTTPException(409, "Your account or workspace changed. Reload before editing tags.")
     if is_private_fact_key(key):
         raise HTTPException(404, "This fact is not available in shared workspace facts.")
-    from .api import _world
+    from ._shared import _world
     world = _world()
     item = world.fact_record(key)
     if item is None:
@@ -109,7 +109,7 @@ def remove_fact(request: Request, key: str, expected_revision: int, context: str
         raise HTTPException(404, "This fact is not available in shared workspace facts.")
     if context != context_for(request):
         raise HTTPException(409, "Your account or workspace changed. Reload before removing.")
-    from .api import _world
+    from ._shared import _world
     try:
         removed = _world().delete_fact(name, expected_revision=expected_revision)
     except FactConflict as exc:

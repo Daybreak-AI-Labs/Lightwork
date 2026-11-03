@@ -47,6 +47,6 @@ Run watches use server replay cursors, bounded frames/output, connection and
 idle deadlines, and owned cancellation. Read the [client lifecycle
 contract](../../docs/client-request-lifecycle.md). `tests/RunEventStreamTest.kt`
 is a standalone Kotlin/JVM main for real loopback HTTP acceptance: compile it
-together with `RunEventStream.kt` using Kotlin 2.1.20, JRE/JDK 17+, and Gson
+together with `GeneratedDashboardFixtures.kt` and `RunEventStream.kt` using Kotlin 2.1.20, JRE/JDK 17+, and Gson
 2.11.0, then run `dev.maverick.RunEventStreamTestKt`. It does not qualify an
 installed IntelliJ plugin or substitute for building against the actual SDK.

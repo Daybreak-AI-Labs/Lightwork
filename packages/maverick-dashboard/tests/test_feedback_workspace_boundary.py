@@ -48,12 +48,13 @@ def test_current_owner_lineage_is_required_for_readback():
 
 def test_native_goal_read_and_aggregate_pass_trusted_owner(tmp_path, monkeypatch):
     from maverick.world_model import WorldModel
-    from maverick_dashboard import api
+    from maverick_dashboard import _shared, api
 
     world = WorldModel(tmp_path / "world.db")
     try:
         goal_id = world.create_goal("Owned local task", "", owner="")
         monkeypatch.setattr(api, "_world", lambda: world)
+        monkeypatch.setattr(_shared, "_world", lambda: world)
         request = Request({"type": "http", "method": "GET", "headers": [], "path": "/", "query_string": b""})
         with paths.tenant_scope(tenant="feedback-alpha"):
             feedback.record(goal_id, "someone-else", "down", value=0, note="Private previous lineage")

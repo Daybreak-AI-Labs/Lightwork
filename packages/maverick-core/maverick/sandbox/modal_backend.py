@@ -33,6 +33,9 @@ _DEFAULT_IMAGE = "python:3.12-slim"
 class ModalBackend:
     """Execute commands in ephemeral Modal sandboxes (one per exec)."""
 
+    # The host path is not transferred into the ephemeral filesystem.
+    workdir_is_local = False
+
     def __init__(self, workdir: Path | str = ".", *, image: str = _DEFAULT_IMAGE,
                  timeout: float = 60.0, cpu: float | None = None,
                  memory_mb: int | None = None, allow_network: bool = False,

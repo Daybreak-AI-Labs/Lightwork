@@ -7,17 +7,30 @@ the proxy strips whatever the client sent, injects the real key, and forwards to
 the single configured upstream. The key never lives in the agent's address
 space.
 
-## Why a second language here
+## Deployment choices
 
-Go provides a standalone deployment binary. Both the Go and Python listeners
-now stream responses with bounded admission, backpressure and cancellation.
-Neither implementation has been qualified against live provider traffic by the
-local transport tests; these changes do not establish a comparative speedup.
+The Python implementation is part of `maverick-core` and can be launched in a
+separate process with `python -m maverick.model_proxy`. It accepts proxy-process
+environment variables and, for non-key settings, `[model_proxy]` configuration.
+The provider key is read from the proxy process's `MAVERICK_PROXY_KEY`.
+
+The Go implementation can be built as a standalone binary and reads its
+configuration from the proxy process's environment. Both implementations are
+optional and maintain the same intended request-ownership behavior. Both have
+local tests, including generated parity fixtures for authorization, routing and
+header decisions. The fixtures do not establish parity for every transport or
+provider behavior.
+
+Both listeners stream responses with bounded admission, backpressure and
+cancellation. Local transport tests have not qualified either implementation
+against live provider traffic, and no comparative speedup has been established.
+Choose based on deployment requirements and qualify the intended providers and
+workload before making a performance or reliability claim.
 
 The security-critical decision logic —
 `BuildRequest` (drop the client's auth + hop-by-hop headers, inject the proxy's
 key, refuse a host outside the allow-set), `Authenticate` (constant-time client
-token check), `RouteAllowed` (allow-list only model-inference routes) — is a
+token check), `RouteAllowed` (allow-list only model-inference routes) — is
 covered by generated parity fixtures against the real Python (see below).
 
 The shared lifecycle, limits and compatibility restrictions are documented in
@@ -25,9 +38,11 @@ The shared lifecycle, limits and compatibility restrictions are documented in
 
 ## Run
 
-Config comes from the proxy's **own** environment (never the agent's config):
+From the repository root, run the Go implementation with config from the
+proxy's **own** environment (never the agent's config):
 
 ```bash
+cd go/model-proxy
 export MAVERICK_PROXY_UPSTREAM=https://api.anthropic.com
 export MAVERICK_PROXY_KEY=sk-ant-...          # the real key, injected upstream
 export MAVERICK_PROXY_CLIENT_TOKEN=some-shared-secret  # agent must present this
@@ -56,7 +71,8 @@ SSRF blocks). Regenerate after changing either side so they can't drift:
 
 ```bash
 python3 go/model-proxy/gen_parity.py     # from the repo root, with maverick-core installed
-go test ./go/model-proxy/...             # build + unit + parity + concurrency, run with -race in CI
+cd go/model-proxy
+go test ./...                            # build + unit + parity + concurrency, run with -race in CI
 ```
 
 CI (`.github/workflows/go-model-proxy.yml`) regenerates the fixture from Python

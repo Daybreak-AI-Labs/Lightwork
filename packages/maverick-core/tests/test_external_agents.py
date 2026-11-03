@@ -963,6 +963,29 @@ def test_execute_read_runs_immediately_and_is_audited(monkeypatch):
     assert fired[0]["outcome"] == "executed"
 
 
+@pytest.mark.parametrize("state, content, expected", [
+    ("succeeded", "ERROR is document content", "executed"),
+    ("failed", "upstream did not complete", "failed"),
+    ("indeterminate", "receipt missing", "indeterminate"),
+])
+def test_external_agent_respects_explicit_connector_state(monkeypatch, state, content, expected):
+    from maverick.tool_results import ToolOutcome, ToolResultState
+
+    class TypedConn(_FakeConn):
+        def read(self, params):
+            self.reads.append(dict(params))
+            return ToolOutcome(ToolResultState(state), content)
+
+    conn = _wire_fakecrm(monkeypatch, TypedConn())
+    _enroll()
+    verdict = xa.execute("sf-quotebot", {"connector": "fakecrm", "op": "get",
+                                         "path": "/opportunities"})
+    assert verdict["status"] == expected
+    assert len(conn.reads) == 1
+    if expected == "executed":
+        assert verdict["result"] == content
+
+
 def test_revocation_winning_final_fence_blocks_direct_provider_call(monkeypatch):
     conn = _wire_fakecrm(monkeypatch)
     _enroll()

@@ -99,7 +99,7 @@ def create_assessment_evidence_autopopulation_page_router(
         ):
             raise HTTPException(status_code=404, detail="workbench unavailable")
         style_nonce = secrets.token_urlsafe(18)
-        from .api import module_activation_enabled
+        from .module_activation import module_activation_enabled
 
         response = templates.TemplateResponse(
             request,

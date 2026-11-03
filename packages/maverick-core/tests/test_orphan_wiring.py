@@ -171,7 +171,11 @@ def _split_run_goal_impl_distillation_blocks() -> tuple[str, str]:
 
     import maverick.orchestrator as orchestrator
 
-    src = inspect.getsource(orchestrator._run_goal_impl)
+    # The main lifecycle must call the extracted success-learning stage, and
+    # the freeze checks must guard both distillation paths inside that stage.
+    entry = inspect.getsource(orchestrator._run_goal_impl)
+    assert "await _finish_goal_learning(" in entry
+    src = inspect.getsource(orchestrator._finish_goal_learning)
     marker = "# Default-on local continuous learning"
     split_at = src.index(marker)
     return src[:split_at], src[split_at:]
@@ -179,7 +183,7 @@ def _split_run_goal_impl_distillation_blocks() -> tuple[str, str]:
 
 def test_run_goal_impl_checks_the_freeze_before_distilling():
     """Guard against the gate rotting back out of the call site: the actual
-    per-run LOCAL distillation block in ``_run_goal_impl`` must call
+    per-run LOCAL distillation block in ``_finish_goal_learning`` must call
     ``_skill_distillation_frozen(...)`` before ``distill_and_save_gated``."""
     _auto_block, local_block = _split_run_goal_impl_distillation_blocks()
     frozen_idx = local_block.index("_skill_distillation_frozen(")

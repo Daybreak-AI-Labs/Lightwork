@@ -41,7 +41,7 @@ _SECTION_SUBJECT = re.compile(r"\A([a-z0-9_.]+) is not enabled\Z")
 
 
 def _switches() -> dict:
-    from .api import _MODULE_SWITCHES
+    from .module_activation import _MODULE_SWITCHES
 
     return _MODULE_SWITCHES
 

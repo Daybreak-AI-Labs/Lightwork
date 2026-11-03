@@ -6,7 +6,7 @@ from functools import partial
 from fastapi import HTTPException
 from maverick.governed_operations import digest
 
-from . import api
+from . import _shared
 from . import chat_message_actions as native
 from .product_operations import Adapter, EmptyInput, Preview, Snapshot
 
@@ -17,7 +17,7 @@ def snapshot(request, selection, *, action):
         goal_id = int(selection.get("id", selection.get("goal_id", 0)))
     except (TypeError, ValueError) as exc:
         raise HTTPException(422, "Open the conversation message first.") from exc
-    goal = api._world().get_goal(goal_id)
+    goal = _shared._world().get_goal(goal_id)
     if goal is None:
         return Snapshot(digest(bound), "Current Chat message", "Open a saved conversation message first.",
                         blocked="Choose a message in Chat.")

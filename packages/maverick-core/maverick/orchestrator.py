@@ -1551,6 +1551,38 @@ def _bind_goal_execution_principal(
     return bool(binder(int(goal.id), principal))
 
 
+def _verify_goal_execution_principal(
+    world: Any, goal: Any, goal_id: int, principal: str,
+) -> tuple[Any | None, str | None]:
+    """Bind execution authority and return the observable durable goal.
+
+    An unavailable or mismatched binding stops execution before status, audit,
+    episode, model or tool side effects.
+    """
+    was_unbound = not bool(getattr(goal, "execution_principal", "") or "")
+    try:
+        matches = _bind_goal_execution_principal(world, goal, principal)
+    except Exception:
+        log.exception("goal #%s execution-principal binding is unavailable", goal_id)
+        return None, "BLOCKED: goal execution-principal binding is unavailable"
+    if not matches:
+        log.warning("goal #%s execution principal does not match its binding", goal_id)
+        return None, "BLOCKED: goal is bound to a different execution principal"
+    if was_unbound:
+        try:
+            rebound_goal = world.get_goal(goal_id)
+        except Exception:
+            rebound_goal = None
+        if (
+            rebound_goal is None
+            or (getattr(rebound_goal, "execution_principal", "") or "") != principal
+        ):
+            log.error("goal #%s execution-principal binding was not observable", goal_id)
+            return None, "BLOCKED: goal execution-principal binding is unavailable"
+        return rebound_goal, None
+    return goal, None
+
+
 def _evidence_ready_goal_output(
     generated_text: str,
     *,
@@ -1568,7 +1600,7 @@ def _evidence_ready_goal_output(
     Code-patch artifacts intentionally bypass this human-prose seam.
     """
 
-    from . import ai_evidence_gateway as gateway
+    from .ai_evidence import delivery as gateway
 
     if not gateway.enabled():
         return generated_text
@@ -1655,6 +1687,847 @@ async def _goal_risk_gate(goal_id: int, goal: Any, *, resuming: bool) -> tuple[d
                     "work to watch the Approvals page.")
 
 
+def _check_start_limits(world: WorldModel, budget: Budget, goal_id: int,
+                        principal: str) -> str | None:
+    """Enforce person and tenant spending policy before a goal is claimed."""
+    try:
+        from . import quotas
+        reason = quotas.over_quota(principal) if quotas.quotas_enforced() else None
+    except Exception as exc:
+        reason = (
+            "principal quota policy unavailable: "
+            f"{_safe_exception_text(exc, fallback='quota lookup failed')}"
+        )
+    if not reason:
+        try:
+            from .spending_limits import start_refusal
+            reason = start_refusal(principal)
+        except Exception as exc:
+            reason = (
+                "The spending limits could not be read, so new work is paused "
+                f"({_safe_exception_text(exc, fallback='limits unreadable')})."
+            )
+    if reason:
+        world.set_goal_status(goal_id, "blocked", result=f"over quota: {reason}")
+        log.warning("goal #%s refused: %s", goal_id, reason)
+        return reason
+
+    try:
+        from .paths import current_tenant_id
+        from .tenant.registry import assert_tenant_active, tenant_over_quota
+
+        tenant_id = current_tenant_id()
+        assert_tenant_active(tenant_id)
+        reason = tenant_over_quota(tenant_id)
+    except Exception as exc:
+        reason = (
+            "tenant policy unavailable or inactive: "
+            f"{_safe_exception_text(exc, fallback='tenant lookup failed')}"
+        )
+    if not reason:
+        reason = getattr(budget, "_tenant_refusal", None)
+    if reason:
+        world.set_goal_status(goal_id, "blocked", result=f"over quota: {reason}")
+        log.warning("goal #%s refused: %s", goal_id, reason)
+        return reason
+    return None
+
+
+def _open_goal_episode(world: WorldModel, budget: Budget, goal_id: int, *,
+                       resume: bool, resume_episode_id: int | None,
+                       settlement: _QuotaUsageSettlement,
+                       lifecycle: _RunLifecycle) -> int:
+    """Select the durable episode and restore accounting before any spend."""
+    episode_id = resume_episode_id
+    resume_agent_id = "orchestrator-0"
+    if resume or resume_episode_id is not None:
+        from . import checkpoint as _ckpt_mod
+        if _ckpt_mod.enabled():
+            boundary = _ckpt_mod.Checkpointer(world).orchestrator_for(
+                goal_id, episode_id=episode_id, required=True,
+            )
+            if boundary is not None:
+                resume_agent_id, episode_id = boundary
+                if not world.episode_exists(goal_id, episode_id):
+                    raise ValueError("checkpoint episode does not belong to this goal")
+    if episode_id is None:
+        episode_id = world.start_episode(goal_id)
+    settlement.world = world
+    settlement.episode_id = episode_id
+    settlement.bind_checkpoint()
+    if resume or resume_episode_id is not None:
+        from . import checkpoint as _ckpt_mod
+        if _ckpt_mod.enabled():
+            saved = _ckpt_mod.Checkpointer(world).latest(
+                goal_id, resume_agent_id, episode_id=episode_id, required=True,
+            )
+            if saved is not None:
+                _ckpt_mod.restore_budget(settlement.reconcile_snapshot(saved.budget), into=budget)
+            else:
+                settlement.require_unspent_scope()
+    lifecycle.episode_id = episode_id
+    return episode_id
+
+
+def _create_root_agent(*, world: WorldModel, goal_id: int, ctx: SwarmContext,
+                       brief: str, domain: str | None, resume: bool,
+                       allowed_suites: frozenset[str] | None,
+                       model_override: str | None, lifecycle: _RunLifecycle
+                       ) -> tuple[Any | None, Any | None, str | None]:
+    """Create the requested specialist without relaxing its authority envelope."""
+    # Domain routing: when a domain is named, the root runs AS that domain's
+    # specialist -- its persona, capability envelope, compartment tag, and
+    # knowledge_search -- instead of the generic orchestrator. This is how
+    # the factory's packs actually execute a task end to end.
+    root = None
+    domain_profile = None
+    if domain:
+        try:
+            from .domain import (
+                agent_from_profile,
+                enabled_domains,
+                rejected_workspace_domains,
+                suites_for_domain,
+            )
+            # enabled_domains() honors the operator's [suites] toggles, so a
+            # domain whose suite is switched off is treated as unavailable.
+            _profile = enabled_domains().get(domain)
+            if _profile is None:
+                if domain in rejected_workspace_domains():
+                    msg = (
+                        f"{domain!r} cannot start because its setup needs review. "
+                        "Ask an administrator to check its permissions and "
+                        "operating limits. No work was started."
+                    )
+                else:
+                    msg = (f"no such domain: {domain!r} (unknown or its suite is "
+                           "disabled). See `maverick compartments` for available domains.")
+                world.set_goal_status(goal_id, "blocked", result=msg)
+                lifecycle.end_episode(msg, "blocked")
+                _fire_webhook("goal_finished", {
+                    "goal_id": goal_id, "status": "blocked", "result": msg,
+                })
+                return None, None, msg
+            # A changed specialist may be on trial: this goal runs the trial
+            # version only when its recorded choice says so (see specialist_canary).
+            from .specialist_canary import profile_for_goal
+            _profile, _ = profile_for_goal(domain, _profile, goal_id, world=world, resume=resume)
+            if (allowed_suites is not None
+                    and not suites_for_domain(domain, _profile) <= allowed_suites):
+                msg = ("This specialist is outside your department access. "
+                       "No work was started.")
+                world.set_goal_status(goal_id, "blocked", result=msg)
+                lifecycle.end_episode(msg, "blocked")
+                _fire_webhook("goal_finished", {
+                    "goal_id": goal_id, "status": "blocked", "result": msg,
+                })
+                return None, None, msg
+            domain_profile = _profile
+            root = agent_from_profile(_profile, ctx, brief, depth=0)
+        except Exception as e:
+            safe_error = _safe_exception_text(
+                e, fallback="domain agent construction failed",
+            )
+            msg = (
+                f"domain {domain!r} agent build failed: {safe_error}. "
+                "Refusing to run without the requested domain capability envelope."
+            )
+            log.error("%s", msg)
+            world.set_goal_status(goal_id, "blocked", result=msg)
+            lifecycle.end_episode(msg, "blocked")
+            _fire_webhook("goal_finished", {
+                "goal_id": goal_id, "status": "blocked", "result": msg,
+            })
+            return None, None, msg
+    if root is None:
+        root = Agent(
+            ctx=ctx,
+            role="orchestrator",
+            brief=brief,
+            model_override=model_override,
+            depth=0,
+        )
+
+    return root, domain_profile, None
+
+
+async def _execute_root_agent(*, root: Any, world: WorldModel, goal: Any, goal_id: int,
+                              budget: Budget, blackboard: Blackboard, shield: Any,
+                              channel: str | None, user_id: str | None, domain: str | None,
+                              lifecycle: _RunLifecycle) -> tuple[Any | None, str | None]:
+    """Run the agent and account for failures that escape its execution loop."""
+    try:
+        result = await root.run()
+    except UnpricedModelError as e:
+        # A genuinely unpriced model, not a cap trip -- must be
+        # caught BEFORE the BudgetExceeded clause below (it's a
+        # subclass) or it's reported as "raise your cap and resume",
+        # advice that fails identically since spend was never the issue.
+        safe_error = _safe_exception_text(e, fallback="model price unavailable")
+        lifecycle.end_episode(f"unpriced model: {safe_error}", "failure")
+        try:  # default-on local failure telemetry; no-op when disabled
+            from . import failure_telemetry as _ft
+            _ft.record_failure(
+                "unpriced_model", goal_id=goal_id, detail=safe_error,
+            )
+        except Exception:  # pragma: no cover -- telemetry never blocks a run
+            pass
+        _maybe_record_reflexion(
+            goal, failure_class="unpriced_model", failure_msg=safe_error,
+            blackboard=blackboard, shield=shield, channel=channel,
+            user_id=user_id, domain=domain,
+        )
+        world.set_goal_status(
+            goal_id, "blocked", result=f"unpriced model: {safe_error}",
+        )
+        _fire_webhook("goal_finished", {
+            "goal_id": goal_id, "status": "blocked",
+            "result": f"unpriced model: {safe_error}",
+        })
+        return None, _unpriced_model_message(e, goal_id)
+    except UsageAccountingError as e:
+        # A provider mis-reported usage on a call made outside the agent
+        # loop (verifier, summariser...). Same reporting as the in-loop
+        # path below: a provider fault, not a cap breach.
+        lifecycle.end_episode(f"provider accounting: {e}", "failure")
+        try:  # default-on local failure telemetry; no-op when disabled
+            from . import failure_telemetry as _ft
+            _ft.record_failure("provider_accounting", goal_id=goal_id, detail=str(e))
+        except Exception:  # pragma: no cover -- telemetry never blocks a run
+            pass
+        _maybe_record_reflexion(
+            goal, failure_class="provider_accounting", failure_msg=str(e),
+            blackboard=blackboard, shield=shield, channel=channel,
+            user_id=user_id, domain=domain,
+        )
+        world.set_goal_status(goal_id, "blocked", result=f"provider usage accounting: {e}")
+        _fire_webhook("goal_finished", {
+            "goal_id": goal_id, "status": "blocked",
+            "result": f"provider usage accounting: {e}",
+        })
+        return None, _usage_accounting_message(str(e), goal_id)
+    except BudgetExceeded as e:
+        safe_error = _safe_exception_text(e, fallback="budget limit reached")
+        lifecycle.end_episode(f"budget: {safe_error}", "interrupted")
+        try:  # default-on local failure telemetry; no-op when disabled
+            from . import failure_telemetry as _ft
+            _ft.record_failure("budget", goal_id=goal_id, detail=safe_error)
+        except Exception:  # pragma: no cover -- telemetry never blocks a run
+            pass
+        message = _budget_stop_message(budget, goal_id, e)
+        world.set_goal_status(goal_id, "blocked", result=message)
+        _fire_webhook("goal_finished", {
+            "goal_id": goal_id, "status": "blocked",
+            "result": message,
+        })
+        # Sentence-style error so a non-engineer can read it.
+        return None, message
+    except Exception as e:
+        # Anything else escaping the swarm (LLM auth/network errors, a
+        # sandbox exec failure) must leave a finished state. Keep raw SDK
+        # details in the server log; the saved goal and work log carry a
+        # plain, non-sensitive cause and next step for the customer.
+        from .stop_reasons import exception_stop_text, explain_stop
+
+        safe_error = _safe_exception_text(e, fallback="internal run failure")
+        reason = exception_stop_text(e)
+        try:
+            lifecycle.end_episode(f"error: {safe_error}", "failure")
+        except Exception:  # pragma: no cover
+            pass
+        try:  # default-on local failure telemetry; no-op when disabled
+            from . import failure_telemetry as _ft
+            _ft.record_failure(e, goal_id=goal_id)
+        except Exception:  # pragma: no cover -- telemetry never blocks a run
+            pass
+        try:
+            world.set_goal_status(goal_id, "failed", result=reason)
+            world.append_event(
+                goal_id, "Lightwork", "error", explain_stop(reason).message,
+            )
+        except Exception:  # pragma: no cover
+            pass
+        raise
+
+    return result, None
+
+
+def _handle_root_error(*, result: Any, world: WorldModel, goal: Any, goal_id: int,
+                       budget: Budget, blackboard: Blackboard, shield: Any,
+                       channel: str | None, user_id: str | None, domain: str | None,
+                       domain_profile: Any, ctx: SwarmContext, planning_mode: Any,
+                       lifecycle: _RunLifecycle) -> str:
+    """Settle an agent error, preserving any valid partial patch and receipts."""
+    # Even when the agent loop errored (e.g. hit
+    # max_steps), it may have produced a usable patch via
+    # str_replace_editor before exiting. salvage it.
+    if result.final_patch and (
+        "diff --git" in result.final_patch
+        or "--- a/" in result.final_patch
+    ):
+        lifecycle.end_episode(result.final_patch, "success")
+        world.set_goal_status(
+            goal_id, "done", result=result.final_patch,
+        )
+        _fire_webhook("final_emitted", {
+            "goal_id": goal_id,
+            "patch_size_bytes": len(result.final_patch.encode("utf-8")),
+        })
+        _fire_webhook(
+            "goal_finished",
+            _finished_webhook_payload(
+                world,
+                goal_id=goal_id,
+                status="done",
+                result=result.final_patch,
+                domain_profile=domain_profile,
+                domain=domain,
+            ),
+        )
+        return result.final_patch
+    # A budget / wall-clock exhaustion inside the agent surfaces as
+    # result.error (the agent swallows BudgetExceeded so spawned
+    # children can return gracefully), which otherwise loses the
+    # helpful "raise the cap" guidance and shows a generic error.
+    # Re-check the budget and, if that's the cause, emit the same
+    # message as the BudgetExceeded handler above.
+    try:
+        budget.check()
+    except BudgetExceeded as be:
+        lifecycle.end_episode(f"budget: {be}", "interrupted")
+        message = _budget_stop_message(budget, goal_id, be)
+        world.set_goal_status(goal_id, "blocked", result=message)
+        _fire_webhook("goal_finished", {
+            "goal_id": goal_id, "status": "blocked",
+            "result": message,
+        })
+        return message
+    # An unpriced model inside a spawned child is swallowed by
+    # the agent into `result.error` (same reason a budget cap trip
+    # is), not raised -- `budget.check()` above never sees it (it's
+    # not a cap trip). Detect it via agent.py's "unpriced model:"
+    # label and give the pricing remediation, not the "raise your
+    # cap and resume" advice that fails identically.
+    if (result.error or "").startswith("unpriced model:"):
+        lifecycle.end_episode(result.error, "failure")
+        _maybe_record_reflexion(
+            goal, failure_class="unpriced_model", failure_msg=result.error,
+            blackboard=blackboard, shield=shield, channel=channel,
+            user_id=user_id, domain=domain,
+        )
+        world.set_goal_status(goal_id, "blocked", result=result.error)
+        _fire_webhook("goal_finished", {
+            "goal_id": goal_id, "status": "blocked", "result": result.error,
+        })
+        # Strip the "unpriced model: " label back off so the Detail
+        # line reads the same raw pricing message as the direct-raise
+        # handler above, instead of doubling the label.
+        _detail = result.error.split(": ", 1)[-1]
+        return _unpriced_model_message(_detail, goal_id)
+    # Branch on the structured stop kind, not on substrings of
+    # the error text. A review-checkpoint stop is a reviewer decision:
+    # there is no HALT file and `maverick unhalt` would do nothing.
+    if result.stop_kind == "review_checkpoint":
+        lifecycle.end_episode("review checkpoint", "interrupted")
+        world.set_goal_status(goal_id, "blocked", result=result.error)
+        _fire_webhook("goal_finished", {
+            "goal_id": goal_id, "status": "blocked", "result": result.error,
+        })
+        return _review_checkpoint_message(result.stop_detail, goal_id)
+    if result.stop_kind == "usage_accounting":
+        lifecycle.end_episode(result.error, "failure")
+        _maybe_record_reflexion(
+            goal, failure_class="provider_accounting",
+            failure_msg=result.stop_detail,
+            blackboard=blackboard, shield=shield, channel=channel,
+            user_id=user_id, domain=domain,
+        )
+        world.set_goal_status(goal_id, "blocked", result=result.error)
+        _fire_webhook("goal_finished", {
+            "goal_id": goal_id, "status": "blocked", "result": result.error,
+        })
+        return _usage_accounting_message(result.stop_detail, goal_id)
+    # A halt tripped mid-run surfaces as result.error too. Give the
+    # clear unhalt instruction rather than the generic error (whose
+    # 'resume' advice would just halt again).
+    if result.stop_kind == "killswitch":
+        lifecycle.end_episode("halted", "interrupted")
+        world.set_goal_status(goal_id, "blocked", result="halted")
+        _fire_webhook("goal_finished", {
+            "goal_id": goal_id, "status": "blocked", "result": "halted",
+        })
+        return (
+            "Stopped: Lightwork was halted mid-run (a HALT file is present).\n"
+            f"Run `maverick unhalt` to clear it, then `maverick resume {goal_id}`."
+        )
+    if result.stop_kind in {"budget", "organization_budget"}:
+        message = (
+            _organization_budget_message(result.stop_detail, goal_id)
+            if result.stop_kind == "organization_budget"
+            else _budget_exceeded_message(budget, goal_id)
+        )
+        lifecycle.end_episode(result.stop_kind, "interrupted")
+        world.set_goal_status(goal_id, "blocked", result=message)
+        _fire_webhook("goal_finished", {
+            "goal_id": goal_id, "status": "blocked", "result": message,
+        })
+        return message
+    lifecycle.end_episode(result.error, "failure")
+    _maybe_record_reflexion(
+        goal,
+        failure_class=(
+            "max_steps" if "max_steps" in (result.error or "")
+            else "agent_error"
+        ),
+        failure_msg=result.error or "",
+        blackboard=blackboard, shield=shield, channel=channel,
+        user_id=user_id, domain=domain,
+    )
+    world.set_goal_status(goal_id, "blocked", result=result.error)
+    # Attribute the failure to the recalled skills, but NOT when the
+    # run was aborted for budget — that's a cap, not the skill's fault.
+    if not (result.error or "").startswith("budget exceeded:"):
+        _record_skill_outcome(ctx, success=False)
+        _record_planning_outcome(goal, domain, planning_mode, success=False)
+        _record_harness_outcome(domain, success=False, blackboard=blackboard,
+                                ctx=ctx)
+        # A run that genuinely could not finish is real negative ground
+        # truth (the work didn't get done) — the most common negative
+        # outcome, and until now invisible to the learning loop, which
+        # only saw human cancels/sign-offs. Feed it as a grounded 0.0 so
+        # the flywheel learns from organic failure, not just the proxy.
+        # Same budget-cap exclusion as above; best-effort and default-on.
+        # Explicitly disabling [consequence] makes this a no-op.
+        from . import consequence
+        consequence.record_self_outcome(world, goal_id, 0.0, kind="failed")
+    _fire_webhook("goal_finished", {
+        "goal_id": goal_id, "status": "blocked", "result": result.error,
+    })
+    if (result.error or "").startswith("budget exceeded:"):
+        # A sub-agent's call was refused by the budget reservation;
+        # surface the same friendly cap message as a top-level
+        # BudgetExceeded, not the generic "ran into an error".
+        return _budget_exceeded_message(budget, goal_id)
+    return (
+        f"Stopped: the assistant ran into an error and couldn't finish.\n"
+        f"Detail: {result.error}\n"
+        f"You can try again with: maverick resume {goal_id}\n"
+        f"[{budget.summary()}]"
+    )
+
+
+
+def _handle_root_result(*, result: Any, world: WorldModel, goal: Any, goal_id: int,
+                        budget: Budget, blackboard: Blackboard, shield: Any,
+                        channel: str | None, user_id: str | None, domain: str | None,
+                        domain_profile: Any, ctx: SwarmContext, planning_mode: Any,
+                        lifecycle: _RunLifecycle) -> str | None:
+    """Settle non-success results before the final output path can run."""
+    # A dashboard cancellation can race the final model response. It must
+    # win before a returned result is persisted as successful or blocked.
+    if result.stop_kind == "cancelled":
+        cancelled = GoalCancelled(result.stop_detail)
+        cancelled.tool_execution_unknown = result.tool_execution_unknown
+        raise cancelled
+    if world.get_goal(goal_id).status == "cancelled":
+        lifecycle.end_episode("cancelled", "interrupted")
+        return "Stopped: this goal was cancelled."
+
+    if result.blocked_on_user:
+        lifecycle.end_episode("blocked awaiting user", "interrupted")
+        world.set_goal_status(goal_id, "blocked")
+        qs = world.open_questions(goal_id)
+        _fire_webhook("goal_waiting", {
+            "goal_id": goal_id, "status": "blocked",
+            "waiting_for": "user_input",
+            "open_question_count": min(len(qs), 10000),
+            "open_question_count_complete": len(qs) <= 10000,
+        })
+        # Question-asked signal: a stall on missing input is a learnable
+        # pattern — record WHAT was missing so the next similar goal
+        # gathers it up front (recalled via reflexion; dreaming
+        # consolidates repeats). No-op unless [reflexion] is enabled.
+        if qs:
+            with _enrich("blocked-question reflexion"):
+                from . import reflexion as _r
+                if _r.enabled():
+                    _q = _r._sanitize_text(qs[0].question, shield=shield)[:200]
+                    _r.record(
+                        goal_text=_r._sanitize_text(
+                            f"{goal.title}\n{goal.description or ''}",
+                            shield=shield,
+                        )[:500],
+                        failure_class="blocked_on_user",
+                        failure_msg=f"stalled waiting for: {_q}",
+                        reflection=(
+                            "This kind of goal stalled waiting for the user "
+                            f"to answer: {_q!r}. Gather that input up "
+                            "front, or ask in the first turn, not mid-run."
+                        ),
+                        channel=channel, user_id=user_id, domain=domain,
+                    )
+        if not qs:
+            return (
+                "Paused: the assistant said it needs more information, "
+                "but no question was filed. You can resume with "
+                f"`maverick resume {goal_id}` or send a follow-up message."
+            )
+        lines = [f"  #{q.id}: {q.question}" for q in qs]
+        return (
+            f"Paused: waiting for you to answer "
+            f"{len(qs)} question{'s' if len(qs) != 1 else ''}.\n"
+            + "\n".join(lines)
+            + "\n\nAnswer with: maverick answer <id> \"<your answer>\""
+        )
+
+    if result.error:
+        return _handle_root_error(
+            result=result, world=world, goal=goal, goal_id=goal_id, budget=budget,
+            blackboard=blackboard, shield=shield, channel=channel, user_id=user_id,
+            domain=domain, domain_profile=domain_profile, ctx=ctx,
+            planning_mode=planning_mode, lifecycle=lifecycle,
+        )
+    return None
+
+
+def _prepare_goal_output(*, result: Any, shield: Any, world: WorldModel,
+                         goal_id: int, brief: str, conversation_id: int | None,
+                         channel: str | None, root: Any, lifecycle: _RunLifecycle
+                         ) -> tuple[str, bool, str | None]:
+    """Apply output and evidence gates before publishing a successful result."""
+    # Prefer the rendered unified diff (set by the agent's
+    # FINAL handler when SEARCH/REPLACE blocks were applied) over
+    # the raw FINAL text. Without this, extract_unified_diff on
+    # downstream calls (best-of-N selector, harness CSV row) returns
+    # None for SR-only candidates and the patch is silently dropped.
+    # `final` is kept as a fallback for non-coding-mode goals where
+    # the answer is prose.
+    summary = result.final_patch or result.final or "(no answer)"
+    is_rendered_diff = bool(
+        result.final_patch
+        and ("diff --git" in summary or "--- a/" in summary)
+    )
+    # Output chokepoint for the CLI / REST / programmatic callers and
+    # outbound lifecycle webhooks. Scan prose answers before any
+    # success webhooks or persistence paths can export content that
+    # Shield would block from the direct caller. The rendered-diff path
+    # remains intentionally unscanned: code legitimately contains strings
+    # the builtin rules flag (rm -rf, curl | sh) and that path feeds
+    # tooling/graders, not a chat answer.
+    if shield is not None and not is_rendered_diff:
+        from .shield_policy import shield_required
+        reasons = None
+        try:
+            out_v = shield.scan_output(summary)
+            if shield_required() and getattr(out_v, "scan_error", False):
+                reasons = "required safety scan unavailable"
+            elif not getattr(out_v, "allowed", True):
+                reasons = "; ".join(getattr(out_v, "reasons", []) or []) or "blocked by Shield"
+        except Exception:
+            log.exception("scan_output on summary failed")
+            if shield_required():
+                reasons = "required safety scan unavailable"
+        if reasons is not None:
+            refusal = f"⚠ Output blocked by Shield: {reasons}"
+            log.warning("output scan blocked goal #%s: %s", goal_id, reasons)
+            world.set_goal_status(goal_id, "blocked", result=refusal)
+            lifecycle.end_episode(refusal, "blocked")
+            return "", False, refusal
+
+    if not is_rendered_diff:
+        try:
+            summary = _evidence_ready_goal_output(
+                summary,
+                brief=brief,
+                goal_id=goal_id,
+                conversation_id=conversation_id,
+                channel=channel,
+                model=getattr(root, "model", ""),
+            )
+        except Exception as exc:
+            from .ai_evidence import delivery as gateway
+
+            if not isinstance(exc, gateway.EvidenceGatewayError):
+                raise
+            refusal = (
+                "AI evidence gateway withheld the generated output. "
+                "Operator action is required: "
+                f"{_safe_exception_text(exc, fallback='evidence review failed')}"
+            )
+            lifecycle.end_episode(refusal, "failure")
+            world.set_goal_status(goal_id, "blocked", result=refusal)
+            _fire_webhook(
+                "goal_finished",
+                {
+                    "goal_id": goal_id,
+                    "status": "blocked",
+                    "result": refusal,
+                },
+            )
+            return "", False, refusal
+
+    return summary, is_rendered_diff, None
+
+
+def _record_goal_success(*, world: WorldModel, goal: Any, goal_id: int, summary: str,
+                         is_rendered_diff: bool, quarantine: Any, shield: Any,
+                         blackboard: Blackboard, lifecycle: _RunLifecycle,
+                         domain: str | None, domain_profile: Any, ctx: SwarmContext,
+                         planning_mode: Any) -> None:
+    """Commit success and its audit, memory, and public lifecycle records."""
+    # Compartment observability: record a one-line summary of the run's
+    # bulkhead activity (threats immunized, sealed agents/sectors) so it's
+    # visible in the run record / dashboard. No-op when compartments are off.
+    if quarantine is not None:
+        try:
+            from .quarantine import compartment_status, format_compartment_status
+            blackboard.post(
+                "orchestrator", "observation",
+                format_compartment_status(compartment_status(quarantine, shield)),
+                provenance="compartment",
+            )
+        except Exception:  # pragma: no cover -- observability is best-effort
+            pass
+    lifecycle.end_episode(summary, "success")
+    world.set_goal_status(goal_id, "done", result=summary)
+    # Success-path audit: GOAL_END on the signed chain records the outcome,
+    # closing the GOAL_START..GOAL_END pair for a completed run. Block/denial
+    # exits are already covered by their own audit events. A write error is
+    # swallowed; a refusal propagates, so a run cannot be marked done on a
+    # chain that declined to record its completion.
+    from .audit import EventKind, audit_event
+    _res = summary if isinstance(summary, str) else None
+    audit_event(EventKind.GOAL_END, goal_id=goal_id, agent="orchestrator",
+                status="succeeded",
+                result=(_res[:500] + "…") if _res and len(_res) > 500 else _res)
+    # Index this finished goal into the semantic store (#432) so future
+    # runs recall it via vector search. No-op unless a [memory] backend is
+    # configured; re-reads the goal so the indexed status/result reflect
+    # the just-written 'done' state. Never blocks the finalize path.
+    with _enrich("semantic index"):
+        from . import semantic_recall
+        semantic_recall.index_goal(world.get_goal(goal_id))
+    _record_deliverable_artifact(world, goal_id, summary)
+    if not is_rendered_diff:
+        # Only an answer the checker actually ran on counts as verified
+        # (verifier_confidence defaults to 1.0 when no checker ran).
+        _maybe_store_learning_cache(
+            goal, summary, getattr(ctx, "last_verifier_confidence", None))
+    _record_skill_outcome(ctx, success=True)
+    _record_planning_outcome(goal, domain, planning_mode, success=True)
+    _record_harness_outcome(domain, success=True, blackboard=blackboard, ctx=ctx)
+    _fire_webhook("final_emitted", {
+        "goal_id": goal_id,
+        "patch_size_bytes": len(summary.encode("utf-8")),
+    })
+    _fire_webhook(
+        "goal_finished",
+        _finished_webhook_payload(
+            world,
+            goal_id=goal_id,
+            status="done",
+            result=summary,
+            domain_profile=domain_profile,
+            domain=domain,
+        ),
+    )
+
+
+
+async def _finish_goal_learning(*, world: WorldModel, goal: Any, goal_id: int,
+                                summary: str, is_rendered_diff: bool,
+                                result: Any, ctx: SwarmContext,
+                                blackboard: Blackboard, budget: Budget, llm: LLM,
+                                conversation_id: int | None) -> str:
+    """Run optional learning and joined publication side effects after success."""
+    # Trajectory donation (Karpathy data-engine analog). Default OFF;
+    # only fires when the user opted into [telemetry] donate_trajectories
+    # AND the selection gate (disagreement_high + verifier_confident
+    # + success) passes. Never raises -- a bad donation must never
+    # affect the goal result.
+    # The two finalize side effects (donation write to a file, conversation
+    # turn write to the world DB) are independent of each other and of skill
+    # distillation. Define them as closures that swallow their own errors --
+    # a bad donation/turn-write must never affect the goal result -- so they
+    # can optionally overlap distillation (a blocking LLM call) instead of
+    # running strictly before it.
+    def _donate() -> None:
+        with _enrich("trajectory donation"):
+            from .donation import TrajectoryRecord, hash_brief, write_record
+            entropy = getattr(ctx, "last_disagreement", 0.0)
+            record = TrajectoryRecord(
+                task_brief_hash=hash_brief(goal.title + (goal.description or "")),
+                task_brief_text=(goal.title + "\n" + (goal.description or "")),
+                # Local join key so ingest/export_texts can pull this goal's
+                # goal_events back out of the world DB (PRM step labels + DPO
+                # text sidecar). Omitting it left every trajectory step-less.
+                goal_id=goal_id,
+                model_id=getattr(llm, "model", ""),
+                # by_kind() snapshots under the blackboard lock. _donate runs
+                # on a worker thread (asyncio.to_thread); reading the raw
+                # .entries list here races the event loop's post() append/trim
+                # -> "list changed size during iteration", which the blanket
+                # except below swallowed as a silently-lost donation.
+                tools_used=sorted({e.kind for e in blackboard.by_kind("observation")}),
+                outcome="success",
+                reward=1.0 if result.verifier_confidence >= 0.75 else result.verifier_confidence,
+                verifier_confidence=result.verifier_confidence,
+                verifier_critique=result.verifier_critique,
+                disagreement_entropy=float(entropy or 0.0),
+                agent_credit=dict(getattr(ctx, "last_credit", {}) or {}),
+                sub_trajectories=list(getattr(ctx, "last_subtrajectories", []) or []),
+                # Rejected pre-revision drafts -> the "rejected" half of DPO
+                # preference pairs (chosen = this accepted final). Same ctx
+                # channel as last_credit/last_subtrajectories above.
+                rejected_attempts=list(
+                    getattr(ctx, "last_rejected_attempts", []) or []
+                ),
+                wall_seconds=budget.elapsed(),
+                cost_dollars=budget.dollars,
+                tokens_in=budget.input_tokens,
+                tokens_out=budget.output_tokens,
+            )
+            write_record(record)
+
+    def _write_turn() -> None:
+        if conversation_id is None:
+            return
+        try:
+            world.append_turn(conversation_id, "assistant", summary, goal_id=goal_id)
+        except Exception as e:  # pragma: no cover -- never block on history
+            log.warning(
+                "conversation turn write failed: %s",
+                _safe_exception_text(e, fallback="conversation write failed"),
+            )
+
+    # Overlap the side effects with distillation when enabled (default on).
+    # WorldModel uses check_same_thread=False + a write lock (built for the
+    # FastAPI threadpool), so the turn write is safe from a worker thread;
+    # the donation write touches only a file. Both are joined before
+    # run_goal returns (see below). MAVERICK_SPECULATIVE_FINALIZE=0 reverts
+    # to running them inline, before distillation.
+    _spec_finalize = os.getenv(
+        "MAVERICK_SPECULATIVE_FINALIZE", "1",
+    ).strip().lower() not in {"0", "false", "no", "off"}
+    _finalize_specs: list = []
+    if _spec_finalize:
+        from .speculative import speculate
+        _finalize_specs = [
+            speculate(asyncio.to_thread(_donate)),
+            speculate(asyncio.to_thread(_write_turn)),
+        ]
+    else:
+        _donate()
+        _write_turn()
+
+    # Security hardening: disable automatic closed-loop distillation by
+    # default. Trajectories can contain untrusted goal/tool/workspace text
+    # and writing LLM output directly to persisted skills creates a
+    # cross-run prompt-injection primitive. Operators can opt in explicitly
+    # (see _auto_distill_enabled).
+    auto_distill = _auto_distill_enabled()
+    # Same calibration-freeze interlock as the local distillation path
+    # below (and dreaming._consolidate_learning): a drifted verifier's
+    # success/failure labels must not seed a new, LLM-written, recallable
+    # skill either. This is the second of the two distillation call
+    # sites the freeze needs to reach -- this one is opt-in but still
+    # live wherever an operator has set MAVERICK_AUTO_DISTILL=1.
+    if auto_distill and getattr(goal, "owner", None) != "":
+        auto_distill = False
+        skill_note = ""
+        try:
+            from .audit import EventKind, audit_event
+            if not audit_event(EventKind.SKILL_DISTILL_SKIPPED,
+                               agent="skill_distillation", goal_id=goal_id,
+                               reason="private_source"):
+                log.warning("private skill distillation skip audit unavailable")
+        except Exception:  # no learning action to roll back
+            log.warning("private skill distillation skip audit unavailable")
+    elif auto_distill and _skill_distillation_frozen():
+        auto_distill = False
+        skill_note = "\n\n[skill distill skipped: learning is frozen (verifier calibration inadequate)]"
+    elif auto_distill:
+        try:
+            skill = distill(goal.title, summary, blackboard, llm,
+                            budget=budget, source_world=world)
+            # A None return means no skill was installed (validation,
+            # source scope, HALT, or audit may have refused it). Do not
+            # claim a specific failed gate that the caller cannot know.
+            skill_note = (
+                f"\n\n[distilled skill: {skill.name}]" if skill
+                else "\n\n[skill distill: no skill installed]"
+            )
+        except BudgetExceeded:
+            skill_note = "\n\n[skill distill skipped: budget]"
+        except Exception as e:
+            skill_note = (
+                "\n\n[skill distill error: "
+                f"{_safe_exception_text(e, fallback='distillation unavailable')}]"
+            )
+    else:
+        # Show the opt-in hint once per process, not on every run / chat
+        # turn (it's a standing setting, not a per-goal event).
+        global _WARNED_DISTILL_DISABLED
+        if _WARNED_DISTILL_DISABLED:
+            skill_note = ""
+        else:
+            _WARNED_DISTILL_DISABLED = True
+            skill_note = "\n\n[skill distill disabled: set MAVERICK_AUTO_DISTILL=1 to enable]"
+
+    # Default-on local continuous learning ([self_learning] distill_local):
+    # an LLM-free, injection-safe distillation that turns recent SUCCESSFUL
+    # goals into a reusable SKILL.md under ~/.maverick/learned-skills. Uses
+    # the persisted goal history as trajectories, so no extra store is
+    # needed. No-op when explicitly disabled; never raises into the run.
+    with _enrich("local skill distillation"):
+        # Load config once and reuse it for both checks below (each
+        # otherwise independently calls config.load_config() for its own
+        # section) -- caught by this block's own fail-open _enrich() the
+        # same as a failure inside either check would have been.
+        from .config import load_config as _load_config
+        from .skill import distillation_local as _sdl
+        _cfg = _load_config()
+        if (_sdl.enabled(config=_cfg)
+                and not _skill_distillation_frozen(config=_cfg)):
+            trajectories = [
+                {"goal_id": g.id, "goal": g.title, "success": True, "tools": [],
+                 "t": getattr(g, "updated_at", 0.0)}
+                for g in world.list_goals(status="done", limit=10, order="desc", owner="")
+            ]
+            # v2: gate on evidence + dedup against the learned-skills store
+            # so the loop doesn't accumulate near-duplicate skills each run.
+            from .skill import distillation_v2 as _sdl2
+            path, _why = _sdl2.distill_and_save_gated(trajectories)
+            if path:
+                blackboard.post("orchestrator", "skill",
+                                f"distilled local skill -> {path}")
+
+    # Join the speculative side effects before returning, so the turn /
+    # donation writes are guaranteed durable to any caller that reads them
+    # back. The closures swallow their own errors, so result() won't raise.
+    for _s in _finalize_specs:
+        await _s.result()
+
+    # In coding mode the orchestrator's return value
+    # IS the benchmark CSV's `predicted_patch` after extract_unified_diff.
+    # The trailing skill_note + budget summary then pollute the patch
+    # (they sit AFTER the last hunk so `git apply` ignores them, but
+    # stricter graders + downstream tooling don't). When summary is
+    # already a rendered unified diff, return it as-is — log the
+    # bookkeeping to the blackboard instead.
+    if is_rendered_diff:
+        try:
+            if skill_note.strip():
+                blackboard.post("orchestrator", "skill", skill_note.strip())
+            blackboard.post(
+                "orchestrator", "budget_summary", budget.summary(),
+            )
+        except Exception:
+            pass
+        return summary
+    return f"DONE.\n\n{summary}{skill_note}\n\n[{budget.summary()}]"
+
+
 async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
     llm: LLM,
     world: WorldModel,
@@ -1688,33 +2561,13 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
     # model or tool side effects. Resource owner remains a separate dashboard
     # authorization identity, so delegated runs do not disappear from their
     # human owner's view.
-    was_unbound = not bool(getattr(goal, "execution_principal", "") or "")
-    try:
-        execution_principal_matches = _bind_goal_execution_principal(
-            world, goal, execution_principal,
-        )
-    except Exception:
-        log.exception("goal #%s execution-principal binding is unavailable", goal_id)
-        return "BLOCKED: goal execution-principal binding is unavailable"
-    if not execution_principal_matches:
-        log.warning("goal #%s execution principal does not match its binding", goal_id)
-        return "BLOCKED: goal is bound to a different execution principal"
-    if was_unbound:
-        try:
-            rebound_goal = world.get_goal(goal_id)
-        except Exception:
-            rebound_goal = None
-        if (
-            rebound_goal is None
-            or (getattr(rebound_goal, "execution_principal", "") or "")
-            != execution_principal
-        ):
-            log.error("goal #%s execution-principal binding was not observable", goal_id)
-            return "BLOCKED: goal execution-principal binding is unavailable"
-        # Downstream execution attribution must use the durable value, not the
-        # stale pre-binding dataclass returned by the first read.
-        goal = rebound_goal
-        _quota_settlement.goal = goal
+    goal, binding_error = _verify_goal_execution_principal(
+        world, goal, goal_id, execution_principal,
+    )
+    if binding_error:
+        return binding_error
+    # Use the durable value, not a stale pre-binding goal.
+    _quota_settlement.goal = goal
 
     from .task_file_recovery import begin_capture
     begin_capture(world, goal_id)
@@ -1746,62 +2599,10 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
             "Run `maverick unhalt` to clear it, then try again."
         )
 
-    # Per-principal usage quota (P2 cost governance). Default-off and opt-in
-    # ([quotas] enforce / MAVERICK_QUOTA_*): with nothing configured this is a
-    # no-op. When enforcement is on and this principal is over its daily cap,
-    # refuse BEFORE the expensive agent run -- mirror the killswitch handler
-    # above (mark blocked, return the human-readable reason). The principal
-    # convention matches agent.py's capability resolution.
-    try:
-        from . import quotas
-        _quota_reason = quotas.over_quota(principal) if quotas.quotas_enforced() else None
-    except Exception as exc:
-        _quota_reason = (
-            "principal quota policy unavailable: "
-            f"{_safe_exception_text(exc, fallback='quota lookup failed')}"
-        )
-    if not _quota_reason:
-        # Administrator-set workspace and per-person limits (none by default).
-        try:
-            from .spending_limits import start_refusal
-            _quota_reason = start_refusal(principal)
-        except Exception as exc:
-            _quota_reason = (
-                "The spending limits could not be read, so new work is paused "
-                f"({_safe_exception_text(exc, fallback='limits unreadable')})."
-            )
-    if _quota_reason:
-        world.set_goal_status(goal_id, "blocked", result=f"over quota: {_quota_reason}")
-        log.warning("goal #%s refused: %s", goal_id, _quota_reason)
-        return _quota_reason
-
-    # Per-tenant daily-spend cap. The channel door already enforces this, but
-    # dashboard/CLI/gRPC-initiated runs bypass that door, so enforce here too.
-    # Opt-in: tenant_over_quota returns None unless a provisioned tenant has a
-    # cap (or [billing] enforce_plan_caps). A policy read failure blocks the
-    # start instead of silently restoring an unlimited tenant.
-    try:
-        from .paths import current_tenant_id
-        from .tenant.registry import assert_tenant_active, tenant_over_quota
-
-        _tenant_id = current_tenant_id()
-        assert_tenant_active(_tenant_id)
-        _tenant_reason = tenant_over_quota(_tenant_id)
-    except Exception as exc:
-        _tenant_reason = (
-            "tenant policy unavailable or inactive: "
-            f"{_safe_exception_text(exc, fallback='tenant lookup failed')}"
-        )
-    if not _tenant_reason:
-        # budget_from_config clamps a run to $0 when the tenant's
-        # allowance is exhausted by in-flight holds (or unreadable) and says
-        # why. Refuse here, before the run starts, rather than admit a
-        # $0-cap run that dies on its first model call.
-        _tenant_reason = getattr(budget, "_tenant_refusal", None)
-    if _tenant_reason:
-        world.set_goal_status(goal_id, "blocked", result=f"over quota: {_tenant_reason}")
-        log.warning("goal #%s refused: %s", goal_id, _tenant_reason)
-        return _tenant_reason
+    # Enforce spending policy before any execution claim or model work.
+    limit_refusal = _check_start_limits(world, budget, goal_id, principal)
+    if limit_refusal:
+        return limit_refusal
 
     # Bind trace context so every log line emitted in this task is
     # automatically tagged with goal_id (+ conversation_id when set). Capture
@@ -1847,36 +2648,11 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
                 title=goal.title,
                 description=getattr(goal, "description", None),
                 **_risk_record)
-    episode_id = resume_episode_id
-    resume_agent_id = "orchestrator-0"
-    if resume or resume_episode_id is not None:
-        from . import checkpoint as _ckpt_mod
-        if _ckpt_mod.enabled():
-            boundary = _ckpt_mod.Checkpointer(world).orchestrator_for(
-                goal_id, episode_id=episode_id, required=True,
-            )
-            if boundary is not None:
-                resume_agent_id, episode_id = boundary
-                if not world.episode_exists(goal_id, episode_id):
-                    raise ValueError("checkpoint episode does not belong to this goal")
-    if episode_id is None:
-        episode_id = world.start_episode(goal_id)
-    _quota_settlement.world = world
-    _quota_settlement.episode_id = episode_id
-    _quota_settlement.bind_checkpoint()
-    # Restore before briefing/planning can spend, and before any model or
-    # tool call. Agent restoration is idempotent on this same Budget object.
-    if resume or resume_episode_id is not None:
-        from . import checkpoint as _ckpt_mod
-        if _ckpt_mod.enabled():
-            saved = _ckpt_mod.Checkpointer(world).latest(
-                goal_id, resume_agent_id, episode_id=episode_id, required=True,
-            )
-            if saved is not None:
-                _ckpt_mod.restore_budget(_quota_settlement.reconcile_snapshot(saved.budget), into=budget)
-            else:
-                _quota_settlement.require_unspent_scope()
-    _lifecycle.episode_id = episode_id
+    episode_id = _open_goal_episode(
+        world, budget, goal_id, resume=resume,
+        resume_episode_id=resume_episode_id, settlement=_quota_settlement,
+        lifecycle=_lifecycle,
+    )
     blackboard = Blackboard()
     blackboard.attach_world(world, goal_id)  # persist every post for live streaming
     # Replayable trace (opt-in via MAVERICK_TRACE_DIR or [replay] record): write
@@ -2003,701 +2779,49 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
             log.warning("goal #%s assembled brief blocked by Shield: %s", goal_id, reason)
             return f"BLOCKED: goal brief rejected by Shield ({reason})"
 
-        # Domain routing: when a domain is named, the root runs AS that domain's
-        # specialist -- its persona, capability envelope, compartment tag, and
-        # knowledge_search -- instead of the generic orchestrator. This is how
-        # the factory's packs actually execute a task end to end.
-        root = None
-        domain_profile = None
-        if domain:
-            try:
-                from .domain import (
-                    agent_from_profile,
-                    enabled_domains,
-                    rejected_workspace_domains,
-                    suites_for_domain,
-                )
-                # enabled_domains() honors the operator's [suites] toggles, so a
-                # domain whose suite is switched off is treated as unavailable.
-                _profile = enabled_domains().get(domain)
-                if _profile is None:
-                    if domain in rejected_workspace_domains():
-                        msg = (
-                            f"{domain!r} cannot start because its setup needs review. "
-                            "Ask an administrator to check its permissions and "
-                            "operating limits. No work was started."
-                        )
-                    else:
-                        msg = (f"no such domain: {domain!r} (unknown or its suite is "
-                               "disabled). See `maverick compartments` for available domains.")
-                    world.set_goal_status(goal_id, "blocked", result=msg)
-                    _lifecycle.end_episode(msg, "blocked")
-                    _fire_webhook("goal_finished", {
-                        "goal_id": goal_id, "status": "blocked", "result": msg,
-                    })
-                    return msg
-                # A changed specialist may be on trial: this goal runs the trial
-                # version only when its recorded choice says so (see specialist_canary).
-                from .specialist_canary import profile_for_goal
-                _profile, _ = profile_for_goal(domain, _profile, goal_id, world=world, resume=resume)
-                if (allowed_suites is not None
-                        and not suites_for_domain(domain, _profile) <= allowed_suites):
-                    msg = ("This specialist is outside your department access. "
-                           "No work was started.")
-                    world.set_goal_status(goal_id, "blocked", result=msg)
-                    _lifecycle.end_episode(msg, "blocked")
-                    _fire_webhook("goal_finished", {
-                        "goal_id": goal_id, "status": "blocked", "result": msg,
-                    })
-                    return msg
-                domain_profile = _profile
-                root = agent_from_profile(_profile, ctx, brief, depth=0)
-            except Exception as e:
-                safe_error = _safe_exception_text(
-                    e, fallback="domain agent construction failed",
-                )
-                msg = (
-                    f"domain {domain!r} agent build failed: {safe_error}. "
-                    "Refusing to run without the requested domain capability envelope."
-                )
-                log.error("%s", msg)
-                world.set_goal_status(goal_id, "blocked", result=msg)
-                _lifecycle.end_episode(msg, "blocked")
-                _fire_webhook("goal_finished", {
-                    "goal_id": goal_id, "status": "blocked", "result": msg,
-                })
-                return msg
-        if root is None:
-            root = Agent(
-                ctx=ctx,
-                role="orchestrator",
-                brief=brief,
-                model_override=orchestrator_model_override,
-                depth=0,
-            )
-
-        try:
-            result = await root.run()
-        except UnpricedModelError as e:
-            # A genuinely unpriced model, not a cap trip -- must be
-            # caught BEFORE the BudgetExceeded clause below (it's a
-            # subclass) or it's reported as "raise your cap and resume",
-            # advice that fails identically since spend was never the issue.
-            safe_error = _safe_exception_text(e, fallback="model price unavailable")
-            _lifecycle.end_episode(f"unpriced model: {safe_error}", "failure")
-            try:  # default-on local failure telemetry; no-op when disabled
-                from . import failure_telemetry as _ft
-                _ft.record_failure(
-                    "unpriced_model", goal_id=goal_id, detail=safe_error,
-                )
-            except Exception:  # pragma: no cover -- telemetry never blocks a run
-                pass
-            _maybe_record_reflexion(
-                goal, failure_class="unpriced_model", failure_msg=safe_error,
-                blackboard=blackboard, shield=shield, channel=channel,
-                user_id=user_id, domain=domain,
-            )
-            world.set_goal_status(
-                goal_id, "blocked", result=f"unpriced model: {safe_error}",
-            )
-            _fire_webhook("goal_finished", {
-                "goal_id": goal_id, "status": "blocked",
-                "result": f"unpriced model: {safe_error}",
-            })
-            return _unpriced_model_message(e, goal_id)
-        except UsageAccountingError as e:
-            # A provider mis-reported usage on a call made outside the agent
-            # loop (verifier, summariser...). Same reporting as the in-loop
-            # path below: a provider fault, not a cap breach.
-            _lifecycle.end_episode(f"provider accounting: {e}", "failure")
-            try:  # default-on local failure telemetry; no-op when disabled
-                from . import failure_telemetry as _ft
-                _ft.record_failure("provider_accounting", goal_id=goal_id, detail=str(e))
-            except Exception:  # pragma: no cover -- telemetry never blocks a run
-                pass
-            _maybe_record_reflexion(
-                goal, failure_class="provider_accounting", failure_msg=str(e),
-                blackboard=blackboard, shield=shield, channel=channel,
-                user_id=user_id, domain=domain,
-            )
-            world.set_goal_status(goal_id, "blocked", result=f"provider usage accounting: {e}")
-            _fire_webhook("goal_finished", {
-                "goal_id": goal_id, "status": "blocked",
-                "result": f"provider usage accounting: {e}",
-            })
-            return _usage_accounting_message(str(e), goal_id)
-        except BudgetExceeded as e:
-            safe_error = _safe_exception_text(e, fallback="budget limit reached")
-            _lifecycle.end_episode(f"budget: {safe_error}", "interrupted")
-            try:  # default-on local failure telemetry; no-op when disabled
-                from . import failure_telemetry as _ft
-                _ft.record_failure("budget", goal_id=goal_id, detail=safe_error)
-            except Exception:  # pragma: no cover -- telemetry never blocks a run
-                pass
-            message = _budget_stop_message(budget, goal_id, e)
-            world.set_goal_status(goal_id, "blocked", result=message)
-            _fire_webhook("goal_finished", {
-                "goal_id": goal_id, "status": "blocked",
-                "result": message,
-            })
-            # Sentence-style error so a non-engineer can read it.
-            return message
-        except Exception as e:
-            # Anything else escaping the swarm (LLM auth/network errors, a
-            # sandbox exec failure) must leave a finished state. Keep raw SDK
-            # details in the server log; the saved goal and work log carry a
-            # plain, non-sensitive cause and next step for the customer.
-            from .stop_reasons import exception_stop_text, explain_stop
-
-            safe_error = _safe_exception_text(e, fallback="internal run failure")
-            reason = exception_stop_text(e)
-            try:
-                _lifecycle.end_episode(f"error: {safe_error}", "failure")
-            except Exception:  # pragma: no cover
-                pass
-            try:  # default-on local failure telemetry; no-op when disabled
-                from . import failure_telemetry as _ft
-                _ft.record_failure(e, goal_id=goal_id)
-            except Exception:  # pragma: no cover -- telemetry never blocks a run
-                pass
-            try:
-                world.set_goal_status(goal_id, "failed", result=reason)
-                world.append_event(
-                    goal_id, "Lightwork", "error", explain_stop(reason).message,
-                )
-            except Exception:  # pragma: no cover
-                pass
-            raise
-
-        # A dashboard cancellation can race the final model response. It must
-        # win before a returned result is persisted as successful or blocked.
-        if result.stop_kind == "cancelled":
-            cancelled = GoalCancelled(result.stop_detail)
-            cancelled.tool_execution_unknown = result.tool_execution_unknown
-            raise cancelled
-        if world.get_goal(goal_id).status == "cancelled":
-            _lifecycle.end_episode("cancelled", "interrupted")
-            return "Stopped: this goal was cancelled."
-
-        if result.blocked_on_user:
-            _lifecycle.end_episode("blocked awaiting user", "interrupted")
-            world.set_goal_status(goal_id, "blocked")
-            qs = world.open_questions(goal_id)
-            _fire_webhook("goal_waiting", {
-                "goal_id": goal_id, "status": "blocked",
-                "waiting_for": "user_input",
-                "open_question_count": min(len(qs), 10000),
-                "open_question_count_complete": len(qs) <= 10000,
-            })
-            # Question-asked signal: a stall on missing input is a learnable
-            # pattern — record WHAT was missing so the next similar goal
-            # gathers it up front (recalled via reflexion; dreaming
-            # consolidates repeats). No-op unless [reflexion] is enabled.
-            if qs:
-                with _enrich("blocked-question reflexion"):
-                    from . import reflexion as _r
-                    if _r.enabled():
-                        _q = _r._sanitize_text(qs[0].question, shield=shield)[:200]
-                        _r.record(
-                            goal_text=_r._sanitize_text(
-                                f"{goal.title}\n{goal.description or ''}",
-                                shield=shield,
-                            )[:500],
-                            failure_class="blocked_on_user",
-                            failure_msg=f"stalled waiting for: {_q}",
-                            reflection=(
-                                "This kind of goal stalled waiting for the user "
-                                f"to answer: {_q!r}. Gather that input up "
-                                "front, or ask in the first turn, not mid-run."
-                            ),
-                            channel=channel, user_id=user_id, domain=domain,
-                        )
-            if not qs:
-                return (
-                    "Paused: the assistant said it needs more information, "
-                    "but no question was filed. You can resume with "
-                    f"`maverick resume {goal_id}` or send a follow-up message."
-                )
-            lines = [f"  #{q.id}: {q.question}" for q in qs]
-            return (
-                f"Paused: waiting for you to answer "
-                f"{len(qs)} question{'s' if len(qs) != 1 else ''}.\n"
-                + "\n".join(lines)
-                + "\n\nAnswer with: maverick answer <id> \"<your answer>\""
-            )
-
-        if result.error:
-            # Even when the agent loop errored (e.g. hit
-            # max_steps), it may have produced a usable patch via
-            # str_replace_editor before exiting. salvage it.
-            if result.final_patch and (
-                "diff --git" in result.final_patch
-                or "--- a/" in result.final_patch
-            ):
-                _lifecycle.end_episode(result.final_patch, "success")
-                world.set_goal_status(
-                    goal_id, "done", result=result.final_patch,
-                )
-                _fire_webhook("final_emitted", {
-                    "goal_id": goal_id,
-                    "patch_size_bytes": len(result.final_patch.encode("utf-8")),
-                })
-                _fire_webhook(
-                    "goal_finished",
-                    _finished_webhook_payload(
-                        world,
-                        goal_id=goal_id,
-                        status="done",
-                        result=result.final_patch,
-                        domain_profile=domain_profile,
-                        domain=domain,
-                    ),
-                )
-                return result.final_patch
-            # A budget / wall-clock exhaustion inside the agent surfaces as
-            # result.error (the agent swallows BudgetExceeded so spawned
-            # children can return gracefully), which otherwise loses the
-            # helpful "raise the cap" guidance and shows a generic error.
-            # Re-check the budget and, if that's the cause, emit the same
-            # message as the BudgetExceeded handler above.
-            try:
-                budget.check()
-            except BudgetExceeded as be:
-                _lifecycle.end_episode(f"budget: {be}", "interrupted")
-                message = _budget_stop_message(budget, goal_id, be)
-                world.set_goal_status(goal_id, "blocked", result=message)
-                _fire_webhook("goal_finished", {
-                    "goal_id": goal_id, "status": "blocked",
-                    "result": message,
-                })
-                return message
-            # An unpriced model inside a spawned child is swallowed by
-            # the agent into `result.error` (same reason a budget cap trip
-            # is), not raised -- `budget.check()` above never sees it (it's
-            # not a cap trip). Detect it via agent.py's "unpriced model:"
-            # label and give the pricing remediation, not the "raise your
-            # cap and resume" advice that fails identically.
-            if (result.error or "").startswith("unpriced model:"):
-                _lifecycle.end_episode(result.error, "failure")
-                _maybe_record_reflexion(
-                    goal, failure_class="unpriced_model", failure_msg=result.error,
-                    blackboard=blackboard, shield=shield, channel=channel,
-                    user_id=user_id, domain=domain,
-                )
-                world.set_goal_status(goal_id, "blocked", result=result.error)
-                _fire_webhook("goal_finished", {
-                    "goal_id": goal_id, "status": "blocked", "result": result.error,
-                })
-                # Strip the "unpriced model: " label back off so the Detail
-                # line reads the same raw pricing message as the direct-raise
-                # handler above, instead of doubling the label.
-                _detail = result.error.split(": ", 1)[-1]
-                return _unpriced_model_message(_detail, goal_id)
-            # Branch on the structured stop kind, not on substrings of
-            # the error text. A review-checkpoint stop is a reviewer decision:
-            # there is no HALT file and `maverick unhalt` would do nothing.
-            if result.stop_kind == "review_checkpoint":
-                _lifecycle.end_episode("review checkpoint", "interrupted")
-                world.set_goal_status(goal_id, "blocked", result=result.error)
-                _fire_webhook("goal_finished", {
-                    "goal_id": goal_id, "status": "blocked", "result": result.error,
-                })
-                return _review_checkpoint_message(result.stop_detail, goal_id)
-            if result.stop_kind == "usage_accounting":
-                _lifecycle.end_episode(result.error, "failure")
-                _maybe_record_reflexion(
-                    goal, failure_class="provider_accounting",
-                    failure_msg=result.stop_detail,
-                    blackboard=blackboard, shield=shield, channel=channel,
-                    user_id=user_id, domain=domain,
-                )
-                world.set_goal_status(goal_id, "blocked", result=result.error)
-                _fire_webhook("goal_finished", {
-                    "goal_id": goal_id, "status": "blocked", "result": result.error,
-                })
-                return _usage_accounting_message(result.stop_detail, goal_id)
-            # A halt tripped mid-run surfaces as result.error too. Give the
-            # clear unhalt instruction rather than the generic error (whose
-            # 'resume' advice would just halt again).
-            if result.stop_kind == "killswitch":
-                _lifecycle.end_episode("halted", "interrupted")
-                world.set_goal_status(goal_id, "blocked", result="halted")
-                _fire_webhook("goal_finished", {
-                    "goal_id": goal_id, "status": "blocked", "result": "halted",
-                })
-                return (
-                    "Stopped: Lightwork was halted mid-run (a HALT file is present).\n"
-                    f"Run `maverick unhalt` to clear it, then `maverick resume {goal_id}`."
-                )
-            if result.stop_kind in {"budget", "organization_budget"}:
-                message = (
-                    _organization_budget_message(result.stop_detail, goal_id)
-                    if result.stop_kind == "organization_budget"
-                    else _budget_exceeded_message(budget, goal_id)
-                )
-                _lifecycle.end_episode(result.stop_kind, "interrupted")
-                world.set_goal_status(goal_id, "blocked", result=message)
-                _fire_webhook("goal_finished", {
-                    "goal_id": goal_id, "status": "blocked", "result": message,
-                })
-                return message
-            _lifecycle.end_episode(result.error, "failure")
-            _maybe_record_reflexion(
-                goal,
-                failure_class=(
-                    "max_steps" if "max_steps" in (result.error or "")
-                    else "agent_error"
-                ),
-                failure_msg=result.error or "",
-                blackboard=blackboard, shield=shield, channel=channel,
-                user_id=user_id, domain=domain,
-            )
-            world.set_goal_status(goal_id, "blocked", result=result.error)
-            # Attribute the failure to the recalled skills, but NOT when the
-            # run was aborted for budget — that's a cap, not the skill's fault.
-            if not (result.error or "").startswith("budget exceeded:"):
-                _record_skill_outcome(ctx, success=False)
-                _record_planning_outcome(goal, domain, _planning_mode, success=False)
-                _record_harness_outcome(domain, success=False, blackboard=blackboard,
-                                        ctx=ctx)
-                # A run that genuinely could not finish is real negative ground
-                # truth (the work didn't get done) — the most common negative
-                # outcome, and until now invisible to the learning loop, which
-                # only saw human cancels/sign-offs. Feed it as a grounded 0.0 so
-                # the flywheel learns from organic failure, not just the proxy.
-                # Same budget-cap exclusion as above; best-effort and default-on.
-                # Explicitly disabling [consequence] makes this a no-op.
-                from . import consequence
-                consequence.record_self_outcome(world, goal_id, 0.0, kind="failed")
-            _fire_webhook("goal_finished", {
-                "goal_id": goal_id, "status": "blocked", "result": result.error,
-            })
-            if (result.error or "").startswith("budget exceeded:"):
-                # A sub-agent's call was refused by the budget reservation;
-                # surface the same friendly cap message as a top-level
-                # BudgetExceeded, not the generic "ran into an error".
-                return _budget_exceeded_message(budget, goal_id)
-            return (
-                f"Stopped: the assistant ran into an error and couldn't finish.\n"
-                f"Detail: {result.error}\n"
-                f"You can try again with: maverick resume {goal_id}\n"
-                f"[{budget.summary()}]"
-            )
-
-        # Prefer the rendered unified diff (set by the agent's
-        # FINAL handler when SEARCH/REPLACE blocks were applied) over
-        # the raw FINAL text. Without this, extract_unified_diff on
-        # downstream calls (best-of-N selector, harness CSV row) returns
-        # None for SR-only candidates and the patch is silently dropped.
-        # `final` is kept as a fallback for non-coding-mode goals where
-        # the answer is prose.
-        summary = result.final_patch or result.final or "(no answer)"
-        is_rendered_diff = bool(
-            result.final_patch
-            and ("diff --git" in summary or "--- a/" in summary)
+        root, domain_profile, root_refusal = _create_root_agent(
+            world=world, goal_id=goal_id, ctx=ctx, brief=brief, domain=domain,
+            resume=resume, allowed_suites=allowed_suites,
+            model_override=orchestrator_model_override, lifecycle=_lifecycle,
         )
-        # Output chokepoint for the CLI / REST / programmatic callers and
-        # outbound lifecycle webhooks. Scan prose answers before any
-        # success webhooks or persistence paths can export content that
-        # Shield would block from the direct caller. The rendered-diff path
-        # remains intentionally unscanned: code legitimately contains strings
-        # the builtin rules flag (rm -rf, curl | sh) and that path feeds
-        # tooling/graders, not a chat answer.
-        if shield is not None and not is_rendered_diff:
-            from .shield_policy import shield_required
-            reasons = None
-            try:
-                out_v = shield.scan_output(summary)
-                if shield_required() and getattr(out_v, "scan_error", False):
-                    reasons = "required safety scan unavailable"
-                elif not getattr(out_v, "allowed", True):
-                    reasons = "; ".join(getattr(out_v, "reasons", []) or []) or "blocked by Shield"
-            except Exception:
-                log.exception("scan_output on summary failed")
-                if shield_required():
-                    reasons = "required safety scan unavailable"
-            if reasons is not None:
-                refusal = f"⚠ Output blocked by Shield: {reasons}"
-                log.warning("output scan blocked goal #%s: %s", goal_id, reasons)
-                world.set_goal_status(goal_id, "blocked", result=refusal)
-                _lifecycle.end_episode(refusal, "blocked")
-                return refusal
+        if root_refusal is not None:
+            return root_refusal
 
-        if not is_rendered_diff:
-            try:
-                summary = _evidence_ready_goal_output(
-                    summary,
-                    brief=brief,
-                    goal_id=goal_id,
-                    conversation_id=conversation_id,
-                    channel=channel,
-                    model=getattr(root, "model", ""),
-                )
-            except Exception as exc:
-                from . import ai_evidence_gateway as gateway
+        result, execution_refusal = await _execute_root_agent(
+            root=root, world=world, goal=goal, goal_id=goal_id, budget=budget,
+            blackboard=blackboard, shield=shield, channel=channel, user_id=user_id,
+            domain=domain, lifecycle=_lifecycle,
+        )
+        if execution_refusal is not None:
+            return execution_refusal
+        result_refusal = _handle_root_result(
+            result=result, world=world, goal=goal, goal_id=goal_id, budget=budget,
+            blackboard=blackboard, shield=shield, channel=channel, user_id=user_id,
+            domain=domain, domain_profile=domain_profile, ctx=ctx,
+            planning_mode=_planning_mode, lifecycle=_lifecycle,
+        )
+        if result_refusal is not None:
+            return result_refusal
 
-                if not isinstance(exc, gateway.EvidenceGatewayError):
-                    raise
-                refusal = (
-                    "AI evidence gateway withheld the generated output. "
-                    "Operator action is required: "
-                    f"{_safe_exception_text(exc, fallback='evidence review failed')}"
-                )
-                _lifecycle.end_episode(refusal, "failure")
-                world.set_goal_status(goal_id, "blocked", result=refusal)
-                _fire_webhook(
-                    "goal_finished",
-                    {
-                        "goal_id": goal_id,
-                        "status": "blocked",
-                        "result": refusal,
-                    },
-                )
-                return refusal
-
-        # Compartment observability: record a one-line summary of the run's
-        # bulkhead activity (threats immunized, sealed agents/sectors) so it's
-        # visible in the run record / dashboard. No-op when compartments are off.
-        if quarantine is not None:
-            try:
-                from .quarantine import compartment_status, format_compartment_status
-                blackboard.post(
-                    "orchestrator", "observation",
-                    format_compartment_status(compartment_status(quarantine, shield)),
-                    provenance="compartment",
-                )
-            except Exception:  # pragma: no cover -- observability is best-effort
-                pass
-        _lifecycle.end_episode(summary, "success")
-        world.set_goal_status(goal_id, "done", result=summary)
-        # Success-path audit: GOAL_END on the signed chain records the outcome,
-        # closing the GOAL_START..GOAL_END pair for a completed run. Block/denial
-        # exits are already covered by their own audit events. A write error is
-        # swallowed; a refusal propagates, so a run cannot be marked done on a
-        # chain that declined to record its completion.
-        from .audit import EventKind, audit_event
-        _res = summary if isinstance(summary, str) else None
-        audit_event(EventKind.GOAL_END, goal_id=goal_id, agent="orchestrator",
-                    status="succeeded",
-                    result=(_res[:500] + "…") if _res and len(_res) > 500 else _res)
-        # Index this finished goal into the semantic store (#432) so future
-        # runs recall it via vector search. No-op unless a [memory] backend is
-        # configured; re-reads the goal so the indexed status/result reflect
-        # the just-written 'done' state. Never blocks the finalize path.
-        with _enrich("semantic index"):
-            from . import semantic_recall
-            semantic_recall.index_goal(world.get_goal(goal_id))
-        _record_deliverable_artifact(world, goal_id, summary)
-        if not is_rendered_diff:
-            # Only an answer the checker actually ran on counts as verified
-            # (verifier_confidence defaults to 1.0 when no checker ran).
-            _maybe_store_learning_cache(
-                goal, summary, getattr(ctx, "last_verifier_confidence", None))
-        _record_skill_outcome(ctx, success=True)
-        _record_planning_outcome(goal, domain, _planning_mode, success=True)
-        _record_harness_outcome(domain, success=True, blackboard=blackboard, ctx=ctx)
-        _fire_webhook("final_emitted", {
-            "goal_id": goal_id,
-            "patch_size_bytes": len(summary.encode("utf-8")),
-        })
-        _fire_webhook(
-            "goal_finished",
-            _finished_webhook_payload(
-                world,
-                goal_id=goal_id,
-                status="done",
-                result=summary,
-                domain_profile=domain_profile,
-                domain=domain,
-            ),
+        summary, is_rendered_diff, output_refusal = _prepare_goal_output(
+            result=result, shield=shield, world=world, goal_id=goal_id, brief=brief,
+            conversation_id=conversation_id, channel=channel, root=root,
+            lifecycle=_lifecycle,
+        )
+        if output_refusal is not None:
+            return output_refusal
+        _record_goal_success(
+            world=world, goal=goal, goal_id=goal_id, summary=summary,
+            is_rendered_diff=is_rendered_diff, quarantine=quarantine, shield=shield,
+            blackboard=blackboard, lifecycle=_lifecycle, domain=domain,
+            domain_profile=domain_profile, ctx=ctx, planning_mode=_planning_mode,
         )
 
-        # Trajectory donation (Karpathy data-engine analog). Default OFF;
-        # only fires when the user opted into [telemetry] donate_trajectories
-        # AND the selection gate (disagreement_high + verifier_confident
-        # + success) passes. Never raises -- a bad donation must never
-        # affect the goal result.
-        # The two finalize side effects (donation write to a file, conversation
-        # turn write to the world DB) are independent of each other and of skill
-        # distillation. Define them as closures that swallow their own errors --
-        # a bad donation/turn-write must never affect the goal result -- so they
-        # can optionally overlap distillation (a blocking LLM call) instead of
-        # running strictly before it.
-        def _donate() -> None:
-            with _enrich("trajectory donation"):
-                from .donation import TrajectoryRecord, hash_brief, write_record
-                entropy = getattr(ctx, "last_disagreement", 0.0)
-                record = TrajectoryRecord(
-                    task_brief_hash=hash_brief(goal.title + (goal.description or "")),
-                    task_brief_text=(goal.title + "\n" + (goal.description or "")),
-                    # Local join key so ingest/export_texts can pull this goal's
-                    # goal_events back out of the world DB (PRM step labels + DPO
-                    # text sidecar). Omitting it left every trajectory step-less.
-                    goal_id=goal_id,
-                    model_id=getattr(llm, "model", ""),
-                    # by_kind() snapshots under the blackboard lock. _donate runs
-                    # on a worker thread (asyncio.to_thread); reading the raw
-                    # .entries list here races the event loop's post() append/trim
-                    # -> "list changed size during iteration", which the blanket
-                    # except below swallowed as a silently-lost donation.
-                    tools_used=sorted({e.kind for e in blackboard.by_kind("observation")}),
-                    outcome="success",
-                    reward=1.0 if result.verifier_confidence >= 0.75 else result.verifier_confidence,
-                    verifier_confidence=result.verifier_confidence,
-                    verifier_critique=result.verifier_critique,
-                    disagreement_entropy=float(entropy or 0.0),
-                    agent_credit=dict(getattr(ctx, "last_credit", {}) or {}),
-                    sub_trajectories=list(getattr(ctx, "last_subtrajectories", []) or []),
-                    # Rejected pre-revision drafts -> the "rejected" half of DPO
-                    # preference pairs (chosen = this accepted final). Same ctx
-                    # channel as last_credit/last_subtrajectories above.
-                    rejected_attempts=list(
-                        getattr(ctx, "last_rejected_attempts", []) or []
-                    ),
-                    wall_seconds=budget.elapsed(),
-                    cost_dollars=budget.dollars,
-                    tokens_in=budget.input_tokens,
-                    tokens_out=budget.output_tokens,
-                )
-                write_record(record)
-
-        def _write_turn() -> None:
-            if conversation_id is None:
-                return
-            try:
-                world.append_turn(conversation_id, "assistant", summary, goal_id=goal_id)
-            except Exception as e:  # pragma: no cover -- never block on history
-                log.warning(
-                    "conversation turn write failed: %s",
-                    _safe_exception_text(e, fallback="conversation write failed"),
-                )
-
-        # Overlap the side effects with distillation when enabled (default on).
-        # WorldModel uses check_same_thread=False + a write lock (built for the
-        # FastAPI threadpool), so the turn write is safe from a worker thread;
-        # the donation write touches only a file. Both are joined before
-        # run_goal returns (see below). MAVERICK_SPECULATIVE_FINALIZE=0 reverts
-        # to running them inline, before distillation.
-        _spec_finalize = os.getenv(
-            "MAVERICK_SPECULATIVE_FINALIZE", "1",
-        ).strip().lower() not in {"0", "false", "no", "off"}
-        _finalize_specs: list = []
-        if _spec_finalize:
-            from .speculative import speculate
-            _finalize_specs = [
-                speculate(asyncio.to_thread(_donate)),
-                speculate(asyncio.to_thread(_write_turn)),
-            ]
-        else:
-            _donate()
-            _write_turn()
-
-        # Security hardening: disable automatic closed-loop distillation by
-        # default. Trajectories can contain untrusted goal/tool/workspace text
-        # and writing LLM output directly to persisted skills creates a
-        # cross-run prompt-injection primitive. Operators can opt in explicitly
-        # (see _auto_distill_enabled).
-        auto_distill = _auto_distill_enabled()
-        # Same calibration-freeze interlock as the local distillation path
-        # below (and dreaming._consolidate_learning): a drifted verifier's
-        # success/failure labels must not seed a new, LLM-written, recallable
-        # skill either. This is the second of the two distillation call
-        # sites the freeze needs to reach -- this one is opt-in but still
-        # live wherever an operator has set MAVERICK_AUTO_DISTILL=1.
-        if auto_distill and getattr(goal, "owner", None) != "":
-            auto_distill = False
-            skill_note = ""
-            try:
-                from .audit import EventKind, audit_event
-                if not audit_event(EventKind.SKILL_DISTILL_SKIPPED,
-                                   agent="skill_distillation", goal_id=goal_id,
-                                   reason="private_source"):
-                    log.warning("private skill distillation skip audit unavailable")
-            except Exception:  # no learning action to roll back
-                log.warning("private skill distillation skip audit unavailable")
-        elif auto_distill and _skill_distillation_frozen():
-            auto_distill = False
-            skill_note = "\n\n[skill distill skipped: learning is frozen (verifier calibration inadequate)]"
-        elif auto_distill:
-            try:
-                skill = distill(goal.title, summary, blackboard, llm,
-                                budget=budget, source_world=world)
-                # A None return means no skill was installed (validation,
-                # source scope, HALT, or audit may have refused it). Do not
-                # claim a specific failed gate that the caller cannot know.
-                skill_note = (
-                    f"\n\n[distilled skill: {skill.name}]" if skill
-                    else "\n\n[skill distill: no skill installed]"
-                )
-            except BudgetExceeded:
-                skill_note = "\n\n[skill distill skipped: budget]"
-            except Exception as e:
-                skill_note = (
-                    "\n\n[skill distill error: "
-                    f"{_safe_exception_text(e, fallback='distillation unavailable')}]"
-                )
-        else:
-            # Show the opt-in hint once per process, not on every run / chat
-            # turn (it's a standing setting, not a per-goal event).
-            global _WARNED_DISTILL_DISABLED
-            if _WARNED_DISTILL_DISABLED:
-                skill_note = ""
-            else:
-                _WARNED_DISTILL_DISABLED = True
-                skill_note = "\n\n[skill distill disabled: set MAVERICK_AUTO_DISTILL=1 to enable]"
-
-        # Default-on local continuous learning ([self_learning] distill_local):
-        # an LLM-free, injection-safe distillation that turns recent SUCCESSFUL
-        # goals into a reusable SKILL.md under ~/.maverick/learned-skills. Uses
-        # the persisted goal history as trajectories, so no extra store is
-        # needed. No-op when explicitly disabled; never raises into the run.
-        with _enrich("local skill distillation"):
-            # Load config once and reuse it for both checks below (each
-            # otherwise independently calls config.load_config() for its own
-            # section) -- caught by this block's own fail-open _enrich() the
-            # same as a failure inside either check would have been.
-            from .config import load_config as _load_config
-            from .skill import distillation_local as _sdl
-            _cfg = _load_config()
-            if (_sdl.enabled(config=_cfg)
-                    and not _skill_distillation_frozen(config=_cfg)):
-                trajectories = [
-                    {"goal_id": g.id, "goal": g.title, "success": True, "tools": [],
-                     "t": getattr(g, "updated_at", 0.0)}
-                    for g in world.list_goals(status="done", limit=10, order="desc", owner="")
-                ]
-                # v2: gate on evidence + dedup against the learned-skills store
-                # so the loop doesn't accumulate near-duplicate skills each run.
-                from .skill import distillation_v2 as _sdl2
-                path, _why = _sdl2.distill_and_save_gated(trajectories)
-                if path:
-                    blackboard.post("orchestrator", "skill",
-                                    f"distilled local skill -> {path}")
-
-        # Join the speculative side effects before returning, so the turn /
-        # donation writes are guaranteed durable to any caller that reads them
-        # back. The closures swallow their own errors, so result() won't raise.
-        for _s in _finalize_specs:
-            await _s.result()
-
-        # In coding mode the orchestrator's return value
-        # IS the benchmark CSV's `predicted_patch` after extract_unified_diff.
-        # The trailing skill_note + budget summary then pollute the patch
-        # (they sit AFTER the last hunk so `git apply` ignores them, but
-        # stricter graders + downstream tooling don't). When summary is
-        # already a rendered unified diff, return it as-is — log the
-        # bookkeeping to the blackboard instead.
-        if is_rendered_diff:
-            try:
-                if skill_note.strip():
-                    blackboard.post("orchestrator", "skill", skill_note.strip())
-                blackboard.post(
-                    "orchestrator", "budget_summary", budget.summary(),
-                )
-            except Exception:
-                pass
-            return summary
-        return f"DONE.\n\n{summary}{skill_note}\n\n[{budget.summary()}]"
+        return await _finish_goal_learning(
+            world=world, goal=goal, goal_id=goal_id, summary=summary,
+            is_rendered_diff=is_rendered_diff, result=result, ctx=ctx,
+            blackboard=blackboard, budget=budget, llm=llm, conversation_id=conversation_id,
+        )
     finally:
         if mcp_clients:
             try:

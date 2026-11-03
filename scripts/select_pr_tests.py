@@ -100,7 +100,7 @@ JOB_PREFIXES: dict[str, tuple[str, ...]] = {
     # OSV/pip-audit/bandit/SBOM over every dependency surface and all Python code.
     "audit": (
         "packages/", "apps/", "benchmarks/", "demo/", "examples/", "rust/", "go/", "sdks/",
-        "web/", "extensions/", "deploy/", "osv-scanner.toml",
+        "web/", "extensions/", "deploy/", "vendor/", "osv-scanner.toml",
     ),
     # Wheel builds and package metadata of the release cohort.
     "release-cohort": ("packages/", "apps/installer-cli/"),
@@ -175,7 +175,8 @@ def changed_files_from_git(base: str, head: str, root: Path = REPO_ROOT) -> tupl
     Returns ``(paths, merge_base)``, or ``(None, reason)`` when git cannot
     answer (unknown ref, no common history, no git); the caller then selects
     the full suite. ``--no-renames`` lists both names of a moved file so the
-    tests naming either are selected.
+    tests naming either are selected. NUL-delimited output preserves paths
+    that Git would otherwise quote, including non-ASCII names.
     """
     for ref in (base, head):
         if not _GIT_REF.fullmatch(ref):
@@ -186,13 +187,20 @@ def changed_files_from_git(base: str, head: str, root: Path = REPO_ROOT) -> tupl
             [*git, "merge-base", base, head], check=True, capture_output=True, text=True
         ).stdout.strip()
         diff = subprocess.run(
-            [*git, "diff", "--name-only", "--no-renames", merge_base, head],
+            [*git, "diff", "--name-only", "--no-renames", "-z", merge_base, head],
             check=True, capture_output=True, text=True,
         ).stdout
-    except (OSError, subprocess.CalledProcessError) as exc:
+    except (OSError, UnicodeError, subprocess.CalledProcessError) as exc:
         detail = (getattr(exc, "stderr", "") or str(exc)).strip()
         return None, f"git could not diff {base}...{head}: {detail}"
-    return diff.splitlines(), merge_base
+    paths = [path for path in diff.split("\0") if path]
+    # ``select`` also accepts hand-entered Windows paths and normalizes them.
+    # A literal backslash in a POSIX Git path, or a path whose outer whitespace
+    # would be stripped, cannot safely pass through that normalization. Control
+    # characters also make diagnostics and downstream path lists ambiguous.
+    if any(path != path.strip() or "\\" in path or any(ord(c) < 32 for c in path) for path in paths):
+        return None, "git returned a path that cannot be safely normalized; run the full suite"
+    return paths, merge_base
 
 
 def jobs_needed(changed: list[str]) -> dict[str, bool]:
@@ -213,6 +221,20 @@ def select(changed: list[str], root: Path = REPO_ROOT) -> dict:
             return {"mode": "full", "paths": [], "reasons": [reason],
                     "jobs": dict.fromkeys(JOB_PREFIXES, True)}
     jobs = jobs_needed(changed)
+
+    # A test-only change selects exactly the changed test files. Avoid reading
+    # every test in the repository just to rediscover those paths; this does not
+    # alter the conservative full-suite rules above or package/reference scans.
+    if changed and all(_is_test_file(rel) for rel in changed):
+        existing = [rel for rel in changed if (root / rel).exists()]
+        if not existing:
+            return {"mode": "none", "paths": [], "reasons": ["no files changed"], "jobs": jobs}
+        return {
+            "mode": "paths",
+            "paths": sorted(existing),
+            "reasons": [f"{rel} changed" for rel in existing],
+            "jobs": jobs,
+        }
 
     all_tests = test_files(root)
     texts = {t: t.read_text(encoding="utf-8", errors="ignore") for t in all_tests}

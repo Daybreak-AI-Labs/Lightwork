@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from ..governed_http import guarded_redirect_get
 from . import Tool
 
 log = logging.getLogger(__name__)
@@ -43,8 +44,8 @@ _ALGOLIA = "https://hn.algolia.com/api/v1"
 
 def _get(url: str, params: dict | None = None) -> tuple[int, Any]:
     import httpx
-    r = httpx.get(url, params=params or {}, timeout=20.0,
-                  follow_redirects=True)
+    r = guarded_redirect_get(httpx.get)(url, params=params or {}, timeout=20.0,
+                                       follow_redirects=True)
     try:
         return r.status_code, r.json()
     except ValueError:

@@ -47,6 +47,7 @@ from typing import Any
 
 # Initialize encryption before a worker resolves sealed dashboard settings.
 from . import crypto_at_rest
+from .config_contracts import BOOLEAN_SETTINGS, INTEGER_SETTINGS
 from .file_lock import _windows_extended_path, atomic_read_bytes
 
 try:
@@ -1986,8 +1987,8 @@ def get_automation_import() -> dict:
     """
     cfg = load_config().get("automation_import", {})
     return {
-        "enable": _strict_config_bool(cfg, "enable", False),
-        "create_schedules": _strict_config_bool(cfg, "create_schedules", False),
+        "enable": _strict_config_bool(cfg, "enable", BOOLEAN_SETTINGS["automation_import.enable"].default),
+        "create_schedules": _strict_config_bool(cfg, "create_schedules", BOOLEAN_SETTINGS["automation_import.create_schedules"].default),
     }
 
 
@@ -4206,13 +4207,14 @@ def get_durable() -> dict:
     many checkpoints are retained per agent for rewind/history.
     """
     cfg = load_config().get("durable", {})
+    contract = INTEGER_SETTINGS["durable.keep_last"]
     try:
-        keep = int(cfg.get("keep_last", 5))
+        keep = int(cfg.get("keep_last", contract.default))
     except (TypeError, ValueError):
-        keep = 5
+        keep = contract.default
     return {
-        "enabled": bool(cfg.get("enabled", False)),
-        "keep_last": max(1, keep),
+        "enabled": bool(cfg.get("enabled", BOOLEAN_SETTINGS["durable.enabled"].default)),
+        "keep_last": max(contract.minimum, keep),
     }
 
 

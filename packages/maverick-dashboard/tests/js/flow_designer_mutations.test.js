@@ -41,6 +41,7 @@ function fixture(fetchImpl) {
     commitRawFields() { return []; },
     toApiFlow() { return { ...context.rootFlow }; },
     FDCore: require("../../maverick_dashboard/templates/flow_designer_core.js"),
+    FDTransport: require("../../maverick_dashboard/templates/flow_designer_transport.js"),
     FDRecipeInputs: require("../../maverick_dashboard/templates/flow_designer_inputs.js"),
     retireInFlight: false, undoStack: [], redoStack: [], pendingSnap: null, firstSaveHistory: null,
     selected: null, renderProps() {},
@@ -105,7 +106,9 @@ test('actual API load and save retain recipe evidence and typed step zero', () =
   const source = fs.readFileSync(path.resolve(__dirname,
     "../../maverick_dashboard/templates/flow_designer.js"), "utf8");
   const core = require("../../maverick_dashboard/templates/flow_designer_core.js");
-  const context = { document: { getElementById() { return null; } },
+  const schedule = require("../../maverick_dashboard/templates/flow_designer_schedule.js");
+  const wire = require("../../maverick_dashboard/templates/flow_designer_wire.js");
+  const context = { FDSchedule: schedule, FDWire: wire, document: { getElementById() { return null; } },
     renderCrumbs() {}, syncScheduleControls() {}, syncSaveButtons() {}, autoLayout() {}, render() {}, renderProps() {}, markClean() {},
     nameInput: {}, idInput: {}, normalizeNode: core.normalizeNode, serializeFlow: core.serializeFlow };
   const loadStart = source.indexOf('  function fromApiFlow(');
@@ -130,7 +133,9 @@ test('actual API load and save retain choice guard, both branches and admission 
   const source = fs.readFileSync(path.resolve(__dirname,
     "../../maverick_dashboard/templates/flow_designer.js"), "utf8");
   const core = require("../../maverick_dashboard/templates/flow_designer_core.js");
-  const context = { document: { getElementById() { return null; } },
+  const schedule = require("../../maverick_dashboard/templates/flow_designer_schedule.js");
+  const wire = require("../../maverick_dashboard/templates/flow_designer_wire.js");
+  const context = { FDSchedule: schedule, FDWire: wire, document: { getElementById() { return null; } },
     renderCrumbs() {}, syncScheduleControls() {}, syncSaveButtons() {}, autoLayout() {}, render() {}, renderProps() {}, markClean() {},
     nameInput: {}, idInput: {}, normalizeNode: core.normalizeNode, serializeFlow: core.serializeFlow };
   const loadStart = source.indexOf('  function fromApiFlow(');

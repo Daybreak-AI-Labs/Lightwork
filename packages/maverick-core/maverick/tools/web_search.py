@@ -23,6 +23,8 @@ import re
 import uuid
 from typing import Any
 
+from ..governed_http import guarded_redirect_get
+from ..governed_http import guarded_sender as _governed_sender
 from ..provider_cost_cap import (
     ProviderAccountingUnavailable,
     ProviderCapExceeded,
@@ -106,7 +108,7 @@ def _try_tavily(
         return None
     try:
         def request():
-            resp = httpx.post(
+            resp = _governed_sender(httpx.post)(
                 "https://api.tavily.com/search",
                 json={
                     "api_key": key,
@@ -147,7 +149,7 @@ def _try_brave(
         return None
     try:
         def request():
-            resp = httpx.get(
+            resp = _governed_sender(httpx.get)(
                 "https://api.search.brave.com/res/v1/web/search",
                 params={"q": query, "count": min(num, 20)},
                 headers={"X-Subscription-Token": key, "Accept": "application/json"},
@@ -184,7 +186,7 @@ def _try_serpapi(
         return None
     try:
         def request():
-            resp = httpx.get(
+            resp = _governed_sender(httpx.get)(
                 "https://serpapi.com/search.json",
                 params={"q": query, "num": num, "api_key": key, "engine": "google"},
                 timeout=20.0,
@@ -259,7 +261,7 @@ def _try_duckduckgo(
         return None
     try:
         def request():
-            resp = httpx.get(
+            resp = guarded_redirect_get(httpx.get)(
                 "https://html.duckduckgo.com/html/",
                 params={"q": query},
                 headers={"User-Agent": "Mozilla/5.0 (compatible; Lightwork/1.0)"},

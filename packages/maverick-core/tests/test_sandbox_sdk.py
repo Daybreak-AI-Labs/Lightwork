@@ -8,6 +8,7 @@ from maverick.sandbox.docker import DockerBackend
 from maverick.sandbox.firecracker import FirecrackerBackend
 from maverick.sandbox.kubernetes import KubernetesBackend
 from maverick.sandbox.local import ExecResult, LocalBackend
+from maverick.sandbox.modal_backend import ModalBackend
 from maverick.sandbox.podman import PodmanBackend
 from maverick.sandbox.ssh import SSHBackend
 
@@ -25,6 +26,14 @@ def test_local_instance_satisfies_protocol(tmp_path):
     assert isinstance(sb, sdk.SandboxV2)
     assert sdk.conformance(sb) == []
     assert "exec" in sdk.capabilities(sb)
+
+
+def test_remote_backends_without_workspace_transfer_do_not_claim_local_workspace(tmp_path):
+    # Construct without external provider credentials or starting a VM.
+    modal = ModalBackend(workdir=tmp_path)
+    firecracker = object.__new__(FirecrackerBackend)
+    assert not sdk.workdir_is_local(modal)
+    assert not sdk.workdir_is_local(firecracker)
 
 
 def test_conformance_flags_missing_exec():
@@ -96,8 +105,18 @@ def test_capabilities_reports_optional_methods(tmp_path):
             pass
 
     assert sdk.capabilities(WithFiles()) == {
-        "exec", "put_file", "exec_authenticated_tests",
+        "exec", "local_workdir", "put_file", "exec_authenticated_tests",
     }
+
+
+def test_capabilities_reports_workspace_locality():
+    class Remote:
+        workdir_is_local = False
+
+        def exec(self, cmd, timeout=None):
+            return ExecResult(stdout="", stderr="", exit_code=0)
+
+    assert sdk.capabilities(Remote()) == {"exec"}
 
 
 class _GoodExternal:

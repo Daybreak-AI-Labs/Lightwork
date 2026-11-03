@@ -295,7 +295,11 @@ def _discover_endpoints(issuer: str, *, timeout: float = 5.0) -> dict[str, str]:
     try:
         import httpx
 
-        resp = httpx.get(url, timeout=timeout, follow_redirects=True)
+        from .governed_http import guarded_redirect_get
+
+        resp = guarded_redirect_get(httpx.get, require_https=True)(
+            url, timeout=timeout, follow_redirects=True,
+        )
         resp.raise_for_status()
         doc = resp.json()
     except OIDCError:

@@ -62,7 +62,7 @@ def create_ai_evidence_analysis_page_router(templates: Jinja2Templates) -> APIRo
         ):
             raise HTTPException(status_code=404, detail="workbench unavailable")
         style_nonce = secrets.token_urlsafe(18)
-        from .api import module_activation_enabled
+        from .module_activation import module_activation_enabled
 
         response = templates.TemplateResponse(
             request,

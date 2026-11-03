@@ -47,9 +47,20 @@ it, follow the
 [source installation guide](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/source-install.md)
 instead.
 
+Standalone demos carry local copies of their shared support code so each Docker
+build context or release archive remains independent. This includes the PIA
+and DSAR mail and license helpers, and the request boundary and store lock used
+by the GRC, platform threat, environment threat, and model risk demos. Edit the
+canonical files in `demo/shared/`, then run
+`python scripts/sync_standalone_support.py`. Include any new support files in
+the applicable Dockerfiles or release manifests. CI checks that the copies match.
+
 You need git, bash and Python 3.11 or 3.12 (the versions CI tests).
-Docker or Podman is optional; the container sandbox backends use it. Node.js is
-needed only for the TypeScript SDK in `sdks/plugin-ts`.
+Docker or Podman is optional; the container sandbox backends use it. Node.js
+and npm are needed for the TypeScript SDK and for the dashboard, desktop and
+mobile JavaScript tests. The UI regression workflow uses Node.js 22.23.1;
+see the [browser test guide](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/packages/maverick-dashboard/tests/browser/README.md)
+for its additional Chromium setup.
 
 ```bash
 git clone https://github.com/Daybreak-AI-Labs/Lightwork
@@ -60,26 +71,24 @@ lightwork version
 lightwork doctor
 ```
 
-`.devcontainer/post-create.sh` creates a virtual environment in `.venv` with
-the `python3` on your `PATH`, so make sure that is a supported version. It
-installs the eight workspace packages in editable mode (`maverick-core` with
-its dependencies, the others with `--no-deps`), then the runtime dependencies
-those packages need and the development tools: pytest, pytest-asyncio,
-pytest-xdist, ruff, vulture and build. The repository's dev container (`.devcontainer/`) and GitHub
-Codespaces run the same script automatically. On Windows, run it in WSL or use
-the dev container.
+`.devcontainer/post-create.sh` creates a virtual environment in `.venv`. It
+prefers the first available interpreter among `python3.12`, then `python3.11`, then falls back to `python3` on your `PATH`.
+Make sure the selected interpreter is supported. The script
+installs the eight workspace packages together in editable mode using the
+release cohort manifest and their declared runtime dependencies, then adds
+development tools: pytest, pytest-asyncio,
+pytest-xdist, ruff, mypy, vulture, build and detect-secrets. The repository's dev
+container (`.devcontainer/`) and GitHub Codespaces run the same script
+automatically. On Windows, run it in WSL or use the dev container.
 
 The `lightwork` and `maverick` commands are the same CLI. `lightwork version`
 lists the installed packages; `lightwork doctor` reports what is configured and
 what is missing. On a development machine, warnings about a missing provider
 key or an unsandboxed host are expected. The tests do not need a provider key.
 
-To run the secret scan that is part of the lint gates, also install
-detect-secrets:
-
-```bash
-python -m pip install 'detect-secrets>=1.5'
-```
+The bootstrap installs detect-secrets for the secret scan in the lint gates.
+If you set up your environment another way, install it before running the
+pre-push checks.
 
 Do not run `pip install -e .` at the repository root. The root
 `pyproject.toml` holds workspace and tool configuration only; install the
@@ -110,7 +119,7 @@ sdks/                  Client and plugin SDKs
 ```
 
 [ARCHITECTURE.md](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/ARCHITECTURE.md)
-describes how the pieces fit together.
+describes how the pieces fit together. The [dashboard service boundaries](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/operations/dashboard-architecture.md) describe shared policies, configuration contracts, and where request authorization belongs.
 
 ## Running the tests
 
@@ -189,9 +198,11 @@ bash scripts/pre-push-lint.sh
 
 It runs these checks and reports every failure at once:
 
-- `ruff check .` over the whole repository. Ruff is the only static checker;
-  there is no type checker. Bugbear (`B`) rules are enabled and the complexity
+- `ruff check .` over the whole repository. Bugbear (`B`) rules are enabled and the complexity
   limit is 20, so new code must stay under it.
+- `python -m mypy` for the selected boundary modules in `pyproject.toml`. It
+  runs in strict mode and does not check transitive imports; expand the checked
+  set as interfaces are typed and tested.
 - `vulture` for dead code.
 - A check for a bare `import tomllib` and for `shell=True` outside the sandbox
   backends (see the house rules below).
@@ -231,7 +242,7 @@ refused, history stays linear, and nobody can bypass the rules.
 
 | Check | What it runs |
 | --- | --- |
-| `lint` | `ruff check .`, vulture, the `tomllib` and `shell=True` checks, detect-secrets and the `python -m maverick.<gate> --ci` contract gates |
+| `lint` | `ruff check .`, selected-boundary mypy, vulture, the `tomllib` and `shell=True` checks, detect-secrets and the `python -m maverick.<gate> --ci` contract gates |
 | `lint-pr-title` | Conventional Commits pull request title (see below) |
 | `no-ai-attribution` | `scripts/check_attribution.py` over the pull request's commits, title and description, the merge-queue commit and pushes to `main` |
 | `select-tests` | On a pull request, the test files the changed files can affect (`scripts/select_pr_tests.py`): a change to the kernel, a `conftest.py`, `pyproject.toml`, the requirements, `.github/` or `scripts/` selects the full suite; a package change selects its tests and every test naming its import package; other files select the tests naming them by path. The heavier jobs (`docker`, `postgres`, `audit`, `release-cohort`, `redteam`, `eval-smoke`, the benchmark gates, Windows containment) run on a pull request only when a changed file is under their inputs (`JOB_PREFIXES`) |
@@ -281,10 +292,8 @@ The kernel rules below are numbered; code comments and documents cite them as
 
 Further rules:
 
-- **Keep the `tomllib` fallback.** Python 3.11, the supported floor, has
-  `tomllib` in its standard library, but some bootstrap, deploy and benchmark
-  helpers still run under an older system interpreter, so CI still rejects a
-  bare `import tomllib`. Use:
+- **Portable bootstrap imports.** The runtime requires Python 3.11+, but
+  bootstrap utilities retain the existing guarded TOML import convention. Use:
 
   ```python
   try:

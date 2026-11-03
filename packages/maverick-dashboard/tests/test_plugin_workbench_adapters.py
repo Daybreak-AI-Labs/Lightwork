@@ -16,7 +16,7 @@ from maverick_dashboard import product_operations_plugins as copilot
 
 @pytest.fixture
 def native_scope(monkeypatch, tmp_path):
-    from maverick_dashboard import api
+    from maverick_dashboard import flows_api
     monkeypatch.setattr(pins, "data_dir", lambda: tmp_path)
     monkeypatch.setattr(native, "_authority", lambda *args: None)
     monkeypatch.setattr(native, "caller_principal", lambda request: "alice")
@@ -24,7 +24,7 @@ def native_scope(monkeypatch, tmp_path):
     run = SimpleNamespace(run_id="run-1", flow_id="flow-1", owner="alice", status="paused_approval", definition_revision="r1")
     monkeypatch.setattr(store, "load_run", lambda ident, **kwargs: run if kwargs.get("owner") == run.owner else None)
     monkeypatch.setattr(store, "load_flow", lambda ident: SimpleNamespace(owner="alice"))
-    monkeypatch.setattr(api, "_can_access_flow", lambda request, flow: True)
+    monkeypatch.setattr(flows_api, "_can_access_flow", lambda request, flow: True)
     current = {"group": "maverick.tools", "name": "tool", "distribution": "plugin", "content_sha256": "b" * 64}
     monkeypatch.setattr(workbench, "selected", lambda fingerprint: current)
     monkeypatch.setattr(workbench, "history", lambda context: {"publications": [{"fingerprint": "c" * 64, "current": True}]})

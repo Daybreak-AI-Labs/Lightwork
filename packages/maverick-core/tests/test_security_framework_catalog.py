@@ -15,16 +15,12 @@ from maverick.security_framework_catalog import (
     FEDRAMP_CLASS_C_CONTROLS,
     NIST_800_53_MODERATE,
     NIST_CSF_2_SUBCATEGORIES,
+    SECURITY_CATALOG_INDEX,
     SECURITY_CATALOG_PROVENANCE,
+    SECURITY_CATALOGS,
 )
 
-CATALOGS = {
-    "nist_csf": NIST_CSF_2_SUBCATEGORIES,
-    "nist_800_53": NIST_800_53_MODERATE,
-    "cis_v8": CIS_V81_SAFEGUARDS,
-    "cmmc_l2": CMMC_L2_PRACTICES,
-    "fedramp_moderate": FEDRAMP_CLASS_C_CONTROLS,
-}
+CATALOGS = SECURITY_CATALOGS
 EXPECTED_COUNTS = {
     "nist_csf": 106,
     "nist_800_53": 287,
@@ -39,6 +35,23 @@ def test_catalogs_have_exact_counts_and_unique_references():
     for rows in CATALOGS.values():
         references = [row[0] for row in rows]
         assert len(references) == len(set(references))
+
+
+def test_catalog_indexes_preserve_every_authoritative_row_and_are_read_only():
+    for name, rows in CATALOGS.items():
+        index = SECURITY_CATALOG_INDEX[name]
+        assert tuple(index.values()) == rows
+        assert all(index[row[0]] == row for row in rows)
+        with pytest.raises(TypeError):
+            index["invented"] = rows[0]
+    with pytest.raises(TypeError):
+        SECURITY_CATALOG_INDEX["invented"] = {}
+
+
+def test_generated_catalog_document_is_current():
+    from scripts.generate_security_catalog_docs import OUTPUT, render
+
+    assert OUTPUT.read_text(encoding="utf-8") == render()
 
 
 @pytest.mark.parametrize(
@@ -72,6 +85,33 @@ def test_expanded_templates_have_unique_ids_and_text():
         assert len(questions) == expected_count
         assert len({question.id for question in questions}) == expected_count
         assert len({question.text for question in questions}) == expected_count
+
+
+@pytest.mark.parametrize("name", CATALOGS)
+def test_every_catalog_practice_survives_into_scored_findings(name):
+    """No practice may silently lose its reference or severity in an assessment."""
+    template = TEMPLATES[name]
+    session = AssessmentSession(
+        type=name,
+        subject="Catalog contract subject",
+        answers={question.id: {"answer": "no", "note": ""} for question in template.questions},
+    )
+    result = session.evaluate()
+    assert result.total == result.answered == len(CATALOGS[name])
+    assert len(result.findings) == len(CATALOGS[name])
+    for (reference, section, _objective, severity, minimum_ig), question, finding in zip(
+        CATALOGS[name], template.questions, result.findings, strict=True,
+    ):
+        assert question.risk_answer == "no"
+        assert question.severity == finding.severity == severity
+        assert question.id == finding.question_id
+        assert finding.kind == "risk"
+        assert reference in finding.question and reference in finding.recommendation
+        assert finding.section.startswith(section)
+        if minimum_ig is not None:
+            assert f"minimum IG{minimum_ig}" in finding.section
+            for group in range(1, 4):
+                assert (f"IG{group}" in finding.recommendation) == (group >= minimum_ig)
 
 
 def test_first_practice_in_each_legacy_group_keeps_stable_id():

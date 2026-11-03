@@ -317,6 +317,7 @@ test("actual undo snapshot and restoration retain learning evidence, lineage and
     '"recipe_teaching":{"schema":"lightwork.action-choice-teaching.v1"},"version":2,"revision":"v2","published":true}';
   const source = fs.readFileSync(path.resolve(__dirname, "../../maverick_dashboard/templates/flow_designer.js"), "utf8");
   const context = {rootFlow: inputs.parseText(raw), FDCore: core, FDRecipeInputs: inputs,
+    FDHistory: require("../../maverick_dashboard/templates/flow_designer_history.js"),
     idInput: {value: "teaching"}, nameInput: {value: "Teaching"}, normalizeNode: core.normalizeNode,
     flowInputs: [], document: {getElementById() { return null; }}, syncScheduleControls() {},
     renderCrumbs() {}, autoLayout() {}, render() {}, renderProps() {}};

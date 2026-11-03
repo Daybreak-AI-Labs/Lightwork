@@ -29,6 +29,7 @@ class TestStoreGuards:
         s = SqliteVectorStore()
         s.add("c", [("1", "t", [1.0, 0.0], {})])
         assert s.search("c", [1.0, 0.0], k=0) == []
+        assert s.search("c", [1.0, 0.0], k=-1) == []
 
 
 class TestBuildStore:
@@ -459,6 +460,85 @@ class TestDeterministicEmbedder:
 
 
 class TestSqliteStore:
+    def test_exact_delete_is_atomic_when_later_metadata_is_corrupt(self):
+        store = SqliteVectorStore()
+        store.add("c", [("1", "keep on error", [1.0], {"source": "wanted"})])
+        store._db.execute(
+            "INSERT INTO chunks VALUES (?, ?, ?, ?, ?)",
+            ("c", "2", "corrupt", "[1.0]", "{"),
+        )
+        store._db.commit()
+        with pytest.raises(ValueError):
+            store.delete_where("c", "source", "wanted")
+        with pytest.raises(ValueError):
+            store.count_where("c", "source", "wanted")
+        assert store.count("c") == 2
+
+    def test_top_k_validates_metadata_even_for_discarded_rows(self):
+        store = SqliteVectorStore()
+        store.add("c", [("1", "best", [1.0], {})])
+        store._db.execute(
+            "INSERT INTO chunks VALUES (?, ?, ?, ?, ?)",
+            ("c", "2", "worse", "[-1.0]", "{"),
+        )
+        store._db.commit()
+        with pytest.raises(ValueError):
+            store.search("c", [1.0], k=1)
+
+    def test_top_k_matches_stable_sort_across_many_ties(self):
+        from maverick_knowledge.store import _cosine
+
+        store = SqliteVectorStore()
+        vectors = [[float(i % 5 - 2), float((i * 3) % 7 - 3)] for i in range(100)]
+        store.add("c", [(f"{i:03d}", str(i), vector, {}) for i, vector in enumerate(vectors)])
+        expected = sorted(range(len(vectors)), key=lambda i: _cosine([1.0, 1.0], vectors[i]), reverse=True)
+        assert [match.text for match in store.search("c", [1.0, 1.0], k=7)] == [
+            str(i) for i in expected[:7]
+        ]
+
+    def test_exact_read_stops_fetching_after_overflow_sentinel(self):
+        store = SqliteVectorStore()
+        store.add("c", [
+            ("1", "skip", [1.0], {"source": "other"}),
+            ("2", "first", [1.0], {"source": "wanted"}),
+            ("3", "overflow", [1.0], {"source": "wanted"}),
+            ("4", "later", [1.0], {"source": "wanted"}),
+        ])
+        fetched = []
+
+        def track_row(cursor, row):
+            fetched.append(row[0])
+            return row
+
+        store._db.row_factory = track_row
+        chunks = store.read_where("c", "source", "wanted", limit=1)
+        assert [chunk.text for chunk in chunks] == ["first", "overflow"]
+        assert fetched == ["1", "2", "3"]
+
+    def test_top_k_preserves_ties_and_validates_all_rows(self):
+        store = SqliteVectorStore()
+        store.add("c", [
+            ("1", "first", [1.0, 0.0], {"n": 1}),
+            ("2", "second", [2.0, 0.0], {"n": 2}),
+            ("3", "opposite", [-1.0, 0.0], {"n": 3}),
+        ])
+        assert [(m.text, m.meta["n"]) for m in store.search("c", [1.0, 0.0], k=2)] == [
+            ("first", 1), ("second", 2),
+        ]
+        assert [m.text for m in store.search("c", [0.0, 0.0], k=2)] == ["first", "second"]
+        store.add("c", [("4", "bad dimension", [1.0], {})])
+        with pytest.raises(ValueError, match="dim"):
+            store.search("c", [1.0, 0.0], k=1)
+
+    def test_top_k_matches_stable_sort_for_nonfinite_scores(self):
+        from maverick_knowledge.store import _cosine
+
+        store = SqliteVectorStore()
+        vectors = [[1.0, 0.0], [float("nan"), 1.0], [-1.0, 0.0], [0.0, 1.0]]
+        store.add("c", [(str(i), str(i), v, {}) for i, v in enumerate(vectors)])
+        expected = sorted(range(len(vectors)), key=lambda i: _cosine([1.0, 0.0], vectors[i]), reverse=True)
+        assert [m.text for m in store.search("c", [1.0, 0.0], k=2)] == [str(i) for i in expected[:2]]
+
     def test_add_and_rank(self):
         e = DeterministicEmbedder(dim=128)
         store = SqliteVectorStore()

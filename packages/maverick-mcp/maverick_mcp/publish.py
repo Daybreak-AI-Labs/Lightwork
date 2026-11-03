@@ -54,7 +54,7 @@ def build_manifest(
     description: str | None = None,
 ) -> dict:
     """Build the registry ``server.json`` for this MCP server."""
-    from .server import SERVER_NAME, SERVER_VERSION
+    from .protocol import SERVER_NAME, SERVER_VERSION
     ver = (version or SERVER_VERSION).strip()
     return {
         "$schema": SCHEMA_URL,
@@ -103,7 +103,7 @@ def validate(manifest: dict) -> list[str]:
 
 def tools_summary() -> list[str]:
     """The tool names this server publishes (informational; not in the manifest)."""
-    from .server import TOOLS
+    from .catalog import TOOLS
     return sorted(t["name"] for t in TOOLS
                   if isinstance(t, dict) and t.get("name"))
 

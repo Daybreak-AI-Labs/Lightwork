@@ -1,10 +1,9 @@
 name: Go (model proxy)
 
 # Builds and tests the Go model proxy (go/model-proxy) — a faithful port of
-# maverick.model_proxy that runs the listener out-of-process. Go's
-# goroutine-per-request model forwards concurrent calls without the GIL
-# serialization of Python's ThreadingHTTPServer (throughput/density), while the
-# security-critical decision logic stays byte-for-byte identical to Python.
+# maverick.model_proxy that runs the listener out-of-process. Both listeners
+# stream requests with bounded admission. Local tests exercise concurrency and
+# decision parity; they do not establish a comparative performance claim.
 #
 # Two jobs, mirroring the native (Rust) carve:
 #   - go:     build + vet + gofmt + race-tested unit/parity tests.

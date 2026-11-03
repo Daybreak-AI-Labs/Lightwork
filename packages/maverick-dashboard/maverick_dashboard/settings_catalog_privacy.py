@@ -28,6 +28,8 @@ from __future__ import annotations
 
 import math
 
+from maverick.config_contracts import BOOLEAN_SETTINGS, CHOICE_SETTINGS, INTEGER_SETTINGS
+
 _P = "Privacy"
 
 # An exact https origin on a public host name: letters in the last part (so no
@@ -1042,30 +1044,34 @@ def _other_rows(S) -> tuple:
           "How long a person can undo an approve or reject on the Approvals page. "
           "The agent waits this long before acting on the decision. 0 turns undo off "
           "and lets the agent act at once.", "number", "Safety",
-          30, "maverick.safety.consent", subgroup="Approvals", minimum=0, maximum=3600,
+          INTEGER_SETTINGS["approval.undo_grace_seconds"].default, "maverick.safety.consent",
+          subgroup="Approvals", minimum=INTEGER_SETTINGS["approval.undo_grace_seconds"].minimum,
+          maximum=INTEGER_SETTINGS["approval.undo_grace_seconds"].maximum,
           integer=True, unit="seconds", weaker="higher",
           warning="Approved actions will wait longer before they start.",
-          env=("MAVERICK_APPROVAL_UNDO_GRACE_SECONDS",)),
+          env=INTEGER_SETTINGS["approval.undo_grace_seconds"].dashboard_env),
         S("approval", "require_acknowledgement", "Confirm high-risk approvals",
           "Approving a high or critical risk request needs an explicit confirmation: a "
           "ticked box for high risk, and typing APPROVE for critical risk. Turning this "
           "off makes those approvals one click.", "toggle", "Safety",
-          True, "maverick.safety.consent", subgroup="Approvals", weaker=False,
+          BOOLEAN_SETTINGS["approval.require_acknowledgement"].default, "maverick.safety.consent",
+          subgroup="Approvals", weaker=False,
           warning="High-risk actions can be approved with a single click, without "
                   "restating what they will do.",
-          env=("MAVERICK_APPROVAL_REQUIRE_ACKNOWLEDGEMENT",)),
+          env=BOOLEAN_SETTINGS["approval.require_acknowledgement"].dashboard_env),
         S("approval", "separate_approver", "Who approves a risky action someone asked for",
           "Whether the person who asked for a high or critical risk action may approve it "
           "themselves. By default someone else must, whenever another person can decide "
           "it; where nobody else can, the person who asked may approve it and the record "
           "says so. Always means someone else, even if the request then waits until it "
-          "expires and the action is refused.", "select", "Safety", "when_available",
+          "expires and the action is refused.", "select", "Safety",
+          CHOICE_SETTINGS["approval.separate_approver"].default,
           "maverick.safety.dual_control", subgroup="Approvals",
           choices=(("when_available", "Someone else, when another approver is available (default)"),
                    ("always", "Always someone else"),
                    ("never", "The person who asked may approve it")),
           weaker=True, order=("always", "when_available", "never"),
-          env=("MAVERICK_SEPARATE_APPROVER",),
+          env=CHOICE_SETTINGS["approval.separate_approver"].dashboard_env,
           aliases="self approval approve own request second approver four eyes "
                   "segregation of duties",
           warning="People will be able to approve high-risk actions they asked for "
@@ -1075,12 +1081,14 @@ def _other_rows(S) -> tuple:
           "risk level, the kind of action, the agent or specialist and whether it was allowed, "
           "sent to a person or refused. Never the content or the command. The record lets you "
           "see later what a different approval threshold would have done.", "toggle", "Safety",
-          True, "maverick.approval_checks", subgroup="Approvals",
+          BOOLEAN_SETTINGS["approval.record_checks"].default, "maverick.approval_checks", subgroup="Approvals",
           aliases="approval history threshold preview record of approval checks"),
         S("approval", "check_retention_days", "Keep approval checks for",
           "How long the record of approval checks is kept. Older entries are removed a few "
-          "hundred at a time.", "number", "Safety", 90, "maverick.approval_checks",
-          subgroup="Approvals", minimum=1, maximum=3650, integer=True, unit="days"),
+          "hundred at a time.", "number", "Safety",
+          INTEGER_SETTINGS["approval.check_retention_days"].default, "maverick.approval_checks",
+          subgroup="Approvals", minimum=INTEGER_SETTINGS["approval.check_retention_days"].minimum,
+          maximum=INTEGER_SETTINGS["approval.check_retention_days"].maximum, integer=True, unit="days"),
     )
 
 

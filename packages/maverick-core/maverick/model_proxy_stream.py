@@ -28,6 +28,9 @@ async def forward_stream(config, client, method, path, headers, body):
     if len(body) > config.max_request_bytes:
         raise ProxyHTTPError(413, b"proxy request body limit exceeded")
     url, forwarded = build_request(config, path, headers)
+    from .governed_http import admit_client_request
+
+    admit_client_request(client, url)
     async with client.stream(
         method, url, headers=forwarded, content=body,
         follow_redirects=False, timeout=config.total_seconds,

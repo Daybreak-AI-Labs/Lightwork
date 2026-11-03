@@ -56,8 +56,8 @@ class DraftIn(BaseModel):
 
 
 def _guard(request: Request) -> None:
-    from .api import _require_pack_editing
     from .app import _require_same_origin
+    from .editor_policy import require_pack_editing as _require_pack_editing
 
     _require_pack_editing(request)
     _require_same_origin(request)
@@ -313,7 +313,7 @@ async def approve_business_agent(request: Request, job_id: str, confirm: bool = 
 
 @router.get("/api/v1/agents/business-setup/{job_id}")
 def business_agent_job(request: Request, job_id: str, step: str = "draft") -> dict:
-    from .api import _require_pack_editing
+    from .editor_policy import require_pack_editing as _require_pack_editing
     from .ops_jobs import JOBS, identity
 
     _require_pack_editing(request)

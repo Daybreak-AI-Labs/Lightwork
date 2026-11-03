@@ -23,6 +23,7 @@ from .anthropic_limits import (
     _adaptive_max_tokens_floor as _adaptive_max_tokens_floor,
 )
 from .anthropic_limits import _is_opus_adaptive, effective_max_tokens
+from .conversation import ConversationMessage, anthropic_messages
 
 # Fast mode is a real
 # Anthropic API feature (Claude Opus 5 / Opus 4.8 only, research preview),
@@ -377,7 +378,7 @@ class AnthropicClient:
     def _build_request(
         self,
         system: str,
-        messages: list[dict],
+        messages: list[dict | ConversationMessage],
         tools: list[dict] | None,
         max_tokens: int,
         thinking_budget: int | None,
@@ -385,6 +386,7 @@ class AnthropicClient:
         effort: str | None = None,
         tool_choice: dict | None = None,
     ) -> dict[str, Any]:
+        messages = anthropic_messages(messages)
         # Fast mode: MODEL_OPUS_FAST is a catalog-only id, never sent
         # to the API. Substitute the real model NOW so every prefix check
         # below (adaptive-thinking gating, cache minimums, etc.) sees the
@@ -713,7 +715,7 @@ class AnthropicClient:
     def complete(
         self,
         system: str,
-        messages: list[dict],
+        messages: list[dict | ConversationMessage],
         tools: list[dict] | None = None,
         budget: Budget | None = None,
         max_tokens: int = 4096,
@@ -754,7 +756,7 @@ class AnthropicClient:
     async def complete_async(
         self,
         system: str,
-        messages: list[dict],
+        messages: list[dict | ConversationMessage],
         tools: list[dict] | None = None,
         budget: Budget | None = None,
         max_tokens: int = 4096,
