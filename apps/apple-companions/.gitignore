@@ -1,6 +1,0 @@
-*.xcodeproj/
-build/
-DerivedData/
-*.xcarchive/
-*.xcresult/
-ExportOptions.plist

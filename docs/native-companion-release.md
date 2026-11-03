@@ -1,17 +1,15 @@
 # Native companion preview and release evidence
 
-All four companion surfaces remain **preview** until the exact packaged build
+Every companion surface below remains **preview** until the exact packaged build
 passes the installed-host checks below. Mock tests and TypeScript checks do not
 qualify Keychain, Android Keystore, VoiceOver/TalkBack or native networking.
 These build paths create no store listing, signed download, distribution
-certificate or platform account. Watch has no delivered complication target.
+certificate or platform account.
 
 | Client | Reproducible project input | Build host / minimum deployment target | Current evidence |
 | --- | --- | --- | --- |
 | iOS phone/tablet | `apps/mobile-companion/package-lock.json`, Expo 52.0.49, local LightworkTransport module, `build-native.cjs` | macOS + Xcode; iOS 15.1 | Mocked UI/protocol tests and TypeScript checks; native installed qualification pending |
 | Android phone/tablet | Same locked Expo project and native transport | JDK 17 + Android SDK; SDK versions from pinned Expo generation | Pinned-template Android project generation and native-module autolinking checked; not yet built with the Android SDK |
-| watchOS | `apps/apple-companions/project.yml`, XcodeGen 2.42.0, Swift entry point and hosted model test target | macOS + Xcode 16/watchOS SDK; watchOS 10 | Auth/response-cap/model tests authored; not yet built with Xcode |
-| visionOS | Same generated project, volume entry point and hosted model test target | macOS + Xcode 16/visionOS SDK; visionOS 1 | Model tests authored; device comfort/accessibility and build qualification pending |
 | JetBrains | Gradle 8.13 wrapper/checksum, pinned SDK 2024.3.6, Kotlin 2.1.20, `apps/jetbrains-plugin/build.py` | JDK 21; compile target IntelliJ Community 243 only | Local SDK compile and synthetic loopback transport checks; installed IDE/PasswordSafe/accessibility qualification pending |
 | Zed | Rust 1.97.1, exact API 0.7.0, Cargo.lock, `apps/zed-extension/build.py` | wasm32-wasip2; selected host must support API 0.7.0 | Locked release WASM build and unsigned source/component bundle; installed-host/MCP/accessibility qualification pending |
 
@@ -36,16 +34,6 @@ limits concurrent requests, and never logs request bodies or credentials.
 Android automatic connection retries are disabled. Native TLS validation is
 unchanged. JavaScript also rejects non-loopback cleartext addresses.
 
-For Apple companions, install the exact XcodeGen pin in
-`apps/apple-companions/Mintfile`, then run `python build.py watch` or
-`python build.py vision` from that folder. `--check` reports missing tools;
-`--test-destination 'platform=watchOS Simulator,id=...'` runs the included hosted
-model tests on an installed simulator. The same option accepts a visionOS
-simulator. The script never enables signing or provisioning updates. Generated
-projects include the shared local connection package and require no manual
-target/source assembly. The input format follows the
-[pinned XcodeGen specification](https://github.com/yonaskolb/XcodeGen/blob/2.42.0/Docs/ProjectSpec.md).
-
 ## Release-owner gate
 
 A release owner must select the distribution channel, confirm bundle ownership,
@@ -63,7 +51,6 @@ expiry/renewal, TLS redirect refusal, 4 MiB response overflow, network loss,
 background cancellation, two-profile/cache isolation, protected-store failure,
 largest text, screen-reader navigation and RTL. For mobile actions also test
 stale review, duplicate confirmation, lost response and preserved partial result
-on Stop. Watch needs the actual UTC-day/freshness view; vision needs both the
-spatial and 1/100/1000-node text paths. Record actual results and defects, not
+on Stop. Record actual results and defects, not
 unchecked acceptance claims. These checks use mock accounts/endpoints and never
 require a production provider invocation.

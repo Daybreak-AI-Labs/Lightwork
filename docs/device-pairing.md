@@ -1,7 +1,7 @@
 # Personal companion pairing (preview)
 
 Enable **Allow personal companion pairing** in All settings or the installer.
-Named members can then enter their dashboard address in mobile, watch or vision
+Named members can then enter their dashboard address in the mobile companion's
 Settings and choose **Start device pairing**. A twelve-character code lasts five
 minutes. On the signed-in dashboard, **Your account → Your paired devices** shows
 the exact device name, code, account and workspace before explicit approval.

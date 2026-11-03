@@ -30,10 +30,10 @@ catalogue of built features and tools; planned work is listed in
 | [Information-flow control](#information-flow-control) | 1 |
 | [Adaptive immunity](#adaptive-immunity) | 5 |
 | [Unified cross-suite audit projection](#unified-cross-suite-audit-projection) | 6 |
-| [Distribution and install](#distribution-and-install) | 22 |
+| [Distribution and install](#distribution-and-install) | 21 |
 | [Customer workflow completion and readiness](#customer-workflow-completion-and-readiness) | 18 in 24 subsections |
 
-479 entries in 19 sections. This block is generated: `python scripts/features_toc.py --write` (the test suite fails when it is stale).
+478 entries in 19 sections. This block is generated: `python scripts/features_toc.py --write` (the test suite fails when it is stale).
 <!-- toc:end -->
 
 ## Agent kernel and orchestration
@@ -5464,8 +5464,8 @@ tested without spawning py-spy.
   proxy client token, not the provider credential — the proxy authenticates the
   caller, strips the client token, injects the real key, and allows only
   model-inference routes by default.
-- **Watch glance endpoint** (`GET /api/v1/glance`): the fixed tiny payload
-  the watch scaffold renders.
+- **Glance endpoint** (`GET /api/v1/glance`): a fixed tiny status payload
+  for small-screen clients.
 - **Granular redaction UI** (`GET /redact` page + `POST
   /api/v1/redact/preview`): paste text, see every secret/PII finding as a
   kind + span (never the raw value), and pick per-kind what to scrub —
@@ -5532,13 +5532,10 @@ tested without spawning py-spy.
   CLI acknowledgement; remote start timeouts remain unconfirmed until reviewed.
   See [client lifecycle and qualification limits](client-request-lifecycle.md),
   including older React Native transport buffering and native-app test gaps.
-- **Apple Watch glance** (`glance.py` + `apps/watch-glance/` SwiftUI
-  scaffold): a tiny fixed payload sized for a watch face — active count,
-  today's done/failed, today's spend (summed from the usage ledger), and the
-  last terminal result (60-char bound) — computed in one cheap pass; the
-  watchOS scaffold renders exactly that shape against the dashboard (token
-  header honored; building it requires Xcode, documented in its README — the
-  integrator wires `GET /api/v1/glance`).
+- **Glance payload** (`glance.py`): a tiny fixed payload sized for a small
+  screen — active count, today's done/failed, today's spend (summed from the
+  usage ledger), and the last terminal result (60-char bound) — computed in
+  one cheap pass and served at `GET /api/v1/glance`.
 - **Mobile push v2** (`push_v2.py`): a device registry layered on the v1
   notify path — each device registers a backend, a minimum priority floor,
   and optional quiet hours; routing fans out only to eligible devices, with
@@ -5562,8 +5559,8 @@ tested without spawning py-spy.
 - **Personal device pairing preview** — default-off `[device_pairing] enabled`
   lets named members approve an expiring device code. Scoped credentials read
   only their own work in one workspace, with protected renewal and explicit
-  removal in Your paired devices. Mobile/watch/vision settings store the
-  connection securely. See [scope, retention and qualification](device-pairing.md).
+  removal in Your paired devices. Mobile settings store the connection
+  securely. See [scope, retention and qualification](device-pairing.md).
 
 ## Packaged governance, evidence and external privacy control planes
 
@@ -5920,13 +5917,6 @@ tested without spawning py-spy.
   and the release gate the maintainer cut runs through (CI matrix,
   contract checks, deprecation sunsets, migration rehearsal, LTS branch
   cut, signing).
-- **AR plan tree (visionOS scaffold)** (`apps/visionos-plan-tree/`):
-  SwiftUI + RealityKit volumetric window rendering the goal forest from
-  `GET /api/v1/goal-tree` — status-colored spheres, parent link bars,
-  pinch-to-inspect card; read-only, bearer-token honored. Building/tuning
-  needs Xcode + the visionOS SDK; the source flags that scale and sphere
-  radius have not been verified on Vision Pro hardware, per the watch-glance
-  scaffold posture.
 
 ## Customer workflow completion and readiness
 
