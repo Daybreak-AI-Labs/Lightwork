@@ -179,6 +179,51 @@ def test_discover_tools_wraps_with_isolation(tmp_path, monkeypatch):
     sys.modules.pop("iso_tool_plugin", None)
 
 
+def test_isolated_factory_refuses_immutable_or_ignored_wrapper():
+    from maverick import plugins
+
+    class Immutable:
+        @property
+        def fn(self):
+            return lambda _args: "unsafe direct call"
+
+    class IgnoresAssignment:
+        @property
+        def fn(self):
+            return lambda _args: "unsafe direct call"
+
+        @fn.setter
+        def fn(self, _value):
+            pass
+
+    for target in (Immutable, IgnoresAssignment):
+        factory = plugins._isolated_factory("example", "example:factory", target, mode="subprocess")
+        with pytest.raises(RuntimeError, match="refusing to load"):
+            factory()
+
+
+def test_isolated_discovery_skips_entry_without_worker_target(monkeypatch):
+    from maverick import plugin_isolation, plugins
+    monkeypatch.setattr(plugin_isolation, "isolation_mode", lambda: "subprocess")
+    monkeypatch.setattr(plugins, "_iter_loaded_with_value", lambda *_args: [
+        ("example", lambda: pytest.fail("unwrapped factory called"), "", "example-dist"),
+    ])
+    assert plugins.discover_tools() == []
+
+
+def test_isolated_factory_keeps_the_selected_mode(monkeypatch):
+    from types import SimpleNamespace
+    from maverick import plugin_isolation, plugins
+    monkeypatch.setattr(plugin_isolation, "isolation_mode", lambda: "none")
+    monkeypatch.setattr(plugin_isolation, "run_isolated",
+                        lambda _entry, _args, **kwargs: kwargs["mode"])
+    factory = plugins._isolated_factory(
+        "example", "example:factory", lambda: SimpleNamespace(fn=lambda _args: "direct"),
+        mode="subprocess",
+    )
+    assert factory().fn({}) == "subprocess"
+
+
 def test_discover_tools_direct_when_isolation_off(tmp_path, monkeypatch):
     import types
 

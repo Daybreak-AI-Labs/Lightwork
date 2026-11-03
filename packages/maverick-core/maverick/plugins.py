@@ -366,33 +366,16 @@ def _permission_violations(manifest, granted: set[str]) -> list[str]:
 
 
 def _warn_permissions_advisory(ep, group: str, manifest, dist: str | None) -> None:
-    """Advisory (finding #15): a granted permission is only meaningful when the
-    plugin actually runs confined.
-
-    With ``[plugins] isolation = "none"`` (the default outside enterprise) a
-    plugin runs in the HOST interpreter, so a manifest permission the operator
-    granted is self-asserted, not runtime-enforced -- nothing stops the plugin
-    from touching the network / filesystem / subprocess regardless of what it
-    declared. Emit a warning at load so the operator knows the grant is
-    advisory and can opt into real confinement via ``[plugins] isolation``. We
-    do NOT change the default isolation mode (that would break in-process
-    plugins) or weaken the allowlist/permission gate -- this only informs.
-
-    Fires only for plugins that actually declare permissions: a manifest-less
-    plugin declares none, so there is no grant to qualify as advisory.
-    """
+    """Warn that declared permissions are not operating-system confinement."""
     requested = _requested_permissions(manifest)
     if not requested:
         return
     from .plugin_isolation import isolation_mode
-    if isolation_mode() != "none":
-        return
     log.warning(
-        "plugin %s.%s (%s) declares permission(s) %s, but plugin isolation is "
-        "'none': the plugin runs in-process and these permissions are ADVISORY "
-        "only -- self-asserted, not runtime-enforced. Set [plugins] isolation = "
-        '"subprocess" (or "subinterpreter") to confine plugin calls.',
-        group, ep.name, dist or "unknown-dist", requested,
+        "plugin %s.%s (%s) declares permission(s) %s; these permissions are "
+        "ADVISORY, not OS-enforced. Isolation mode %r does not confine plugin "
+        "import, factory, filesystem or network access. Install trusted plugins only.",
+        group, ep.name, dist or "unknown-dist", requested, isolation_mode(),
     )
 
 
@@ -731,8 +714,8 @@ def _gate(ep, group: str, allow, name_dists, granted, enforce) -> bool:
             group, name, dist or "unknown-dist",
         )
         return False
-    # The plugin will load. If it declares permissions but nothing confines it
-    # at runtime (isolation 'none'), tell the operator the grant is advisory.
+    # Tool-call proxies do not enforce OS permissions, and imports/factories
+    # run in the host process. Declared grants are advisory in every mode.
     _warn_permissions_advisory(ep, group, manifest, dist)
     return True
 
@@ -763,11 +746,11 @@ def _iter_loaded(group: str, what: str):
         yield ep.name, target
 
 
-def _isolated_factory(name: str, ep_value: str, target: Callable[[], Any]):
+def _isolated_factory(name: str, ep_value: str, target: Callable[[], Any], *, mode: str):
     """Wrap a plugin tool factory so its CALLS run under plugin isolation.
 
-    The factory runs in-process once (schema/description introspection is
-    harmless metadata), but the returned Tool's ``fn`` is replaced with a
+    The factory runs in-process once and is therefore trusted code, not
+    sandboxed metadata. The returned Tool's ``fn`` is replaced with a
     proxy that executes the real call via :mod:`maverick.plugin_isolation`
     (fresh subinterpreter or scrubbed subprocess, per ``[plugins] isolation``).
     """
@@ -776,12 +759,14 @@ def _isolated_factory(name: str, ep_value: str, target: Callable[[], Any]):
         from .plugin_isolation import run_isolated
 
         def _isolated_fn(args: dict) -> str:
-            return run_isolated(ep_value, args or {}, factory=True)
+            return run_isolated(ep_value, args or {}, factory=True, mode=mode)
 
         try:
             tool.fn = _isolated_fn
-        except Exception:  # frozen/odd Tool object: fall back to direct call
-            log.warning("plugin tool %s: cannot wrap for isolation; running direct", name)
+            if tool.fn is not _isolated_fn:
+                raise ValueError("plugin ignored isolation wrapper")
+        except Exception as exc:
+            raise RuntimeError(f"plugin tool {name} cannot be isolated; refusing to load") from exc
         return tool
     return factory
 
@@ -798,7 +783,8 @@ def discover_tools() -> list[Any]:
     from .plugin_isolation import isolation_mode
     from .plugin_telemetry import enabled as telemetry_enabled
     from .plugin_telemetry import wrap_factory as telemetry_wrap
-    isolate = isolation_mode() != "none"
+    mode = isolation_mode()
+    isolate = mode != "none"
     count = telemetry_enabled()
     out: list[tuple[str, Callable[[], Any]]] = []
     for name, target, ep_value, dist in _iter_loaded_with_value("maverick.tools", "tools"):
@@ -806,8 +792,11 @@ def discover_tools() -> list[Any]:
             log.warning("plugin tool %s is not callable; skipping", name)
             continue
         factory = target
-        if isolate and ep_value:
-            factory = _isolated_factory(name, ep_value, factory)
+        if isolate:
+            if not ep_value:
+                log.warning("plugin tool %s has no isolation entry point; skipping", name)
+                continue
+            factory = _isolated_factory(name, ep_value, factory, mode=mode)
         if count:
             # Applied last so the tick covers isolated calls too.
             factory = telemetry_wrap(name, dist, factory)

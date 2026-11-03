@@ -241,21 +241,23 @@ def test_no_advisory_for_manifestless_plugin(monkeypatch, caplog):
     assert "ADVISORY" not in caplog.text
 
 
-def test_no_advisory_when_isolation_confines(monkeypatch, caplog):
-    # With isolation actually enforcing (subprocess), the grant is not advisory.
+def test_advisory_remains_when_subprocess_proxy_is_selected(monkeypatch, caplog):
+    # Subprocess calls do not confine imports, factories or OS access.
     monkeypatch.setenv("MAVERICK_PLUGINS_ALLOW", "*")
     monkeypatch.setattr(
         plugins, "_plugins_config",
         lambda: {"grant": ["network"], "enforce_permissions": True},
     )
     monkeypatch.setenv("MAVERICK_PLUGIN_ISOLATION", "subprocess")
+    entry = _FakeEP("wp", lambda: "ok", dist=_FakeDist("wp", _manifest_toml(network=True)))
+    entry.value = "example_plugin:factory"
     _set_eps(monkeypatch, {"maverick.tools": [
-        _FakeEP("wp", lambda: "ok", dist=_FakeDist("wp", _manifest_toml(network=True))),
+        entry,
     ]})
     with caplog.at_level(logging.WARNING, logger="maverick.plugins"):
         out = plugins.discover_tools()
     assert [n for n, _ in out] == ["wp"]
-    assert "ADVISORY" not in caplog.text
+    assert "ADVISORY" in caplog.text
 
 
 # ---------- pure helpers ----------

@@ -42,8 +42,8 @@ _TIMEOUT_S = 60.0
 
 def _enterprise_default_mode() -> str:
     """The isolation default when nothing is configured: ``subprocess`` (out-of-
-    process) under enterprise mode so a regulated deployment doesn't run third-
-    party plugin code in-process by default; ``none`` for single-tenant/dev."""
+    process) under enterprise mode for tool calls; plugin import and factories
+    still run in-process. ``none`` for single-tenant/dev."""
     try:
         from .enterprise import enterprise_enabled
         return "subprocess" if enterprise_enabled() else "none"
