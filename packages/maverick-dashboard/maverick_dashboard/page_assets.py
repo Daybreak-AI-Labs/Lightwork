@@ -19,6 +19,8 @@ ASSETS = (
     "lightwork-today.js",
     "lightwork-department-board.js",
     "lightwork-department-team-updates.js",
+    "lightwork-starter-teams.js",
+    "lightwork-starter-team-schedules.js",
     "lightwork-employee-activation.js",
     "lightwork-budget-guidance.js",
     "lightwork-task-diagnostics.js",

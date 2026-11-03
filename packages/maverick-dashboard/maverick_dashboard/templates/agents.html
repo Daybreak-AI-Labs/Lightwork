@@ -33,6 +33,7 @@
 {% endmacro %}
 
 {% block content %}
+{% if can_open_page('/starter-teams') %}<p><a class="btn" href="/starter-teams">Review a starter team and try its sample</a></p>{% endif %}
 <style>
   .agent-access { margin-bottom: var(--space-3); }
   .agent-access > summary { cursor: pointer; }

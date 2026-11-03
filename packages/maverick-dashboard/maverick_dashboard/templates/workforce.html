@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Workforce · Lightwork{% endblock %}
 {% block content %}
+  {% if can_open_page('/starter-teams') %}<p><a class="btn" href="/starter-teams">Explore starter teams and samples</a></p>{% endif %}
   {% from "_hero.html" import hero, state %}
   {% set workforce_actions %}<a class="btn btn--primary" href="#departments">View departments</a>{% endset %}
   {% call hero('Build your workforce', 'Workforce',

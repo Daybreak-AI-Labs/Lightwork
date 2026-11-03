@@ -200,6 +200,7 @@ def register_main_components(app, supervisor):
         ("conversation_inbox", "conversation_inbox_scheduler", "stop_conversation_inbox_scheduler", "_threads"),
         ("knowledge_sources", "knowledge_sources_scheduler", "stop_knowledge_sources_scheduler", "_thread"),
         ("consent_delivery", "consent_delivery_scheduler", "stop_consent_delivery_scheduler", "_thread"),
+        ("starter_teams", "starter_team_scheduler", "stop_starter_team_scheduler", "_thread"),
         ("personal_notifications", "personal_notification_scheduler", "stop_personal_notification_scheduler", "_scheduler_thread"),
         ("daily_digest", "daily_digest_scheduler", "stop_daily_digest_scheduler",
          "_scheduler_thread"),

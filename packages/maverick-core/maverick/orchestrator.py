@@ -1808,10 +1808,26 @@ def _create_root_agent(*, world: WorldModel, goal_id: int, ctx: SwarmContext,
                     "goal_id": goal_id, "status": "blocked", "result": msg,
                 })
                 return None, None, msg
-            # A changed specialist may be on trial: this goal runs the trial
-            # version only when its recorded choice says so (see specialist_canary).
-            from .specialist_canary import profile_for_goal
-            _profile, _ = profile_for_goal(domain, _profile, goal_id, world=world, resume=resume)
+            # Reviewed starter workflows bind an exact evidence-mode profile.
+            # A canary must not replace that profile after human approval.
+            native_goal = world.get_goal(goal_id)
+            if str(getattr(native_goal, "execution_principal", "") or "").startswith("agent:starter-team."):
+                from .starter_team_runtime import (
+                    StarterWorkerAlreadyAdmitted,
+                    profile_for_starter_goal,
+                )
+                try:
+                    _profile = profile_for_starter_goal(
+                        world, goal_id, _profile, capability=ctx.capability, budget=ctx.budget,
+                    )
+                except StarterWorkerAlreadyAdmitted as exc:
+                    # The original worker owns the result. A repeated agent
+                    # construction must not overwrite its status or evidence.
+                    return None, None, str(exc)
+            else:
+                # Ordinary specialist trials keep their original behavior.
+                from .specialist_canary import profile_for_goal
+                _profile, _ = profile_for_goal(domain, _profile, goal_id, world=world, resume=resume)
             if (allowed_suites is not None
                     and not suites_for_domain(domain, _profile) <= allowed_suites):
                 msg = ("This specialist is outside your department access. "
@@ -2985,6 +3001,7 @@ async def run_goal(
                 except Exception:  # pragma: no cover - status write must not mask the block
                     log.exception("failed to mark goal #%s blocked after admission gate", goal_id)
             return f"BLOCKED: {reason}"
+    from .starter_team_runtime import StarterWorkerAlreadyAdmitted, reject_admitted_starter_goal
     from .task_execution_guard import TaskBusy
     from .task_execution_guard import lease as execution_lease
     from .task_file_recovery import run_scope
@@ -2993,6 +3010,9 @@ async def run_goal(
     sandbox = sandbox or LocalBackend()
     try:
         with execution_lease(world, goal_id):
+            # This runs under the existing per-goal lease, before lifecycle,
+            # recovery, or quota setup can alter the original starter result.
+            reject_admitted_starter_goal(world, goal_id)
             require_ai_open(world, goal_id)
             require_open(world, goal_id)
             apply_ceiling(world, goal_id, budget)
@@ -3008,7 +3028,7 @@ async def run_goal(
         if goal is not None and goal.owner == _execution_principal(user_id=user_id, capability=capability):
             world.set_goal_status(goal_id, "blocked", result=str(exc))
         return f"BLOCKED: {exc}"
-    except (TaskBusy, GoalMutationConflict) as exc:
+    except (TaskBusy, GoalMutationConflict, StarterWorkerAlreadyAdmitted) as exc:
         return f"BLOCKED: {exc}"
 
 
