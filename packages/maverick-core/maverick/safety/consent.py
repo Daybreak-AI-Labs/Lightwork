@@ -345,6 +345,16 @@ def _policy_binding() -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+def _unscoped_policy_binding(policy: str) -> str:
+    """Separate newly authorized unscoped grants from ambiguous old grants.
+
+    Older rows do not record whether an operator or earned autonomy created
+    them. They remain in the signed history but cannot authorize new effects.
+    Scoped rows retain their original binding.
+    """
+    return hashlib.sha256(("explicit-unscoped-v2:" + policy).encode("ascii")).hexdigest()
+
+
 def _authority_binding() -> tuple[str, str, str]:
     return (
         str(current_tenant_id_strict() or "shared"),
@@ -483,7 +493,9 @@ def _active_grants(records: list[dict]) -> dict[tuple[str, str], None]:
         if (
             record["tenant"] != tenant
             or record["principal"] != principal
-            or record["policy"] != policy
+            or record["policy"] != (
+                _unscoped_policy_binding(policy) if not record["scope"] else policy
+            )
         ):
             continue
         key = (record["action"], record["scope"])
@@ -505,6 +517,8 @@ def _append_record_unlocked(
     tenant, principal, policy = current_binding if authority_binding is None else authority_binding
     if authority_binding is not None and (tenant != current_binding[0] or not re.fullmatch(r"[a-f0-9]{64}", principal) or not re.fullmatch(r"[a-f0-9]{64}", policy)):
         raise ConsentLedgerError("consent revocation binding is invalid")
+    if not scope and authority_binding is None:
+        policy = _unscoped_policy_binding(policy)
     unsigned = {
         "action": action,
         "op": op,
@@ -604,6 +618,8 @@ def revoke(
                 return False
             if write_tombstone and not was_active:
                 tenant, principal, policy = _authority_binding()
+                if not normalized_scope:
+                    policy = _unscoped_policy_binding(policy)
                 last_matching = next(
                     (
                         record

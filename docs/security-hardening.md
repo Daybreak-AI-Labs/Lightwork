@@ -1332,3 +1332,11 @@ WebSocket connections. This is a connection-level check: HTTP connection reuse
 can carry more than one hostname, and existing connections are not revoked
 immediately when a policy changes. Route-level checks and network isolation
 remain necessary for stronger enforcement.
+
+Earned-autonomy predictions are recorded by action type, so qualification is
+advisory and does not grant consent. Shadow execution still invokes its human
+approval callback. Historical unscoped standing-consent records cannot be
+attributed reliably to an operator or to earned autonomy and no longer grant
+authority. Operators must explicitly reauthorize any unscoped standing consent
+they still need. Existing scoped records retain their prior authority binding;
+clearing prediction qualification does not revoke an explicit consent grant.

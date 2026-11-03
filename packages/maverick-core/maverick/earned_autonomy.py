@@ -1,67 +1,8 @@
-"""Earned Autonomy -- consequence-proven trust.
+"""Record and reconcile action-level outcome evidence.
 
-The biggest blocker to enterprise agents isn't quality, it's trust to take
-irreversible action. Everyone ships agents that draft; almost no one ships
-agents that *act*, because the downside is catastrophic and unprovable. This
-module makes autonomy something the workforce **earns, action type by action
-type, by proving it predicts consequences correctly -- with a guaranteed undo
-until it has.**
-
-Three pieces, fused:
-
-* **Consequence cards** (:class:`ConsequenceCard`, :class:`CardStore`): before
-  a high-stakes action runs, its *predicted* outcome (from the rehearsal twin
-  or a governed-action simulation) is pinned into a hash-chained, append-only
-  card store -- closing the gap where rehearsal predictions vanished on
-  PROCEED. A card is a commitment: "we predicted THIS before acting". Only
-  actions that actually PROCEED are pinned -- a held action is never graded by
-  an outcome it didn't produce.
-* **The predicted-vs-actual join** (:meth:`EarnedAutonomyEngine.reconcile`):
-  when reality reports back through the existing Consequence Engine
-  (:mod:`maverick.consequence`, keyed ``(goal_id, episode_id)``), cards are
-  scored hit/miss against the real outcome. One episode outcome grades ONE
-  prediction per action type -- same-episode duplicates are collapsed as
-  ``superseded`` so a single observed consequence can never mint a streak.
-* **The autonomy dial driven by evidence**: the trust unit is the **action
-  type, deployment-wide** -- exactly the unit the enforcement surface grants
-  at (a standing consent grant carries no per-agent scope), so authority is
-  never wider than the evidence that minted it. Events keep the acting
-  agent's identity for provenance, and a miss by ANY agent demotes the action
-  type. Graduation is a *revocable standing consent grant*
-  (:func:`maverick.safety.consent.grant_persistent`), so the existing agent
-  gate chain honours it with no new hot-path code. One miss demotes
-  instantly; the revoke runs BEFORE the evidence write, is re-attempted on
-  every subsequent miss, and a stale-grant sweep at each reconcile retries
-  any revoke that previously failed -- authority never outruns evidence.
-
-Interlocks (all fail toward "keep the human"): graduation is refused while
-:func:`maverick.calibration.learning_frozen` (a drifting verifier must not
-mint autonomy), during a learning HALT, for action types above the
-``max_auto_risk`` ceiling (default ``medium``; the action's risk is
-recomputed from :func:`maverick.safety.tool_risk.tool_risk`, never trusted
-from the card, and an unknown risk level ranks above every ceiling), and for
-action types whose cards don't declare reversibility when
-``require_reversible`` is on. Graduation only ever converts require-human
-into auto-approve for an action the capability envelope, governance rules,
-and budget caps ALREADY permit -- it changes who approves, never what is
-permitted. Every card, hit, miss, graduation, and demotion is a signed audit
-event.
-
-The compensating half of the bet -- "every action ships its inverse" -- is
-:func:`run_saga`: a sequence of :class:`SagaStep` (do + undo) that refuses to
-start while any step lacks an inverse (unless explicitly overridden) and rolls
-the completed prefix back, in reverse, on the first failure.
-
-Posture: OFF by default (kernel rule 1) behind ``[earned_autonomy] enable`` /
-``MAVERICK_EARNED_AUTONOMY``; and even when on, graduation takes effect only
-once the operator arms ``auto_graduate`` (the authority-widening switch is
-strict-parsed -- a truthy string never arms it). Recording evidence is
-harmless; deciding fails closed. NOTE: disabling the feature stops evidence
-capture and the demotion loop but does NOT withdraw grants already minted --
-they live in the consent ledger, which is enforcement's source of truth.
-``maverick earned-autonomy --revoke <action>`` (or
-:meth:`EarnedAutonomyEngine.revoke`) works regardless of the enable switch
-and is the incident-response path.
+Action-wide predictions do not identify an authorized recipient, destination,
+or exact operation. Graduation is advisory and never grants standing consent.
+Shadow executions continue to require the supplied human approval callback.
 """
 from __future__ import annotations
 
@@ -358,9 +299,9 @@ class TrustLedger:
     Events: ``hit`` / ``miss`` (a card scored against reality),
     ``superseded`` (a same-episode duplicate collapsed into the scored card
     -- enters the idempotency set, never the counts), ``graduate``
-    (auto-approval granted), ``demote`` (a miss withdrew it), ``revoke`` (an
-    operator withdrew it). Trust state is a pure reduction over the chain
-    keyed by ACTION TYPE -- the same unit enforcement grants at -- with each
+    (evidence qualified), ``demote`` (a miss removed qualification), and
+    ``revoke`` (an operator cleared it). Trust state is a pure reduction over
+    the chain keyed by ACTION TYPE, with each
     event keeping the acting agent for provenance. Demote/revoke rows append
     even at capacity (``force``): shedding authority is never rate-limited.
     """
@@ -443,13 +384,13 @@ class TrustLedger:
 
 @dataclass(frozen=True)
 class GraduationPolicy:
-    """The evidence bar an action type must clear to earn auto-approval.
+    """The evidence bar an action type must clear to qualify.
 
     Deliberately stricter than :mod:`maverick.predictive_approvals` (which
     only ever *suggests*, and never for high risk): this policy *decides*, so
     it demands a consecutive-hit streak against ground truth, not just a
     lopsided approval history. ``armed`` is the operator's authority-widening
-    switch (``[earned_autonomy] auto_graduate``).
+    evidence qualification switch (``[earned_autonomy] auto_graduate``).
     """
 
     min_streak: int = 10
@@ -606,17 +547,15 @@ def _default_audit_fn(kind: str, **payload) -> None:
 
 
 def _default_grant_fn(action: str) -> None:
-    from .safety.consent import grant_persistent
-
-    grant_persistent(action)
+    # Evidence is aggregated by action type and does not identify an approved
+    # target or operation. Graduation is advisory until evidence is scoped.
+    del action
 
 
 def _default_revoke_fn(action: str) -> None:
-    from .safety.consent import revoke
-
-    # False means an already-absent grant, not an I/O failure, only in strict
-    # mode. A tombstone also preserves an idempotent withdrawal record.
-    revoke(action, strict=True, write_tombstone=True)
+    # Earned autonomy no longer owns standing grants. Do not revoke a manual
+    # operator grant that happens to share the same action and empty scope.
+    del action
 
 
 def _live_risk(action: str) -> str | None:
@@ -654,16 +593,10 @@ class ReconcileReport:
 
 @dataclass
 class EarnedAutonomyEngine:
-    """Record predictions, join reality, and move the autonomy dial on proof.
+    """Record and evaluate prediction evidence without granting authority.
 
-    Grants and revocations are injected callables so the decision logic is
-    deterministic offline; the defaults write the sanctioned consent-ledger
-    standing grant (which the existing agent approval path already honours)
-    and revoke it. Order of operations is asymmetric on purpose: a demotion
-    revokes authority BEFORE recording the event (losing authority must never
-    lag), the revoke is re-attempted on every later miss and by the
-    stale-grant sweep, while a graduation takes authority only AFTER the
-    grant succeeded and is compensated if the evidence write then fails.
+    Legacy callback fields remain for construction compatibility but are not
+    invoked: action-wide evidence cannot authorize or revoke consent grants.
     """
 
     cards: CardStore = field(default_factory=CardStore)
@@ -692,14 +625,8 @@ class EarnedAutonomyEngine:
             log.debug("earned-autonomy audit sink failed", exc_info=True)
 
     def _revoke_grant(self, action: str) -> bool:
-        """Attempt the authority withdrawal; failures are logged, then retried
-        by every later miss and the per-reconcile stale-grant sweep."""
-        try:
-            self.revoke_fn(action)
-        except Exception:
-            log.warning("earned-autonomy grant revoke failed for %s", action,
-                        exc_info=True)
-            return False
+        """There is no earned consent authority to withdraw."""
+        del action
         return True
 
     # -- recording ---------------------------------------------------------
@@ -853,7 +780,7 @@ class EarnedAutonomyEngine:
 
     def _demote(self, action: str, *, principal: str, card_id: str,
                 demoted: list[str]) -> None:
-        """One missed prediction withdraws the action type's auto-approval.
+        """One missed prediction clears the action type's qualification.
 
         The revoke is attempted on EVERY miss (not only while the ledger says
         graduated) so a previously failed withdrawal is retried, and it runs
@@ -875,7 +802,7 @@ class EarnedAutonomyEngine:
 
     def _graduate_touched(self, touched: set[str],
                           policy: GraduationPolicy) -> list[str]:
-        """Evaluate every action the reconcile touched; grant on a full pass."""
+        """Evaluate each touched action; record qualifying evidence only."""
         graduated: list[str] = []
         frozen = self._frozen()
         for action in sorted(touched):
@@ -891,19 +818,11 @@ class EarnedAutonomyEngine:
                 policy=policy, frozen=frozen)
             if not verdict.graduate:
                 continue
-            try:
-                self.grant_fn(action)
-            except Exception:
-                log.warning("earned-autonomy grant failed for %s", action,
-                            exc_info=True)
-                continue  # no grant -> no graduation record
             if not self.ledger.record_event(
                     "graduate", action,
                     reason=f"{state.streak} consecutive accurate predictions "
                            f"({state.hits}/{state.samples} overall)",
                     ts=self.now()):
-                # Authority must never outlive its evidence: compensate.
-                self._revoke_grant(action)
                 continue
             graduated.append(action)
             from .audit import EventKind
@@ -914,16 +833,7 @@ class EarnedAutonomyEngine:
         return graduated
 
     def _sweep_stale_grants(self) -> None:
-        """Retry the withdrawal for any action that lost its graduation.
-
-        A revoke that failed at demote time (consent ledger unavailable, full,
-        corrupted key) must not leave a live grant behind forever; every
-        reconcile re-runs the withdrawal for demoted/revoked action types.
-        Revoking an absent grant is a cheap no-op, so this is idempotent.
-        """
-        for action, state in self.ledger.states().items():
-            if state.ever_graduated and not state.graduated:
-                self._revoke_grant(action)
+        """Compatibility hook; earned evidence no longer owns consent grants."""
 
     def _reversible_share(self, action: str) -> float:
         """Share of cards whose undo was *demonstrated*, not merely asserted.
@@ -957,8 +867,7 @@ class EarnedAutonomyEngine:
         """May ``action`` auto-run right now?
 
         Read-only; every uncertainty resolves to "keep the human". The live
-        enforcement path is the consent-ledger grant the graduation wrote --
-        this is the queryable answer (CLI / dashboard / integrations). When
+        evidence is advisory and never creates a consent-ledger grant. When
         ``risk`` is omitted the action's live classification is used; an
         unresolvable or unknown risk level keeps the human.
         """
@@ -989,19 +898,14 @@ class EarnedAutonomyEngine:
                 False, f"not graduated: streak {state.streak}, "
                        f"{state.hits}/{state.samples} accurate")
         return EarnedDecision(
-            True, f"graduated: {state.hits}/{state.samples} accurate predictions")
+            False, "action-level evidence is advisory; a human decision is required")
 
     def revoke(self, action: str, *, reason: str = "operator revoke",
                principal: str = "operator") -> bool:
-        """Demote an action and withdraw its current-authority standing grant.
+        """Demote action evidence without revoking manual consent grants.
 
-        Works even while disabled. The default consent withdrawal is bound to
-        the current tenant, identity and policy, not every identity whose
-        earlier evidence contributed to this action's local trust state.
-
-        True confirms the withdrawal callback and local revocation ledger.
-        The separate central audit remains best-effort. False can represent a
-        partial withdrawal; never restore authority to compensate for it.
+        Works even while evidence collection is disabled. The audit records
+        whether the local revocation was recorded.
         """
         revoked = self._revoke_grant(action)
         ok = self.ledger.record_event("revoke", action, principal=principal,
@@ -1010,8 +914,8 @@ class EarnedAutonomyEngine:
 
         self._audit(EventKind.AUTONOMY_GRADUATION, decision="revoke",
                     principal=principal, action=action, reason=_safe_text(reason),
-                    withdrawal_confirmed=revoked, local_revocation_recorded=ok,
-                    authority_scope="current_identity_and_policy")
+                    withdrawal_confirmed=False, local_revocation_recorded=ok,
+                    authority_scope="advisory_evidence_only")
         return revoked and ok
 
     def status(self) -> list[TrustState]:
@@ -1179,10 +1083,9 @@ def shadow_execute(preview: ConsequencePreview,
 
     The Bet-5 centerpiece, composed from the pieces the engine already owns:
 
-    1. **Gate.** If the action type has *earned* auto-approval
-       (:meth:`EarnedAutonomyEngine.decide`), the human is skipped; otherwise
-       ``approve(card_view)`` -- the operator seeing "this would move $240k" --
-       must return truthy. Any approval error is a denial (fail-closed).
+    1. **Gate.** ``approve(card_view)`` must return truthy for this operation.
+       Action-level evidence does not authorize a particular target or effect.
+       Any approval error is a denial (fail-closed).
     2. **Guaranteed undo.** Execution runs through :func:`run_saga`, which
        refuses before any effect unless every step declares an inverse (pass
        ``allow_irreversible=True`` only when the caller accepts no rollback),
@@ -1195,8 +1098,7 @@ def shadow_execute(preview: ConsequencePreview,
     4. **Provenance.** The gate decision and the execution outcome are signed
        into the audit chain (``shadow_execution``).
 
-    Deciding fails toward keeping the human: a disabled or unarmed engine grants
-    no auto-approval, so every action still routes through ``approve``. The
+    Every action routes through ``approve``. The
     preview/gate/execute/sign flow itself is valuable standalone and is NOT
     gated by ``[earned_autonomy] enable`` -- only the card evidence is (a
     disabled engine simply records no card).
@@ -1207,14 +1109,12 @@ def shadow_execute(preview: ConsequencePreview,
     view = preview.card_view()
     kind = _shadow_kind()
 
-    # 1. Gate -- earned auto-approval, else the human/policy callback. The
-    #    action's risk is recomputed LIVE inside decide() (risk omitted on
-    #    purpose): the preview's declared label is provenance only and must
-    #    never set the auto-approval ceiling, or a mislabeled/stale preview
-    #    could sneak an over-ceiling action past the human.
+    # Evidence is action-wide, so it cannot authorize this exact effect.
+    # Keep the human decision even for legacy graduated states or a custom
+    # engine implementation.
     decision = engine.decide(action)
-    auto = bool(decision.auto)
-    approved = auto or _safe_approve(approve, view)
+    auto = False
+    approved = _safe_approve(approve, view)
     if not approved:
         engine._audit(kind, decision="denied", action=action, goal_id=goal_id,
                       exposure=view.get("exposure_dollars"), auto=auto)

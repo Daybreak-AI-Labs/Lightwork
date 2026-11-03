@@ -29,8 +29,8 @@ function answers(over) {
     "/access": { admin: true, audit: true },
     "/compounding": { task_types: [{ name: "Invoices", runs: 12, cost_change_pct: -40, success_change: 0.1, improving: true }] },
     "/departments": { departments: [] },
-    "/earned-autonomy": { enabled: true, auto_grant_on: true, needs: { outcomes: 10, streak: 10, accuracy_pct: 90 },
-      actions: [{ action: "send_invoice", name: "Send invoice", auto_approved: true, confirmed: 12, missed: 0, streak: 12 }] },
+    "/earned-autonomy": { enabled: true, auto_grant_on: false, needs: { outcomes: 10, streak: 10, accuracy_pct: 90 },
+      actions: [{ action: "send_invoice", name: "Send invoice", auto_approved: false, evidence_qualified: true, confirmed: 12, missed: 0, streak: 12 }] },
     "/fleet-memory": { enabled: true, agents: [] },
     "/record-stats": { records: 5, tasks: 3, approvals: 2, human_decisions: 2, departments: [{ name: "Finance", count: 4 }] },
     "/earned-autonomy/revoke": { revoked: true },
@@ -83,7 +83,7 @@ test("savings page shows results, automatic approvals with Withdraw and the reco
   t.after(() => ui.window.close());
   assert.match(ui.doc.getElementById("vp-comp").textContent, /Invoices12-40%\+10%Getting cheaper/);
   assert.match(ui.doc.getElementById("vp-dept").textContent, /No department has enough tasks/);
-  assert.match(ui.doc.getElementById("vp-ea").textContent, /Approved automatically/);
+  assert.match(ui.doc.getElementById("vp-ea").textContent, /No approval granted by evidence/);
   assert.match(ui.doc.getElementById("vp-ea-state").textContent, /10 real outcomes/);
   assert.match(ui.doc.getElementById("vp-fleet").textContent, /No outside agents/);
   assert.match(ui.doc.getElementById("vp-rec").textContent, /5 decisions on record/);
@@ -95,10 +95,10 @@ test("withdraw confirms, then calls the kernel route", async (t) => {
   t.after(() => ui.window.close());
   ui.doc.querySelector("#vp-ea button").click();
   await ui.settle();
-  assert.ok(ui.calls.some((c) => c.confirm && /need to approve it again/.test(c.confirm)));
+  assert.ok(ui.calls.some((c) => c.confirm && /Explicit consent grants will not change/.test(c.confirm)));
   const sent = ui.calls.find((c) => c.method === "POST");
   assert.deepEqual(sent.body, { action: "send_invoice" });
-  assert.match(ui.doc.getElementById("vp-proof-msg").textContent, /withdrawn for Send invoice/);
+  assert.match(ui.doc.getElementById("vp-proof-msg").textContent, /qualification cleared for Send invoice/);
 });
 
 test("non-admins get no withdraw buttons and no downloads", async (t) => {

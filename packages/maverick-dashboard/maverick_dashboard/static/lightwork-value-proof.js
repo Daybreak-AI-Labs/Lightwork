@@ -171,24 +171,23 @@
   }
   function loadEarned() {
     return get('/earned-autonomy').then(function (d) {
-      var rule = 'An action is approved automatically only after ' + d.needs.outcomes + ' real outcomes, ' +
-        d.needs.streak + ' correct predictions in a row and ' + d.needs.accuracy_pct + '% accuracy.';
-      var state = !d.enabled ? 'Earning automatic approval is off. ' + rule
-        : (d.auto_grant_on ? rule : 'Evidence is being collected, but automatic approval is not switched on. ' + rule);
+      var rule = 'Evidence is assessed after ' + d.needs.outcomes + ' real outcomes, ' +
+        d.needs.streak + ' correct predictions in a row and ' + d.needs.accuracy_pct + '% accuracy. This evidence does not grant approval.';
+      var state = !d.enabled ? 'Evidence collection is off. ' + rule : rule;
       say('vp-ea-state', state);
       if (!d.actions.length) {
         fill('vp-ea', el('p', 'muted', 'No evidence yet. It builds up as checked actions run and their real outcomes come back.'));
         return;
       }
       fill('vp-ea', table(['Action', 'Now', 'Why'].concat(access.admin ? ['Actions'] : []), d.actions.map(function (a) {
-        var row = [a.name, a.auto_approved ? 'Approved automatically' : 'A person approves',
+        var row = [a.name, a.auto_approved ? 'Approved automatically' : 'No approval granted by evidence',
           a.confirmed + ' of ' + (a.confirmed + a.missed) + ' predictions matched what really happened; ' +
           a.streak + ' correct in a row'];
         if (access.admin) {
-          if (a.auto_approved) {
-            var b = el('button', 'btn btn--danger', 'Withdraw');
+          if (a.evidence_qualified) {
+            var b = el('button', 'btn btn--danger', 'Clear qualification');
             b.type = 'button';
-            b.setAttribute('aria-label', 'Withdraw automatic approval for ' + a.name);
+            b.setAttribute('aria-label', 'Clear prediction qualification for ' + a.name);
             b.addEventListener('click', function () { withdraw(a, b); });
             row.push(b);
           } else row.push('—');
@@ -198,15 +197,15 @@
     }).catch(async function (failure) { say('vp-ea-state', errorText(failure, 'load automatic approvals')); });
   }
   async function withdraw(a, b) {
-    if (!(await window.mvConfirm('Withdraw automatic approval for "' + a.name + '"? A person will need to approve it again from now on.',
-      { okText: 'Withdraw' }))) return;
+    if (!(await window.mvConfirm('Clear prediction qualification for "' + a.name + '"? Explicit consent grants will not change.',
+      { okText: 'Clear' }))) return;
     b.disabled = true;
     try {
       await post('/earned-autonomy/revoke', { action: a.action });
-      say('vp-proof-msg', 'Automatic approval withdrawn for ' + a.name + '.');
+      say('vp-proof-msg', 'Prediction qualification cleared for ' + a.name + '.');
       await loadEarned();
     } catch (failure) {
-      say('vp-proof-msg', await planError(failure, 'withdraw automatic approval'));
+      say('vp-proof-msg', await planError(failure, 'clear prediction qualification'));
       b.disabled = false;
     }
   }

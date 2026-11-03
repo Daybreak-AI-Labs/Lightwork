@@ -44,16 +44,16 @@ def test_hindsight_cli_reports_actual_write_result(tmp_path, monkeypatch, writte
         assert "before retrying" in result.output.lower()
 
 
-def test_default_revoker_requires_durable_withdrawal(monkeypatch):
+def test_default_revoker_does_not_touch_consent(monkeypatch):
     from maverick.safety import consent
 
     calls = []
     monkeypatch.setattr(consent, "revoke", lambda action, **kwargs: calls.append((action, kwargs)))
     earned_autonomy._default_revoke_fn("shell")
-    assert calls == [("shell", {"strict": True, "write_tombstone": True})]
+    assert calls == []
 
 
-def test_failed_grant_withdrawal_cannot_report_success(tmp_path):
+def test_legacy_revoke_callback_is_not_used(tmp_path):
     calls = []
     audits = []
 
@@ -68,16 +68,16 @@ def test_failed_grant_withdrawal_cannot_report_success(tmp_path):
         ledger=ledger, revoke_fn=fail_revoke,
         audit_fn=lambda kind, **kwargs: audits.append((kind, kwargs)),
     )
-    assert engine.revoke("shell") is False
-    assert calls == ["shell"]
-    # Still demote the local authority; do not restore it because withdrawal failed.
+    assert engine.revoke("shell") is True
+    assert calls == []
+    # Evidence is demoted without touching independent consent authority.
     assert ledger.state("shell").graduated is False
     assert audits[-1][1]["withdrawal_confirmed"] is False
     assert audits[-1][1]["local_revocation_recorded"] is True
-    assert audits[-1][1]["authority_scope"] == "current_identity_and_policy"
+    assert audits[-1][1]["authority_scope"] == "advisory_evidence_only"
 
 
-def test_revoke_ledger_failure_does_not_undo_real_withdrawal(tmp_path, monkeypatch):
+def test_failed_evidence_revocation_preserves_manual_grant(tmp_path, monkeypatch):
     from maverick.safety import consent
 
     consent.grant_persistent("shell")
@@ -89,8 +89,8 @@ def test_revoke_ledger_failure_does_not_undo_real_withdrawal(tmp_path, monkeypat
     )
     monkeypatch.setattr(engine.ledger, "record_event", lambda *args, **kwargs: False)
     assert engine.revoke("shell") is False
-    assert ("shell", "") not in consent.list_grants()
-    assert audits[-1][1]["withdrawal_confirmed"] is True
+    assert ("shell", "") in consent.list_grants()
+    assert audits[-1][1]["withdrawal_confirmed"] is False
     assert audits[-1][1]["local_revocation_recorded"] is False
 
 
@@ -105,7 +105,7 @@ def test_revoke_cli_does_not_claim_unconfirmed_withdrawal(monkeypatch):
 
 
 @pytest.mark.parametrize("storage_fails", [False, True])
-def test_default_revoker_reports_real_consent_storage_result(tmp_path, monkeypatch, storage_fails):
+def test_evidence_revocation_preserves_manual_consent(tmp_path, monkeypatch, storage_fails):
     from maverick.safety import consent
 
     consent.grant_persistent("shell")
@@ -120,14 +120,14 @@ def test_default_revoker_reports_real_consent_storage_result(tmp_path, monkeypat
         ledger=earned_autonomy.TrustLedger(path=tmp_path / "trust.ndjson"),
         audit_fn=lambda *args, **kwargs: None,
     )
-    assert engine.revoke("shell") is not storage_fails
-    assert (("shell", "") in consent.list_grants()) is storage_fails
+    assert engine.revoke("shell") is True
+    assert ("shell", "") in consent.list_grants()
     if not storage_fails:
         # An already absent grant is still a successful idempotent withdrawal.
         assert engine.revoke("shell") is True
 
 
-def test_revoke_cli_discloses_principal_scope_with_other_live_grant(tmp_path, monkeypatch):
+def test_revoke_cli_discloses_manual_grants_remain(tmp_path, monkeypatch):
     from maverick.connections import bind_principal
     from maverick.safety import consent
 
@@ -142,7 +142,6 @@ def test_revoke_cli_discloses_principal_scope_with_other_live_grant(tmp_path, mo
     with bind_principal("local"):
         result = CliRunner().invoke(_learning_groups.earned_autonomy, ["--revoke", "shell"])
         assert result.exit_code == 0, result.output
-        assert "current identity and policy" in result.output
-        assert "Other identities' standing grants are not withdrawn" in result.output
+        assert "Explicit standing consent grants are unchanged" in result.output
     with bind_principal("user:alice"):
         assert ("shell", "") in consent.list_grants()

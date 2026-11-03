@@ -130,3 +130,35 @@ def test_concurrent_grants_are_complete_and_chain_valid(tmp_path):
     grants = consent.list_grants(path=path)
     assert len(grants) == 20
     assert all(consent._check_ledger(*grant, path=path) for grant in grants)
+
+
+def test_historical_unscoped_grants_require_explicit_reauthorization(monkeypatch, tmp_path):
+    path = tmp_path / "consent.ledger"
+    # Recreate records from before the unscoped-generation change while using
+    # the ordinary signed append path; keep a scoped record as a control.
+    with monkeypatch.context() as old:
+        old.setattr(consent, "_unscoped_policy_binding", lambda policy: policy)
+        with bind_principal("user:alice"):
+            consent.grant_persistent("send", path=path)
+            consent.grant_persistent("deploy", "prod", path=path)
+        with bind_principal("user:bob"):
+            consent.grant_persistent("send", path=path)
+    with bind_principal("user:alice"):
+        assert not consent._check_ledger("send", None, path=path)
+        assert consent._check_ledger("deploy", "prod", path=path)
+        consent.grant_persistent("send", path=path)
+        assert consent._check_ledger("send", None, path=path)
+    with bind_principal("user:bob"):
+        assert not consent._check_ledger("send", None, path=path)
+
+
+def test_earned_autonomy_does_not_mint_or_revoke_manual_grants(monkeypatch, tmp_path):
+    from maverick import earned_autonomy
+
+    path = tmp_path / "consent.ledger"
+    monkeypatch.setattr(consent, "CONSENT_LEDGER_PATH", path)
+    consent.grant_persistent("send", path=path)
+    earned_autonomy._default_grant_fn("send")
+    earned_autonomy._default_revoke_fn("send")
+    assert consent._check_ledger("send", None, path=path)
+    assert not consent._check_ledger("other", None, path=path)

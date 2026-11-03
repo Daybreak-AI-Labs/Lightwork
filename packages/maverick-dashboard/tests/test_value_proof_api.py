@@ -123,7 +123,7 @@ def test_earned_autonomy_withdraw_is_admin_checked_and_recorded(client, monkeypa
 
     monkeypatch.setattr(earned_autonomy, "shared", lambda: _Engine())
     listed = client.get(API + "/earned-autonomy").json()
-    assert listed["actions"][0]["name"] == "Send invoice" and listed["actions"][0]["auto_approved"] is True
+    assert listed["actions"][0]["name"] == "Send invoice" and listed["actions"][0]["auto_approved"] is False and listed["actions"][0]["evidence_qualified"] is True
     assert client.post(API + "/earned-autonomy/revoke", json={"action": "unknown"}).status_code == 404
     assert client.post(API + "/earned-autonomy/revoke", json={"action": "send_invoice"}).json()["revoked"] is True
     assert calls == [("send_invoice", "local:dashboard")]
