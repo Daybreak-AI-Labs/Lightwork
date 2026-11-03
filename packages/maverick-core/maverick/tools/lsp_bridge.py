@@ -441,6 +441,10 @@ def _run_query(args: dict[str, Any], sandbox: Any = None) -> str:
             session = _LspSession(argv, root, deadline_s=timeout)
     except (ApprovalCardError, OSError):
         return "ERROR: language server, file, or approval authority changed; review it again"
+    return _execute_query_session(session, root, path, language, source_text, op, args)
+
+
+def _execute_query_session(session, root, path, language, source_text, op, args):
     try:
         session.request("initialize", {
             "processId": os.getpid(),

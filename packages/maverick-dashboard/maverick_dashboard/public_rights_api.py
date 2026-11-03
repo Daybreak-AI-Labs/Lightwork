@@ -101,9 +101,10 @@ def _origin_of(value: str) -> str:
 
 def _public_base_url() -> str:
     """Operator-owned URL used in public verification links and origin checks."""
-    from maverick.env_setting import env_or_config
     import ipaddress
     from urllib.parse import urlsplit
+
+    from maverick.env_setting import env_or_config
 
     raw = str(env_or_config("MAVERICK_PUBLIC_BASE_URL", "channels", "public_base_url", "") or "").strip().rstrip("/")
     if not raw:

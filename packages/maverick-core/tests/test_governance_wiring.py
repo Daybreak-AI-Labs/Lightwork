@@ -90,8 +90,9 @@ async def test_human_denial_learning_keeps_request_scope(monkeypatch, tmp_path):
 async def test_require_human_runs_with_grant(monkeypatch, tmp_path):
     # A real human approval (here, a granted consent decision) lets the
     # require-human action proceed.
-    import maverick.safety.consent as consent
     from contextlib import nullcontext
+
+    import maverick.safety.consent as consent
     seen = []
     monkeypatch.setattr(
         consent, "require_operation_consent",

@@ -1,8 +1,8 @@
 """Amount-aware authorization in governance (finance-agent-suite §2.3)."""
 from __future__ import annotations
 
-from maverick.governance import Decision, Policy, _amount_table, evaluate
 import pytest
+from maverick.governance import Decision, Policy, _amount_table, evaluate
 
 
 def test_require_human_above_threshold():

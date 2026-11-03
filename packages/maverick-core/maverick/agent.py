@@ -3296,6 +3296,17 @@ class Agent:
         return Verdict(Decision.REQUIRE_HUMAN, check.reason, check.rule,
                        compliance_profiles=profile_keys)
 
+    def _stage_human_action(self, name, args, profiles):
+        from .human_action_drafts import stage
+
+        try:
+            return stage(self, name, args), profiles
+        except Exception:
+            log.warning("human action suggestion could not be retained", exc_info=True)
+            return ("The complete suggested action could not be saved for review. "
+                    "No action was performed. Ask the person to review the task before trying another suggestion.",
+                    profiles)
+
     async def _governance_denial(
         self,
         name: str,
@@ -3491,15 +3502,7 @@ class Agent:
                 _gov.compliance_profiles,
             )
         if _human_executes:
-            from .human_action_drafts import stage
-
-            try:
-                return stage(self, name, args), _gov.compliance_profiles
-            except Exception:
-                log.warning("human action suggestion could not be retained", exc_info=True)
-                return ("The complete suggested action could not be saved for review. "
-                        "No action was performed. Ask the person to review the task before trying another suggestion.",
-                        _gov.compliance_profiles)
+            return self._stage_human_action(name, args, _gov.compliance_profiles)
         # REQUIRE_HUMAN: the action runs only with a real human's approval
         # (Art 14). allow_auto_approve=False means a silent auto-approve mode
         # counts as a denial -- no human in the loop, no run.
@@ -3922,14 +3925,8 @@ class Agent:
         # Compartment Rung 1: a sealed agent runs no further tools. Its prior
         # blackboard posts are also withheld (see Blackboard.render).
         q = getattr(self.ctx, "quarantine", None)
-        if q is not None:
-            # Register this agent's domain so a Rung-2 sector seal reaches it.
-            q.register_agent(self.name, getattr(self, "domain", None))
-            if q.is_sealed(self.name):
-                return _NotExecutedToolResult(
-                    f"⚠ Agent sealed by compartment quarantine "
-                    f"({q.reason(self.name)}). No further tools will run."
-                )
+        if (denial := self._quarantine_denial(q)) is not None:
+            return denial
         args = self._with_capability_host_scope(name, args, None)
         args = _normalize_file_tool_args(name, args, self.ctx.sandbox)
         # Loop-guard suppression tier: an exact call that has already returned
@@ -4093,17 +4090,8 @@ class Agent:
             _recent = self._recent_tool_calls = []
         _recent.append((name, dict(args) if isinstance(args, dict) else {}))
         del _recent[:-_SPECULATION_HISTORY]
-        if permit := _governance_approval.get("permit"):
-            from .safety.consent import consume_operation_consent
-            try:
-                with consume_operation_consent(permit):
-                    pass
-            except AuditRefused:
-                raise
-            except Exception:
-                return _NotExecutedToolResult(
-                    "The governance approval changed or expired before dispatch; the tool did not run."
-                )
+        if (denial := self._consume_governance_permit(_governance_approval)) is not None:
+            return denial
         return await self._run_dispatched_tool(
             name,
             args,
@@ -4114,6 +4102,30 @@ class Agent:
             principal=principal,
             capability_active=cap is not None,
         )
+
+    def _quarantine_denial(self, quarantine):
+        if quarantine is not None:
+            quarantine.register_agent(self.name, getattr(self, "domain", None))
+            if quarantine.is_sealed(self.name):
+                return _NotExecutedToolResult(
+                    f"⚠ Agent sealed by compartment quarantine "
+                    f"({quarantine.reason(self.name)}). No further tools will run."
+                )
+        return None
+
+    def _consume_governance_permit(self, approval):
+        if permit := approval.get("permit"):
+            from .safety.consent import consume_operation_consent
+            try:
+                with consume_operation_consent(permit):
+                    pass
+            except AuditRefused:
+                raise
+            except Exception:
+                return _NotExecutedToolResult(
+                    "The governance approval changed or expired before dispatch; the tool did not run."
+                )
+        return None
 
     def _maybe_speculate_reads(self) -> None:
         """Warm the tool-output cache with this agent's predictable repeat reads.

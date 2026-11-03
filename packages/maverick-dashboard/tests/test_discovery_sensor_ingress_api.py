@@ -6,6 +6,7 @@ import time
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from maverick import agent_trust, ai_discovery_sensors, config
 from maverick.ai_discovery_sensor_clients import (
@@ -155,7 +156,7 @@ def test_legacy_implicit_tenant_is_admitted_without_creating_a_claim(tmp_path, m
     claims = tmp_path / ".tenant-namespaces"
     before = set(claims.rglob("*.json")) if claims.exists() else set()
     external_gateway._require_registered_external_tenant("legacy")
-    with pytest.raises(Exception):
+    with pytest.raises(HTTPException):
         external_gateway._require_registered_external_tenant("other")
     after = set(claims.rglob("*.json")) if claims.exists() else set()
     assert after == before

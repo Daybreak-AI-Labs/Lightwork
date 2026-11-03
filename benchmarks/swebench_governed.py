@@ -836,6 +836,15 @@ def _load_manifest(path: Path) -> list[Instance]:
     return out
 
 
+def _agent_has_hidden_tests(proposer: str, instances: list[Instance]) -> bool:
+    return proposer == "llm" and any((inst.test_patch or "").strip() for inst in instances)
+
+
+def _limited_instances(manifest: Path, limit: int) -> list[Instance]:
+    instances = _load_manifest(manifest)
+    return instances[:limit] if limit else instances
+
+
 def main(argv: list[str] | None = None) -> int:
     import tempfile
 
@@ -878,10 +887,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.agent_max_steps is not None:
         os.environ["MAVERICK_MAX_STEPS"] = str(args.agent_max_steps)
 
-    instances = _load_manifest(args.manifest)
-    if args.limit:
-        instances = instances[: args.limit]
-    if args.proposer == "llm" and any((inst.test_patch or "").strip() for inst in instances):
+    instances = _limited_instances(args.manifest, args.limit)
+    if _agent_has_hidden_tests(args.proposer, instances):
         print("[ABORT] agent solving with hidden test patches requires a separate trusted grader boundary")
         return 2
     propose = PROPOSERS[args.proposer]

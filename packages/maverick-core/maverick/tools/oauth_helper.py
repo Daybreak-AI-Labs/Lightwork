@@ -13,7 +13,6 @@ from urllib.parse import urlparse
 from . import Tool
 from ._ssrf import safe_client
 
-
 _MAX_TOKEN_RESPONSE_BYTES = 100_000
 
 

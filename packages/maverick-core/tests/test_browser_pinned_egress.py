@@ -5,7 +5,6 @@ import sys
 from types import ModuleType, SimpleNamespace
 
 import pytest
-
 from maverick import consent_scanner
 from maverick.tools import browser
 

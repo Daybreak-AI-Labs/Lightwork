@@ -261,8 +261,9 @@ def _send_slack(title: str, body: str, url: str) -> bool:
         return False
     try:
         import httpx
-        from .slack_interactive import _slack_literal
+
         from .governed_http import guarded_sender
+        from .slack_interactive import _slack_literal
         raw = f"{title}\n{body}"
         if len(raw) > 145000:
             log.warning("notify slack failed: message exceeds Slack block limits")

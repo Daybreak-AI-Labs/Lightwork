@@ -691,6 +691,31 @@ def _preserve_connector_failure(exc, receipt):
     return detail
 
 
+def _prepare_connector_args(tool: Tool, args: dict) -> tuple[dict, str | None]:
+    if tool.name != "teams":
+        return args, None
+    args = copy.deepcopy(args)
+    if args.get("webhook"):
+        return args, "ERROR: Teams accepts only the operator-configured webhook destination"
+    if not args.get("op"):
+        args["op"] = "send"
+    return args, None
+
+
+def _connector_approval_denial(decision, decision_actor: str, expected_approver: str, path: str) -> str | None:
+    if decision.source == "dashboard" and not decision_actor:
+        return (
+            "REFUSED (governed): the dashboard decision did not carry "
+            f"an authenticated approver identity for target {path!r}; no write was attempted."
+        )
+    if expected_approver and decision_actor != expected_approver:
+        return (
+            "REFUSED (governed): the configured approver did not approve "
+            f"the change to {path!r}; no write was attempted."
+        )
+    return None
+
+
 def _wrap_connector_executor(
     tool: Tool,
     *,
@@ -735,12 +760,9 @@ def _wrap_connector_executor(
         )
 
     def _fn(args: dict) -> str:
-        if tool.name == "teams":
-            args = copy.deepcopy(args)
-        if tool.name == "teams" and args.get("webhook"):
-            return "ERROR: Teams accepts only the operator-configured webhook destination"
-        if tool.name == "teams" and not args.get("op"):
-            args["op"] = "send"
+        args, error = _prepare_connector_args(tool, args)
+        if error:
+            return error
         op = str(args.get("op", "")).strip().lower()
         if not _is_governed_write(tool, args):
             return tool.fn(args)
@@ -846,17 +868,9 @@ def _wrap_connector_executor(
             decision = permit.decision
 
             decision_actor = str(getattr(decision, "actor", "") or "").strip()
-            if decision.source == "dashboard" and not decision_actor:
-                return (
-                    "REFUSED (governed): the dashboard decision did not carry "
-                    "an authenticated approver identity for target "
-                    f"{path!r}; no write was attempted."
-                )
-            if expected_approver and decision_actor != expected_approver:
-                return (
-                    "REFUSED (governed): the configured approver did not approve "
-                    f"the change to {path!r}; no write was attempted."
-                )
+            denial = _connector_approval_denial(decision, decision_actor, expected_approver, path)
+            if denial:
+                return denial
             approval_identity = decision_actor or decision.source
             try:
                 prepared = _receipt(

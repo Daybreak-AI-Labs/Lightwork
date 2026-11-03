@@ -29,15 +29,17 @@ from ..budget import BudgetExceeded
 from ..killswitch import Halted
 from .continuation_frame import ContinuationFrame
 from .expressions import (
-    FlowRegexRefused,
-    _regex_is_safe,
     _CREDENTIAL_REPAIR,
     _FN_CALL,
+    FlowRegexRefused,
     _as_text,
     _dig,
     _split_args,
     eval_condition,
     render,
+)
+from .expressions import (
+    _regex_is_safe as _regex_is_safe,
 )
 from .ir import (
     MAX_FLOW_NODE_RETRY_SLEEP,

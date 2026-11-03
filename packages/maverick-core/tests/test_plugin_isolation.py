@@ -246,6 +246,7 @@ def test_isolated_discovery_skips_entry_without_worker_target(monkeypatch):
 
 def test_isolated_factory_keeps_the_selected_mode(monkeypatch):
     from types import SimpleNamespace
+
     from maverick import plugin_isolation, plugins
     monkeypatch.setattr(plugin_isolation, "isolation_mode", lambda: "none")
     monkeypatch.setattr(plugin_isolation, "run_isolated",

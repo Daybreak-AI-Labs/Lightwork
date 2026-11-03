@@ -240,8 +240,8 @@ def test_public_rights_requires_configured_origin(monkeypatch):
 
 
 def test_public_rights_origin_normalization_and_invalid_config(monkeypatch):
-    from maverick_dashboard.public_rights_api import _origin_of, _public_base_url
     from fastapi import HTTPException
+    from maverick_dashboard.public_rights_api import _origin_of, _public_base_url
 
     assert _origin_of("https://Example.COM:443/path") == "https://example.com"
     assert _origin_of("http://[") == ""

@@ -157,6 +157,7 @@ class Workflow:
         stop_on_error: bool = True,
     ) -> WorkflowResult:
         import time
+
         from .tool_authz import non_agent_capability_required
         result = WorkflowResult()
         outputs: dict[str, str] = {}

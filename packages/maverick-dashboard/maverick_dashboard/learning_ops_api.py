@@ -1081,8 +1081,8 @@ def _factory_review_authority(request: Request) -> None:
     responses={422: {"description": "Invalid guidance decision details"}},
 )
 async def factory_review(request: Request):
-    from .app import _read_limited_request_body
     from . import factory_guidance as guided
+    from .app import _read_limited_request_body
 
     content_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
     if content_type and not (content_type == "application/json" or (

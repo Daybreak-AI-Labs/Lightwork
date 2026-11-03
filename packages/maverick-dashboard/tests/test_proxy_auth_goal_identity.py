@@ -13,8 +13,7 @@ def _enable_proxy_identity(monkeypatch):
 
 
 def _isolated_app(monkeypatch, tmp_path):
-    from maverick import config
-    from maverick import world_model
+    from maverick import config, world_model
     from maverick_dashboard import api as api_mod
     from maverick_dashboard import app as app_mod
 

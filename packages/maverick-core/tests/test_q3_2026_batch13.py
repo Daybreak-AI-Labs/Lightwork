@@ -437,8 +437,8 @@ def test_ffmpeg_convert_calls_binary(monkeypatch, tmp_path):
         captured["cmd"] = cmd
         return 0, "", ""
 
-    from types import SimpleNamespace
     import importlib
+    from types import SimpleNamespace
     module = importlib.import_module("maverick.tools.ffmpeg_tool")
     monkeypatch.setattr(module, "_run_cmd", _run)
     out = module.ffmpeg_tool(SimpleNamespace(workdir=tmp_path)).fn({
@@ -451,9 +451,9 @@ def test_ffmpeg_convert_calls_binary(monkeypatch, tmp_path):
 
 def test_ffmpeg_info_parses_ffprobe(monkeypatch, tmp_path):
     monkeypatch.setattr("shutil.which", lambda b: "/usr/bin/" + b)
+    import importlib
     import json
     from types import SimpleNamespace
-    import importlib
     module = importlib.import_module("maverick.tools.ffmpeg_tool")
     output = json.dumps({
         "format": {"format_name": "mov,mp4", "duration": "10.0", "bit_rate": "1000"},
@@ -511,8 +511,8 @@ def test_imagemagick_missing(monkeypatch):
 def test_imagemagick_resize(monkeypatch, tmp_path):
     monkeypatch.setattr("shutil.which",
                         lambda b: "/usr/bin/magick" if b == "magick" else None)
-    from types import SimpleNamespace
     import importlib
+    from types import SimpleNamespace
     module = importlib.import_module("maverick.tools.imagemagick_tool")
     monkeypatch.setattr(module, "_run_cmd", lambda *a, **kw: (0, "", ""))
     out = module.imagemagick_tool(SimpleNamespace(workdir=tmp_path)).fn({
@@ -525,8 +525,8 @@ def test_imagemagick_resize(monkeypatch, tmp_path):
 def test_imagemagick_identify_parses(monkeypatch, tmp_path):
     monkeypatch.setattr("shutil.which",
                         lambda b: "/usr/bin/magick" if b == "magick" else None)
-    from types import SimpleNamespace
     import importlib
+    from types import SimpleNamespace
     module = importlib.import_module("maverick.tools.imagemagick_tool")
     monkeypatch.setattr(module, "_run_cmd", lambda *a, **kw: (0, "1024 768 PNG 200KB image.png\n", ""))
     out = module.imagemagick_tool(SimpleNamespace(workdir=tmp_path)).fn({"op": "identify", "input_path": "a.png"})

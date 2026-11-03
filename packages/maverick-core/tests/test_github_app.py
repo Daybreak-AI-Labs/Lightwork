@@ -170,6 +170,7 @@ class TestSlugify:
 
 def test_issue_automation_refuses_before_clone_or_subprocess(monkeypatch):
     import asyncio
+
     from maverick import github_app as ga
 
     payload = ga.WebhookPayload(

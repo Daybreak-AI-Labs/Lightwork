@@ -2939,8 +2939,12 @@ async def _verify_maverick_webhook(request: Request) -> dict:
     return the parsed JSON object. Shared by /webhook/start and /webhook/run,
     which had byte-identical preambles. Raises HTTPException (401 unconfigured,
     403 bad signature, 400 bad body) and enforces a configured LLM provider."""
-    from maverick.webhooks import (inbound_secret, read_signature_headers,
-                                   separate_webhook_credential, verify_signature)
+    from maverick.webhooks import (
+        inbound_secret,
+        read_signature_headers,
+        separate_webhook_credential,
+        verify_signature,
+    )
 
     secret = inbound_secret()
     if not separate_webhook_credential(secret, "control"):
