@@ -3,16 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>How Lightwork works: governed AI agents, every action audited</title>
-<meta name="description" content="How Lightwork, the open-source agent runtime from Daybreak Labs, works: every tool call is checked for scope, policy, safety and budget before it runs, and lands in a signed, hash-chained record you can verify offline. Apache 2.0, self-hosted or air-gapped.">
+<title>Lightwork Platform: give it a goal, get the work back</title>
+<meta name="description" content="Lightwork, the open-source AI agent platform from Daybreak Labs: describe a goal in plain words and a team of specialist agents plans it, does it on your tools and documents, checks it and brings back the finished work. Chat, workflows, connections, every channel, any model. Apache 2.0, self-hosted.">
 <link rel="stylesheet" href="styles.css">
 <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
 <link rel="icon" type="image/png" sizes="512x512" href="favicon-512.png">
 <link rel="apple-touch-icon" href="favicon-180.png">
 <meta name="theme-color" content="#04050A">
 <meta property="og:type" content="website">
-<meta property="og:title" content="How Lightwork works: governed AI agents, every action audited">
-<meta property="og:description" content="Every tool call is checked for scope, policy, safety and budget before it runs, then signed into a hash-chained record you can verify offline. Open source under Apache 2.0; self-hosted or air-gapped.">
+<meta property="og:title" content="Lightwork Platform: give it a goal, get the work back">
+<meta property="og:description" content="Describe a goal and a team of specialist agents plans it, does it on your tools, checks it and brings back the finished work. Open source under Apache 2.0, self-hosted.">
 <meta property="og:image" content="https://daybreakailabs.com/og.png">
 <meta property="og:url" content="https://daybreakailabs.com/product">
 <meta name="twitter:card" content="summary_large_image">
@@ -30,11 +30,11 @@
       <span class="brand-word">Daybreak Labs<small>Lightwork</small></span>
     </a>
     <nav class="nav-links" aria-label="Primary">
+      <a href="autonomous-shoring.html">Autonomous Shoring</a>
       <a href="product.html" aria-current="page">Platform</a>
+      <a href="packs.html">Specialists</a>
       <a href="cortex.html">Cortex</a>
       <a href="autonomous-compliance.html">Autonomous Compliance</a>
-      <a href="autonomous-shoring.html">Autonomous Shoring</a>
-      <a href="security.html">Security</a>
       <a href="company.html">Company</a>
     </nav>
     <div class="nav-cta">
@@ -48,312 +48,209 @@
 <section class="hero inner">
   <div class="wrap hero-grid">
     <div>
-      <span class="pill rv"><span class="dot"></span> Lightwork Platform &middot; how it works</span>
-      <h1 class="rv d1">Every action clears <b>one gate</b> before it runs.</h1>
+      <span class="pill rv"><span class="dot"></span> Lightwork Platform &middot; what it does</span>
+      <h1 class="rv d1">Give it a goal. <b>Get the work back.</b></h1>
       <div class="dline rv d1" role="presentation"></div>
-      <p class="lede rv d2">Lightwork checks every tool call an agent makes for scope, policy, safety and budget before it happens: every payment, every write, every command. Each decision lands in a signed, hash-chained record you can verify offline. It is open source under the Apache License 2.0, and you run it yourself: on your own machine, your own servers, or an air-gapped network.</p>
+      <p class="lede rv d2">Tell Lightwork what you need in plain words. An orchestrator plans the work, hands the pieces to specialist agents that run in parallel on the models you choose, uses your tools and documents, checks the result and brings back a finished answer. From the chat, your team's messaging app, the command line, an API call or a schedule.</p>
       <div class="hero-cta rv d3">
         <a class="btn btn-primary" href="https://github.com/Daybreak-AI-Labs/Lightwork">View on GitHub</a>
-        <a class="btn btn-ghost" href="security.html">Security &amp; deployment</a>
+        <a class="btn btn-ghost" href="autonomous-shoring.html">See Autonomous Shoring</a>
       </div>
       <div class="hero-marks rv d3">
         <span><b>Open source</b> &middot; Apache 2.0</span>
-        <span><b>One gate,</b> every action</span>
-        <span><b>Signed,</b> tamper-evident audit</span>
+        <span><b>Any model</b>, even local</span>
+        <span><b>Chat, Slack, Teams</b>, email, voice</span>
         <span><b>Self-hosted</b> or air-gapped</span>
         <span><b>Alpha</b> &middot; install from source</span>
       </div>
     </div>
     <aside class="rv d2">
       <div class="term">
-        <div class="bar"><span class="chip">operating record</span><span class="ok">&#9679; chain verified</span></div>
+        <div class="bar"><span class="chip">one goal &middot; a team on it</span><span>from the chat</span></div>
         <div class="body">
-          <div class="c"># each entry chains to the one before it</div>
-          <div class="row"><span>0xA2 &middot; deny $60k wire</span><span class="ok">&#10003; signed</span></div>
-          <div class="row"><span>0xA3 &middot; require-human $6k</span><span class="ok">&#10003; signed</span></div>
-          <div class="row"><span>0xA4 &middot; cap runaway loop</span><span class="ok">&#10003; signed</span></div>
-          <div class="row"><span class="c">&middot; alter 0xA2 after the fact &middot;</span><span class="deny">&#10007; CAUGHT</span></div>
+          <div class="c"># "Reconcile March vendor invoices and draft the summary"</div>
+          <div class="row"><span>orchestrator &middot; plan the work</span><span class="cap">4 steps</span></div>
+          <div class="row"><span>researcher &middot; pull invoices and orders</span><span class="ok">&#10003; done</span></div>
+          <div class="row"><span>finance specialist &middot; match and reconcile</span><span class="ok">&#10003; done</span></div>
+          <div class="row"><span>writer &middot; draft the summary</span><span class="ok">&#10003; done</span></div>
+          <div class="row"><span>verifier &middot; check the numbers</span><span class="ok">&#10003; passed</span></div>
+          <div class="row"><span>answer &middot; back in your chat</span><span class="human">for your review</span></div>
         </div>
       </div>
-      <p class="art-cap"><b>Fig. 04</b> &middot; Illustrative. Each entry carries the hash of the one before it and is signed, so changing an earlier entry breaks the chain.</p>
+      <p class="art-cap"><b>Fig. 01</b> &middot; Illustrative. One goal from the chat: the orchestrator plans it, specialists work in parallel, a verifier checks the result, and the answer comes back to you.</p>
     </aside>
   </div>
 </section>
 
-<!-- THE GATE -->
+<!-- FROM GOAL TO ANSWER -->
 <section>
   <div class="wrap">
     <div class="sec-head rv">
-      <span class="eyebrow"><span class="n">01</span> The gate</span>
-      <h2>Every action is checked <b>before it runs.</b></h2>
-      <p>Every tool call passes through this gate before it runs, and the decision is written to the audit log either way.</p>
+      <span class="eyebrow"><span class="n">01</span> How it works</span>
+      <h2>From a sentence <b>to a finished deliverable.</b></h2>
+      <p>You describe the outcome. Lightwork decides how to get there, puts a team on it, and keeps going until the work is done or it needs you.</p>
     </div>
     <div class="gate rv">
-      <div class="stage"><div class="n">01</div><div class="t">Scope</div><div class="d">The action must fall inside the agent's grant. A spawned agent's grant can only narrow, never widen.</div></div>
-      <div class="stage"><div class="n">02</div><div class="t">Policy</div><div class="d">Allow, deny, or require a human, bound to the action and, for money, to the amount.</div></div>
-      <div class="stage"><div class="n">03</div><div class="t">Safety</div><div class="d">The shield screens inputs, tool calls and answers for dangerous actions and prompt injection.</div></div>
-      <div class="stage"><div class="n">04</div><div class="t">Budget</div><div class="d">Hard caps on tokens, dollars, wall-clock time and tool calls.</div></div>
-      <div class="stage"><div class="n">05</div><div class="t">Record</div><div class="d">A signed, hash-chained entry you can verify offline.</div></div>
+      <div class="stage"><div class="n">01</div><div class="t">Goal</div><div class="d">From the chat, Slack or Teams, the command line, the REST API, an MCP client or a schedule.</div></div>
+      <div class="stage"><div class="n">02</div><div class="t">Plan</div><div class="d">The orchestrator breaks the goal into steps and decides who does each one.</div></div>
+      <div class="stage"><div class="n">03</div><div class="t">Team</div><div class="d">Specialist agents (researcher, coder, writer, verifier and domain experts) work in parallel, each on the model you chose for its role.</div></div>
+      <div class="stage"><div class="n">04</div><div class="t">Tools</div><div class="d">Your connected systems, documents, the web, and code that runs in a sandbox.</div></div>
+      <div class="stage"><div class="n">05</div><div class="t">Answer</div><div class="d">Checked, formatted and delivered to the chat or your results inbox for sign-off.</div></div>
     </div>
-    <p class="muted rv" style="margin-top:26px;font-size:16px">Capability enforcement is on in Enterprise mode or with <code>MAVERICK_ENFORCE_CAPABILITIES=1</code>. The shield is a separate package: the kernel runs without it, with a warning, so treat it as one layer, not the only one.</p>
   </div>
 </section>
 
-<!-- THE PACKAGES -->
+<!-- CHAT -->
 <section class="panel">
   <div class="wrap">
     <div class="sec-head rv">
-      <span class="eyebrow"><span class="n">02</span> The platform</span>
-      <h2>Eight packages, <b>one governed spine.</b></h2>
-      <p>The kernel runs and governs the work; the other seven packages build on it. They install and version together, from source.</p>
+      <span class="eyebrow"><span class="n">02</span> Chat that does the work</span>
+      <h2>A conversation <b>that ends in a deliverable.</b></h2>
+      <p>The chat looks like the chat apps you already use. The difference is what happens after you press Enter.</p>
+    </div>
+    <div class="cols cols-3">
+      <div class="card rv"><span class="idx">Threads</span><h3>It remembers the conversation</h3><p>Every follow-up runs inside the same thread, so the agents see what was already asked and answered. Answers come back as formatted text with tables, lists and links.</p></div>
+      <div class="card rv d1"><span class="idx">While it works</span><h3>Talk to it mid-task</h3><p>Add guidance the running task picks up at its next safe point, queue the next request, or start a separate task, without stopping the work in progress.</p></div>
+      <div class="card rv d2"><span class="idx">Inputs</span><h3>Attach, dictate, listen</h3><p>Drop in files, dictate instead of typing, and have an answer read aloud. Copy it, edit it, or stop the run at any time.</p></div>
+      <div class="card rv"><span class="idx">Results</span><h3>An inbox of finished work</h3><p>Each team's results arrive as the deliverable its role produces. Sign them off, export them, or send them on to your system of record.</p></div>
+      <div class="card rv d1"><span class="idx">Control</span><h3>Pick how independently it runs</h3><p>Director mode turns one choice (supervised, semi-autonomous or autonomous) into the right checkpoints and limits for a whole run.</p></div>
+      <div class="card rv d2"><span class="idx">Recovery</span><h3>Failures that explain themselves</h3><p>When a run fails, Lightwork names what went wrong (a spending limit, a missing key, a timeout) and gives you the steps to fix it.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- AGENT FACTORY -->
+<section>
+  <div class="wrap">
+    <div class="split" style="margin-top:0;align-items:center">
+      <div class="rv">
+        <span class="eyebrow"><span class="n">03</span> Agent Factory</span>
+        <h2 class="sm" style="margin-top:18px">Hire an agent <b>from a job description.</b></h2>
+        <p style="font-size:19px;color:var(--muted)">Paste a job description and Lightwork matches it to the specialists you already have or drafts a new agent. Describe your business and it proposes one, then grounds it in your documents. Or start from a built-in specialist and tailor its job, its tools and its limits in plain English.</p>
+        <p style="font-size:17px;color:var(--muted)">You can also teach by example: <code>lightwork learn-demo</code> turns a record of a person doing the job into a draft agent, with a final human-review step built in. Nothing activates until you approve it.</p>
+        <p style="margin-top:22px"><a class="btn btn-ghost" href="packs.html">See the specialists</a></p>
+      </div>
+      <figure class="shot-wrap rv d1">
+        <div class="shot"><img src="shots/agent-factory.jpg" alt="The Agent Factory page in the Lightwork dashboard, with options to build a custom agent, hire from a job description and set up an agent for your business." width="1600" height="1033" loading="lazy"></div>
+        <figcaption class="art-cap"><b>Agent Factory</b> &middot; the Lightwork dashboard, running locally with synthetic sample data.</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<!-- WORKFLOWS -->
+<section class="panel">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">04</span> Workflows and automations</span>
+      <h2>Turn a process <b>into something that runs itself.</b></h2>
+      <p>For work that happens the same way every time, build a workflow once and let it start on its own. Schedules are built in; the workflow engine is optional and starts switched off.</p>
     </div>
     <div class="cols cols-4">
-      <div class="card rv"><span class="idx">maverick-core</span><h3>The kernel</h3><p>The orchestrator, tools, sandbox backends, world model, budget, audit log and CLI. It runs without the shield and warns when the shield is missing.</p></div>
-      <div class="card rv d1"><span class="idx">maverick-shield</span><h3>Screens every action</h3><p>The Agent Shield integration and built-in rule set: user input, every tool call and every answer are scanned, including decoded variants of encoded text.</p></div>
-      <div class="card rv d2"><span class="idx">maverick-channels</span><h3>Work in, work out</h3><p>Messaging adapters for <code>lightwork serve</code>: Slack, Microsoft Teams, email, Telegram, SMS, voice and more.</p></div>
-      <div class="card rv d3"><span class="idx">maverick-dashboard</span><h3>The human control plane</h3><p>The web dashboard and REST API: chat, goal pages, the Approvals page and deliverable sign-off, where a person reviews what an agent produced.</p></div>
-      <div class="card rv"><span class="idx">maverick-mcp</span><h3>Drive it from your editor</h3><p>A Model Context Protocol server. Run Lightwork from Claude Code, Cursor, or any MCP client.</p></div>
-      <div class="card rv d1"><span class="idx">maverick-evolve</span><h3>Configuration search</h3><p>Config-only evolutionary search with an evaluation harness, for tuning how the workforce runs.</p></div>
-      <div class="card rv d2"><span class="idx">maverick-knowledge</span><h3>Document knowledge</h3><p>Per-domain document knowledge with vector retrieval, so agents answer from your documents.</p></div>
-      <div class="card rv d3"><span class="idx">maverick-installer</span><h3>The setup wizard</h3><p>The interactive wizard behind <code>lightwork init</code>: providers, sandbox, limits and every switch, in plain questions.</p></div>
+      <div class="card rv"><span class="idx">Design</span><h3>A visual designer</h3><p>Agent steps, fixed actions, branches, loops, parallel steps, approvals and delays on one canvas. Or describe the process, or upload a document, and get a draft to edit.</p></div>
+      <div class="card rv d1"><span class="idx">Trigger</span><h3>Starts on its own</h3><p>On a schedule, from a webhook, an RSS feed, an email inbox, a GitHub issue or a hosted form.</p></div>
+      <div class="card rv d2"><span class="idx">Import</span><h3>Bring what you have</h3><p>Import existing automations from n8n, Make, Workato, UiPath and Power Automate, and review them before they run.</p></div>
+      <div class="card rv d3"><span class="idx">Schedule</span><h3>Recurring goals</h3><p><code>lightwork schedule</code> runs any goal on a cron schedule, and a background worker picks it up, no workflow engine required.</p></div>
     </div>
   </div>
 </section>
 
-<!-- GOVERNANCE -->
+<!-- CONNECT -->
 <section>
   <div class="wrap">
     <div class="sec-head rv">
-      <span class="eyebrow"><span class="n">03</span> Governance</span>
-      <h2>Least privilege, <b>enforced.</b></h2>
-      <p>Three mechanisms, enforced at the gate, not bolted on after the fact.</p>
-    </div>
-    <div class="cols cols-3">
-      <div class="card rv"><span class="idx">01</span><h3>Capability tokens</h3><p>Attenuate-only. A spawned agent's grant is narrowed from its parent's and can never exceed it. <code>lightwork whoami</code> shows any principal's effective grant.</p></div>
-      <div class="card rv d1"><span class="idx">02</span><h3>Policy engine</h3><p>Allow, deny, or require a human, bound to every action: a $6,000 payment release can wait for a person while a $60,000 wire is refused outright.</p></div>
-      <div class="card rv d2"><span class="idx">03</span><h3>Egress lock</h3><p>In Enterprise mode, model calls are pinned to local or self-hosted providers and a cloud call is refused before any prompt is sent. It is an application-layer control: pair it with sandbox network isolation and a network egress policy.</p></div>
-    </div>
-  </div>
-</section>
-
-<!-- OPERATING RECORD -->
-<section class="on-navy">
-  <div class="wrap">
-    <div class="sec-head rv">
-      <span class="eyebrow"><span class="n">04</span> The Operating Record</span>
-      <h2>Every action, <b>signed and hash-chained.</b></h2>
-      <p>Audit events are hash-chained and Ed25519-signed by default. Alter a row and the chain breaks: <code>lightwork audit verify</code> exits non-zero, and a standalone Rust verifier checks the same chain without Python.</p>
-    </div>
-    <div class="split rv" style="margin-top:48px">
-      <div class="term">
-        <div class="bar"><span class="chip">operating record</span><span class="ok">&#9679; chain verified</span></div>
-        <div class="body">
-          <div class="c"># each entry chains to the one before it</div>
-          <div class="row"><span>0xA2 &middot; deny $60k wire</span><span class="ok">&#10003; signed</span></div>
-          <div class="row"><span>0xA3 &middot; require-human $6k</span><span class="ok">&#10003; signed</span></div>
-          <div class="row"><span>0xA4 &middot; cap runaway loop</span><span class="ok">&#10003; signed</span></div>
-          <div class="row"><span class="c">&middot; alter 0xA2 after the fact &middot;</span><span class="deny">&#10007; CAUGHT</span></div>
-        </div>
-      </div>
-      <div class="term">
-        <div class="bar"><span class="chip">audit &middot; verify offline</span><span>no network required</span></div>
-        <div class="body">
-          <div class="c"># lightwork audit verify</div>
-          <div class="row"><span>read 0xA2 &rarr; 0xA4</span><span class="ok">&#10003; signatures valid</span></div>
-          <div class="row"><span>recompute hash chain</span><span class="ok">&#10003; intact</span></div>
-          <div class="row"><span>compare with a published checkpoint</span><span class="ok">&#10003; match</span></div>
-          <div class="row"><span class="c">tamper one byte</span><span class="deny">&#10007; chain breaks</span></div>
-        </div>
-      </div>
-    </div>
-    <p class="muted rv" style="margin-top:26px;font-size:16px">By default the signing key lives on the same host, which catches accidental or unprivileged edits but not someone running as the service account. Supply the key from outside the host and publish audit checkpoints to an independent location to narrow that gap.</p>
-  </div>
-</section>
-
-<!-- BOUNDED BLAST RADIUS -->
-<section>
-  <div class="wrap">
-    <div class="sec-head rv">
-      <span class="eyebrow"><span class="n">05</span> Blast radius</span>
-      <h2>Hard limits, <b>by default.</b></h2>
-      <p>The budget tracker enforces its caps every time it records usage, so a run stops at the first call that crosses one. The setup wizard offers a $2, 30-minute task limit, which you can change or turn off.</p>
-    </div>
-    <div class="fig rv">
-      <div class="term">
-        <div class="bar"><span class="chip">budget &middot; sandbox</span><span>hard limits</span></div>
-        <div class="body">
-          <div class="row"><span>tokens</span><span class="cap">HARD CAP</span></div>
-          <div class="row"><span>dollars</span><span class="cap">HARD CAP</span></div>
-          <div class="row"><span>wall-clock</span><span class="cap">HARD CAP</span></div>
-          <div class="row"><span>tool calls</span><span class="cap">HARD CAP</span></div>
-          <div class="row"><span>container sandbox network</span><span class="ok">OFF BY DEFAULT</span></div>
-        </div>
-      </div>
-      <p class="figcap"><b>Fig. 05</b> &middot; A runaway agent stops at the cap, not after it. Docker and Podman run each command in a throwaway container with no network by default. The default <code>local</code> backend runs commands on the host itself, so use a container backend for any goal you would not run yourself.</p>
-    </div>
-  </div>
-</section>
-
-<!-- REVIEWABLE LEARNING -->
-<section class="panel">
-  <div class="wrap">
-    <div class="sec-head rv">
-      <span class="eyebrow"><span class="n">06</span> Reviewable learning</span>
-      <h2>A workforce that improves, <b>under review.</b></h2>
-      <p>Lightwork learns from its own runs without widening any agent's permissions, and nothing it learns changes behavior until a person lets it. What it keeps becomes part of <a class="btn-link" href="cortex.html">Cortex</a>, where the next agent to face the same case finds it.</p>
-    </div>
-    <div class="cols cols-3">
-      <div class="card rv"><span class="idx">reviewed</span><h3>Admitted by a person</h3><p>Successful runs are distilled into proposed skills. A proposed skill is used in later runs only after someone reviews and admits it on the Skills page.</p></div>
-      <div class="card rv d1"><span class="idx">trialled</span><h3>Tried on a share, then promoted</h3><p>A changed specialist can run as a trial on a share of new goals beside the current version, with every goal recording the version it used. Promote it or roll it back; automatic roll back is an option.</p></div>
-      <div class="card rv d2"><span class="idx">reversible</span><h3>Snapshotted, and it can't grade itself</h3><p>Proposed changes to prompts, skills and memory are off by default, wait for approval and are snapshotted so they can be reverted. The evaluator that scores improvement is held to ground-truth anchors that CI locks once released.</p></div>
-    </div>
-    <p class="muted rv" style="margin-top:26px;font-size:16px">Comparisons drawn from ordinary run history are used to find candidates, never as proof of cause on their own. Code self-modification is off by default and research-only: it can propose and test a patch but never applies one. Details in <a class="btn-link" href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/self-learning.md">the self-learning docs</a>.</p>
-  </div>
-</section>
-
-<!-- THE LIBRARY -->
-<section>
-  <div class="wrap">
-    <div class="sec-head rv">
-      <span class="eyebrow"><span class="n">07</span> The library</span>
-      <h2>The specialists, <b>already built.</b></h2>
-      <p>Built-in specialist packs across finance, tax, legal, privacy, GRC, operations and more. Each is a TOML file you can read, and every one runs under the same governance gate.</p>
-    </div>
-    <div class="stats rv">
-      <div class="s"><div class="big">Specialist <b>packs</b></div><div class="lbl">finance, tax, legal, privacy, GRC, operations and more, each with a fixed job and a step-by-step workflow</div></div>
-      <div class="s"><div class="big">Least <b>privilege</b></div><div class="lbl">a persona, the tools it may and may not use, a maximum risk level and a compartment, per pack</div></div>
-      <div class="s"><div class="big">Governed <b>deliverables</b></div><div class="lbl">routed to the role that uses them and signed off by a person</div></div>
-    </div>
-    <p class="muted rv" style="margin-top:26px;font-size:16px">CI lints every pack and fails the build on any error-level finding, such as an empty tool allow-list or a missing risk ceiling. <a class="btn-link" href="packs.html">See the packs &rarr;</a></p>
-  </div>
-</section>
-
-<!-- WHAT RUNS ON IT -->
-<section class="panel">
-  <div class="wrap">
-    <div class="sec-head rv">
-      <span class="eyebrow"><span class="n">08</span> What runs on it</span>
-      <h2>One runtime. <b>Everything else is built on it.</b></h2>
-      <p>Every capability below uses the same governance gate, the same Operating Record and the same memory.</p>
-    </div>
-    <dl class="spec rv">
-      <dt>The runtime</dt>
-      <dd><b>Lightwork Platform.</b> The governed runtime on this page: one gate on every action, one Operating Record underneath.</dd>
-      <dt>Memory</dt>
-      <dd><b>Cortex.</b> The governed memory the workforce reads from and writes to under audit. <a class="btn-link" href="cortex.html">Inside Cortex &rarr;</a></dd>
-      <dt>Specialist packs</dt>
-      <dd><b>Specialist packs.</b> Specialists for finance, tax, legal, privacy, GRC, operations and more, each with a fixed job, least-privilege tools, and a person who signs off. <a class="btn-link" href="packs.html">See the packs &rarr;</a></dd>
-      <dt>Any fleet</dt>
-      <dd><b>Fleet governance.</b> Bring agents you didn't build under the same audit and memory. <a class="btn-link" href="fleet-governance.html">How it governs &rarr;</a></dd>
-      <dt>Compliance</dt>
-      <dd><b>Autonomous Compliance.</b> Privacy, GRC and AI-governance work carried out by governed agents, with a person reviewing. <a class="btn-link" href="autonomous-compliance.html">See the suites &rarr;</a></dd>
-      <dt>Shoring</dt>
-      <dd><b>Autonomous Shoring.</b> Tooling for moving a whole business function onto the workforce: a book of work, service-level tracking and a record of every deliverable. <a class="btn-link" href="autonomous-shoring.html">How it works &rarr;</a></dd>
-    </dl>
-  </div>
-</section>
-
-<!-- DATA GROUNDING -->
-<section>
-  <div class="wrap">
-    <div class="sec-head rv">
-      <span class="eyebrow"><span class="n">09</span> Data grounding</span>
-      <h2>Grounded in primary sources, <b>not model memory.</b></h2>
-      <p>An analyst pack cites an authoritative source instead of recalling one, so an answer says where it came from.</p>
+      <span class="eyebrow"><span class="n">05</span> Connections and channels</span>
+      <h2>Works with your systems. <b>Shows up where your team talks.</b></h2>
     </div>
     <div class="cols cols-2">
-      <div class="card rv"><span class="idx">public data &middot; read-only</span><h3>Primary-source connectors, granted by domain</h3><p>Each analyst pack is granted the read-only public-data connectors for its domain: SEC EDGAR, FRED, Census, openFDA, the Federal Register, NOAA weather and more. GET-only and low-risk, on by default, with one switch to turn it off.</p></div>
-      <div class="card rv d1"><span class="idx">business systems &middot; write-capable</span><h3>A deeper bench, behind approvals</h3><p>Write-capable connectors for systems such as Salesforce, ServiceNow, Stripe and Snowflake use your own credentials. A change to an external system waits on the Approvals page until a person approves it.</p></div>
+      <div class="card rv"><span class="idx">Your tools</span><h3>Connect the systems you run on</h3><p>A registry of write-capable REST and GraphQL connectors, dedicated modules for common business systems, and any Model Context Protocol server as a tool. Agents can also draw on public primary sources such as SEC EDGAR, FRED and openFDA. A change to an outside system is shown in full and sent only after a person approves it.</p></div>
+      <div class="card rv d1"><span class="idx">Your channels</span><h3>Message it like a colleague</h3><p>Slack, Microsoft Teams, email, WhatsApp, SMS, Telegram, Discord, Signal, Mattermost, Matrix, IRC, RCS, Bluesky, Mastodon, Threads, iMessage on macOS, and voice. Hand a conversation to a person when it needs one.</p></div>
     </div>
   </div>
 </section>
 
-<!-- PROOF -->
-<section class="on-navy">
-  <div class="wrap">
-    <div class="sec-head rv">
-      <span class="eyebrow"><span class="n">10</span> Proof</span>
-      <h2>We don't say it's governed. <b>Run it and see.</b></h2>
-      <p>The golden path (<code>python -m maverick.golden_path</code>) drives the real governance code through a treasury scenario with no model and no key, and leaves the signed audit trail. The proof pack (<code>python -m maverick.proof_pack</code>) writes a signed evidence bundle and a <code>PROOF.md</code> you can verify offline.</p>
-    </div>
-    <div class="split rv" style="margin-top:48px">
-      <div class="term">
-        <div class="bar"><span class="chip">golden path</span><span>every row tamper-evident</span></div>
-        <div class="body">
-          <div class="row"><span>boot finance specialist</span><span class="seal">SEALED</span></div>
-          <div class="row"><span>$60,000 wire</span><span class="deny">DENY</span></div>
-          <div class="row"><span>$6,000 release</span><span class="human">REQUIRE_HUMAN</span></div>
-          <div class="row"><span>runaway loop</span><span class="cap">CAPPED</span></div>
-          <div class="row"><span>alter an audited row</span><span class="ok">CAUGHT</span></div>
-        </div>
-      </div>
-      <div class="term">
-        <div class="bar"><span class="chip">proof pack</span><span class="ok">&#9679; Ed25519 signed</span></div>
-        <div class="body">
-          <div class="c"># PROOF.md &middot; verifiable offline</div>
-          <div class="row"><span>governance</span><span class="ok">&#10003; PASS</span></div>
-          <div class="row"><span>reliability</span><span class="ok">&#10003; PASS</span></div>
-          <div class="row"><span>shield</span><span class="ok">&#10003; PASS</span></div>
-          <div class="row"><span>benchmarks without a key</span><span class="seal">NOT RUN</span></div>
-        </div>
-      </div>
-    </div>
-    <p class="muted rv" style="margin-top:20px;font-size:14px">Illustrative output. A section that cannot run on your machine reports NOT RUN with the command to reproduce it; no number is filled in. Two measured benchmarks are committed with signed manifests: the <a class="btn-link" href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/benchmarks/GOVERNANCE_FRONTIER_RESULTS.md">governance frontier</a> (72 of 72 unsafe instances prevented, 48 of 48 benign tasks completed) and <a class="btn-link" href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/benchmarks/HARNESS_OVERHEAD_RESULTS.md">governance overhead</a> (a median 14.69 ms per task, with no added model calls or tokens). Both are offline, deterministic runs with no model in the loop on one host, not third-party certification or a measure of task quality.</p>
-  </div>
-</section>
-
-<!-- DELIVERABLES -->
-<section>
-  <div class="wrap">
-    <div class="sec-head rv">
-      <span class="eyebrow"><span class="n">11</span> Deliverables</span>
-      <h2>Work lands where <b>a person signs off.</b></h2>
-      <p>A finished goal becomes the deliverable its pack declares, lands in the inbox of the role that uses it, and waits for a person to certify it before it goes anywhere.</p>
-    </div>
-    <div class="gate rv">
-      <div class="stage"><div class="n">01</div><div class="t">Render</div><div class="d">The result renders as the deliverable the pack declares.</div></div>
-      <div class="stage"><div class="n">02</div><div class="t">Route</div><div class="d">It lands in the inbox of the role that uses it.</div></div>
-      <div class="stage human"><div class="n">03</div><div class="t">Certify</div><div class="d">A person approves or rejects it, with a note.</div></div>
-      <div class="stage"><div class="n">04</div><div class="t">Deliver</div><div class="d">It is exported as CSV, or sent to a connected system after approval.</div></div>
-      <div class="stage final"><div class="n">05</div><div class="t">Record</div><div class="d">Who signed off, and when, is recorded.</div></div>
-    </div>
-  </div>
-</section>
-
-<!-- FINOPS -->
+<!-- LEARNING AND MEMORY -->
 <section class="panel">
   <div class="wrap">
     <div class="sec-head rv">
-      <span class="eyebrow"><span class="n">12</span> FinOps &amp; assurance</span>
-      <h2>Cost and safety <b>you can assert in CI.</b></h2>
-      <p>Machine-readable reports, so a pipeline can check spend and posture without opening a dashboard.</p>
+      <span class="eyebrow"><span class="n">06</span> Learning and memory</span>
+      <h2>It gets better <b>at your work.</b></h2>
+      <p>Lightwork keeps what it learns about your business, and you decide what it keeps.</p>
     </div>
     <div class="cols cols-3">
-      <div class="card rv"><span class="idx">spend</span><h3>Run cost, exported</h3><p><code>lightwork spend --json</code> prints total spend, the costliest goals and a per-tag split for chargeback and BI.</p></div>
-      <div class="card rv d1"><span class="idx">safety</span><h3>Posture, asserted</h3><p><code>lightwork safety --json</code> prints the shield status, sandbox backend and egress policy, and <code>lightwork airgap</code> exits non-zero on any outbound path in the configuration.</p></div>
-      <div class="card rv d2"><span class="idx">chargeback</span><h3>Charges, itemized</h3><p>If you run Lightwork for several teams, the billing view shows each workspace's accrued charges, a period-over-period trend and an itemized CSV.</p></div>
+      <div class="card rv"><span class="idx">Skills</span><h3>Learns from what worked</h3><p>Successful runs become proposed skills. A person reviews and admits each one before it is used again. You can also write skills in plain English.</p></div>
+      <div class="card rv d1"><span class="idx">Overnight</span><h3>Consolidates while idle</h3><p>When the agents are idle, Lightwork replays recent wins and misses and distills the recurring ones into proposed skills for each department.</p></div>
+      <div class="card rv d2"><span class="idx">Cortex</span><h3>One company memory</h3><p>One search across your documents, the skills learned on your work, past decisions and the Operating Record. <a class="btn-link" href="cortex.html">Inside Cortex &rarr;</a></p></div>
     </div>
   </div>
 </section>
 
-<!-- DEPLOY -->
+<!-- PROOF OF WORK -->
 <section>
   <div class="wrap">
     <div class="sec-head rv">
-      <span class="eyebrow"><span class="n">13</span> Deploy</span>
-      <h2>On your hardware, <b>or off the network.</b></h2>
-      <p>Self-hosted or air-gapped, with the same gates, the same record, and your own keys.</p>
+      <span class="eyebrow"><span class="n">07</span> See how it got there</span>
+      <h2>Every task, <b>replayable.</b></h2>
+      <p>You never have to take an answer on faith. Open any task and see exactly how it was produced.</p>
     </div>
-    <dl class="spec rv">
-      <dt>Where it runs</dt>
-      <dd><b>Self-hosted or air-gapped.</b> Your laptop, your servers, your cloud account, or a fully offline network with local models.</dd>
-      <dt>Packages</dt>
-      <dd><b>Eight Python packages</b>, installed together from source. No release, PyPI package or container image is published yet.</dd>
-      <dt>Runs on</dt>
-      <dd>Linux, macOS or Windows; Docker, Kubernetes (Helm chart) or a single VPS, with reference deployments in the repository.</dd>
-      <dt>Surfaces</dt>
-      <dd>CLI &middot; web dashboard and REST API &middot; MCP server &middot; GitHub Action &middot; TypeScript plugin SDK &middot; messaging channels.</dd>
-    </dl>
+    <div class="cols cols-4">
+      <div class="card rv"><span class="idx">Replay</span><h3>Step through any task</h3><p>Every plan, tool call and result, in order, in plain words.</p></div>
+      <div class="card rv d1"><span class="idx">Branches</span><h3>Compare the paths</h3><p>Branch a run at a decision and read the alternatives side by side.</p></div>
+      <div class="card rv d2"><span class="idx">Walkthroughs</span><h3>Turn it into a video</h3><p>Render a task as a captioned video walkthrough, or export it as a tutorial.</p></div>
+      <div class="card rv d3"><span class="idx">Explain</span><h3>Ask what happened</h3><p>A plain-language account of what the agents did and why, for anyone who wasn't watching.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- DOCUMENTS AND RESEARCH -->
+<section class="panel">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">08</span> Documents, data and research</span>
+      <h2>The real files <b>your work runs on.</b></h2>
+    </div>
+    <div class="cols cols-3">
+      <div class="card rv"><span class="idx">Spreadsheets</span><h3>Formulas, not just values</h3><p>Reads and edits spreadsheets with their formulas intact, converts Office files, and reads scanned PDFs with optional OCR.</p></div>
+      <div class="card rv d1"><span class="idx">Research</span><h3>Grounded in sources</h3><p>Web research and public primary-source data, cited, so an answer points at where each fact came from.</p></div>
+      <div class="card rv d2"><span class="idx">Code</span><h3>Runs code safely</h3><p>Writes and runs code in the sandbox you choose, from Docker and Podman to Kubernetes, gVisor, SSH or Modal.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- MODELS AND INTERFACES -->
+<section>
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">09</span> Any model, every interface</span>
+      <h2>Your models. <b>Your tools. Your way in.</b></h2>
+    </div>
+    <div class="cols cols-2">
+      <div class="card rv"><span class="idx">Models</span><h3>Fifteen providers, one per role if you like</h3><p>Anthropic, OpenAI, Azure, Bedrock, Vertex, Gemini, DeepSeek, xAI, Moonshot, OpenRouter, Ollama, TGI, vLLM, any OpenAI-compatible server and the Codex CLI. Choose a model for each role; Settings lists the models your keys can actually reach.</p></div>
+      <div class="card rv d1"><span class="idx">Interfaces</span><h3>Wherever you work</h3><p>The web dashboard with a built-in Copilot panel, the command line and an interactive chat, VS Code, Zed, Neovim and Emacs, a JetBrains plugin (preview), a Windows desktop package (in release testing), an MCP server, a REST API, and a GitHub Action that runs a goal under a hard spending cap.</p></div>
+    </div>
+    <figure class="shot-wrap rv" style="margin-top:36px">
+      <div class="shot"><img src="shots/overview.jpg" alt="The Overview page of the Lightwork dashboard showing total tasks, tasks delivered and blocked, a momentum chart and where tasks stand." width="1600" height="1111" loading="lazy"></div>
+      <figcaption class="art-cap"><b>Overview</b> &middot; the Lightwork dashboard, running locally with synthetic sample data.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- CONTROL -->
+<section class="panel">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">10</span> And it stays in your control</span>
+      <h2>Fast, <b>with the brakes built in.</b></h2>
+      <p>Every action passes the same five checks before it runs, and lands in a signed record you can verify offline. You run it on your own infrastructure, with your own keys.</p>
+    </div>
+    <div class="gate rv">
+      <div class="stage"><div class="n">01</div><div class="t">Capability</div><div class="d">A sub-agent never gets more access than its parent.</div></div>
+      <div class="stage"><div class="n">02</div><div class="t">Policy</div><div class="d">Allow, deny, or wait for a person.</div></div>
+      <div class="stage"><div class="n">03</div><div class="t">Shield</div><div class="d">Screens for injection and dangerous actions.</div></div>
+      <div class="stage"><div class="n">04</div><div class="t">Budget</div><div class="d">Hard caps on dollars, time, tokens and tool calls.</div></div>
+      <div class="stage"><div class="n">05</div><div class="t">Record</div><div class="d">Signed and hash-chained.</div></div>
+    </div>
+    <p class="muted rv" style="margin-top:26px;font-size:16px"><a class="btn-link" href="security.html">How each control works, and where it stops &rarr;</a></p>
   </div>
 </section>
 
@@ -362,8 +259,8 @@
   <div class="wrap rv">
     <div class="dline" role="presentation"></div>
     <span class="eyebrow">Get started</span>
-    <h2>Run it yourself. <b>Read every line of it.</b></h2>
-    <p class="lede">Lightwork is open source under the Apache License 2.0. Install it from source and run it on your own machine, your own servers or an air-gapped network.</p>
+    <h2>Give it your first goal <b>today.</b></h2>
+    <p class="lede">Lightwork is open source under the Apache License 2.0. Install it from source, open the dashboard, connect a model and type what you need.</p>
     <div class="hero-cta">
       <a class="btn btn-primary" href="https://github.com/Daybreak-AI-Labs/Lightwork">View on GitHub</a>
       <a class="btn btn-ghost" href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/source-install.md">Install from source</a>
@@ -383,12 +280,12 @@
       <div>
         <h4>Lightwork</h4>
         <ul>
+          <li><a href="autonomous-shoring.html">Autonomous Shoring</a></li>
           <li><a href="product.html">Platform</a></li>
+          <li><a href="packs.html">Specialists</a></li>
           <li><a href="cortex.html">Cortex</a></li>
-          <li><a href="packs.html">Specialist packs</a></li>
           <li><a href="fleet-governance.html">Fleet governance</a></li>
           <li><a href="autonomous-compliance.html">Autonomous Compliance</a></li>
-          <li><a href="autonomous-shoring.html">Autonomous Shoring</a></li>
         </ul>
       </div>
       <div>

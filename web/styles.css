@@ -319,3 +319,16 @@ html.modal-open{overflow:hidden}
   .hero.inner h1{font-size:40px}
   .hud b{font-size:34px}
 }
+
+/* Product screenshots and journey (capabilities-first revision) */
+.shot-wrap{margin:56px 0 0}
+.shot{border:1px solid var(--line-2);border-radius:16px;overflow:hidden;background:var(--panel);box-shadow:0 40px 120px -60px rgba(139,92,246,.55)}
+.shot .bar{display:flex;align-items:center;gap:7px;padding:11px 14px;border-bottom:1px solid var(--line);background:var(--bg-2)}
+.shot .bar i{width:10px;height:10px;border-radius:50%;background:var(--line-2);display:block}
+.shot .bar span{margin-left:10px;font-family:var(--mono);font-size:12px;color:var(--muted)}
+.shot img{display:block;width:100%;height:auto}
+.gate.four{grid-template-columns:repeat(4,1fr)}
+.chips{display:flex;flex-wrap:wrap;gap:10px;margin-top:28px}
+.chips span{font-family:var(--mono);font-size:12.5px;letter-spacing:.04em;color:var(--text-2);border:1px solid var(--line-2);border-radius:999px;padding:7px 13px;background:var(--panel)}
+@media (max-width:1000px){.gate.four{grid-template-columns:repeat(2,1fr)}}
+@media (max-width:600px){.gate.four{grid-template-columns:1fr}}

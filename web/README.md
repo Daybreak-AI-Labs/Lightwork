@@ -12,23 +12,26 @@ on a Lightwork dashboard's own origin; see [`widget/README.md`](widget/README.md
 
 | File | What it is |
 | --- | --- |
-| `index.html` | Home: the problem, how the runtime works, Cortex, open source, the six ways to use it, proof, security, who it's for, benchmarks, and the source install |
-| `product.html` | Lightwork Platform: how the governed runtime works |
+| `index.html` | Home: Autonomous Shoring first, then what the platform does, specialists, the live dashboard, Cortex, models and interfaces, a short control section, open source and the source install |
+| `product.html` | Platform tour: goal to answer, chat, Agent Factory, workflows, connections and channels, learning, proof of work, models and interfaces |
 | `cortex.html` | Cortex, the governed company memory |
-| `packs.html` | Specialist packs, and drafting a new pack for review |
+| `packs.html` | Specialists: the built-in specialist packs, and drafting a new one for review |
 | `fleet-governance.html` | Governing and remembering for agents you didn't build |
 | `autonomous-compliance.html` | Privacy, GRC, third-party and AI-governance work run by governed agents |
-| `autonomous-shoring.html` | The tooling for moving a whole business function onto governed agents |
+| `autonomous-shoring.html` | The flagship page: moving a whole business function onto AI agents, with dashboard screenshots |
 | `security.html` | Controls, where each one stops, deployment, audit evidence, vulnerability reporting |
 | `company.html` | The lab, the thesis, why open source, contact |
 | `privacy.html`, `terms.html` | Website privacy and terms of use |
 | `404.html` | Not found |
 | `_redirects` | Cloudflare Pages redirects for retired pages (`/second-shift`, `/daybreak-forge`, `/onepager`) |
 | `sitemap.xml`, `robots.txt` | Search engines |
-| `styles.css`, `lab.js`, `fonts/`, `*.png` | Design system, the two canvas figures, self-hosted fonts, brand assets |
+| `shots/` | Dashboard screenshots taken with synthetic sample data; captions on the pages say so |
+| `styles.css`, `lab.js`, `fonts/`, `*.png` | Design system, the two canvas figures and the scroll reveal, self-hosted fonts, brand assets |
 
 ## Copy rules
 
+- Lead with what Lightwork does, with Autonomous Shoring first; governance is a
+  supporting section, and the security page carries the detail.
 - Lightwork is open source under the Apache License 2.0, and nothing on the
   site is for sale: calls to action point at the repository, the source
   install, the documentation and GitHub Discussions.
