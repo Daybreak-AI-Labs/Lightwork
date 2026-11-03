@@ -103,18 +103,35 @@
 <!-- CHAT -->
 <section class="panel">
   <div class="wrap">
-    <div class="sec-head rv">
-      <span class="eyebrow"><span class="n">02</span> Chat that does the work</span>
-      <h2>A conversation <b>that ends in a deliverable.</b></h2>
-      <p>The chat looks like the chat apps you already use. The difference is what happens after you press Enter.</p>
-    </div>
-    <div class="cols cols-3">
-      <div class="card rv"><span class="idx">Threads</span><h3>It remembers the conversation</h3><p>Every follow-up runs inside the same thread, so the agents see what was already asked and answered. Answers come back as formatted text with tables, lists and links.</p></div>
-      <div class="card rv d1"><span class="idx">While it works</span><h3>Talk to it mid-task</h3><p>Add guidance the running task picks up at its next safe point, queue the next request, or start a separate task, without stopping the work in progress.</p></div>
-      <div class="card rv d2"><span class="idx">Inputs</span><h3>Attach, dictate, listen</h3><p>Drop in files, dictate instead of typing, and have an answer read aloud. Copy it, edit it, or stop the run at any time.</p></div>
-      <div class="card rv"><span class="idx">Results</span><h3>An inbox of finished work</h3><p>Each team's results arrive as the deliverable its role produces. Sign them off, export them, or send them on to your system of record.</p></div>
-      <div class="card rv d1"><span class="idx">Control</span><h3>Pick how independently it runs</h3><p>Director mode turns one choice (supervised, semi-autonomous or autonomous) into the right checkpoints and limits for a whole run.</p></div>
-      <div class="card rv d2"><span class="idx">Recovery</span><h3>Failures that explain themselves</h3><p>When a run fails, Lightwork names what went wrong (a spending limit, a missing key, a timeout) and gives you the steps to fix it.</p></div>
+    <div class="split" style="margin-top:0;align-items:center">
+      <div class="rv">
+        <span class="eyebrow"><span class="n">02</span> Chat that does the work</span>
+        <h2 class="sm" style="margin-top:18px">A conversation <b>that ends in a deliverable.</b></h2>
+        <p style="font-size:19px;color:var(--muted)">It looks like the chat apps you already use. The difference is what happens after you press Enter.</p>
+        <dl class="spec" style="grid-template-columns:140px 1fr">
+          <dt>Threads</dt><dd>Follow-ups run in the same thread, so the agents see what was already asked and answered.</dd>
+          <dt>While it works</dt><dd>Add guidance the running task picks up at its next safe point, or queue the next request.</dd>
+          <dt>Inputs</dt><dd>Attach files, dictate instead of typing, have an answer read aloud.</dd>
+          <dt>Results</dt><dd>Finished work lands in an inbox to sign off, export, or send on to your system of record.</dd>
+          <dt>Recovery</dt><dd>When a run fails, Lightwork names what went wrong and gives you the steps to fix it.</dd>
+        </dl>
+      </div>
+      <figure class="rv d1" style="margin:0">
+        <div class="instrument chatbox glow">
+          <div class="bar"><span class="chip">chat</span><span>one thread</span></div>
+          <div class="msgs">
+            <div class="msg me">Reconcile March vendor invoices against the purchase orders and draft a one-page summary for Dana.</div>
+            <div class="msg ai"><span class="who">&#9679; done &middot; 4 specialists</span><span class="ttl">March vendor reconciliation</span>
+              <div class="kv"><span>Invoices matched</span><span>412 of 431</span></div>
+              <div class="kv"><span>Need a person</span><span class="warn">19 mismatches</span></div>
+              <div class="kv"><span>Summary for Dana</span><span>1 page, drafted</span></div>
+              <div class="acts"><span>Copy</span><span>Read aloud</span><span>Edit</span></div></div>
+            <div class="msg me">Hold the three largest mismatches for me and draft notes to the other vendors.</div>
+          </div>
+          <div class="typing">working &middot; 2 specialists on it</div>
+        </div>
+        <figcaption class="art-cap"><b>Fig. 02</b> &middot; One thread in the chat. Illustrative.</figcaption>
+      </figure>
     </div>
   </div>
 </section>
@@ -131,8 +148,8 @@
         <p style="margin-top:22px"><a class="btn btn-ghost" href="packs.html">See the specialists</a></p>
       </div>
       <figure class="shot-wrap rv d1">
-        <div class="shot"><img src="shots/agent-factory.jpg" alt="The Agent Factory page in the Lightwork dashboard, with options to build a custom agent, hire from a job description and set up an agent for your business." width="1400" height="1090" loading="lazy"></div>
-        <figcaption class="art-cap"><b>Agent Factory</b> &middot; the Lightwork dashboard, running locally with synthetic sample data.</figcaption>
+        <div class="shot"><div class="bar"><i></i><i></i><i></i><span>localhost &middot; /agents</span></div><img src="shots/agent-factory.jpg" alt="The Agent Factory page in the Lightwork dashboard, with options to build a custom agent, hire from a job description and set up an agent for your business." width="1400" height="1090" loading="lazy"></div>
+        <figcaption class="art-cap"><b>Fig. 03</b> &middot; Agent Factory in the dashboard, captured from a local install with synthetic sample data.</figcaption>
       </figure>
     </div>
   </div>
@@ -141,16 +158,35 @@
 <!-- WORKFLOWS -->
 <section class="panel">
   <div class="wrap">
-    <div class="sec-head rv">
-      <span class="eyebrow"><span class="n">04</span> Workflows and automations</span>
-      <h2>Turn a process <b>into something that runs itself.</b></h2>
-      <p>For work that happens the same way every time, build a workflow once and let it start on its own. Schedules are built in; the workflow engine is optional and starts switched off.</p>
-    </div>
-    <div class="cols cols-4">
-      <div class="card rv"><span class="idx">Design</span><h3>A visual designer</h3><p>Agent steps, fixed actions, branches, loops, parallel steps, approvals and delays on one canvas. Or describe the process, or upload a document, and get a draft to edit.</p></div>
-      <div class="card rv d1"><span class="idx">Trigger</span><h3>Starts on its own</h3><p>On a schedule, from a webhook, an RSS feed, an email inbox, a GitHub issue or a hosted form.</p></div>
-      <div class="card rv d2"><span class="idx">Import</span><h3>Bring what you have</h3><p>Import existing automations from n8n, Make, Workato, UiPath and Power Automate, and review them before they run.</p></div>
-      <div class="card rv d3"><span class="idx">Schedule</span><h3>Recurring goals</h3><p><code>lightwork schedule</code> runs any goal on a cron schedule, and a background worker picks it up, no workflow engine required.</p></div>
+    <div class="split" style="margin-top:0;align-items:center">
+      <figure class="rv" style="margin:0">
+        <div class="instrument flow glow">
+          <div class="bar"><span class="chip">workflow &middot; invoice intake</span><span>runs on its own</span></div>
+          <div class="fl">
+            <div class="node trig"><span class="k">Trigger &middot; email</span>An invoice arrives in the AP inbox</div>
+            <div class="edge"></div>
+            <div class="node"><span class="k">Agent step</span>Read the invoice and pull the line items</div>
+            <div class="edge"></div>
+            <div class="node"><span class="k">Fixed action</span>Match it against the purchase order</div>
+            <div class="branch">
+              <div class="node ok"><span class="k">Matches</span>Post it to the ledger</div>
+              <div class="node human"><span class="k">Mismatch</span>Ask a person</div>
+            </div>
+          </div>
+        </div>
+        <figcaption class="art-cap"><b>Fig. 04</b> &middot; A workflow as the designer lays it out. Illustrative.</figcaption>
+      </figure>
+      <div class="rv d1">
+        <span class="eyebrow"><span class="n">04</span> Workflows and automations</span>
+        <h2 class="sm" style="margin-top:18px">Turn a process <b>into something that runs itself.</b></h2>
+        <p style="font-size:19px;color:var(--muted)">For work that happens the same way every time, build it once and let it start on its own. The workflow engine is optional and starts switched off; schedules are built in.</p>
+        <dl class="spec" style="grid-template-columns:120px 1fr">
+          <dt>Design</dt><dd>Agent steps, fixed actions, branches, loops, parallel steps, approvals and delays on one canvas, or describe the process and get a draft.</dd>
+          <dt>Trigger</dt><dd>A schedule, a webhook, an RSS feed, an email inbox, a GitHub issue or a hosted form.</dd>
+          <dt>Import</dt><dd>Bring automations from n8n, Make, Workato, UiPath and Power Automate, and review them before they run.</dd>
+          <dt>Schedule</dt><dd><code>lightwork schedule</code> runs any goal on a cron schedule, no workflow engine required.</dd>
+        </dl>
+      </div>
     </div>
   </div>
 </section>
@@ -161,58 +197,31 @@
     <div class="sec-head rv">
       <span class="eyebrow"><span class="n">05</span> Connections and channels</span>
       <h2>Works with your systems. <b>Shows up where your team talks.</b></h2>
+      <p>Connect the systems you run on, and message Lightwork like a colleague. A change to an outside system is shown in full and sent only after a person approves it.</p>
     </div>
-    <div class="cols cols-2">
-      <div class="card rv"><span class="idx">Your tools</span><h3>Connect the systems you run on</h3><p>A registry of write-capable REST and GraphQL connectors, dedicated modules for common business systems, and any Model Context Protocol server as a tool. Agents can also draw on public primary sources such as SEC EDGAR, FRED and openFDA. A change to an outside system is shown in full and sent only after a person approves it.</p></div>
-      <div class="card rv d1"><span class="idx">Your channels</span><h3>Message it like a colleague</h3><p>Slack, Microsoft Teams, email, WhatsApp, SMS, Telegram, Discord, Signal, Mattermost, Matrix, IRC, RCS, Bluesky, Mastodon, Threads, iMessage on macOS, and voice. Hand a conversation to a person when it needs one.</p></div>
+    <div class="rows rv">
+      <div class="r"><span class="k">Systems</span><div class="chips"><span>REST and GraphQL connector registry</span><span>Any MCP tool server</span><span>Salesforce</span><span>ServiceNow</span><span>Workday</span><span>SAP</span><span>Jira</span><span>Slack</span></div></div>
+      <div class="r"><span class="k">Public sources</span><div class="chips"><span>SEC EDGAR</span><span>FRED</span><span>openFDA</span><span>Web research, cited</span></div></div>
+      <div class="r"><span class="k">Channels</span><div class="chips"><span>Slack</span><span>Microsoft Teams</span><span>Email</span><span>WhatsApp</span><span>SMS</span><span>Telegram</span><span>Discord</span><span>Signal</span><span>Mattermost</span><span>Matrix</span><span>IRC</span><span>RCS</span><span>Bluesky</span><span>Mastodon</span><span>Threads</span><span>iMessage</span><span>Voice</span></div></div>
     </div>
   </div>
 </section>
 
-<!-- LEARNING AND MEMORY -->
+<!-- LEARNING, PROOF, FILES -->
 <section class="panel">
   <div class="wrap">
     <div class="sec-head rv">
-      <span class="eyebrow"><span class="n">06</span> Learning and memory</span>
-      <h2>It gets better <b>at your work.</b></h2>
-      <p>Lightwork keeps what it learns about your business, and you decide what it keeps.</p>
+      <span class="eyebrow"><span class="n">06</span> Learning and proof of work</span>
+      <h2>It gets better at your work, <b>and shows how it did it.</b></h2>
+      <p>Lightwork keeps what it learns about your business, you decide what it keeps, and you never have to take an answer on faith.</p>
     </div>
-    <div class="cols cols-3">
-      <div class="card rv"><span class="idx">Skills</span><h3>Learns from what worked</h3><p>Successful runs become proposed skills. A person reviews and admits each one before it is used again. You can also write skills in plain English.</p></div>
-      <div class="card rv d1"><span class="idx">Overnight</span><h3>Consolidates while idle</h3><p>When the agents are idle, Lightwork replays recent wins and misses and distills the recurring ones into proposed skills for each department.</p></div>
-      <div class="card rv d2"><span class="idx">Cortex</span><h3>One company memory</h3><p>One search across your documents, the skills learned on your work, past decisions and the Operating Record. <a class="btn-link" href="cortex.html">Inside Cortex &rarr;</a></p></div>
-    </div>
-  </div>
-</section>
-
-<!-- PROOF OF WORK -->
-<section>
-  <div class="wrap">
-    <div class="sec-head rv">
-      <span class="eyebrow"><span class="n">07</span> See how it got there</span>
-      <h2>Every task, <b>replayable.</b></h2>
-      <p>You never have to take an answer on faith. Open any task and see exactly how it was produced.</p>
-    </div>
-    <div class="cols cols-4">
-      <div class="card rv"><span class="idx">Replay</span><h3>Step through any task</h3><p>Every plan, tool call and result, in order, in plain words.</p></div>
-      <div class="card rv d1"><span class="idx">Branches</span><h3>Compare the paths</h3><p>Branch a run at a decision and read the alternatives side by side.</p></div>
-      <div class="card rv d2"><span class="idx">Walkthroughs</span><h3>Turn it into a video</h3><p>Render a task as a captioned video walkthrough, or export it as a tutorial.</p></div>
-      <div class="card rv d3"><span class="idx">Explain</span><h3>Ask what happened</h3><p>A plain-language account of what the agents did and why, for anyone who wasn't watching.</p></div>
-    </div>
-  </div>
-</section>
-
-<!-- DOCUMENTS AND RESEARCH -->
-<section class="panel">
-  <div class="wrap">
-    <div class="sec-head rv">
-      <span class="eyebrow"><span class="n">08</span> Documents, data and research</span>
-      <h2>The real files <b>your work runs on.</b></h2>
-    </div>
-    <div class="cols cols-3">
-      <div class="card rv"><span class="idx">Spreadsheets</span><h3>Formulas, not just values</h3><p>Reads and edits spreadsheets with their formulas intact, converts Office files, and reads scanned PDFs with optional OCR.</p></div>
-      <div class="card rv d1"><span class="idx">Research</span><h3>Grounded in sources</h3><p>Web research and public primary-source data, cited, so an answer points at where each fact came from.</p></div>
-      <div class="card rv d2"><span class="idx">Code</span><h3>Runs code safely</h3><p>Writes and runs code in the sandbox you choose, from Docker and Podman to Kubernetes, gVisor, SSH or Modal.</p></div>
+    <div class="caps rv">
+      <div class="cap-i"><span class="k">Skills</span><div><h3>Learns from what worked</h3><p>Successful runs become proposed skills. A person reviews and admits each one before it is used again, and you can write skills in plain English.</p></div></div>
+      <div class="cap-i"><span class="k">Overnight</span><div><h3>Consolidates while idle</h3><p>When the agents are idle, Lightwork replays recent wins and misses and distills the recurring ones into proposed skills.</p></div></div>
+      <div class="cap-i"><span class="k">Cortex</span><div><h3>One company memory</h3><p>One search across your documents, learned skills, past decisions and the Operating Record. <a class="btn-link" href="cortex.html">Inside Cortex</a></p></div></div>
+      <div class="cap-i"><span class="k">Replay</span><div><h3>Step through any task</h3><p>Every plan, tool call and result, in order and in plain words. Branch a run at a decision and compare the paths side by side.</p></div></div>
+      <div class="cap-i"><span class="k">Walkthroughs</span><div><h3>Turn a run into a video</h3><p>Render a task as a captioned walkthrough or export it as a tutorial, and get a plain-language account of what happened.</p></div></div>
+      <div class="cap-i"><span class="k">Files and code</span><div><h3>Works on the real files</h3><p>Spreadsheets with their formulas intact, Office conversion, scanned PDFs with optional OCR, and code run in the sandbox you choose.</p></div></div>
     </div>
   </div>
 </section>
@@ -221,16 +230,17 @@
 <section>
   <div class="wrap">
     <div class="sec-head rv">
-      <span class="eyebrow"><span class="n">09</span> Any model, every interface</span>
-      <h2>Your models. <b>Your tools. Your way in.</b></h2>
+      <span class="eyebrow"><span class="n">07</span> Any model, every interface</span>
+      <h2>Your models. Your tools. <b>Your way in.</b></h2>
+      <p>Choose a model for each role; Settings lists the models your keys can actually reach.</p>
     </div>
-    <div class="cols cols-2">
-      <div class="card rv"><span class="idx">Models</span><h3>Fifteen providers, one per role if you like</h3><p>Anthropic, OpenAI, Azure, Bedrock, Vertex, Gemini, DeepSeek, xAI, Moonshot, OpenRouter, Ollama, TGI, vLLM, any OpenAI-compatible server and the Codex CLI. Choose a model for each role; Settings lists the models your keys can actually reach.</p></div>
-      <div class="card rv d1"><span class="idx">Interfaces</span><h3>Wherever you work</h3><p>The web dashboard with a built-in Copilot panel, the command line and an interactive chat, VS Code, Zed, Neovim and Emacs, a JetBrains plugin (preview), a Windows desktop package (in release testing), an MCP server, a REST API, and a GitHub Action that runs a goal under a hard spending cap.</p></div>
+    <div class="rows rv">
+      <div class="r"><span class="k">Models</span><div class="chips"><span>Anthropic</span><span>OpenAI</span><span>Azure</span><span>Bedrock</span><span>Vertex</span><span>Gemini</span><span>DeepSeek</span><span>xAI</span><span>Moonshot</span><span>OpenRouter</span><span>Ollama</span><span>TGI</span><span>vLLM</span><span>Any OpenAI-compatible server</span><span>Codex CLI</span></div></div>
+      <div class="r"><span class="k">Interfaces</span><div class="chips"><span>Dashboard + Copilot</span><span>Command line and chat</span><span>VS Code</span><span>Zed</span><span>Neovim</span><span>Emacs</span><span>JetBrains &middot; preview</span><span>Windows desktop &middot; in release testing</span><span>MCP server</span><span>REST API</span><span>GitHub Action</span></div></div>
     </div>
-    <figure class="shot-wrap rv" style="margin-top:36px">
-      <div class="shot"><img src="shots/overview.jpg" alt="The Overview page of the Lightwork dashboard showing total tasks, tasks delivered and blocked, a momentum chart and where tasks stand." width="1400" height="1166" loading="lazy"></div>
-      <figcaption class="art-cap"><b>Overview</b> &middot; the Lightwork dashboard, running locally with synthetic sample data.</figcaption>
+    <figure class="shot-wrap rv">
+      <div class="shot"><div class="bar"><i></i><i></i><i></i><span>localhost &middot; /overview</span></div><img src="shots/overview.jpg" alt="The Overview page: tasks on record, active now, delivered and blocked counts, a momentum chart and a donut of where tasks stand." width="1400" height="1166" loading="lazy"></div>
+      <figcaption class="art-cap"><b>Fig. 05</b> &middot; The dashboard's Overview page, captured from a local install with synthetic sample data.</figcaption>
     </figure>
   </div>
 </section>
@@ -239,7 +249,7 @@
 <section class="panel">
   <div class="wrap">
     <div class="sec-head rv">
-      <span class="eyebrow"><span class="n">10</span> And it stays in your control</span>
+      <span class="eyebrow"><span class="n">08</span> And it stays in your control</span>
       <h2>Fast, <b>with the brakes built in.</b></h2>
       <p>Every action passes the same five checks before it runs, and lands in a signed record you can verify offline. You run it on your own infrastructure, with your own keys.</p>
     </div>
