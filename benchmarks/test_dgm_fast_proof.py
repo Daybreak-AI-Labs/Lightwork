@@ -22,19 +22,22 @@ def _govern(patch, tasks, solver_dir, keys, ledger, workroot):
         workroot=workroot, held_out_frac=0.5, timeout=60, score_fn=proof._score_fn)
 
 
-def _setup(tmp_path):
+def _setup(tmp_path, monkeypatch, *, trusted=True):
     from maverick.self_improvement import PromotionLedger
     tasks = proof.build_corpus()
     solver_dir = tmp_path / "solver"
     solver_dir.mkdir()
     (solver_dir / "solver.py").write_text(proof._BASELINE)
     keys = proof._make_keys(tmp_path)
+    # Simulate an operator whose public key was trusted at process startup.
+    monkeypatch.setattr("maverick._STARTUP_APPROVER_KEYS",
+                        (keys / "operator.pub").read_bytes().hex() if trusted else "")
     ledger = PromotionLedger(path=tmp_path / "ledger.json")
     return tasks, solver_dir, keys, ledger
 
 
-def test_real_generalising_change_is_promoted(tmp_path):
-    tasks, solver_dir, keys, ledger = _setup(tmp_path)
+def test_real_generalising_change_is_promoted(tmp_path, monkeypatch):
+    tasks, solver_dir, keys, ledger = _setup(tmp_path, monkeypatch)
     res = _govern(proof._diff(proof._BASELINE, proof._CAND_REAL),
                   tasks, solver_dir, keys, ledger, tmp_path / "g")
     assert res.boundary_ok
@@ -45,8 +48,8 @@ def test_real_generalising_change_is_promoted(tmp_path):
     assert res.promoted, res.reason
 
 
-def test_memorising_change_is_caught_by_overfit_guard(tmp_path):
-    tasks, solver_dir, keys, ledger = _setup(tmp_path)
+def test_memorising_change_is_caught_by_overfit_guard(tmp_path, monkeypatch):
+    tasks, solver_dir, keys, ledger = _setup(tmp_path, monkeypatch)
     held_in, _ = dgm_uplift.split_instances(tasks, held_out_frac=0.5)
     golds = {t.spec: t.gold for t in tasks}
     held_in_mul = [t.spec for t in held_in if t.spec.split()[1] == "*"]
@@ -58,8 +61,8 @@ def test_memorising_change_is_caught_by_overfit_guard(tmp_path):
     assert not res.promoted
 
 
-def test_noop_change_is_refused(tmp_path):
-    tasks, solver_dir, keys, ledger = _setup(tmp_path)
+def test_noop_change_is_refused(tmp_path, monkeypatch):
+    tasks, solver_dir, keys, ledger = _setup(tmp_path, monkeypatch)
     res = _govern(proof._diff(proof._BASELINE, proof._CAND_NOOP),
                   tasks, solver_dir, keys, ledger, tmp_path / "g")
     assert res.uplift == 0
@@ -67,7 +70,32 @@ def test_noop_change_is_refused(tmp_path):
     assert not res.promoted
 
 
-def test_full_driver_runs_and_audits_clean(tmp_path):
+def test_full_driver_runs_and_audits_clean(tmp_path, monkeypatch):
     # The end-to-end driver returns 0 only when all three verdicts are correct
     # AND the independent ledger audit re-verifies every signature.
+    make_keys = proof._make_keys
+
+    def make_and_trust_test_keys(path):
+        keys = make_keys(path)
+        monkeypatch.setattr("maverick._STARTUP_APPROVER_KEYS",
+                            (keys / "operator.pub").read_bytes().hex())
+        return keys
+
+    monkeypatch.setattr(proof, "_make_keys", make_and_trust_test_keys)
     assert proof.main([]) == 0
+
+
+def test_generated_signer_is_not_trusted_automatically(tmp_path, monkeypatch):
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    tasks, solver_dir, keys, ledger = _setup(tmp_path, monkeypatch, trusted=False)
+    unrelated = Ed25519PrivateKey.generate().public_key().public_bytes_raw().hex()
+    monkeypatch.setattr("maverick._STARTUP_APPROVER_KEYS", unrelated)
+    res = _govern(proof._diff(proof._BASELINE, proof._CAND_REAL),
+                  tasks, solver_dir, keys, ledger, tmp_path / "g")
+    assert res.boundary_ok and not res.overfit
+    assert res.uplift > 0 and res.samples >= 10
+    assert not res.promoted
+    assert "signature" in res.reason.lower()
+    assert ledger.all() == []
+    assert (solver_dir / "solver.py").read_text() == proof._BASELINE

@@ -108,7 +108,7 @@ def test_goal_batch_limits_queries_and_preserves_encryption(world, monkeypatch, 
 
 
 def test_shoring_completion_and_approval_context_are_tenant_scoped(world, monkeypatch):
-    from maverick.logging_config import reset_goal_context, set_goal_context
+    from maverick.logging_config import _goal_id_var, reset_goal_context, set_goal_context
     from maverick.paths import tenant_scope
     from maverick.world_model_backends import postgres
 
@@ -136,11 +136,18 @@ def test_shoring_completion_and_approval_context_are_tenant_scoped(world, monkey
             try:
                 approval = world.create_approval("payment", detail="support")
                 with tenant_scope(tenant=other):
+                    with pytest.raises(ValueError, match="approval goal is unavailable"):
+                        world.create_approval("finance_ap", scope="finance_ap")
+            finally:
+                reset_goal_context(tokens)
+            with tenant_scope(tenant=other):
+                no_goal = _goal_id_var.set(None)
+                try:
                     foreign = world.create_approval("finance_ap", scope="finance_ap")
                     assert world.get_approval(foreign).department == ""
                     assert world.shoring_measurements("finance_ap", since=0, until=clock[0])["delivered"] == 0
-            finally:
-                reset_goal_context(tokens)
+                finally:
+                    _goal_id_var.reset(no_goal)
             records = [world.get_approval(approval), *world.pending_approvals(), *world.list_approvals()]
             assert all(row.department == "finance_ap" and row.goal_id == goal for row in records)
     finally:

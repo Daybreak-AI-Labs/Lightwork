@@ -106,7 +106,10 @@ def _worker(sandbox, request, *, allow_local=False):
         job = DocumentJob.create(request)
         (stage / "engine.py").write_bytes(resources.files("maverick.sandbox").joinpath("document_engine.py").read_bytes())
         (stage / "request.json").write_text(json.dumps({**request, **job.manifest()}), encoding="utf-8")
-        yield stage, worker
+        from ..sandbox.workspace_guard import _document_stage_scope
+
+        with _document_stage_scope(stage):
+            yield stage, worker
 
 
 def _execute(stage, worker):

@@ -14,7 +14,7 @@ What it proves (the gate has teeth, and they are the real production teeth):
 
   * PROMOTED -- a candidate solver that genuinely generalises (learns to handle
     ``*``) lifts the HELD-OUT resolved-rate; the gate clears the real ``code``
-    rung (min_samples=10, capability evidence, human signature), signs it into
+    rung (min_samples=10, capability evidence, trusted signature), records it in
     the ledger, and an INDEPENDENT auditor re-verifies the signature.
   * OVERFIT -- a candidate that memorises the answers to the SEEN (held-in)
     tasks lifts held-in but not held-out; the overfit guard catches it and
@@ -24,7 +24,9 @@ What it proves (the gate has teeth, and they are the real production teeth):
 The task is arithmetic, but the governance is identical to the SWE-bench cycle:
 boundary review of the solver patch, isolated baseline/candidate evaluation on a
 deterministic held-in/held-out split, the overfit guard, the capability
-non-escalation proof, and a human-signed promotion to a verifiable ledger.
+non-escalation proof, and a signed promotion to a verifiable ledger. The
+generated signer is a simulation, not evidence of a human approval; its public
+key must already be a startup trust root for promotion to succeed.
 
     python benchmarks/dgm_fast_proof.py            # run all three, audit
     python benchmarks/dgm_fast_proof.py --keep     # keep the run dir + ledger
@@ -211,7 +213,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  corpus: {len(tasks)} tasks  (held-in {len(held_in)} / held-out {len(held_out)})")
     print(f"  multiply tasks the baseline fails: held-in {len(held_in_mul)}, "
           f"held-out {len(held_out_mul)}  (the real headroom)")
-    print("  gate: real 'code' rung (min_samples=10, capability evidence, human signature)")
+    print("  gate: real 'code' rung (min_samples=10, capability evidence, trusted signature)")
 
     solver_dir = tmp / "solver"
     solver_dir.mkdir()

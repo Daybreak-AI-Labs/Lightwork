@@ -198,15 +198,19 @@ def test_missing_native_calculation_result_does_not_change_original(tmp_path, mo
 
 def test_native_worker_receives_only_job_files_and_no_network(tmp_path, monkeypatch):
     from maverick.sandbox.docker import DockerBackend
+    from maverick.sandbox.workspace_guard import validate_container_workspace
     monkeypatch.setattr(DockerBackend, "_verify_docker", lambda self: None)
     (tmp_path / "unrelated-secret.txt").write_text("must stay outside")
     backend = DockerBackend(workdir=tmp_path, allow_network=True, reuse_container=True)
     with document_processing._worker(backend, {"operation": "ocr"}) as (stage, worker):
         assert worker.workdir == stage and worker.workdir != backend.workdir
         assert not worker.allow_network and not worker.reuse_container
+        validate_container_workspace(stage)
         assert set(p.name for p in stage.iterdir()) == {"engine.py", "request.json"}
         assert "unrelated-secret.txt" not in (stage / "request.json").read_text()
     assert not stage.exists()
+    with pytest.raises(ValueError, match="dedicated workspace"):
+        validate_container_workspace(stage)
 
 
 def test_native_processing_refuses_unsandboxed_host(tmp_path, monkeypatch):

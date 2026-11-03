@@ -22,9 +22,10 @@ chain passes:
      launder through the uplift metric.
   4. **Capability non-escalation** -- the solver patch is proven to grant no
      new authority (process/network/dynamic-code classes).
-  5. **Human-signed, reversible promotion** -- Ed25519 operator signature bound
+  5. **Signed, reversible promotion** -- Ed25519 operator signature bound
      to the exact patch; the previous solver version is archived for one-step
-     rollback; the promotion lands in the append-only ledger.
+     rollback; the promotion lands in the append-only ledger. This benchmark
+     reads a local private key and does not itself prove human authorization.
 
 The result is the auditable uplift curve: "solver v0 resolved X% held-out;
 the governed loop produced v1 resolving X+Δ% -- every step signed, reversible,
@@ -594,7 +595,7 @@ def govern_solver_change(
     except Exception:
         log.debug("capability_delta failed", exc_info=True)
 
-    # 6. Human-signed promotion through the governed gate -> ledger.
+    # 6. Locally signed promotion through the governed gate -> ledger.
     import os
     priv_path = Path(keys_dir) / "operator.priv.hex"
     if not priv_path.exists():

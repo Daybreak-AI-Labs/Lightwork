@@ -250,6 +250,9 @@ def create_pr_via_gh(
     draft: bool = True,
 ) -> str | None:
     """Refuse publication from an agent-controlled Git checkout."""
+    # Keep the public call signature for existing integrations while this
+    # unsafe publication path is disabled.
+    _ = (workdir, branch_name, issue_number, pr_title, pr_body, draft)
     raise RuntimeError("GitHub issue automation is unavailable until checkout isolation is implemented")
 
 

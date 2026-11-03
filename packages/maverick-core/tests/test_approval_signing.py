@@ -382,3 +382,69 @@ class TestGateIntegration:
         assert verdict.promote is False
         assert human.ok is False
         assert "policy is unavailable" in human.reason
+
+
+def test_startup_pinned_operator_can_sign_exact_promotion_in_new_process(tmp_path):
+    """A separately held test key authorizes only the exact recorded payload."""
+    import json
+    import subprocess
+    import sys
+
+    private, public = _keypair()
+    wrong_private, _ = _keypair()
+    candidate = _candidate(id="startup-signed-test")
+    request = ap.ApprovalRequest.for_candidate(candidate)
+    signature = ap.sign_request(request, private)
+    wrong_signature = ap.sign_request(request, wrong_private)
+    env = os.environ.copy()
+    env.update({
+        "MAVERICK_HOME": str(tmp_path),
+        "MAVERICK_CONFIG": str(tmp_path / "config.toml"),
+        "MAVERICK_APPROVER_KEYS": public,
+        "MAVERICK_SELF_IMPROVEMENT": "1",
+    })
+    env.pop("MAVERICK_APPROVER_KEYS_DIR", None)
+    script = '''
+import json
+import sys
+from pathlib import Path
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+from maverick import approval_signing as ap
+from maverick import self_improvement as si
+
+data = json.load(sys.stdin)
+base = dict(id="startup-signed-test", rung="code", summary="s", baseline_score=0.5,
+            candidate_score=0.9, samples=20, payload={"diff": "x"},
+            capability_widens=False, rollback="snap-1")
+ledger = si.PromotionLedger(path=Path(data["ledger"]))
+controller = si.SelfImprovementController(
+    ledger=ledger, frozen_fn=lambda: False, audit_fn=lambda **kw: None,
+    model_risk_verifier=lambda **kw: (True, ""))
+for change in ({"payload": {"diff": "changed"}, "approval_signature": data["signature"]},
+               {"approval_signature": data["wrong_signature"]}):
+    verdict = controller.promote(si.Candidate(**(base | change)))
+    assert not verdict.promote, verdict
+    assert not ledger.all()
+candidate = si.Candidate(**(base | {"approval_signature": data["signature"],
+                                  "payload_sha256": data["payload_sha256"]}))
+verdict = controller.promote(candidate)
+assert verdict.promote, verdict
+records = ledger.all()
+assert len(records) == 1
+record = records[0]
+request = ap.ApprovalRequest.for_candidate(candidate)
+assert record.id == candidate.id
+assert record.payload_sha256 == request.payload_sha256
+assert record.approval_signature == data["signature"]
+assert record.approver_id == ap.key_id(data["public"])
+Ed25519PublicKey.from_public_bytes(bytes.fromhex(data["public"])).verify(
+    bytes.fromhex(record.approval_signature), request.message())
+'''
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        input=json.dumps({"signature": signature, "wrong_signature": wrong_signature,
+                          "public": public, "payload_sha256": request.payload_sha256,
+                          "ledger": str(tmp_path / "ledger.json")}),
+        env=env, capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
