@@ -54,7 +54,7 @@ an RFC link to it.
 | --- | --- |
 | Draft | Open for discussion; the design may still change. |
 | Accepted | Approved for implementation. |
-| Implemented | Shipped; the RFC records the design as built. |
+| Implemented | Shipped; the design moves to [`docs/contracts/`](../contracts/README.md) as a contract document. |
 | Declined | Considered and not adopted. |
 | Closed | Not pursued for now; the RFC records why and when to reopen it. |
 | Superseded | Replaced by a later RFC, which the status line names. |
@@ -63,15 +63,7 @@ Each RFC states its status at the top of the file.
 
 ## Index
 
-| File | Title | Status |
-| --- | --- | --- |
-| [0001-maverick-2.0.md](0001-maverick-2.0.md) | Lightwork 2.0 | Draft |
-| [0002-plugin-api-v2.md](0002-plugin-api-v2.md) | Plugin API v2 | Implemented |
-| [0003-platform-contracts-v1.md](0003-platform-contracts-v1.md) | Platform contracts v1 | Implemented |
-| [0004-worker-authority-binding-v1.md](0004-worker-authority-binding-v1.md) | Worker authority binding v1 | Implemented |
-| [0005-restore-reference-validation-v1.md](0005-restore-reference-validation-v1.md) | Staged local restore reference validation | Implemented |
-| [0006-supplier-cancellation-v1.md](0006-supplier-cancellation-v1.md) | Supplier request cancellation | Implemented |
-| [0007-supported-supplier-journey-v1.md](0007-supported-supplier-journey-v1.md) | Supported supplier evidence journey, version 1 | Implemented |
-| [0008-plugin-api-v3.md](0008-plugin-api-v3.md) | Plugin API v3: not warranted (triggers recorded) | Closed |
+No RFC is open. Implemented designs are kept as
+[interface contracts](../contracts/README.md).
 
 A new RFC takes the next unused number.

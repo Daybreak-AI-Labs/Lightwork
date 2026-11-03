@@ -1,10 +1,10 @@
-# RFC 0006: Supplier request cancellation
+# Supplier request cancellation v1
 
-- Status: **Implemented** for the existing supplier evidence workflow
+- Applies to: the supplier evidence workflow
 - Scope: local cancellation intent, retained provider state, customer API and controls
 - Supported deployment: single persistent application replica
 
-## Decision
+## Design
 
 Cancellation is a human decision to stop work on a supplier request. It does not
 delete a Jira task, authorize compensation, erase an approval or verify an
@@ -65,14 +65,9 @@ absence of a customer acceptance decision.
 
 ## Boundaries
 
-This slice covers the supplier service and its customer API/UI. It does not add
+Cancellation covers the supplier service and its customer API and UI. It does not add
 provider deletion, compensation, asynchronous queue cancellation, or multi-replica
 preemption. The generic platform-contract transition API remains separate from
 the supplier saga, which enforces the actual authority and side-effect boundaries.
 Any generic cancellation transition must preserve the current technical effect;
 rechecking a cancelled request must not grant a new dispatch or acceptance.
-
-Local tests exercise persistent records, stock workspace authorization, concurrent
-threads, customer HTTP routing and DOM controls with synthetic provider state.
-They establish cancellation semantics without live Jira calls; they do not
-establish live provider behavior or rendered browser qualification.

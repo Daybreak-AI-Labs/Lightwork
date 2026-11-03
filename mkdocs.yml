@@ -151,12 +151,11 @@ nav:
       - Governed agent control plane: enterprise/architecture.md
       - Security & compliance overview: enterprise/security-overview.md
       - Security evidence map: enterprise/diligence.md
+      - Interface contracts: contracts/README.md
   - Integrations:
       - Observability integrations: integrations/observability-partners.md
   - Project:
       - RFC process: rfcs/README.md
-      - "RFC 0001: Lightwork 2.0": rfcs/0001-maverick-2.0.md
-      - "RFC 0002: Plugin API v2": rfcs/0002-plugin-api-v2.md
   - Community:
       - Contributing: CONTRIBUTING.md
       - Governance: https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/GOVERNANCE.md

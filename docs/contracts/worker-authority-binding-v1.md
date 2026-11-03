@@ -1,10 +1,10 @@
-# RFC 0004: Worker authority binding v1
+# Worker authority binding v1
 
-- Status: **Implemented** for the supplier evidence workflow
 - Contract: `lightwork.worker-authority.v1`
+- Applies to: the supplier evidence workflow
 - Scope: request composition, durable action intent, execution, provider readback, customer outcome and tenant-local denial audit
 
-## Decision
+## Design
 
 Every provider effect carries one immutable `ServiceContext` from authenticated request composition. The context binds the tenant, principal, resource owner, dashboard role and its current permission-set digest, workspace selection generation, named ticket and document credential references, credential authority, and tenant budget-authority digest. It contains references and hashes, never credential values.
 
@@ -14,7 +14,7 @@ The supplier workflow persists that context in the exact action intent before ap
 
 The workspace selection store assigns a monotonic generation to each principal. Switching away and back therefore produces a different workspace authority even when the final tenant string is unchanged. Legacy selection rows are admitted at generation zero and move to the versioned format on their next real change. Repeating the same selection is a no-op and does not invalidate work.
 
-Prepared or approved operations created before role, budget and workspace binding existed do not inherit those fields. They require a newly prepared and approved intent before an effect. Invalidating a stale prepared intent archives it and returns the case to review so the customer can prepare the replacement in the app.
+Prepared or approved operations that carry no role, budget or workspace binding do not inherit those fields. They require a newly prepared and approved intent before an effect. Invalidating a stale prepared intent archives it and returns the case to review so the customer can prepare the replacement in the app.
 
 Composition rechecks tenant activity and, for a principal-selected workspace, current membership at each sensitive boundary. A global default operator role cannot substitute for revoked workspace membership.
 
@@ -36,7 +36,7 @@ Read-only reconciliation and customer acceptance authorize the current observer 
 
 - A customer reviewer operates the in-app workflow under the current dashboard role. Changing that role invalidates the queued intent even if the new role also has `operate` permission.
 - The workflow worker holds only the service context and named connector references required for the one approved Jira action. It cannot use ambient request-body authority or raw credentials.
-- A research worker is governed by the separate attenuating `Capability` and self-modification reference monitor. Candidate evaluation requires a non-host-visible sandbox with egress denied, root disabled, bounded processes, memory and output, and authenticated evaluator evidence. These are required properties, not demonstrated process containment: the present foundation tests use mocked backend declarations, and an actual adversarial process qualification remains outstanding. Evaluator, authority, tenant, secret, audit, sandbox and promotion paths remain outside the intended editable surface.
+- A research worker is governed by the separate attenuating `Capability` and self-modification reference monitor. Candidate evaluation requires a non-host-visible sandbox with egress denied, root disabled, bounded processes, memory and output, and authenticated evaluator evidence. These are properties the sandbox backend must provide; this contract requires them but does not itself demonstrate process containment. Evaluator, authority, tenant, secret, audit, sandbox and promotion paths remain outside the intended editable surface.
 
 Dashboard roles and research capabilities are separate control planes. A researcher does not become a customer operator merely by producing a candidate, and an operator approval does not authorize candidate promotion.
 
@@ -53,4 +53,4 @@ Shield adds input/output inspection when installed. This contract does not impor
 
 ## Supported deployment boundary
 
-This implementation preserves the supplier journey's current single persistent application replica contract. It does not claim distributed queue ordering or exactly-once delivery across arbitrary providers. Provider idempotency remains false for Jira creation, so durable intent plus authoritative readback and reconciliation are required.
+The supplier journey supports a single persistent application replica. It does not claim distributed queue ordering or exactly-once delivery across arbitrary providers. Provider idempotency remains false for Jira creation, so durable intent plus authoritative readback and reconciliation are required.

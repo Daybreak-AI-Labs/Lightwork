@@ -3162,8 +3162,7 @@ are rendered into a standalone HTML page (KaTeX/Mermaid in-page, escaped
 `<pre>` source as the no-JS fallback) that `channel_reply_results.prepare_reply`
 attaches to the saved reply on chats that can send files (Slack, Telegram);
 elsewhere the reply says a rendered copy cannot be attached, and plain
-messages pass through byte-identical. **Channel SDK v2** (RFC 0001 C2,
-`base.py`): handlers may return a structured `Reply` (text + attachments +
+messages pass through byte-identical. **Channel SDK v2** (`base.py`): handlers may return a structured `Reply` (text + attachments +
 thread_ref) instead of bare `str` — `as_reply` is the v1 shim (bare `str`
 accepted through the deprecation window), `Channel.dispatch`/`dispatch_text`
 normalize either contract, and all 19 in-tree adapters route through the
@@ -5897,11 +5896,11 @@ tested without spawning py-spy.
   mobile browser, and a Kivy shell + buildozer.spec for Android — store
   builds are maintainer acts; the hard limits (no sandbox/subprocess on
   mobile, relay for network) are documented, not papered over.
-- **RFCs** — [RFC 0001: Lightwork 2.0](./rfcs/0001-maverick-2.0.md) (config
-  schema v2 + async-only channel SDK + connector re-homing, migration story
-  riding `maverick migrate`) and [RFC 0002: Plugin API v2](./rfcs/0002-plugin-api-v2.md)
-  (static manifests discovered without importing plugin code, lifecycle hooks,
-  the wire shape for the gRPC plugin host) — both Draft, open for comment.
+- **Interface contracts** ([`docs/contracts/`](./contracts/README.md)) — the
+  versioned contracts the supplier workflow and platform layer implement:
+  platform contracts v1, worker authority binding, staged local restore
+  reference validation, supplier request cancellation and the supported
+  supplier evidence journey.
 - **Embeddable widgets** — two dependency-free `<script>`-tag surfaces,
   both self-hosted: the floating **chat widget**
   (`web/widget/maverick-widget.js`) posting to your own dashboard's
