@@ -150,13 +150,21 @@ def test_the_budget_counter_is_registered_not_silently_dropped(monkeypatch) -> N
     """
     from maverick import observability
 
-    monkeypatch.setenv("MAVERICK_PROMETHEUS_PORT", "0")
+    # A port value of "0" explicitly disables Prometheus. Use a nonzero
+    # setting and an isolated real registry, without starting an HTTP server.
+    registry = prometheus_client.CollectorRegistry()
+    counter, histogram = prometheus_client.Counter, prometheus_client.Histogram
+    monkeypatch.setenv("MAVERICK_PROMETHEUS_PORT", "12345")
+    monkeypatch.setattr(prometheus_client, "REGISTRY", registry)
+    monkeypatch.setattr(prometheus_client, "start_http_server", lambda *args, **kwargs: None)
+    monkeypatch.setattr(prometheus_client, "Counter", lambda *args, **kwargs: counter(*args, registry=registry, **kwargs))
+    monkeypatch.setattr(prometheus_client, "Histogram", lambda *args, **kwargs: histogram(*args, registry=registry, **kwargs))
+    monkeypatch.setattr(observability, "_sentry_enabled", lambda: False)
+    monkeypatch.setattr(observability, "_otel_enabled", lambda: False)
     monkeypatch.setattr(observability, "_initialized", False)
     monkeypatch.setattr(observability, "_metrics", {})
-    try:
-        observability._initialize()
-    except Exception:  # pragma: no cover -- port binding is not the subject
-        pass
-    assert "tool_latency_budget_exceeded" in observability._metrics, (
-        "latency_budget.note_elapsed records into this name; if it is not "
-        "registered, record_metric drops every breach silently")
+    observability._initialize()
+    observability.record_metric("tool_latency_budget_exceeded", labels={"tool": "slow_tool"})
+    assert registry.get_sample_value(
+        "maverick_tool_latency_budget_exceeded_total", {"tool": "slow_tool"},
+    ) == 1.0
