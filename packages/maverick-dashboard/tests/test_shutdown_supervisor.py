@@ -11,6 +11,15 @@ from maverick import runner
 from maverick_dashboard._lifecycle import ShutdownSupervisor, shutdown_seconds, supervised_runtime
 
 
+@pytest.fixture(autouse=True)
+def _isolate_starter_team_admission(monkeypatch):
+    from maverick import starter_team_runtime
+    from maverick_dashboard import starter_team_scheduler
+
+    monkeypatch.setattr(starter_team_runtime, "_worker_authorizer", None)
+    monkeypatch.setattr(starter_team_scheduler, "_stopping", False)
+
+
 def test_all_signals_precede_joins_and_one_deadline_bounds_many_workers():
     clock = SimpleNamespace(now=0.0)
     order = []
@@ -267,7 +276,7 @@ def test_actual_composed_dashboard_registers_all_default_components():
             "entitlements", "voice", "privacy_discovery", "privacy_publication", "ai_governance",
             "consent_scan", "consent_delivery", "trc_evidence", "data_use_audit", "unified_audit", "third_party_feed",
             "code_watch", "code_sessions", "services",
-            "conversation_inbox", "knowledge_sources", "personal_notifications", "learning_jobs",
+            "conversation_inbox", "knowledge_sources", "personal_notifications", "learning_jobs", "starter_teams",
         }
         assert supervisor.phase == "running"
     assert supervisor.phase == "stopped" and not supervisor.errors

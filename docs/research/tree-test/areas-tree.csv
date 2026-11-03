@@ -37,6 +37,7 @@ Work,Hand over a team's work,Autonomous shoring,/shoring
 Agents,Workforce,Workforce,/workforce
 Agents,Workforce,Teams,/fleets
 Agents,Workforce,Roles,/roles
+Agents,Workforce,Starter teams,/starter-teams
 Agents,Build an agent,Agent Factory,/agents
 Agents,Skills,Skills,/skills
 Agents,Skills,Skill store,/store

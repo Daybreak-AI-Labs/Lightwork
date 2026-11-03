@@ -126,3 +126,27 @@ visual design, screen-reader behavior, browser compatibility, live provider
 acceptance, production deployment, actual invoice authenticity, or customer
 outcome measurements. The recovery drill verifies local archive and SQLite
 integrity; full live restore and desktop packaging have their own gates.
+
+### Starter-team review journey
+
+The focused starter-team smoke uses real application routes and disposable
+synthetic records. Its fixture blocks outbound requests and disables application
+background workers. It does not invoke a provider or qualify customer outcomes.
+With the workspace Python packages and Playwright installed, run from the
+repository root in two terminals:
+
+```sh
+python packages/maverick-dashboard/tests/browser/starter_teams_server.py --port 8909
+node packages/maverick-dashboard/tests/browser/starter_teams_smoke.cjs
+```
+
+Set `LIGHTWORK_CHROMIUM` to an existing Chromium executable if Playwright's
+browser is unavailable. `LIGHTWORK_BROWSER_URL` overrides the loopback fixture
+URL, and `LIGHTWORK_SCREENSHOT_DIR` saves desktop and mobile review screenshots.
+The smoke covers setup review, sample execution, a deliberately lost confirmation
+response followed by exact recovery after reload, supplied CSV checks, preserved
+edits, pause/resume, result links, schedule creation and pause/resume, mobile
+overflow, and uncaught JavaScript errors. The expected failed confirmation request
+in its console output is the injected lost response. Scheduled evidence approval
+and native specialist dispatch are separately covered by focused offline tests;
+this browser smoke does not run them.

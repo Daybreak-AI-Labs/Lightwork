@@ -182,7 +182,7 @@
     }
   },
   "counts": {
-    "governed": 139,
+    "governed": 142,
     "artifact": 55,
     "a2a": 4,
     "preferences": 8,
@@ -30538,6 +30538,237 @@
           "function": "_safe_path",
           "kind": "maverick_home",
           "expression": "maverick_home()"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/starter_teams.py",
+      "contract": "governed",
+      "owner": "packages/maverick-core/maverick/starter_teams.py",
+      "purpose": "Reviewed team setup authority, owner/workspace scope, exact setup reviews, and input-bound cases with idempotency and provenance consumed by specialist execution.",
+      "referenced_store_owners": [
+        ".governed_records"
+      ],
+      "review": "Reviewed all three canonical stores and their approval, scope and case consumers. Records require the local backend and one persistent application replica. Restored bytes are retained with global startup blocked; restoring a review or case never grants fresh execution approval. No starter-team reconciliation/resume adapter exists, and generic recovery cannot release this hold. Current-authority reconciliation and original-outcome readback would be prerequisites for a future supported adapter. Local lock files are coordination support, not approval authority.",
+      "governed_namespaces": [
+        {
+          "namespace": "starter_team_setups",
+          "line": 33,
+          "recovery_policy": "starter_team_setup_authority"
+        },
+        {
+          "namespace": "starter_team_reviews",
+          "line": 34,
+          "recovery_policy": "starter_team_review_authority"
+        },
+        {
+          "namespace": "starter_team_cases",
+          "line": 35,
+          "recovery_policy": "starter_team_case_authority"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "starter_team_setups/STS-example.json",
+          "recovery_policy": "starter_team_setup_authority",
+          "disposition": "Retain exact owner, workspace, scope, catalog and pause bindings; global startup remains blocked until supported current-authority reconciliation. No automatic setup rebind."
+        },
+        {
+          "sample_path": "starter_team_reviews/STR-example.json",
+          "recovery_policy": "starter_team_review_authority",
+          "disposition": "Retain reviewed material and its approval/context binding as unresolved authority; do not turn restored consent into a fresh approval or bypass expiry."
+        },
+        {
+          "sample_path": "starter_team_cases/STC-example.json",
+          "recovery_policy": "starter_team_case_authority",
+          "disposition": "Retain input identity, source evidence and exact idempotency outcomes; global startup remains blocked pending case and downstream original-goal reconciliation, never automatic replay."
+        }
+      ],
+      "literal_path_hints": [
+        "starter_team_locks"
+      ],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 33,
+          "function": "module",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('starter_team_setups', 'STS', 'starter_team_setup', required_backend='local', archive_when_full=False)"
+        },
+        {
+          "line": 34,
+          "function": "module",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('starter_team_reviews', 'STR', 'starter_team_review', required_backend='local')"
+        },
+        {
+          "line": 35,
+          "function": "module",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('starter_team_cases', 'STC', 'starter_team_case', required_backend='local', archive_when_full=False)"
+        },
+        {
+          "line": 98,
+          "function": "StarterTeamService._write",
+          "kind": "data_dir",
+          "expression": "data_dir('starter_team_locks', digest(identity) + '.lock')"
+        },
+        {
+          "line": 99,
+          "function": "StarterTeamService._write",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(lock, strict=True)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/starter_team_schedule.py",
+      "contract": "governed",
+      "owner": "packages/maverick-core/maverick/starter_team_schedule.py",
+      "purpose": "Reviewed recurrence and aggregate-budget authority, exact human-approved input packages, occurrence reservations and durable tick/replay receipts.",
+      "referenced_store_owners": [
+        ".governed_records",
+        ".starter_teams",
+        ".starter_team_runtime"
+      ],
+      "review": "Reviewed schedule, inbox and tick records including active reservations, partial-claim repair and original-runtime readback. All three stores are retained execution authority, not disposable analytics. Restored records globally block startup; restored due times or approvals never authorize dispatch. No starter-team reconciliation/resume adapter exists, and generic recovery cannot release this hold. Current-authority and original-occurrence reconciliation would be prerequisites for a future supported adapter. The required local backend and strict local lock do not qualify multi-replica execution.",
+      "governed_namespaces": [
+        {
+          "namespace": "starter_team_schedules",
+          "line": 28,
+          "recovery_policy": "starter_team_schedule_authority"
+        },
+        {
+          "namespace": "starter_team_inbox",
+          "line": 29,
+          "recovery_policy": "starter_team_input_approval_authority"
+        },
+        {
+          "namespace": "starter_team_ticks",
+          "line": 30,
+          "recovery_policy": "starter_team_tick_receipt_authority"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "starter_team_schedules/SCH-example.json",
+          "recovery_policy": "starter_team_schedule_authority",
+          "disposition": "Retain recurrence, pause, context, active reservation, run count and committed-budget state; globally block startup pending supported reconciliation, never reset limits or resume a restored schedule automatically."
+        },
+        {
+          "sample_path": "starter_team_inbox/STI-example.json",
+          "recovery_policy": "starter_team_input_approval_authority",
+          "disposition": "Retain the exact input, runtime review, human approval and occurrence identity; globally block startup until current authority and original execution are reconciled. Restoration is not new input approval."
+        },
+        {
+          "sample_path": "starter_team_ticks/STT-example.json",
+          "recovery_policy": "starter_team_tick_receipt_authority",
+          "disposition": "Retain tick idempotency receipts and unresolved physical outcomes as replay barriers; preserve original occurrence/runtime identity and block startup rather than retry uncertain work."
+        }
+      ],
+      "literal_path_hints": [
+        "starter_team_schedule_locks"
+      ],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 28,
+          "function": "module",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('starter_team_schedules', 'SCH', 'starter_team_schedule', required_backend='local', archive_when_full=False)"
+        },
+        {
+          "line": 29,
+          "function": "module",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('starter_team_inbox', 'STI', 'starter_team_inbox', required_backend='local', archive_when_full=False)"
+        },
+        {
+          "line": 30,
+          "function": "module",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('starter_team_ticks', 'STT', 'starter_team_tick', required_backend='local')"
+        },
+        {
+          "line": 117,
+          "function": "StarterTeamScheduleService._write",
+          "kind": "data_dir",
+          "expression": "data_dir('starter_team_schedule_locks', digest(schedule_id) + '.lock')"
+        },
+        {
+          "line": 118,
+          "function": "StarterTeamScheduleService._write",
+          "kind": "cross_process_lock",
+          "expression": "cross_process_lock(path, strict=True)"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/starter_team_runtime.py",
+      "contract": "governed",
+      "owner": "packages/maverick-core/maverick/starter_team_runtime.py",
+      "purpose": "Exact specialist execution approval, stage and budget reservations, original native goal identities, prior-result handoffs, and one-time reviewed profile/admission bindings.",
+      "referenced_store_owners": [
+        ".governed_records",
+        ".starter_teams",
+        ".starter_team_schedule",
+        ".world_model"
+      ],
+      "review": "Reviewed all three runtime stores and their native-worker consumers. Original goal bindings and worker-admission markers prevent fresh-budget resume or duplicate execution; approval and source/result hashes bind the exact stage chain. Retain restored bytes and globally block startup. No starter-team reconciliation/resume adapter exists, and generic recovery cannot release this hold. Current-authority reconciliation and original native/provider outcome readback would be prerequisites for a future supported adapter. No automatic reapproval, rebinding, replay or disposal of uncertain work is supported.",
+      "governed_namespaces": [
+        {
+          "namespace": "starter_team_runtime",
+          "line": 30,
+          "recovery_policy": "starter_team_runtime_authority"
+        },
+        {
+          "namespace": "starter_team_runtime_reviews",
+          "line": 32,
+          "recovery_policy": "starter_team_runtime_review_authority"
+        },
+        {
+          "namespace": "starter_team_goal_bindings",
+          "line": 34,
+          "recovery_policy": "starter_team_goal_binding_authority"
+        }
+      ],
+      "persisted_authorities": [
+        {
+          "sample_path": "starter_team_runtime/SRT-example.json",
+          "recovery_policy": "starter_team_runtime_authority",
+          "disposition": "Retain approved scope, finite budget/deadline, stage reservations, goal IDs and outcomes; globally block startup pending supported original-goal readback and current-authority reconciliation, without recreating a stage."
+        },
+        {
+          "sample_path": "starter_team_runtime_reviews/SRV-example.json",
+          "recovery_policy": "starter_team_runtime_review_authority",
+          "disposition": "Retain exact evidence, profile, capability, owner/workspace, schedule and budget review material; restored consent is unresolved authority and cannot authorize a fresh dispatch."
+        },
+        {
+          "sample_path": "starter_team_goal_bindings/STG-example.json",
+          "recovery_policy": "starter_team_goal_binding_authority",
+          "disposition": "Retain original native goal, prompt/profile and one-time admission bindings as replay barriers; block startup pending supported native/provider readback, never clear an admission marker to rerun work."
+        }
+      ],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 30,
+          "function": "module",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('starter_team_runtime', 'SRT', 'starter_team_runtime', required_backend='local', archive_when_full=False)"
+        },
+        {
+          "line": 32,
+          "function": "module",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('starter_team_runtime_reviews', 'SRV', 'starter_runtime_review', required_backend='local', archive_when_full=False)"
+        },
+        {
+          "line": 34,
+          "function": "module",
+          "kind": "GovernedRecordStore",
+          "expression": "GovernedRecordStore('starter_team_goal_bindings', 'STG', 'starter_team_goal_binding', required_backend='local', archive_when_full=False)"
         }
       ]
     }

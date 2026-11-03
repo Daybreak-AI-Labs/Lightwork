@@ -240,6 +240,7 @@ include = ["maverick*"]
     "skills_builtin/*.md",
     "sample_outcomes/*/*.csv",
     "sample_outcomes/*/*.md",
+    "starter_team_data/*.json",
 ]
 "maverick.env_hunt" = ["rules/*.yml"]
 "maverick.training" = ["environment_packs/*.ndjson", "environment_packs/*.json", "specialist_models.v1.json"]

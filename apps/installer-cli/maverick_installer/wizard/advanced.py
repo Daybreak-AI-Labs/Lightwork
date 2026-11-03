@@ -726,7 +726,10 @@ def _pick_memory_and_product_toggles() -> dict[str, Any]:
             "Autonomous Shoring tooling (recommended)? The engagement surface for "
             "moving a whole business function onto the workforce: a tenant-scoped "
             "Book of Work, service levels measured from real completed work, and "
-            "the exception desk over the approvals queue, at /shoring. ON by "
+            "the exception desk over the approvals queue, at /shoring. Includes "
+            "reviewed starter teams with offline samples and evidence-linked "
+            "structured input checks. Samples do not qualify live connections "
+            "or enable outside actions. ON by "
             "default; a deliberate no is written as an explicit opt-out.",
             default=True,
         ),
@@ -3217,6 +3220,8 @@ def _cfg_advanced_products(advanced: dict[str, Any]) -> list[str]:
         lines.append("[shoring]")
         lines.append("# Autonomous Shoring (maverick.shoring): the Book of Work, service levels")
         lines.append("# measured from the Operating Record, and the exception desk at /shoring.")
+        lines.append("# Includes starter-team setup and offline structured-input sample checks.")
+        lines.append("# Samples do not qualify providers, enable external actions or start schedules.")
         lines.append("# On by default; this section only lets an operator turn the surface off.")
         lines.append("enable = true")
     if advanced.get("stripe_billing"):

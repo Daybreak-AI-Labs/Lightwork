@@ -184,6 +184,20 @@ GLOBAL_START_JSON_AUTHORITY_POLICIES = {
     # A restored trial must not route goals to a version that was since promoted or rolled back.
     "specialist-canaries": "specialist_canary_trial_authority",
     "specialist-canary-goals": "specialist_canary_goal_authority",
+    # Starter teams retain reviewed setup, exact-input approvals and native
+    # execution/replay receipts. An older backup cannot renew consent, reset
+    # occurrence budgets or authorize another dispatch. Keep every store
+    # intact and block startup: no authenticated starter-team rebind adapter
+    # is currently available to release these restored authorities.
+    "starter_team_setups": "starter_team_setup_authority",
+    "starter_team_reviews": "starter_team_review_authority",
+    "starter_team_cases": "starter_team_case_authority",
+    "starter_team_schedules": "starter_team_schedule_authority",
+    "starter_team_inbox": "starter_team_input_approval_authority",
+    "starter_team_ticks": "starter_team_tick_receipt_authority",
+    "starter_team_runtime": "starter_team_runtime_authority",
+    "starter_team_runtime_reviews": "starter_team_runtime_review_authority",
+    "starter_team_goal_bindings": "starter_team_goal_binding_authority",
     "vendor-profile-decisions": "vendor_profile_decision_authority",
     # Exact retained safety-settings copies and reviewed restore requests are
     # runtime-override authority: a restored copy must not reapply itself.

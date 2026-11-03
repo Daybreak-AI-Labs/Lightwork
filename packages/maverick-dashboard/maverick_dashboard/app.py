@@ -1225,6 +1225,8 @@ async def _lifespan(app: FastAPI):
         await run_in_threadpool(start_knowledge_sources_scheduler)
         from .consent_delivery_scheduler import start_consent_delivery_scheduler
         await run_in_threadpool(start_consent_delivery_scheduler)
+        from .starter_team_scheduler import start_starter_team_scheduler
+        await run_in_threadpool(start_starter_team_scheduler)
         warm_ready = threading.Event()
         warm_stop = _warm_goal_runtime(ready=warm_ready)
         try:
@@ -2012,8 +2014,14 @@ from .channel_test_requests_api import router as channel_test_requests_router  #
 app.include_router(channel_test_requests_router)
 from .answer_feedback_operations import router as answer_feedback_router  # noqa: E402
 from .department_team_updates_api import router as department_team_updates_router  # noqa: E402
+from .starter_team_schedule_api import router as starter_team_schedule_router  # noqa: E402
+from .starter_teams_api import create_page_router as create_starter_teams_page_router  # noqa: E402
+from .starter_teams_api import router as starter_teams_router  # noqa: E402
 
 app.include_router(department_team_updates_router)
+app.include_router(starter_teams_router)
+app.include_router(starter_team_schedule_router)
+app.include_router(create_starter_teams_page_router(templates))
 app.include_router(answer_feedback_router)
 from .flow_run_feedback import router as flow_run_feedback_router  # noqa: E402
 

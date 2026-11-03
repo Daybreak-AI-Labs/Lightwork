@@ -52,6 +52,7 @@ Agents
 		Workforce
 		Teams
 		Roles
+		Starter teams
 	Build an agent
 		Agent Factory
 	Skills

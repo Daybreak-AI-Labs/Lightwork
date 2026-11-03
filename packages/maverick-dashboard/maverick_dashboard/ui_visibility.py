@@ -347,6 +347,16 @@ PAGES: tuple[dict, ...] = (
         "floor": "view",
         "default": "view",
     },
+    # Reviewed team setup reached from Workforce and Agent Factory.
+    {
+        "path": "/starter-teams",
+        "label": "Starter teams",
+        "group": "Operate",
+        "icon": "fleets",
+        "floor": "operate",
+        "default": "operate",
+        "in_nav": False,
+    },
     # The monthly statement behind Spend's "Billing statement" link.
     {
         "path": "/billing",
@@ -1493,6 +1503,7 @@ PAGE_AREAS: dict[str, tuple[str, str]] = {
     "/agents": ("Agents", "Build an agent"),
     "/roles": ("Agents", "Workforce"),
     "/workforce": ("Agents", "Workforce"),
+    "/starter-teams": ("Agents", "Workforce"),
     "/workflows": ("Work", "Workflows"),
     "/flows/designer": ("Work", "Workflows"),
     "/workflow-builder": ("Work", "Workflows"),
