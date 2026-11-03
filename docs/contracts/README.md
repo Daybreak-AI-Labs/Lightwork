@@ -12,5 +12,5 @@ does not cover.
 | [Supplier request cancellation v1](./supplier-cancellation-v1.md) | Local cancellation of a supplier request and the provider state it retains |
 | [Supported supplier evidence journey v1](./supplier-evidence-journey-v1.md) | The retained outcome contract for the supplier evidence workflow |
 
-Other format specifications live in [`docs/specs/`](../specs/), for example
-the [trust receipt format](../specs/trust-receipt-v1.md).
+Other format specifications live in `docs/specs/`, for example the
+[trust receipt format](../specs/trust-receipt-v1.md).

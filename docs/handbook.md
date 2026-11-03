@@ -359,7 +359,7 @@ haven't installed yet.
 | Safety & security | [`safety.md`](./safety.md), [`security-hardening.md`](./security-hardening.md), [`security/`](./security/), [`SECURITY.md`](SECURITY.md), [`threat-hunting.md`](./threat-hunting.md) |
 | Enterprise & compliance | [`enterprise/`](./enterprise/) (security overview, architecture, deployment playbook, evidence map), [`regulated-deployment.md`](./regulated-deployment.md), [`compliance/`](./compliance/), [`encryption.md`](./encryption.md) |
 | Extend it | [`plugins.md`](./plugins.md), [`plugin-api-v2.md`](./plugin-api-v2.md), [`self-learning.md`](./self-learning.md), [`embedding.md`](./embedding.md), [`connectors.md`](./connectors.md) |
-| Drive it from outside | [`api.md`](./api.md), [`grpc.md`](./grpc.md), [`a2a.md`](./a2a.md), [`clients/`](./clients/), [`integrations/`](./integrations/) |
+| Drive it from outside | [`api.md`](./api.md), [`grpc.md`](./grpc.md), [`a2a.md`](./a2a.md), [`clients/`](./clients/README.md), [`integrations/`](./integrations/) |
 | Task recipes | [`cookbook/`](./cookbook/) (30 recipes), [`starter-goals.md`](./starter-goals.md) |
 | Benchmarks | [`benchmarks/`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/benchmarks/) (`EVAL.md`, `RESULTS.md`) |
 | Naming | [`TRADEMARK.md`](TRADEMARK.md) |
