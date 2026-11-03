@@ -1,243 +1,377 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Lightwork — open-source, self-hosted runtime for governed AI agents</title>
-<meta name="description" content="Lightwork is an open-source (Apache-2.0) multi-agent runtime that runs on your own infrastructure: an orchestrator splits a goal across specialist sub-agents on the models you choose, inside permission controls, spending limits and a signed audit log." />
-<meta property="og:title" content="Lightwork" />
-<meta property="og:description" content="Open-source, self-hosted multi-agent runtime with permission controls, spending limits and a signed audit log." />
-<meta property="og:type" content="website" />
-<link rel="icon" href="daybreak-logo.jpg" />
-<link rel="apple-touch-icon" href="daybreak-logo.jpg" />
-<style>
-  :root {
-    --bg: #ffffff;
-    --text: #1f2328;
-    --muted: #57606a;
-    --border: #d0d7de;
-    --panel: #f6f8fa;
-    --accent: #1a7f37;
-    --accent-hover: #156a2d;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #0d1117;
-      --text: #e6edf3;
-      --muted: #9aa3ad;
-      --border: #30363d;
-      --panel: #161b22;
-      --accent: #3fb950;
-      --accent-hover: #46c655;
-    }
-  }
-  * { box-sizing: border-box; }
-  html { scroll-behavior: smooth; }
-  body {
-    margin: 0;
-    font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, "Helvetica Neue", Arial, sans-serif;
-    background: var(--bg);
-    color: var(--text);
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-  }
-  a { color: var(--accent); }
-  a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-  .skip-link { position: absolute; left: -9999px; }
-  .skip-link:focus { left: 1rem; top: 1rem; padding: 0.5rem 1rem; background: var(--accent); color: #fff; border-radius: 4px; z-index: 100; }
-
-  header {
-    border-bottom: 1px solid var(--border);
-    padding: 1rem 2rem;
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    max-width: 1100px;
-    margin: 0 auto;
-  }
-  header .brand { font-weight: 700; font-size: 1.1rem; }
-  header nav { margin-left: auto; display: flex; gap: 1.25rem; }
-  header nav a { color: var(--muted); text-decoration: none; }
-  header nav a:hover { color: var(--text); }
-
-  main { max-width: 1100px; margin: 0 auto; padding: 2rem; }
-  section { margin-bottom: 4rem; }
-
-  .hero { text-align: center; padding: 4rem 1rem 3rem; }
-  .hero h1 { font-size: clamp(2rem, 5vw, 3rem); margin: 0 0 1rem; line-height: 1.1; font-weight: 700; }
-  .hero p.lead { font-size: 1.2rem; color: var(--muted); max-width: 640px; margin: 0 auto 2rem; }
-  .hero .cta-row { display: flex; justify-content: center; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 1rem; }
-  .btn {
-    display: inline-block;
-    padding: 0.85rem 1.75rem;
-    border-radius: 6px;
-    font-weight: 600;
-    text-decoration: none;
-    border: 1px solid transparent;
-    cursor: pointer;
-    font-size: 1rem;
-  }
-  .btn.primary { background: var(--accent); color: #fff; }
-  .btn.primary:hover { background: var(--accent-hover); }
-  .btn.secondary { background: transparent; color: var(--text); border-color: var(--border); }
-  .btn.secondary:hover { border-color: var(--accent); color: var(--accent); }
-  .note { color: var(--muted); font-size: 0.9rem; margin-top: 0.5rem; }
-
-  h2 { font-size: 1.5rem; margin: 0 0 1.5rem; font-weight: 700; }
-  .feature-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-    gap: 1.5rem;
-  }
-  .feature {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 1.5rem;
-  }
-  .feature h3 { margin: 0 0 0.5rem; font-size: 1.05rem; font-weight: 600; }
-  .feature p { margin: 0; color: var(--muted); }
-  .deploy { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }
-  .deploy > div { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 1.25rem; }
-  .deploy h3 { margin: 0 0 0.35rem; font-size: 1rem; font-weight: 600; }
-  .deploy p { margin: 0; color: var(--muted); font-size: 0.95rem; }
-
-  .audience { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; }
-  .audience > div { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 1.5rem; }
-  .audience h3 { margin: 0 0 0.5rem; font-weight: 600; }
-  .audience ul { margin: 0.5rem 0 0; padding-left: 1.25rem; color: var(--muted); }
-
-  pre { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.25rem; overflow-x: auto; font-size: 0.9rem; line-height: 1.5; }
-  code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-
-  footer { border-top: 1px solid var(--border); padding: 2rem; text-align: center; color: var(--muted); font-size: 0.9rem; max-width: 1100px; margin: 2rem auto 0; }
-  footer a { color: var(--muted); }
-
-  @media (max-width: 720px) {
-    header { padding: 1rem; flex-wrap: wrap; }
-    main { padding: 1rem; }
-    .hero { padding: 2rem 0.5rem; }
-  }
-</style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Daybreak Labs: agentic workforces an auditor can sign off on</title>
+<meta name="description" content="Daybreak Labs is an AI lab that builds agentic workforces on a foundation of compliance and governance. Lightwork, our agent runtime, is open source under the Apache License 2.0: run governed AI agents on your own machine, your own servers or an air-gapped network, with every action checked, capped and signed into a tamper-evident record.">
+<link rel="stylesheet" href="styles.css">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="icon" type="image/png" sizes="512x512" href="favicon-512.png">
+<link rel="apple-touch-icon" href="favicon-180.png">
+<meta name="theme-color" content="#04050A">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Daybreak Labs: agentic workforces an auditor can sign off on">
+<meta property="og:description" content="Lightwork is an open-source runtime for governed AI agents. Every action is checked before it runs and signed into a record you can verify offline. Self-hosted or air-gapped, under the Apache License 2.0.">
+<meta property="og:image" content="https://daybreakailabs.com/og.png">
+<meta property="og:url" content="https://daybreakailabs.com/">
+<meta name="twitter:card" content="summary_large_image">
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='{"token": "28d5584c57bd4c699bbc499ed4c37359"}'></script><!-- pragma: allowlist secret -->
+<script type="application/ld+json">
+[{"@context":"https://schema.org","@type":"Organization","name":"Daybreak Labs","url":"https://daybreakailabs.com","logo":"https://daybreakailabs.com/favicon-512.png","email":"chris@daybreakailabs.com","description":"Daybreak Labs is an AI lab that builds agentic workforces on a foundation of compliance and governance, and maintains Lightwork, an open-source runtime for governed AI agents.","sameAs":["https://github.com/Daybreak-AI-Labs"]},
+{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Lightwork","applicationCategory":"DeveloperApplication","operatingSystem":"Linux, macOS, Windows","license":"https://www.apache.org/licenses/LICENSE-2.0","isAccessibleForFree":true,"url":"https://daybreakailabs.com/","sameAs":["https://github.com/Daybreak-AI-Labs/Lightwork"],"author":{"@type":"Organization","name":"Daybreak Labs"}}]
+</script>
 </head>
 <body>
-<a class="skip-link" href="#content">Skip to content</a>
 
-<header>
-  <span class="brand">Lightwork</span>
-  <nav>
-    <a href="#what">What</a>
-    <a href="#install">Install</a>
-    <a href="#deploy">Deploy</a>
-    <a href="#project">Project</a>
-    <a href="https://daybreak-ai-labs.github.io/Lightwork/">Docs</a>
-    <a href="https://github.com/Daybreak-AI-Labs/Lightwork">GitHub</a>
-  </nav>
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="index.html" aria-label="Daybreak Labs home">
+      <span class="brand-mark"><img src="daybreak-mark-dark.png" alt="" width="425" height="322"></span>
+      <span class="brand-word">Daybreak Labs<small>Lightwork</small></span>
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="product.html">Platform</a>
+      <a href="cortex.html">Cortex</a>
+      <a href="autonomous-compliance.html">Autonomous Compliance</a>
+      <a href="autonomous-shoring.html">Autonomous Shoring</a>
+      <a href="security.html">Security</a>
+      <a href="company.html">Company</a>
+    </nav>
+    <div class="nav-cta">
+      <a class="btn btn-ghost" href="https://daybreak-ai-labs.github.io/Lightwork/">Docs</a>
+      <a class="btn btn-primary" href="https://github.com/Daybreak-AI-Labs/Lightwork">GitHub</a>
+    </div>
+  </div>
 </header>
 
-<main id="content">
-  <section class="hero">
-    <h1>Self-hosted AI agents with governance built in.</h1>
-    <p class="lead">Lightwork is an open-source multi-agent runtime. Give it a goal: an orchestrator splits the work across specialist sub-agents on the models you choose, checks their output, and records each step in a signed audit log. Permission controls and the spending limits you set bound what the agents can do.</p>
-    <div class="cta-row">
-      <a class="btn primary" href="https://github.com/Daybreak-AI-Labs/Lightwork">View on GitHub</a>
-      <a class="btn secondary" href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/source-install.md">Install from source</a>
-      <a class="btn secondary" href="https://daybreak-ai-labs.github.io/Lightwork/">Read the docs</a>
-    </div>
-    <p class="note">Apache License 2.0. No prebuilt binaries, PyPI packages or container images are published yet; install from source.</p>
-  </section>
-
-  <section id="what">
-    <h2>What it does</h2>
-    <div class="feature-grid">
-      <div class="feature">
-        <h3>Multi-agent orchestration</h3>
-        <p>An orchestrator decomposes a goal, runs specialist sub-agents such as a researcher, coder, writer and verifier in parallel, and checks their output before returning a result.</p>
+<!-- HERO: the stage -->
+<section class="hero stage">
+  <canvas class="neon" role="img" aria-label="Schematic: agent actions travel along circuit traces through a governance gate that checks each action for scope, policy, safety and budget, toward a sunrise. Actions that pass are signed; actions that fail stop at a gate."></canvas>
+  <div class="veil"></div>
+  <div class="wrap">
+    <div>
+      <span class="pill rv"><span class="dot"></span> Open source &middot; Apache License 2.0</span>
+      <h1 class="rv d1">Agentic workforces an auditor can <span class="grad"><b>sign off on.</b></span></h1>
+      <p class="lede rv d2">Daybreak Labs builds agentic workforces on a foundation of compliance and governance. Lightwork, our agent runtime, is open source: run it on your own machine, your own servers or an air-gapped network, read every line of it, and prove what the agents did.</p>
+      <div class="hero-cta rv d3">
+        <a class="btn btn-primary" href="#get-started">Get started</a>
+        <a class="btn btn-ghost" href="https://github.com/Daybreak-AI-Labs/Lightwork">View on GitHub</a>
       </div>
-      <div class="feature">
-        <h3>Permission controls</h3>
-        <p>Role-based access, capability tokens, per-tool access lists, consent gates and a kill switch bound every agent action. Agent Shield screens prompts, tool calls and outputs, and enterprise mode adds an egress lock on the agent's outbound network paths.</p>
-      </div>
-      <div class="feature">
-        <h3>Signed audit log</h3>
-        <p>A signed, hash-chained, append-only audit log that you can verify with <code>lightwork audit verify</code> and export to a SIEM.</p>
-      </div>
-      <div class="feature">
-        <h3>Your choice of models</h3>
-        <p>Per-role model routing across Anthropic, OpenAI, Gemini, Amazon Bedrock, Azure OpenAI, OpenRouter, Ollama, vLLM and other providers, including self-hosted models.</p>
-      </div>
-      <div class="feature">
-        <h3>Spending limits</h3>
-        <p>Administrators can set per-task dollar, wall-clock and tool-call limits, and separate organization allowances.</p>
-      </div>
-      <div class="feature">
-        <h3>Reviewable learning</h3>
-        <p>Lightwork captures experience and proposes new skills and workflow changes. Human review, activation and rollback of each change are recorded.</p>
+      <div class="hero-marks rv d3">
+        <span><b>Alpha</b> &middot; install from source</span>
       </div>
     </div>
-  </section>
+    <div class="hud rv d3"><b id="hud-signed">0</b>signed entries<br><span class="ok">&#9679; chain verified</span><br><span class="deny" id="hud-denied">0 denied at the gate</span><div class="cap">Fig. 01 &middot; animated schematic<br>Illustrative simulation, synthetic data &mdash; not production telemetry or measured results.</div></div>
+  </div>
+</section>
 
-  <section id="install">
-    <h2>Install</h2>
-    <p>Python 3.11 to 3.12 and Git. On macOS or Linux:</p>
-<pre><code>git clone https://github.com/Daybreak-AI-Labs/Lightwork
-cd Lightwork
-python3 -m venv .venv
-. .venv/bin/activate            # Windows: .venv\Scripts\activate
-python -m pip install --upgrade pip
-python scripts/install_release_cohort.py --core-extra release-runtime,evidence-analysis
-lightwork doctor
-lightwork dashboard             # serves the dashboard at http://127.0.0.1:8765</code></pre>
-    <p>The <a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/source-install.md">source install guide</a> covers Windows PowerShell and checking the installation.</p>
-  </section>
+<div class="marks">
+  <div class="wrap">
+    <span><b>Open source</b> &middot; Apache 2.0</span>
+    <span><b>Self-hosted</b> or air-gapped</span>
+    <span><b>Five gates</b> on every action</span>
+    <span><b>Signed</b>, hash-chained record</span>
+    <span><b>Your models</b>, your keys</span>
+    <span><b>Cortex</b> &middot; the company brain</span>
+  </div>
+</div>
 
-  <section id="deploy">
-    <h2>Deploy</h2>
-    <div class="deploy">
-      <div><h3>Workstation</h3><p>The local dashboard and CLI, installed from source.</p></div>
-      <div><h3>Container</h3><p>A Dockerfile and Compose recipe in <code>deploy/docker</code>.</p></div>
-      <div><h3>Server</h3><p>A VPS install script and systemd unit in <code>deploy/vps</code>.</p></div>
-      <div><h3>Kubernetes</h3><p>A Helm chart in <code>deploy/helm</code>, with an optional Postgres backend.</p></div>
+<!-- PROBLEM -->
+<section>
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">01</span> The problem</span>
+      <h2>Agents pass the demo. <b>They fail the diligence review.</b></h2>
+      <p>In regulated work the blocker isn't capability. It's three questions no one can answer, so the project never leaves the pilot.</p>
     </div>
-  </section>
+    <div class="cols cols-3">
+      <div class="qcol rv"><span class="idx">Q1</span><h3>&ldquo;What did it do?&rdquo;</h3><p>No tamper-evident record of the actions an agent took.</p></div>
+      <div class="qcol rv d1"><span class="idx">Q2</span><h3>&ldquo;Could it exfiltrate our data?&rdquo;</h3><p>No policy-enforced egress control, a black box, or a framework you secure yourself.</p></div>
+      <div class="qcol rv d2"><span class="idx">Q3</span><h3>&ldquo;Will it get worse?&rdquo;</h3><p>No way to review what it learned, or to undo a change that made it worse.</p></div>
+    </div>
+  </div>
+</section>
 
-  <section id="project">
-    <h2>Project</h2>
-    <div class="audience">
+<!-- HOW IT WORKS -->
+<section class="panel">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">02</span> How it works</span>
+      <h2>Not a chatbot. Not a framework. <b>A governed runtime.</b></h2>
+      <p>You give Lightwork a goal. An orchestrator plans the work, hands parts of it to specialist agents on the models you choose, checks their results and returns an answer. Every action along the way (every tool call, every payment, every write) passes through one gate before it happens.</p>
+    </div>
+    <div class="gate rv">
+      <div class="stage"><div class="n">01</div><div class="t">Capability</div><div class="d">Attenuate-only grants. A sub-agent can narrow its rights, never exceed its parent's.</div></div>
+      <div class="stage"><div class="n">02</div><div class="t">Policy</div><div class="d">Allow, deny, or require a human, bound to every action.</div></div>
+      <div class="stage"><div class="n">03</div><div class="t">Shield</div><div class="d">Scans input, every tool call and every answer for injection and dangerous actions.</div></div>
+      <div class="stage"><div class="n">04</div><div class="t">Budget</div><div class="d">Hard caps on dollars, wall-clock, tokens and tool calls.</div></div>
+      <div class="stage"><div class="n">05</div><div class="t">Audit</div><div class="d">A signed, hash-chained entry you can verify offline.</div></div>
+    </div>
+    <p class="muted rv" style="margin-top:26px;font-size:16px">Runs on your laptop, your servers, your cloud account or a fully air-gapped network, with the same gates and your own keys. Commands run in the sandbox backend you choose; with the default <code>local</code> backend they run directly on the host, so use a container backend for any goal you would not run yourself.</p>
+  </div>
+</section>
+
+<!-- CORTEX -->
+<section id="cortex">
+  <div class="wrap">
+    <div class="split" style="margin-top:0;align-items:center">
+      <div class="rv">
+        <span class="eyebrow"><span class="n">03</span> The company brain</span>
+        <h2 class="sm" style="margin-top:18px">Cortex. <b>Everything your company knows, in one governed mind.</b></h2>
+        <p style="font-size:19px;color:var(--muted)">Cortex is one governed surface over everything the agents know: your documents and data with citations, the skills learned on your work, lessons proven on held-out tasks, the Operating Record of every decision and sign-off, and what outside agents deposited. Every read is floored to the active tenant and audited, and nothing is pooled across tenants. It runs inside your own deployment.</p>
+        <p style="margin-top:22px"><a class="btn btn-ghost" href="cortex.html">Inside Cortex</a></p>
+      </div>
+      <div class="rv d1">
+        <div class="instrument">
+          <div class="bar"><span class="chip">cortex &middot; tenant-exact</span><span>lit as the workforce writes</span></div>
+          <canvas class="lattice" width="640" height="480" role="img" aria-label="A slowly turning lattice of connected nodes in the brand gradient; nodes light up as agents write to it."></canvas>
+        </div>
+        <p class="art-cap"><b>Fig. 02</b> &middot; Cortex. Every node is something your company knows; every flash is an agent adding to it, under audit.</p>
+      </div>
+    </div>
+    <div class="cols cols-3">
+      <div class="card rv"><span class="idx">Remembers</span><h3>Knowledge with citations</h3><p>Your documents, systems of record and public primary sources, retrieved and cited, so an answer is grounded in what your company actually knows.</p></div>
+      <div class="card rv d1"><span class="idx">Learns</span><h3>Lessons that are checked first</h3><p>Successful runs become proposed skills that are used only after a person reviews and admits them. Guidance mined from failures is proven on held-out work before it is used.</p></div>
+      <div class="card rv d2"><span class="idx">Keeps</span><h3>Yours, and only yours</h3><p>Tenant-exact, every read audited, stored in your deployment and encrypted at rest by default. You decide what leaves it.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- WHY -->
+<section class="panel">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">04</span> Why Lightwork</span>
+      <h2>Three things <b>Lightwork is built on.</b></h2>
+    </div>
+    <div class="cols cols-3">
+      <div class="card rv"><span class="idx">01</span><h3>Governance on every action</h3><p>Capability grants, a policy engine, the Shield, budget caps and a signed, hash-chained audit log you can verify offline. Deep infrastructure, not a prompt over an API.</p></div>
+      <div class="card rv d1"><span class="idx">02</span><h3>Improvement you review</h3><p>Learned skills and proposed changes to prompts and memory wait for a person's approval and are snapshotted so they can be rolled back. A changed specialist can run as a trial before you promote it.</p></div>
+      <div class="card rv d2"><span class="idx">03</span><h3>Specialists, already built</h3><p>Built-in specialist packs across finance, tax, legal, privacy, GRC, operations and more. Each declares a persona, the tools it may and may not use, a risk ceiling and a step-by-step workflow.</p></div>
+    </div>
+    <p class="muted rv" style="margin-top:26px;font-size:16px">Invariant tests run across every specialist pack on every build: no drafting pack can reach a state-mutating tool, a pack still in onboarding never acts autonomously, a spawned agent never exceeds its parent's grant, a compartment seal never reaches another compartment, and the hard-refusal floor cannot be removed.</p>
+  </div>
+</section>
+
+<!-- OPEN SOURCE -->
+<section id="open-source">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">05</span> Open source</span>
+      <h2>Governance you can trust <b>is governance you can read.</b></h2>
+      <p>Every gate, rule and record format on this site is in the repository. Audit the code that audits your agents, change it, and run it wherever your policy requires.</p>
+    </div>
+    <div class="cols cols-3">
+      <div class="card rv"><span class="idx">License</span><h3>Apache License 2.0</h3><p>Use, modify and redistribute Lightwork, including inside your own products and services. The Lightwork name and logo are covered by a separate <a class="btn-link" href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/TRADEMARK.md">trademark policy</a>.</p></div>
+      <div class="card rv d1"><span class="idx">Models</span><h3>Your models, your keys</h3><p>Choose a model for each role: Anthropic, OpenAI, Azure, Bedrock, Vertex, Gemini, OpenRouter and more, or local and self-hosted models through Ollama, vLLM, TGI or any OpenAI-compatible server.</p></div>
+      <div class="card rv d2"><span class="idx">Community</span><h3>Built in the open</h3><p>A maintainer-led project with public <a class="btn-link" href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/GOVERNANCE.md">governance</a>, RFCs for significant changes, and a <a class="btn-link" href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/CONTRIBUTING.md">contribution guide</a>. Ask questions in GitHub Discussions.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- CAPABILITIES -->
+<section id="products" class="panel">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">06</span> Everything Lightwork does</span>
+      <h2>One runtime. <b>Six ways to put it to work.</b></h2>
+      <p>The platform, the brain it runs on, the specialist workforce, a governance plane for the agents you didn't build, and two ways to move real work onto all of it.</p>
+    </div>
+    <div class="cols cols-3">
+      <a class="card prod rv" href="product.html"><span class="idx">01 &middot; Platform</span><h3>Lightwork Platform</h3><p>The governed runtime. Every agent action is checked for scope, policy, safety and budget before it runs, then signed into a tamper-evident record.</p><span class="more">How it works &rarr;</span></a>
+      <a class="card prod rv d1" href="cortex.html"><span class="idx">02 &middot; The company brain</span><h3>Cortex</h3><p>The governed, tenant-exact memory the agents read from and write to: your knowledge, skills, lessons and the Operating Record, with every read audited.</p><span class="more">Inside Cortex &rarr;</span></a>
+      <a class="card prod rv d2" href="packs.html"><span class="idx">03 &middot; Specialist packs</span><h3>Specialist packs</h3><p>Specialists for finance, tax, legal, privacy, GRC and more, each with a fixed job, least-privilege tools and a human who signs off. When no pack fits, Lightwork can draft one for review.</p><span class="more">See the packs &rarr;</span></a>
+      <a class="card prod rv" href="fleet-governance.html"><span class="idx">04 &middot; Govern any fleet</span><h3>Fleet governance</h3><p>Bring agents you didn't build under the same record: they deposit into and recall from Cortex under the same gates and audit.</p><span class="more">How it governs &rarr;</span></a>
+      <a class="card prod rv d1" href="autonomous-compliance.html"><span class="idx">05 &middot; Compliance work</span><h3>Autonomous Compliance</h3><p>Privacy, GRC, third-party and AI-governance work done by governed agents, with a person reviewing and committing each result.</p><span class="more">See the suites &rarr;</span></a>
+      <a class="card prod rv d2" href="autonomous-shoring.html"><span class="idx">06 &middot; Move a function</span><h3>Autonomous Shoring</h3><p>Tooling for moving a whole business function onto governed agents: a book of work, target service levels measured from real completed work, and the Operating Record.</p><span class="more">How it works &rarr;</span></a>
+    </div>
+  </div>
+</section>
+
+<!-- PROOF -->
+<section class="on-navy">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">07</span> Proof</span>
+      <h2>We don't say it's governed. <b>Run it and see.</b></h2>
+      <p>Two commands, no model and no API key. The golden path walks the real enforcement code through a treasury scenario and leaves a signed audit trail. The proof pack composes the evidence behind these claims into one signed bundle you can verify offline.</p>
+    </div>
+    <div class="split rv" style="margin-top:48px">
+      <div class="term">
+        <div class="bar"><span class="chip">python -m maverick.golden_path</span><span>every row tamper-evident</span></div>
+        <div class="body">
+          <div class="row"><span>boot finance specialist</span><span class="seal">SEALED</span></div>
+          <div class="row"><span>$60,000 wire</span><span class="deny">DENY</span></div>
+          <div class="row"><span>$6,000 release</span><span class="human">REQUIRE_HUMAN</span></div>
+          <div class="row"><span>runaway loop</span><span class="cap">CAPPED</span></div>
+          <div class="row"><span>alter an audited row</span><span class="ok">CAUGHT</span></div>
+        </div>
+      </div>
+      <div class="term">
+        <div class="bar"><span class="chip">python -m maverick.proof_pack</span><span style="color:var(--ok)">&#9679; Ed25519 signed</span></div>
+        <div class="body">
+          <div class="c"># PROOF.md &middot; verifiable offline</div>
+          <div class="row"><span>governance</span><span class="ok">&#10003; PASS</span></div>
+          <div class="row"><span>reliability</span><span class="ok">&#10003; GATE</span></div>
+          <div class="row"><span>performance</span><span class="ok">&#10003; BENCH</span></div>
+          <div class="row"><span>shield</span><span class="ok">&#10003; PASS</span></div>
+        </div>
+      </div>
+    </div>
+    <p class="muted rv" style="margin-top:20px;font-size:14px">Illustrative output. GATE and BENCH are the project's own release-gate results, not third-party certification. A section that cannot run on your machine says so instead of reporting a result. Methodology is on the <a class="btn-link" href="security.html">Security page</a>.</p>
+  </div>
+</section>
+
+<!-- SECURITY -->
+<section>
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">08</span> Security &amp; deployment</span>
+      <h2>Built to clear <b>your security review.</b></h2>
+      <p>Every control your reviewers ask about maps to a mechanism in the code, not a promise on a slide. Here is what each one does, and where it stops.</p>
+    </div>
+    <table class="maptbl rv">
+      <thead><tr><th>What your reviewers require</th><th>The mechanism</th></tr></thead>
+      <tbody>
+        <tr><td class="ctrl">Runs inside your boundary</td><td class="mech"><b>Self-hosted or air-gapped</b>: your machine, your servers, your cloud account, or fully offline with local models. Sensitive local stores are <b>encrypted at rest</b> (AES-256-GCM) by default.</td></tr>
+        <tr><td class="ctrl">Egress controlled by policy</td><td class="mech"><b>Enterprise mode</b> pins model calls to local or self-hosted providers and checks each outbound request made through the supported HTTP clients. It is an application-layer control: pair it with sandbox network isolation and a network egress policy.</td></tr>
+        <tr><td class="ctrl">Least privilege, per action</td><td class="mech"><b>Capability grants</b>: with enforcement on, a sub-agent's grant is attenuated from its parent's and can never exceed it. Connector changes wait for a person's approval.</td></tr>
+        <tr><td class="ctrl">Bounded blast radius</td><td class="mech"><b>Container sandboxes</b> (Docker, Podman) drop all Linux capabilities and have no network by default &middot; hard caps on dollars, wall-clock, tokens and tool calls.</td></tr>
+        <tr><td class="ctrl">A provable, tamper-evident record</td><td class="mech"><b>Hash-chained, Ed25519-signed audit log</b>, checked by <code>lightwork audit verify</code> or a standalone verifier that needs no Python.</td></tr>
+      </tbody>
+    </table>
+    <p class="muted rv" style="margin-top:26px;font-size:16px"><a class="btn-link" href="security.html">See the security posture &rarr;</a></p>
+  </div>
+</section>
+
+<!-- INDUSTRIES -->
+<section class="panel">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">09</span> Who it's for</span>
+      <h2>Built for work where <b>governance decides.</b></h2>
+    </div>
+    <div class="inds">
+      <div class="ind rv"><div class="t">Finance</div><div class="d">Reconciliation, vendor risk and controls, under audit, with money movement held for a person.</div></div>
+      <div class="ind rv d1"><div class="t">Healthcare</div><div class="d">Operations on sensitive records, with a record a compliance officer can stand behind.</div></div>
+      <div class="ind rv d2"><div class="t">Insurance</div><div class="d">Claims and underwriting work, governed and reversible, with proof of every decision.</div></div>
+      <div class="ind rv"><div class="t">Legal</div><div class="d">High-stakes document work where accountability and a tamper-evident trail are non-negotiable.</div></div>
+      <div class="ind rv d1"><div class="t">GRC</div><div class="d">Every agent action recorded against its control, with evidence generated as the work happens.</div></div>
+      <div class="ind rv d2"><div class="t">Privacy</div><div class="d">Data subject requests, erasure and retention under governance, with a defensible record of every decision.</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- FROM THE LAB -->
+<section>
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">10</span> From the lab</span>
+      <h2>What we measure, <b>and hold ourselves to.</b></h2>
+      <p>The claims on this site are checked by gates in the project's own build. The results and the code that produced them are in the repository.</p>
+    </div>
+    <div class="notes rv">
+      <a class="note" href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/benchmarks/GOVERNANCE_FRONTIER_RESULTS.md"><span class="kind">Benchmark</span><span><span class="ttl">Governance frontier</span><span class="sum" style="display:block">An offline, deterministic benchmark of what the governance layer prevents and what it lets through, re-measured when the control code changes.</span></span><span class="go">&rarr;</span></a>
+      <a class="note" href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/benchmarks/HARNESS_OVERHEAD_RESULTS.md"><span class="kind">Evaluation</span><span><span class="ttl">Governance overhead</span><span class="sum" style="display:block">How much time the governance gate adds to a task, measured against an ungoverned control, with the results committed beside the code that produced them.</span></span><span class="go">&rarr;</span></a>
+      <a class="note" href="product.html"><span class="kind">Quality gate</span><span><span class="ttl">Evaluator integrity</span><span class="sum" style="display:block">The evaluator that judges the workforce is held to locked ground-truth anchors, so a weak or drifting judge can't launder a regression into a lift.</span></span><span class="go">&rarr;</span></a>
+      <a class="note" href="packs.html"><span class="kind">Quality gate</span><span><span class="ttl">Pack quality gate</span><span class="sum" style="display:block">Every specialist pack has a bounded persona, a least-privilege allow-list, an explicit deny-list and a risk ceiling, and the pack linter fails the build on any error.</span></span><span class="go">&rarr;</span></a>
+    </div>
+  </div>
+</section>
+
+<!-- GET STARTED -->
+<section id="get-started" class="panel">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">11</span> Get started</span>
+      <h2>Install it from source <b>in a few minutes.</b></h2>
+      <p>Lightwork is alpha software. No packaged release is published yet, so the supported path is a clone of the repository. You need Git and Python 3.11 or 3.12; Docker or Podman is recommended for running commands in a container.</p>
+    </div>
+    <div class="split rv" style="margin-top:36px">
+      <div class="term">
+        <div class="bar"><span class="chip">macOS &middot; Linux</span><span>from a fresh terminal</span></div>
+        <div class="body">
+          <div>git clone https://github.com/Daybreak-AI-Labs/Lightwork</div>
+          <div>cd Lightwork</div>
+          <div>python3 -m venv .venv</div>
+          <div>. .venv/bin/activate</div>
+          <div>python -m pip install --upgrade pip</div>
+          <div>python scripts/install_release_cohort.py --core-extra release-runtime,evidence-analysis</div>
+          <div>lightwork doctor</div>
+          <div>lightwork dashboard</div>
+        </div>
+      </div>
       <div>
-        <h3>Use it</h3>
+        <p style="font-size:17px;color:var(--muted)"><code>lightwork doctor</code> checks the installation and suggests a fix for anything it flags. The dashboard opens at <code>http://127.0.0.1:8765</code> and walks you through first sign-in and connecting a model provider; <code>lightwork init</code> runs the same setup in the terminal.</p>
+        <p style="font-size:17px;color:var(--muted)">Windows PowerShell commands, post-install checks and the execution posture are in the install guide.</p>
+        <p style="margin-top:22px"><a class="btn btn-ghost" href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/source-install.md">Install guide</a> <a class="btn btn-ghost" href="https://daybreak-ai-labs.github.io/Lightwork/">Documentation</a></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FINAL CTA -->
+<section class="cta-final">
+  <div class="wrap rv">
+    <div class="dline" role="presentation"></div>
+    <span class="eyebrow">Get involved</span>
+    <h2>Put your agents to work, <b>under governance you can prove.</b></h2>
+    <p class="lede">Lightwork is open source under the Apache License 2.0. Star the repository, open an issue, ask a question in Discussions, or send a pull request.</p>
+    <div class="hero-cta">
+      <a class="btn btn-primary" href="https://github.com/Daybreak-AI-Labs/Lightwork">View on GitHub</a>
+      <a class="btn btn-ghost" href="https://github.com/Daybreak-AI-Labs/Lightwork/discussions">Join the discussion</a>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer class="footer">
+  <div class="wrap">
+    <div class="top">
+      <div>
+        <div class="footer-brand"><span class="brand-mark"><img src="daybreak-mark-dark.png" alt="" width="425" height="322"></span><span>Daybreak Labs</span></div>
+        <p class="blurb">An AI lab for agentic workforces, built on compliance and governance. Our agent runtime, Lightwork, is open source under the Apache License 2.0.</p>
+        <div class="dline" role="presentation"></div>
+      </div>
+      <div>
+        <h4>Lightwork</h4>
         <ul>
-          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/source-install.md">Install from source</a></li>
+          <li><a href="product.html">Platform</a></li>
+          <li><a href="cortex.html">Cortex</a></li>
+          <li><a href="packs.html">Specialist packs</a></li>
+          <li><a href="fleet-governance.html">Fleet governance</a></li>
+          <li><a href="autonomous-compliance.html">Autonomous Compliance</a></li>
+          <li><a href="autonomous-shoring.html">Autonomous Shoring</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Open source</h4>
+        <ul>
+          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork">Source code</a></li>
           <li><a href="https://daybreak-ai-labs.github.io/Lightwork/">Documentation</a></li>
-          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork/issues">Issues</a></li>
+          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/source-install.md">Install from source</a></li>
+          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/CONTRIBUTING.md">Contributing</a></li>
+          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork/discussions">Discussions</a></li>
         </ul>
       </div>
       <div>
-        <h3>Contribute</h3>
+        <h4>Company</h4>
         <ul>
-          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/CONTRIBUTING.md">Contributing guide</a></li>
-          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/CODE_OF_CONDUCT.md">Code of conduct</a></li>
-          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/GOVERNANCE.md">Governance</a></li>
-        </ul>
-      </div>
-      <div>
-        <h3>Security and licensing</h3>
-        <ul>
-          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/SECURITY.md">Security policy</a></li>
-          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/LICENSE">Apache License 2.0</a></li>
-          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/TRADEMARK.md">Trademark policy</a></li>
+          <li><a href="company.html">About the lab</a></li>
+          <li><a href="security.html">Security</a></li>
+          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/SECURITY.md">Report a vulnerability</a></li>
+          <li><a href="company.html#contact">Contact</a></li>
         </ul>
       </div>
     </div>
-  </section>
-</main>
-
-<footer>
-  <p>
-    Lightwork is developed by Daybreak Labs and released under the Apache License 2.0.
-    <a href="https://github.com/Daybreak-AI-Labs/Lightwork">Source</a> ·
-    <a href="https://daybreak-ai-labs.github.io/Lightwork/">Docs</a>
-  </p>
+    <div class="legal">
+      <span>&copy; 2026 Daybreak Labs. Lightwork is licensed under the <a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/LICENSE">Apache License 2.0</a>; the Lightwork name and logo are <a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/TRADEMARK.md">trademarks</a>.</span>
+      <span><a href="privacy.html">Privacy &amp; cookies</a> &middot; <a href="terms.html">Terms</a> &middot; Self-hosted fonts, no trackers</span>
+    </div>
+  </div>
 </footer>
+
+<script src="lab.js"></script>
 </body>
 </html>

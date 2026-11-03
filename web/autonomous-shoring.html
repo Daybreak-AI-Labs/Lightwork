@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Autonomous Shoring: move a whole function to governed agents | Lightwork</title>
+<meta name="description" content="Autonomous Shoring is the open-source Lightwork tooling for moving a whole business function onto governed agents: a book of work, service levels measured from real completed work, an exception desk for the decisions that stay human, and a savings report from your own numbers. Self-hosted or air-gapped, under the Apache License 2.0.">
+<link rel="stylesheet" href="styles.css">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="icon" type="image/png" sizes="512x512" href="favicon-512.png">
+<link rel="apple-touch-icon" href="favicon-180.png">
+<meta name="theme-color" content="#04050A">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Autonomous Shoring: move a whole function to governed agents">
+<meta property="og:description" content="Open-source tooling in Lightwork for moving a business function onto governed agents, with a book of work, measured service levels, an exception desk and a savings report. Self-hosted or air-gapped.">
+<meta property="og:image" content="https://daybreakailabs.com/og.png">
+<meta property="og:url" content="https://daybreakailabs.com/autonomous-shoring">
+<meta name="twitter:card" content="summary_large_image">
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='{"token": "28d5584c57bd4c699bbc499ed4c37359"}'></script><!-- pragma: allowlist secret -->
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Lightwork","applicationCategory":"DeveloperApplication","operatingSystem":"Linux, macOS, Windows","license":"https://www.apache.org/licenses/LICENSE-2.0","isAccessibleForFree":true,"url":"https://daybreakailabs.com/autonomous-shoring","sameAs":["https://github.com/Daybreak-AI-Labs/Lightwork"],"publisher":{"@type":"Organization","name":"Daybreak Labs","url":"https://daybreakailabs.com"},"description":"Autonomous Shoring is the Lightwork tooling for moving a whole business function onto governed agents: a book of work, service levels measured from completed work, an exception desk and a savings report."}
+</script>
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="index.html" aria-label="Daybreak Labs home">
+      <span class="brand-mark"><img src="daybreak-mark-dark.png" alt="" width="425" height="322"></span>
+      <span class="brand-word">Daybreak Labs<small>Lightwork</small></span>
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="product.html">Platform</a>
+      <a href="cortex.html">Cortex</a>
+      <a href="autonomous-compliance.html">Autonomous Compliance</a>
+      <a href="autonomous-shoring.html" aria-current="page">Autonomous Shoring</a>
+      <a href="security.html">Security</a>
+      <a href="company.html">Company</a>
+    </nav>
+    <div class="nav-cta">
+      <a class="btn btn-ghost" href="https://daybreak-ai-labs.github.io/Lightwork/">Docs</a>
+      <a class="btn btn-primary" href="https://github.com/Daybreak-AI-Labs/Lightwork">GitHub</a>
+    </div>
+  </div>
+</header>
+
+<!-- HERO -->
+<section class="hero inner">
+  <div class="wrap hero-grid">
+    <div>
+      <span class="pill rv"><span class="dot"></span> Open source &middot; Autonomous Shoring</span>
+      <h1 class="rv d1">Move a whole function. <b>Keep control of every step.</b></h1>
+      <div class="dline rv d1" role="presentation"></div>
+      <p class="lede rv d2">Offshore, nearshore, reshore, onshore: each one moved work to a place. Autonomous Shoring is the Lightwork tooling for moving a whole business function, such as accounts payable, tier-1 support or contract review, onto governed agents instead. It gives you a book of work, service levels measured from real completed work, an exception desk for the decisions that stay human, and a savings report built from your own numbers. It is on by default in every install, at <code>/shoring</code> in the dashboard.</p>
+      <div class="hero-cta rv d3">
+        <a class="btn btn-primary" href="#tooling">See what's included</a>
+        <a class="btn btn-ghost" href="product.html">See the platform underneath</a>
+      </div>
+      <div class="hero-marks rv d3">
+        <span><b>Open source</b> &middot; Apache 2.0</span>
+        <span><b>On by default</b> &middot; <code>[shoring] enable</code></span>
+        <span><b>Every action</b> signed and auditable</span>
+        <span><b>Savings</b> counted from real work</span>
+        <span><b>Self-hosted</b> or air-gapped</span>
+      </div>
+    </div>
+    <aside class="rv d2">
+      <div class="term">
+        <div class="bar"><span class="chip">finance-operations &middot; shored function</span><span>operating record</span></div>
+        <div class="body">
+          <div class="row"><span>pack induced from a demonstration</span><span class="seal">SEALED</span></div>
+          <div class="row"><span>least-privilege pack &middot; reviewer approval</span><span class="human">REQUIRE_HUMAN</span></div>
+          <div class="row"><span>autonomy &middot; observe &rarr; suggest &rarr; request</span><span class="ok">&#10003; SIGNED</span></div>
+          <div class="row"><span>reconciliation batch</span><span class="ok">&#10003; SIGNED</span></div>
+          <div class="row"><span>payment release</span><span class="human">REQUIRE_HUMAN</span></div>
+          <div class="row"><span>runaway loop</span><span class="cap">CAPPED</span></div>
+          <div class="row"><span>period close &middot; savings report &middot; signed capsule</span><span class="seal">SEALED</span></div>
+          <div class="row"><span class="c">&middot; alter an audited row &middot;</span><span class="deny">&#10007; CAUGHT</span></div>
+        </div>
+      </div>
+      <p class="art-cap"><b>Fig. 04</b> &middot; One shored function, from demonstration to period close (illustrative). The pack is approved before it runs; money waits for a person; the record refuses to be rewritten.</p>
+    </aside>
+  </div>
+</section>
+
+<!-- THE LINEAGE -->
+<section id="lineage">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">01</span> The lineage</span>
+      <h2>Every shoring decision traded control for cost. <b>This one gives both back.</b></h2>
+      <p>Offshoring cut cost and lost control of the work; that loss is why reshoring happened. Autonomous Shoring binds governance to every action the work takes and keeps the record with you, on infrastructure you run, so the cost case and the control case point the same way.</p>
+    </div>
+    <div class="gate rv">
+      <div class="stage"><div class="n">01</div><div class="t">Offshore</div><div class="d">Distant, cheap, and out of sight. Control by contract and sampled QA.</div></div>
+      <div class="stage"><div class="n">02</div><div class="t">Nearshore</div><div class="d">Closer time zones, the same sampled control.</div></div>
+      <div class="stage"><div class="n">03</div><div class="t">Reshore</div><div class="d">Control and data back home, at domestic labor cost.</div></div>
+      <div class="stage"><div class="n">04</div><div class="t">Onshore</div><div class="d">Never left. The cost you are trying to move.</div></div>
+      <div class="stage final"><div class="n">05</div><div class="t">Autonomous shore</div><div class="d">Governed agents on infrastructure you run. The cost of an agent, a policy on every action, a record of everything.</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- WHAT'S INCLUDED -->
+<section class="panel" id="tooling">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">02</span> What's included</span>
+      <h2>A function, not a task. <b>Every piece maps to a mechanism.</b></h2>
+      <p>The shoring tooling reads from the stores Lightwork already keeps. It adds no model calls of its own and never invents a number: what it reports comes from work that actually ran.</p>
+    </div>
+    <div class="cols cols-3">
+      <div class="card rv">
+        <span class="idx">01</span>
+        <h3>A book of work</h3>
+        <p>Each function in scope, mapped to an operating department, with a scope, an owner, target service levels and a lifecycle: scoping, demonstrating, running, proving. The starting point is a department of <a class="btn-link" href="packs.html">specialist packs</a>, not a blank prompt.</p>
+      </div>
+      <div class="card rv d1">
+        <span class="idx">02</span>
+        <h3>A transition from a demonstration</h3>
+        <p>Record a person doing the job and the agent factory induces a specialist pack from it. It goes through the same intake checks as a pack built from a description, so it can't grant itself a high-impact tool, and nothing activates until a person approves it.</p>
+      </div>
+      <div class="card rv d2">
+        <span class="idx">03</span>
+        <h3>Service levels, measured</h3>
+        <p>Targets for throughput per day, exception rate and turnaround time, compared with what completed work actually achieved and marked met, at risk or breached. Every unit of work also runs under hard dollar, time, token and tool-call caps.</p>
+      </div>
+      <div class="card rv">
+        <span class="idx">04</span>
+        <h3>An exception desk</h3>
+        <p>The approvals waiting on a person, filtered to each function's department: the same queue as the Approvals page. An approval that can't be traced to a department shows in a shared queue instead of being guessed.</p>
+      </div>
+      <div class="card rv d1">
+        <span class="idx">05</span>
+        <h3>The Operating Record</h3>
+        <p>Every action signed and hash-chained, verifiable offline, and exportable as a signed, portable capsule. Not a sampled QA report: the whole function, every decision, tamper-evident.</p>
+      </div>
+      <div class="card rv d2">
+        <span class="idx">06</span>
+        <h3>A Shoring P&amp;L</h3>
+        <p>The savings report, built from real completed work and your own inputs: your fully-loaded hourly rate and the human hours each task takes, overridable per department. Savings are that human cost minus actual agent spend, and the report shows zeros until goals have run.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- WHERE TO START -->
+<section id="functions">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">03</span> Where to start</span>
+      <h2>Functions that suit it <b>first.</b></h2>
+      <p>The kind of work usually sent to an outsourcing provider, run by governed agents with a person on the exceptions.</p>
+    </div>
+    <div class="inds">
+      <div class="ind rv"><div class="t">Privacy operations</div><div class="d">Rights requests end to end: intake, identity evidence, the statutory clock and response packages built from your system extracts. Destructive work waits for an independent approval.</div></div>
+      <div class="ind rv d1"><div class="t">Governance &amp; compliance evidence</div><div class="d">Control evidence, vendor risk and assessment answers proposed from evidence you already have, with every agent action recorded. See <a class="btn-link" href="autonomous-compliance.html">Autonomous Compliance</a>.</div></div>
+      <div class="ind rv d2"><div class="t">Finance operations</div><div class="d">Reconciliation, close support and reporting from the Office-of-the-CFO packs, under the rule that no agent moves money without a person.</div></div>
+      <div class="ind rv"><div class="t">Model risk &amp; AI assurance</div><div class="d">Inventory, risk classification and testing evidence for the models and agents you already run, and the paper trail a second line of defense expects.</div></div>
+      <div class="ind rv d1"><div class="t">Legal &amp; contract operations</div><div class="d">Intake, first-pass review and drafting, with a person signing off before anything leaves.</div></div>
+      <div class="ind rv d2"><div class="t">Security operations</div><div class="d">Threat-hunting triage across your platform and environment, with findings that cite the exact events behind them, for an analyst to act on.</div></div>
+    </div>
+    <p class="muted rv" style="margin-top:26px;font-size:16px">Need a function no pack covers? The agent factory builds one from a description or a demonstration of the work. <a class="btn-link" href="packs.html">See specialist packs &rarr;</a></p>
+  </div>
+</section>
+
+<!-- BEFORE YOU MOVE A FUNCTION -->
+<section class="on-navy" id="compare">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">04</span> Before you move a function</span>
+      <h2>The questions to ask, <b>answered mechanism by mechanism.</b></h2>
+      <p>What an operations leader asks before moving a function, compared with sending it offshore.</p>
+    </div>
+    <table class="maptbl rv">
+      <thead><tr><th>The question</th><th>Offshore or nearshore</th><th>Autonomous Shoring</th></tr></thead>
+      <tbody>
+        <tr><td class="ctrl">Where does the work run?</td><td class="mech">In the provider's facility, by the provider's people.</td><td class="mech"><b>Where you deploy it</b>: your machine, your servers, your cloud account or an air-gapped network. Enterprise mode keeps model calls on local or self-hosted providers.</td></tr>
+        <tr><td class="ctrl">How is the work controlled?</td><td class="mech">By contract, escalation, and sampled QA.</td><td class="mech"><b>Policy on every action</b>: allow, deny, or require a person, before it happens.</td></tr>
+        <tr><td class="ctrl">What can an auditor see?</td><td class="mech">Reports and samples the provider prepares.</td><td class="mech"><b>Every action, signed and hash-chained</b>, checkable offline with a standalone verifier.</td></tr>
+        <tr><td class="ctrl">How long is the transition?</td><td class="mech">Months of knowledge transfer and shadowing.</td><td class="mech"><b>A demonstration becomes a governed pack</b>, approved by a person, and each agent is given authority step by step: observe, suggest, request approval, act.</td></tr>
+        <tr><td class="ctrl">What happens when the work grows?</td><td class="mech">Hire, train, and re-run the transition.</td><td class="mech"><b>Turn on more packs.</b> The caps and the exception desk apply to each one.</td></tr>
+        <tr><td class="ctrl">Does it get better or worse?</td><td class="mech">Attrition resets institutional knowledge.</td><td class="mech"><b>Reviewable improvement</b>: proposed changes wait for approval and can be reverted, and a changed specialist can run as a trial before it is promoted.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- HOW TO RUN IT -->
+<section id="how-it-runs">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">05</span> How to run it</span>
+      <h2>Scope. Prove. <b>Scale.</b></h2>
+      <p>Three phases for every function, so the second one is faster than the first.</p>
+    </div>
+    <div class="gate rv">
+      <div class="stage"><div class="n">01</div><div class="t">Scope</div><div class="d">Add a function to the book of work. Split its steps into agent work and human decisions, and set the caps and service levels.</div></div>
+      <div class="stage human"><div class="n">02</div><div class="t">Prove</div><div class="d">Run it on your data under governance, with a person approving, until the record shows it meets its service levels.</div></div>
+      <div class="stage final"><div class="n">03</div><div class="t">Scale</div><div class="d">Run it across the function. Exceptions route to the desk, and each period closes with the Operating Record and the savings report.</div></div>
+    </div>
+    <p class="muted rv" style="margin-top:26px;font-size:16px">Runs on Lightwork, wherever you run it: self-hosted or air-gapped. The tooling is on by default; set <code>[shoring] enable = false</code> or <code>MAVERICK_SHORING=0</code> to hide it.</p>
+  </div>
+</section>
+
+<!-- FINAL CTA -->
+<section class="cta-final">
+  <div class="wrap rv">
+    <div class="dline" role="presentation"></div>
+    <span class="eyebrow">Get started</span>
+    <h2>Run it yourself. <b>Read every line of it.</b></h2>
+    <p class="lede">Lightwork is open source under the Apache License 2.0. Install it from source and run it on your own machine, your own servers or an air-gapped network.</p>
+    <div class="hero-cta">
+      <a class="btn btn-primary" href="https://github.com/Daybreak-AI-Labs/Lightwork">View on GitHub</a>
+      <a class="btn btn-ghost" href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/source-install.md">Install from source</a>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer class="footer">
+  <div class="wrap">
+    <div class="top">
+      <div>
+        <div class="footer-brand"><span class="brand-mark"><img src="daybreak-mark-dark.png" alt="" width="425" height="322"></span><span>Daybreak Labs</span></div>
+        <p class="blurb">An AI lab for agentic workforces, built on compliance and governance. Our agent runtime, Lightwork, is open source under the Apache License 2.0.</p>
+        <div class="dline" role="presentation"></div>
+      </div>
+      <div>
+        <h4>Lightwork</h4>
+        <ul>
+          <li><a href="product.html">Platform</a></li>
+          <li><a href="cortex.html">Cortex</a></li>
+          <li><a href="packs.html">Specialist packs</a></li>
+          <li><a href="fleet-governance.html">Fleet governance</a></li>
+          <li><a href="autonomous-compliance.html">Autonomous Compliance</a></li>
+          <li><a href="autonomous-shoring.html">Autonomous Shoring</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Open source</h4>
+        <ul>
+          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork">Source code</a></li>
+          <li><a href="https://daybreak-ai-labs.github.io/Lightwork/">Documentation</a></li>
+          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/source-install.md">Install from source</a></li>
+          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/CONTRIBUTING.md">Contributing</a></li>
+          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork/discussions">Discussions</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Company</h4>
+        <ul>
+          <li><a href="company.html">About the lab</a></li>
+          <li><a href="security.html">Security</a></li>
+          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/SECURITY.md">Report a vulnerability</a></li>
+          <li><a href="company.html#contact">Contact</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="legal">
+      <span>&copy; 2026 Daybreak Labs. Lightwork is licensed under the <a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/LICENSE">Apache License 2.0</a>; the Lightwork name and logo are <a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/TRADEMARK.md">trademarks</a>.</span>
+      <span><a href="privacy.html">Privacy &amp; cookies</a> &middot; <a href="terms.html">Terms</a> &middot; Self-hosted fonts, no trackers</span>
+    </div>
+  </div>
+</footer>
+
+<script src="lab.js"></script>
+</body>
+</html>

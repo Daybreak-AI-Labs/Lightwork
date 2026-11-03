@@ -31,6 +31,13 @@ Each bundled file's licence text or notice is kept next to it or in its header.
 | [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono) 2.211 | `jbm-400.woff2` | OFL-1.1 | Copyright 2020 The JetBrains Mono Project Authors. The licence text is in `OFL.txt` in the same directory. |
 | [Manrope](https://github.com/sharanda/manrope) 4.504 | `manrope-var.woff2` | OFL-1.1 | Copyright 2019 The Manrope Project Authors. The licence text is in `OFL.txt` in the same directory. |
 
+### `web/` (published as the project website)
+
+| Component | Files | Licence | Copyright and notices |
+|---|---|---|---|
+| [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono) 2.211 | `fonts/jbm-400.woff2`, `fonts/jbm-500.woff2` | OFL-1.1 | Copyright 2020 The JetBrains Mono Project Authors. The licence text is in `fonts/OFL.txt`. |
+| [Manrope](https://github.com/sharanda/manrope) 4.504 | `fonts/manrope-var.woff2` | OFL-1.1 | Copyright 2019 The Manrope Project Authors. The licence text is in `fonts/OFL.txt`. |
+
 ### `packages/maverick-core/maverick/data/tokenizer/` (included in the `maverick-core` wheel)
 
 | Component | Files | Licence | Copyright and notices |

@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Specialist packs: governed agents with a fixed job | Lightwork</title>
+<meta name="description" content="Lightwork ships a library of specialist packs across finance, tax, legal, privacy, IT and GRC, operations and many industries, plus an agent factory that builds a new pack from a description or a demonstration. Each pack has a fixed job, least-privilege tools, a risk ceiling and a person who signs off. Open source under the Apache License 2.0.">
+<link rel="stylesheet" href="styles.css">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="icon" type="image/png" sizes="512x512" href="favicon-512.png">
+<link rel="apple-touch-icon" href="favicon-180.png">
+<meta name="theme-color" content="#04050A">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Specialist packs: governed agents with a fixed job">
+<meta property="og:description" content="A library of specialist agents, each one file with a fixed job, least-privilege tools, a risk ceiling and a person who signs off, plus an agent factory for the ones you need. Open source under Apache 2.0.">
+<meta property="og:image" content="https://daybreakailabs.com/og.png">
+<meta property="og:url" content="https://daybreakailabs.com/packs">
+<meta name="twitter:card" content="summary_large_image">
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='{"token": "28d5584c57bd4c699bbc499ed4c37359"}'></script><!-- pragma: allowlist secret -->
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Lightwork","applicationCategory":"DeveloperApplication","operatingSystem":"Linux, macOS, Windows","license":"https://www.apache.org/licenses/LICENSE-2.0","isAccessibleForFree":true,"url":"https://daybreakailabs.com/packs","sameAs":"https://github.com/Daybreak-AI-Labs/Lightwork","author":{"@type":"Organization","name":"Daybreak Labs","url":"https://daybreakailabs.com"},"description":"Lightwork's specialist packs: governed agents with a fixed job, least-privilege tools and a risk ceiling, and an agent factory that builds new packs from a description or a demonstration."}
+</script>
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="index.html" aria-label="Daybreak Labs home">
+      <span class="brand-mark"><img src="daybreak-mark-dark.png" alt="" width="425" height="322"></span>
+      <span class="brand-word">Daybreak Labs<small>Lightwork</small></span>
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="product.html">Platform</a>
+      <a href="cortex.html">Cortex</a>
+      <a href="autonomous-compliance.html">Autonomous Compliance</a>
+      <a href="autonomous-shoring.html">Autonomous Shoring</a>
+      <a href="security.html">Security</a>
+      <a href="company.html">Company</a>
+    </nav>
+    <div class="nav-cta">
+      <a class="btn btn-ghost" href="https://daybreak-ai-labs.github.io/Lightwork/">Docs</a>
+      <a class="btn btn-primary" href="https://github.com/Daybreak-AI-Labs/Lightwork">GitHub</a>
+    </div>
+  </div>
+</header>
+
+<!-- HERO -->
+<section class="hero inner">
+  <div class="wrap hero-grid">
+    <div>
+      <span class="pill rv"><span class="dot"></span> Specialist packs &middot; governed specialists</span>
+      <h1 class="rv d1">Specialists you switch on, <b>not prompts you engineer.</b></h1>
+      <div class="dline rv d1" role="presentation"></div>
+      <p class="lede rv d2">Lightwork ships a library of specialist packs across finance, tax, legal, privacy, IT and GRC, operations and many industries. Each pack is one file that defines a specialist: a fixed job, the tools it may and may not use, a risk ceiling, the compartment it is sealed into and a step-by-step workflow. Suites group the packs by function or industry. Agents draft and recommend; a person signs off.</p>
+      <div class="hero-cta rv d3">
+        <a class="btn btn-primary" href="https://github.com/Daybreak-AI-Labs/Lightwork/tree/main/packages/maverick-core/maverick/domains">Browse the packs on GitHub</a>
+        <a class="btn btn-ghost" href="product.html">See the platform</a>
+      </div>
+      <div class="hero-marks rv d3">
+        <span><b>Open source</b> &middot; Apache 2.0</span>
+        <span><b>One file</b> per specialist</span>
+        <span><b>Least-privilege</b> tools, per pack</span>
+        <span><b>A person</b> signs off</span>
+        <span><b>Self-hosted</b> or air-gapped</span>
+      </div>
+    </div>
+    <aside class="rv d2">
+      <div class="term">
+        <div class="bar"><span class="chip">tax &middot; documents to draft</span><span>operating record</span></div>
+        <div class="body">
+          <div class="row"><span>classify &middot; W-2 &middot; 1099 &middot; K-1 &middot; 1098</span><span class="ok">&#10003; EXTRACTED</span></div>
+          <div class="row"><span>standardized workpaper</span><span class="ok">&#10003; DRAFTED</span></div>
+          <div class="row"><span>first-pass 1040 &middot; every number cites its source</span><span class="ok">&#10003; DRAFTED</span></div>
+          <div class="row"><span>state computation</span><span class="ok">&#10003; DRAFTED</span></div>
+          <div class="row"><span>review and sign</span><span class="human">REQUIRE_HUMAN</span></div>
+          <div class="row"><span class="c">&middot; file the return &middot;</span><span class="deny">&#10007; DENY</span></div>
+        </div>
+      </div>
+      <p class="art-cap"><b>Fig. 02</b> &middot; Illustrative run of the tax workflow, documents to draft. The agents classify, extract and draft; the preparer reviews and signs; filing is a person's act, because a drafting pack cannot reach a tool that changes another system.</p>
+    </aside>
+  </div>
+</section>
+
+<!-- WHAT A PACK IS -->
+<section>
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">01</span> Packs &amp; suites</span>
+      <h2>One specialist per pack, <b>under maker-checker discipline.</b></h2>
+      <p>A pack is a single specialist with one fixed job; a suite groups the packs for one function or industry. Each pack drafts and recommends; a person reviews and commits.</p>
+    </div>
+    <div class="cols cols-3">
+      <div class="card rv"><span class="idx">01</span><h3>A fixed job</h3><p>Every specialist has one bounded persona and one task: a 13-week cash forecaster, a 1099 extractor, a citation checker. No open-ended prompt to engineer.</p></div>
+      <div class="card rv d1"><span class="idx">02</span><h3>Least privilege</h3><p>Each pack gets a tool allow-list, a deny-list that always wins, and a risk ceiling it cannot exceed, bound to every action.</p></div>
+      <div class="card rv d2"><span class="idx">03</span><h3>A person signs off</h3><p>Agents draft and recommend; they don't commit. Work routes to a reviewer who approves and releases it: maker-checker, built in.</p></div>
+    </div>
+    <p class="muted rv" style="margin-top:26px;font-size:16px">The skills and lessons packs learn as they work are part of <a class="btn-link" href="cortex.html">Cortex</a>, Lightwork's governed memory: tenant-exact, every read audited, every learned change reviewable and reversible.</p>
+  </div>
+</section>
+
+<!-- FLAGSHIP PACKS -->
+<section class="panel">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">02</span> Flagship packs</span>
+      <h2>Flagship suites, <b>deep enough to stand on their own.</b></h2>
+    </div>
+    <div class="cols cols-3">
+      <div class="card rv"><span class="idx">Finance</span><h3>Office of the CFO</h3><p>The finance organization as agents: controllership, FP&amp;A, treasury, assurance and reporting. Agents never move money; a maker-checker gate sits on money movement, with amount-aware approval tiers, a segregation-of-duties linter and sanctions screening.</p></div>
+      <div class="card rv d1"><span class="idx">Tax &middot; packs + pipeline</span><h3>Tax preparation</h3><p>A documents-to-draft workflow: classify and extract W-2, the 1099 family, K-1 and 1098 into a standardized workpaper, then a first-pass Form 1040 and state computation. Every number cites the document it came from. The preparer reviews and signs; it never files.</p></div>
+      <div class="card rv d2"><span class="idx">Legal</span><h3>Legal &amp; Privacy</h3><p>Contracts, litigation support, privacy regimes (GDPR, CCPA/CPRA, PIPL, APPI, LGPD and US state laws), AI and emerging-tech counsel, antitrust and board governance, with a citation checker that flags any quote it cannot find in the cited source.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- THE FULL CATALOG -->
+<section>
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">03</span> The full catalog</span>
+      <h2>The org chart, <b>and the industries it runs in.</b></h2>
+      <p>The same discipline, tuned for each kind of work. Corporate-function suites cover the org chart; industry suites carry that industry's regulatory and jurisdiction content. A representative set is shown here; every pack is a file in the repository you can read before you turn it on.</p>
+    </div>
+    <div class="stats four">
+      <div class="s rv"><div class="big"><b>Every</b> function</div><div class="lbl">corporate-function suites cover the org chart</div></div>
+      <div class="s rv d1"><div class="big"><b>Industry</b> verticals</div><div class="lbl">each suite carries that industry's regulatory and jurisdiction content</div></div>
+      <div class="s rv d2"><div class="big"><b>One</b> discipline</div><div class="lbl">maker-checker and least privilege on every pack</div></div>
+      <div class="s rv d3"><div class="big"><b>Readable</b> source</div><div class="lbl">one file per specialist, in the open</div></div>
+    </div>
+    <div class="split rv" style="margin-top:48px">
+      <div class="term">
+        <div class="bar"><span class="chip">corporate-function suites</span><span>the org chart</span></div>
+        <div class="body">
+          <div class="row"><span>Finance</span></div>
+          <div class="row"><span>Tax</span></div>
+          <div class="row"><span>Legal &amp; Privacy</span></div>
+          <div class="row"><span>IT &amp; GRC</span></div>
+          <div class="row"><span>People &amp; HR</span></div>
+          <div class="row"><span>Sales &amp; GTM (RevOps)</span></div>
+          <div class="row"><span>Operations &amp; Procurement</span></div>
+          <div class="row"><span class="c">&middot; and more across the org chart &middot;</span></div>
+        </div>
+      </div>
+      <div class="term">
+        <div class="bar"><span class="chip">industry suites</span><span>regulatory and jurisdiction content</span></div>
+        <div class="body">
+          <div class="row"><span>Banking &amp; Capital Markets</span></div>
+          <div class="row"><span>Insurance</span></div>
+          <div class="row"><span>Healthcare &amp; Life Sciences</span></div>
+          <div class="row"><span>Manufacturing &amp; Industrials</span></div>
+          <div class="row"><span>Retail &amp; Consumer</span></div>
+          <div class="row"><span>Professional Services</span></div>
+          <div class="row"><span>Public Sector</span></div>
+          <div class="row"><span class="c">&middot; and more industries &middot;</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- THE QUALITY GATE -->
+<section class="panel">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">04</span> The quality gate</span>
+      <h2>Every pack clears <b>the same gate.</b></h2>
+      <p>Before a pack ships, it clears the same pack quality gate as every other: a bounded persona, a tool allow-list, a deny-list and a risk ceiling. A pack with an empty allow-list or no risk ceiling fails.</p>
+    </div>
+    <div class="split rv" style="margin-top:48px">
+      <div>
+        <div class="term">
+          <div class="bar"><span class="chip">pack quality gate</span><span>every pack, every suite</span></div>
+          <div class="body">
+            <div class="c"># every pack checked, on every change</div>
+            <div class="row"><span>bounded persona</span><span class="ok">&#10003; PASS</span></div>
+            <div class="row"><span>least-privilege allow-list</span><span class="ok">&#10003; PASS</span></div>
+            <div class="row"><span>deny-list &middot; deny wins</span><span class="deny">&#10007; shell</span></div>
+            <div class="row"><span>risk ceiling</span><span class="cap">CAPPED</span></div>
+            <div class="row"><span>every pack &middot; every suite</span><span class="ok">&#10003; ENFORCED</span></div>
+          </div>
+        </div>
+        <p class="figcap"><b>Fig. 03</b> &middot; The lint every pack clears. The deny-list row is an entry doing its job: a drafting pack is refused the shell, by rule.</p>
+      </div>
+      <div>
+        <h3>Checked on every change</h3>
+        <p><code>lightwork domains-lint --ci</code> runs in CI on every change to the repository, so a pack that weakens its own envelope fails the build.</p>
+        <p>Invariant tests run across the whole library: no drafting pack can reach a state-mutating tool, a pack still in onboarding never acts autonomously, a spawned agent never exceeds its parent's grant, a compartment seal never reaches another compartment, and the hard-refusal floor cannot be removed.</p>
+        <p><a class="btn-link" href="product.html">See how the platform governs every action &rarr;</a></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- THE FACTORY -->
+<section>
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">05</span> Need one that isn't in the library?</span>
+      <h2>When no pack fits, <b>build one the same way.</b></h2>
+      <p>The agent factory creates a new pack from a description of the job, through a short interview, or from a reviewed record of a person doing it (<code>lightwork learn-demo</code>). Both paths run the same spine as the built-in packs: the draft is clamped to a least-privilege envelope, a person approves it before it exists, and provisioning fills in only what the approved workflow already declares.</p>
+    </div>
+    <div class="gate rv">
+      <div class="stage"><div class="n">01</div><div class="t">Describe or demonstrate</div><div class="d">An interview about the job, or a reviewed record of a person doing it. Secrets are redacted at the door.</div></div>
+      <div class="stage"><div class="n">02</div><div class="t">Clamp</div><div class="d">The draft is held to the same least-privilege envelope as a built-in pack, and its persona is Shield-scanned.</div></div>
+      <div class="stage"><div class="n">03</div><div class="t">Approve</div><div class="d">Nothing activates until a person approves it; a demonstration is the evidence they review.</div></div>
+      <div class="stage"><div class="n">04</div><div class="t">Provision</div><div class="d">Missing skills and declared tools are filled in, consent-gated and off by default, never wider than the approved envelope.</div></div>
+      <div class="stage final"><div class="n">05</div><div class="t">Learn</div><div class="d">Approval and provisioning gaps feed back into how the next pack is drafted. Envelopes never widen.</div></div>
+    </div>
+    <div class="fig rv">
+      <div class="term">
+        <div class="bar"><span class="chip">agent factory &middot; from a demonstration</span><span>clamp, then approve</span></div>
+        <div class="body">
+          <div class="c"># a pack drafted from a reviewed demonstration of the work</div>
+          <div class="row"><span>input &middot; a person doing the job</span><span class="ok">&#10003; PARSED</span></div>
+          <div class="row"><span>secrets &middot; at the door</span><span class="ok">&#10003; REDACTED</span></div>
+          <div class="row"><span>envelope &middot; least privilege</span><span class="cap">CLAMPED</span></div>
+          <div class="row"><span>persona &middot; shield scan</span><span class="ok">&#10003; CLEAN</span></div>
+          <div class="row"><span>human approval</span><span class="human">REQUIRE_HUMAN</span></div>
+          <div class="row"><span class="c">&middot; activate before approval &middot;</span><span class="deny">&#10007; BLOCKED</span></div>
+        </div>
+      </div>
+      <p class="figcap"><b>Fig. 04</b> &middot; Illustrative. A demonstrated pack can grant itself no more than a described one: the envelope is clamped, and nothing runs before a person approves it.</p>
+    </div>
+  </div>
+</section>
+
+<!-- FINAL CTA -->
+<section class="cta-final">
+  <div class="wrap rv">
+    <div class="dline" role="presentation"></div>
+    <span class="eyebrow">Get started</span>
+    <h2>Switch on a specialist, <b>or build the one you need.</b></h2>
+    <p class="lede">The packs and the agent factory ship with Lightwork, open source under the Apache License 2.0. Install it from source and run it on your own machine, your own servers or an air-gapped network.</p>
+    <div class="hero-cta">
+      <a class="btn btn-primary" href="https://github.com/Daybreak-AI-Labs/Lightwork">View on GitHub</a>
+      <a class="btn btn-ghost" href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/source-install.md">Install from source</a>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer class="footer">
+  <div class="wrap">
+    <div class="top">
+      <div>
+        <div class="footer-brand"><span class="brand-mark"><img src="daybreak-mark-dark.png" alt="" width="425" height="322"></span><span>Daybreak Labs</span></div>
+        <p class="blurb">An AI lab for agentic workforces, built on compliance and governance. Our agent runtime, Lightwork, is open source under the Apache License 2.0.</p>
+        <div class="dline" role="presentation"></div>
+      </div>
+      <div>
+        <h4>Lightwork</h4>
+        <ul>
+          <li><a href="product.html">Platform</a></li>
+          <li><a href="cortex.html">Cortex</a></li>
+          <li><a href="packs.html">Specialist packs</a></li>
+          <li><a href="fleet-governance.html">Fleet governance</a></li>
+          <li><a href="autonomous-compliance.html">Autonomous Compliance</a></li>
+          <li><a href="autonomous-shoring.html">Autonomous Shoring</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Open source</h4>
+        <ul>
+          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork">Source code</a></li>
+          <li><a href="https://daybreak-ai-labs.github.io/Lightwork/">Documentation</a></li>
+          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/source-install.md">Install from source</a></li>
+          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/CONTRIBUTING.md">Contributing</a></li>
+          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork/discussions">Discussions</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Company</h4>
+        <ul>
+          <li><a href="company.html">About the lab</a></li>
+          <li><a href="security.html">Security</a></li>
+          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/SECURITY.md">Report a vulnerability</a></li>
+          <li><a href="company.html#contact">Contact</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="legal">
+      <span>&copy; 2026 Daybreak Labs. Lightwork is licensed under the <a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/LICENSE">Apache License 2.0</a>; the Lightwork name and logo are <a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/TRADEMARK.md">trademarks</a>.</span>
+      <span><a href="privacy.html">Privacy &amp; cookies</a> &middot; <a href="terms.html">Terms</a> &middot; Self-hosted fonts, no trackers</span>
+    </div>
+  </div>
+</footer>
+
+<script src="lab.js"></script>
+</body>
+</html>
