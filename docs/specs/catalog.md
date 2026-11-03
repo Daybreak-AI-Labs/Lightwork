@@ -1,9 +1,11 @@
 # Lightwork content catalog (federated)
 
-A catalog lets users browse and install community content — skills
-today, plugins / MCP servers / personas next — without editing config
-or running install-by-URL. It's the dashboard **Store** tab and the
-`maverick skill browse` / `maverick skill add` commands.
+A catalog lets users browse and install community skills without editing
+config or running install-by-URL. It's the dashboard **Store** tab and the
+`maverick skill browse` / `maverick skill add` commands. The index format also
+carries other kinds (plugins, MCP servers, personas); only skills have an
+install path, and MCP servers are covered by the
+[MCP server registry](./mcp-registry.md).
 
 ## Index format
 
@@ -49,8 +51,8 @@ hash and a trusted signature. MCP catalog specs have separate trust limits.
 ```toml
 [catalogs]
 # Base URLs (no trailing /kind). Multiple indexes merge; earlier wins
-# on name collision. The built-in default index is not yet published;
-# configure your own under [catalogs] indexes.
+# on name collision. Without this setting the built-in default index is
+# used; an unreachable or empty index yields no entries.
 indexes = ["https://raw.githubusercontent.com/your-org/your-index/main/catalog"]
 ```
 
@@ -69,10 +71,9 @@ dashboard) and serves a stale cache if one exists.
   `POST /api/v1/catalog/skills/install`
 - CLI: `maverick skill browse`, `maverick skill add <name>`
 
-## Roadmap
+## Limits
 
-- Plugins / MCP / personas install-from-catalog (schema already
-  supports the kinds; only skills wire the install path today)
-- Ed25519 publisher signatures + a `verified` badge driven by the
-  signing key, not a hand-set bool
-- Privacy-respecting install counts (anonymous increment)
+- Only skills can be installed from a catalog.
+- The `verified` field is set by the index, not derived from a publisher
+  signature, so it is not a trust signal.
+- `install_count` is reported by the index; the client does not increment it.

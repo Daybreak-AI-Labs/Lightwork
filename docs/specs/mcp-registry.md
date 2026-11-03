@@ -1,18 +1,19 @@
-# Design Spec: MCP Server Registry
+# MCP server registry
 
-**Status:** Discovery is available; all registry-supplied installation and probing are disabled pending publisher authentication. · **Related:** [`catalog.md`](./catalog.md), [`skill-index.md`](./skill-index.md)
+The registry provides discovery of MCP servers. Installing or probing a
+registry-supplied server is disabled, because the index does not authenticate
+its publisher. Related: [`catalog.md`](./catalog.md).
 
-## 1. Problem
+## 1. Scope
 
-Lightwork can *consume* external MCP servers once they're in
-`[mcp_servers.<name>]` (stdio via `MCPClient`, remote HTTP via
-`StreamableHttpMCPClient`). What was missing is **discovery +
-install**: `maverick mcp-registry browse` supports discovery, but adding a
-registry entry is unavailable. Servers require independently reviewed
-administrator configuration because the index does not authenticate its publisher.
+Lightwork *consumes* external MCP servers configured in `[mcp_servers.<name>]`
+(stdio via `MCPClient`, remote HTTP via `StreamableHttpMCPClient`).
+`maverick mcp-registry browse` lists servers from the configured registry
+indexes. Adding a registry entry is refused: a server needs independently
+reviewed administrator configuration.
 
-OAuth 2.1 (the other half of B2) is out of scope here — it needs real accounts
-to validate. Static-bearer remote servers already work via `auth_token`.
+Remote servers authenticate with a static bearer (`auth_token`); OAuth 2.1 is
+not supported.
 
 ## 2. The registry is a federated catalog
 
@@ -20,8 +21,9 @@ A registry is a self-hostable JSON index served at `<base>/mcp/index.json`,
 reusing the generic [`catalog.py`](./catalog.md) infra (fetch + 6h cache +
 SSRF-guarded `guarded_urlopen` + https-only + stale-serve + multi-index merge,
 earlier index wins). Point `[mcp_registries] indexes` at your own base(s).
-The built-in default index (`DEFAULT_MCP_REGISTRIES`) is not yet published;
-configure your own under `[mcp_registries] indexes`.
+Without that setting the built-in default (`DEFAULT_MCP_REGISTRIES`, the same
+base as the content catalog) is used; an unreachable or empty index yields no
+entries.
 
 ```toml
 # ~/.maverick/config.toml
@@ -63,9 +65,9 @@ indexes = ["https://registry.example.com/catalog", "https://internal.acme/catalo
 server's installable artifact is *configuration*, not a content file. There's
 nothing to fetch and hash — the actual server binary is resolved at spawn time
 (`npx`/`pip`/a URL). So the entry carries the `spec` (a `[mcp_servers.<name>]`
-dict) directly, and `source`/`sha256` are optional. `CatalogEntry` gained an
-optional `spec: dict` field for exactly this; content kinds (skills, personas)
-leave it empty and keep fetching `source`.
+dict) directly, and `source`/`sha256` are optional. `CatalogEntry` has an
+optional `spec: dict` field for this; content kinds (skills, personas) leave it
+empty and fetch `source`.
 
 ## 4. Trust model
 
@@ -104,32 +106,31 @@ used to serialize a resolved spec into config.
 Lightwork's *own* server):
 
 - `browse` — list registry servers (name, version, transport, verified badge).
-- `add <name>` — currently refuses unauthenticated registry entries.
+- `add <name>` — refuses unauthenticated registry entries.
 - `remove <name>` — drop the table from config.
 - `list` — show the MCP servers currently configured (via the kernel's loader).
 
 ## 7. Config knob + wizard (kernel rules 5 and 6)
 
-- Knob: `[mcp_registries] indexes` (list of base URLs). Discovery works with **no
-  config** (built-in default), so the knob is only for custom/self-hosted
+- Knob: `[mcp_registries] indexes` (list of base URLs). Without it, discovery
+  uses the built-in default, so the knob is only for custom/self-hosted
   registries.
 - Wizard: `write_config` emits `[mcp_registries]` when custom indexes are
   supplied, so the installer can write the knob; it's omitted by default to keep
   the config minimal.
 
-## 8. Deferred
+## 8. Limits
 
-- **OAuth 2.1** for remote servers (the other half of B2) — needs real accounts.
-- **Signed registry entries** (Ed25519, mirroring the skills `trusted_pubkeys`
-  path) — authenticity and complete workload authorization remain future work.
-- **`install_count` / ranking** — the schema carries the field; surfacing it is
-  cosmetic.
+- Remote servers support static bearer authentication only, not OAuth 2.1.
+- Registry entries are unsigned, so neither their authenticity nor a complete
+  workload authorization can be established from the index.
+- The schema carries `install_count`, but the CLI does not rank or display it.
 
-## Local command trust
+## 9. Local command trust
 
 The registry may describe local stdio servers for discovery, but installation
 and probing of registry-supplied local commands are disabled: pinning an
 executable does not authenticate its arguments or additional programs it may
 run. An administrator can independently review and configure a local MCP
 server directly. HTTP registry entries are also unavailable for installation
-or probing until their publisher and full configuration can be authenticated.
+or probing, because their publisher and full configuration are not authenticated.

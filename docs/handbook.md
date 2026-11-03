@@ -352,7 +352,7 @@ haven't installed yet.
 |---|---|
 | Install + first run | [`source-install.md`](./source-install.md), [`getting-started.md`](./getting-started.md), README |
 | Every shipped feature | [`FEATURES.md`](./FEATURES.md) |
-| The architecture argument | [`architecture.md`](./architecture.md), [`docs/specs/`](./specs/) decision memos |
+| The architecture argument | [`architecture.md`](./architecture.md), [`contracts/`](./contracts/README.md) (interface contracts), [`specs/`](./specs/) (formats and formal models) |
 | Config schema | [`configuration.md`](./configuration.md), [`env-vars.md`](./env-vars.md) |
 | Deploy targets | [`deployment.md`](./deployment.md), [`reference-architectures.md`](./reference-architectures.md), [`github-action.md`](./github-action.md) |
 | Run it day-2 | [`operations.md`](./operations.md), [`perf-sla.md`](./perf-sla.md) |
