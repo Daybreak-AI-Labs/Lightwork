@@ -187,6 +187,22 @@ _BROWSER_INPUT_SCHEMA: dict[str, Any] = {
 }
 
 
+def _proxy_host_policy(tenant: str | None, host: str, port: int) -> bool:
+    """Apply the originating session's hostname policy in the proxy thread."""
+    from ..config import single_read
+    from ..enterprise import egress_permitted
+    from ..tenant.egress import egress_allowed
+
+    # Enterprise policy parses a URL; bracket IPv6 so its host remains intact.
+    authority = f"[{host}]" if ":" in host else host
+    scheme = "https" if port == 443 else "http"
+    # Do not retain a request's cached configuration past that request.
+    with single_read(fresh=True):
+        return egress_permitted(f"{scheme}://{authority}:{port}/") and egress_allowed(
+            "browser", host, tenant=tenant,
+        )
+
+
 class _BrowserSession:
     """One persistent chromium instance, lazily started, thread-safe."""
 
@@ -284,12 +300,24 @@ class _BrowserSession:
                 "&& playwright install chromium"
             ) from e
         from ..consent_scanner import PlaywrightPageCollector, _PinnedSocksProxy
+        from ..paths import current_tenant_id_strict, set_tenant
 
+        tenant = current_tenant_id_strict()
+        # Propagate only tenant identity, not an in-flight request's cached
+        # configuration or other mutable context into proxy worker threads.
+        session_context = contextvars.Context()
+        session_context.run(set_tenant, tenant)
         # Keep the validated DNS answer tied to the actual socket connection,
         # including background and WebSocket traffic outside route callbacks.
         # A proxy failure must never fall back to an unguarded browser.
         try:
-            self._egress_proxy = _PinnedSocksProxy()
+            self._egress_proxy = _PinnedSocksProxy(
+                # Proxy workers are separate threads. Copy the pinned context
+                # per call so tenant-specific configuration is resolved there.
+                authorize_host=lambda host, port: session_context.copy().run(
+                    _proxy_host_policy, tenant, host, port,
+                ),
+            )
             self._egress_proxy.__enter__()
             self._playwright = sync_playwright().start()
             from ..env_setting import env_or_config

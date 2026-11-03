@@ -406,7 +406,9 @@ class _PinnedSocksProxy:
         dns_timeout_seconds: float = _SOCKS_DNS_TIMEOUT_SECONDS,
         connect_timeout_seconds: float = 15.0,
         idle_timeout_seconds: float = 60.0,
+        authorize_host: Callable[[str, int], bool] | None = None,
     ) -> None:
+        self._authorize_host = authorize_host
         self._resolver = resolver
         self._connector = connector
         self._dns_timeout = max(0.1, min(float(dns_timeout_seconds), 30.0))
@@ -632,6 +634,13 @@ class _PinnedSocksProxy:
         try:
             client.settimeout(_SOCKS_HANDSHAKE_TIMEOUT_SECONDS)
             host, port = self._read_request(client)
+            if self._authorize_host is not None:
+                try:
+                    allowed = self._authorize_host(host, port)
+                except Exception:
+                    allowed = False
+                if not allowed:
+                    self._reject(client, 2)
             try:
                 pinned_ip = self._pin_target(host, port)
             except _SocksRequestRejected:

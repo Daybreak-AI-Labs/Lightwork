@@ -1325,3 +1325,10 @@ ports 80 and 443, even when `MAVERICK_FETCH_ALLOW_PRIVATE` is enabled. The proxy
 is not an operating-system sandbox; deployments handling untrusted pages should
 also restrict the browser process's network access at the operating-system or
 container boundary. Long-idle browser connections may be closed by the proxy.
+
+For interactive-browser proxy connections, the enterprise and originating
+workspace hostname policies are checked before DNS resolution, including for
+WebSocket connections. This is a connection-level check: HTTP connection reuse
+can carry more than one hostname, and existing connections are not revoked
+immediately when a policy changes. Route-level checks and network isolation
+remain necessary for stronger enforcement.

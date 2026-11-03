@@ -13,8 +13,9 @@ from maverick.tools import browser
 class FakeProxy:
     server_url = "socks5://127.0.0.1:45678"
 
-    def __init__(self):
+    def __init__(self, **kwargs):
         self.closed = 0
+        self.authorize_host = kwargs.get("authorize_host")
 
     def __enter__(self):
         return self
@@ -95,8 +96,8 @@ def test_browser_startup_failure_closes_proxy_and_can_retry(monkeypatch, fail_at
     install_browser(monkeypatch, fail_at=fail_at)
     created = []
 
-    def new_proxy():
-        proxy = FakeProxy()
+    def new_proxy(**kwargs):
+        proxy = FakeProxy(**kwargs)
         created.append(proxy)
         return proxy
 
@@ -130,6 +131,7 @@ def test_chromium_cannot_bypass_proxy_for_a_loopback_destination(monkeypatch):
     monkeypatch.setattr(consent_scanner, "_SOCKS_ALLOWED_PORTS", frozenset({port}))
     # Exercise the network backstop even if a higher-level URL check is bypassed.
     monkeypatch.setattr(browser, "_route_guard", lambda route, _request: route.continue_())
+    monkeypatch.setattr(browser, "_proxy_host_policy", lambda *_args: True)
     session = browser._BrowserSession()
     try:
         try:
@@ -155,8 +157,8 @@ def test_browser_does_not_launch_without_pinned_proxy(monkeypatch):
         def __enter__(self):
             raise OSError("proxy unavailable")
 
-    def new_proxy():
-        proxy = BrokenProxy()
+    def new_proxy(**kwargs):
+        proxy = BrokenProxy(**kwargs)
         created.append(proxy)
         return proxy
 
@@ -167,3 +169,81 @@ def test_browser_does_not_launch_without_pinned_proxy(monkeypatch):
     assert launches == []
     assert created[0].closed == 1
     assert session._egress_proxy is None
+
+
+def test_proxy_policy_keeps_the_originating_tenant(monkeypatch):
+    from maverick import enterprise
+    from maverick.tenant import egress
+
+    seen = []
+    monkeypatch.setattr(enterprise, "egress_permitted", lambda url: seen.append(url) or True)
+    monkeypatch.setattr(
+        egress, "egress_allowed",
+        lambda tool, host, *, tenant: seen.append((tool, host, tenant)) or tenant == "tenant-a",
+    )
+    assert browser._proxy_host_policy("tenant-a", "public.example", 443)
+    assert seen == ["https://public.example:443/", ("browser", "public.example", "tenant-a")]
+    assert not browser._proxy_host_policy(None, "public.example", 443)
+    assert browser._proxy_host_policy("tenant-a", "2001:4860:4860::8888", 443)
+    assert seen[-2] == "https://[2001:4860:4860::8888]:443/"
+
+
+def test_proxy_policy_runs_with_session_tenant_in_a_fresh_thread(monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+
+    from maverick import enterprise
+    from maverick.paths import current_tenant_id_strict, reset_tenant, set_tenant
+    from maverick.tenant import egress
+
+    install_browser(monkeypatch)
+    observed = []
+    monkeypatch.setattr(enterprise, "egress_permitted", lambda _url: True)
+    monkeypatch.setattr(
+        egress, "egress_allowed",
+        lambda _tool, _host, *, tenant: observed.append(
+            (tenant, current_tenant_id_strict())
+        ) or True,
+    )
+    token = set_tenant("tenant-a")
+    try:
+        session = browser._BrowserSession()
+        session._ensure_started()
+        authorize = session._egress_proxy.authorize_host
+    finally:
+        reset_tenant(token)
+    try:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            assert executor.submit(authorize, "public.example", 443).result()
+        assert observed == [("tenant-a", "tenant-a")]
+    finally:
+        session.close()
+
+
+def test_proxy_thread_honors_real_tenant_config_overlay(monkeypatch, tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    from maverick import enterprise
+    from maverick.paths import reset_tenant, set_tenant
+
+    install_browser(monkeypatch)
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.delenv("MAVERICK_TENANT", raising=False)
+    monkeypatch.setattr(enterprise, "egress_permitted", lambda _url: True)
+    tenant_dir = tmp_path / "tenants" / "tenant-a"
+    tenant_dir.mkdir(parents=True)
+    (tenant_dir / "config.toml").write_text(
+        '[egress]\ndeny = ["blocked.example"]\n', encoding="utf-8",
+    )
+    token = set_tenant("tenant-a")
+    try:
+        session = browser._BrowserSession()
+        session._ensure_started()
+        authorize = session._egress_proxy.authorize_host
+    finally:
+        reset_tenant(token)
+    try:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            assert not executor.submit(authorize, "blocked.example", 443).result()
+            assert executor.submit(authorize, "allowed.example", 443).result()
+    finally:
+        session.close()

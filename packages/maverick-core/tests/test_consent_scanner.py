@@ -647,3 +647,26 @@ def test_playwright_capture_launches_chromium_through_the_pinned_proxy(
 def test_scan_limits_are_finite_and_bounded(limits: ScanLimits) -> None:
     with pytest.raises(ConsentScannerValidationError):
         limits.validated()
+
+
+@pytest.mark.parametrize("raises", [False, True])
+def test_pinned_proxy_denies_host_policy_before_dns_or_connect(raises: bool) -> None:
+    client = ScriptedSocket(_socks_domain_request("denied.vendor.test", 443))
+    calls = []
+
+    def authorize(host: str, port: int) -> bool:
+        calls.append(("authorize", host, port))
+        if raises:
+            raise RuntimeError("policy unavailable")
+        return False
+
+    def resolver(host: str, port: int) -> tuple[str, ...]:
+        calls.append(("resolve", host, port))
+        return ("93.184.216.34",)
+
+    proxy = scanner_module._PinnedSocksProxy(  # noqa: SLF001
+        resolver=resolver, authorize_host=authorize,
+    )
+    proxy._handle_client(client)  # noqa: SLF001
+    assert calls == [("authorize", "denied.vendor.test", 443)]
+    assert client.sent[3] == 2
