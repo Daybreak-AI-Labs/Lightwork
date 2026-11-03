@@ -30,9 +30,9 @@ catalogue of built features and tools.
 | [Adaptive immunity](#adaptive-immunity) | 5 |
 | [Unified cross-suite audit projection](#unified-cross-suite-audit-projection) | 6 |
 | [Distribution and install](#distribution-and-install) | 21 |
-| [Customer workflow completion and readiness](#customer-workflow-completion-and-readiness) | 18 in 24 subsections |
+| [Customer workflow completion and readiness](#customer-workflow-completion-and-readiness) | 22 in 24 subsections |
 
-480 entries in 19 sections. This block is generated: `python scripts/features_toc.py --write` (the test suite fails when it is stale).
+484 entries in 19 sections. This block is generated: `python scripts/features_toc.py --write` (the test suite fails when it is stale).
 <!-- toc:end -->
 
 ## Agent kernel and orchestration
@@ -151,7 +151,7 @@ catalogue of built features and tools.
   physical capacity, make purchases, establish revenue or claim a new algorithm.
 
 - **Compliance studio protected draft saves** — guided risk, control, vendor
-  and evidence record design now reviews the complete supported current and
+  and evidence record design reviews the complete supported current and
   proposed draft before the existing native Save. Interrupted create/replace
   replies recover the exact original request; uncertain admission never repeats
   a write. Current source, actor/workspace and expiry are rechecked after native
@@ -254,7 +254,7 @@ Settings and the installation wizard.
   guard review and interrupted retry. No shell or external-action rollback is
   claimed. See [task-file recovery](task-file-recovery.md) for limits.
 - **Loop-guard suppression tier** — the long-standing repeated-identical-call
-  nudge (`MAVERICK_LOOP_GUARD_THRESHOLD`) now also covers byte-identical
+  nudge (`MAVERICK_LOOP_GUARD_THRESHOLD`) also covers byte-identical
   *successes* (a poll loop whose output never changes is burning budget on
   zero information), and past `MAVERICK_LOOP_GUARD_BLOCK` (default 6,
   clamped above the nudge threshold so advice always precedes enforcement,
@@ -503,8 +503,8 @@ Settings and the installation wizard.
 - **Dream-time rehearsal** — dream cycles queue the biggest recurring
   failure patterns as practice cases (`[dreaming] rehearse`,
   `~/.maverick/dreams/rehearsals.ndjson`); `maverick dream --rehearse` runs
-  them as budgeted `[rehearsal]`-titled goals and reports how many
-  previously-failing patterns now complete. Refused while verifier
+  them as budgeted `[rehearsal]`-titled goals and reports how many of those
+  failure patterns complete. Refused while verifier
   calibration is frozen (the same interlock that gates maverick-evolve), so
   the system never practices against a distrusted grader.
 - **Department-scoped routing memory** — a domain swarm's counterfactual
@@ -524,10 +524,10 @@ Settings and the installation wizard.
   `[self_improvement] causal_promotion` interlock is on when self-improvement is
   enabled; the current trajectory-to-unit adapter does not assert randomization.
 - **Capability grading on the promotion receipt** — the capability
-  non-escalation gate always refused a widening change, but the durable receipt
-  did not record *what the gate concluded*, so a third party reading the ledger
-  afterwards could not tell "proven bounded" from "never checked". Each
-  `PromotionRecord` now carries `capability_evidence` —
+  non-escalation gate refuses a widening change, and the durable receipt records
+  *what the gate concluded*, so a third party reading the ledger can tell
+  "proven bounded" from "never checked". Each `PromotionRecord` carries
+  `capability_evidence` —
   `probed_bounded` (the capability algebra was walked over N tools, with N
   recorded), `declared_bounded` (the caller asserted it), or `unproven` (the rung
   required no proof and none was supplied) — which is what makes the portable
@@ -667,7 +667,7 @@ Settings and the installation wizard.
   Packs add their own via a `refuse = [...]` field; the rails (capability /
   governance / Shield) still enforce independently — this makes the agent
   refuse *before* a rail is tested.
-- **Pack consumption surface** — every one of the 2,031 packs now declares an
+- **Pack consumption surface** — every one of the 2,031 packs declares an
   `[output]` contract (deliverable shape, consumers, cadence, sign-off gate) and
   an editable `[[workflow]]` playbook (the ordered procedure, each step naming
   only the pack's own tools and ending in the human gate). Rendered into the
@@ -737,9 +737,8 @@ Settings and the installation wizard.
   guarantee that a provider's actual invoice stays within a projected charge.
   Plus hostile-argument fuzzing of every
   connector and tool.
-- **Robustness hardening** (bugs found by the stress sweep and fixed) —
-  connectors no longer raise on a non-string op/path/query (they return an
-  ERROR string); `Skill.parse` raises `ValueError` (not `AttributeError`) on
+- **Robustness against malformed input** — connectors return an ERROR string
+  on a non-string op/path/query instead of raising; `Skill.parse` raises `ValueError` (not `AttributeError`) on
   malformed/untrusted frontmatter; `format_money` degrades gracefully on a
   None/empty currency.
 - **Bounded shared connector attempts** — REST/GraphQL factories preserve
@@ -830,7 +829,7 @@ Settings and the installation wizard.
   WINS over the built-in of the same type; deleting the override restores
   the built-in, which is never modified. Scoring identical; strict
   human-readable validation; saves audited (`TEMPLATE_SAVED`).
-- **Privacy framework coverage** — built-in questionnaires now span the
+- **Privacy framework coverage** — built-in questionnaires span the
   assessments a program actually runs: PIA (lightweight screen) plus the
   formal **DPIA** (GDPR Art. 35, distinct and deeper), **LIA** (Art. 6(1)(f)
   three-part legitimate-interest test), **CCPA/CPRA** (California), the
@@ -1010,7 +1009,7 @@ Settings and the installation wizard.
   reachability to records, vendors, and decisions). The **episodic plane**
   joins on exact keys only — episode→goal (foreign key), goal→agent
   (`goal.domain`), goal→owner — and the **procedural plane** joins through
-  `source_goal_ids`, the goal ids the local distiller now stamps into each
+  `source_goal_ids`, the goal ids the local distiller stamps into each
   learned skill's frontmatter. A goal's *title* is prose and is never matched
   against vendors or systems; a skill distilled before provenance stamping
   reads as provenance-unknown rather than guessed. Together they close the
@@ -1289,7 +1288,7 @@ Settings and the installation wizard.
   provider-contract acceptance, and traffic that bypasses the gateway remain
   out of scope.
 - **Agent identity federation** — a trust-registry entry's `jwks_file` may
-  now be an `https://` JWKS endpoint (Microsoft Entra ID, Okta, any OIDC
+  be an `https://` JWKS endpoint (Microsoft Entra ID, Okta, any OIDC
   IdP), fetched with a bounded timeout and cached keys, so platform-issued
   agent tokens verify without exporting key files; authorization never
   federates — the agent must still hold an active, inbound-permitted
@@ -1335,7 +1334,7 @@ Settings and the installation wizard.
   April 1 CPPA submission calendar, and the staggered cybersecurity-audit
   certifications. Regulation text verified before drafting.
 - **Governance workspace panels for the per-model registers** — the GPAI
-  (Art. 53/55) and deployer (Art. 26) registers now have real screens on
+  (Art. 53/55) and deployer (Art. 26) registers have screens on
   `/security/governance`: open a register, record evidence per duty, and
   assign named human oversight (the page renders UNASSIGNED in red until
   people are named). The `/privacy` workspace gains contracts & renewals
@@ -1361,7 +1360,7 @@ Settings and the installation wizard.
   estate.
 - **Gateway prompt screening** (`[llm_gateway] screen_prompts`) — the
   in-kernel deny-wins detector ensemble (injection, exfiltration, PII)
-  now screens chat-completion messages before they leave: a firing
+  screens chat-completion messages before they leave: a firing
   detector blocks with named reason codes and ledgers as
   ``screened_blocked``; the screen itself fails open if it errors, and
   never stores content.
@@ -1397,16 +1396,16 @@ Settings and the installation wizard.
   control themes as original outcome paraphrases; no standards text
   reproduced.
 - **Vendor questionnaire auto-scoring and the public questionnaire page**
-  — hosted-form submissions now score deterministically against the
+  — hosted-form submissions score deterministically against the
   template's risk answers (per-question findings, worst-severity rating,
   "clear" when everything answered came back safe), and the minted
-  `/form/{token}` link now renders a public questionnaire page the vendor
+  `/form/{token}` link renders a public questionnaire page the vendor
   answers in the browser; questionnaire tokens stay answerable even when
-  automation events are off (previously the POST 404'd — fixed).
+  automation events are off.
 - **Vendor contract renewal tracking** (`maverick vendor contract`,
   `/api/v1/vendors/{id}/contracts`) — one current contract per kind
   (DPA/MSA/SLA/addendum) with its renewal date; the governance-alerts
-  digest, CLI, and workspace chips now surface contracts past renewal
+  digest, CLI, and workspace chips surface contracts past renewal
   and renewing soon, alongside new data-map attention chips for flagged
   assets not yet linked to a governing record.
 - **Privacy notice register** (in `consent_registry`, `maverick consent
@@ -1428,7 +1427,7 @@ Settings and the installation wizard.
   search; absent modules degrade to `enabled: false`.
 - **Fairness metrics as governed evidence** (`maverick explainability
   fairness`, `record_fairness_evidence`) — the existing four-fifths /
-  demographic-parity / equal-opportunity monitor now records
+  demographic-parity / equal-opportunity monitor records
   digest-scoped `fairness` evidence against a governed asset, honestly:
   a failing report records as FAILED evidence, never suppressed. A
   screening record, not a fairness certification.
@@ -1974,7 +1973,7 @@ Settings and the installation wizard.
   per-tenant `world.db` on SQLite; **knowledge**, **skills** and the
   **self-harness lessons** file store scope by their `data_dir` directory (a
   different path per tenant); the opt-in shared-Postgres learning store
-  (`[self_harness] store = "world"`) now carries a `tenant_id` on every
+  (`[self_harness] store = "world"`) carries a `tenant_id` on every
   `harness_*` row and scopes every read/write to the active tenant, so a fleet
   of hosts can still learn as one *within* a tenant without pooling learning
   across tenants (`learning_store.py`, `test_learning_store_tenant_isolation.py`);
@@ -2028,9 +2027,8 @@ Settings and the installation wizard.
   obtained out of band. An executed/failed tool claim is available only when a
   signed call and terminal-result row carry the same recomputed commitment;
   `execution_unknown` dispositions remain unknown even with a matching pair.
-  Previously exported v2 receipts that incorrectly labeled such rows as
-  executed or failed must be regenerated from the original signed rows; the
-  corrected verifier rejects the inconsistent claim without changing history.
+  The verifier rejects a v2 receipt that labels such a row as executed or
+  failed; regenerate that receipt from the original signed rows.
   A call row on its own proves only a recorded dispatch attempt. The call row and
   its input summary are omitted by default and require the explicit bounded
   `--include-execution-pair` disclosure. The receipt always embeds the claim
@@ -2108,7 +2106,7 @@ Settings and the installation wizard.
   immediately.
 - **Temporal memory — non-destructive fact evolution** (`fact_history` in
   `world_model.py`, opt-in `[memory] temporal` / `MAVERICK_TEMPORAL_MEMORY`) —
-  a changed fact no longer overwrites the old value; the prior value is kept
+  a changed fact does not overwrite the old value; the prior value is kept
   with the validity window it was believed in (`valid_from`..`valid_to`), so
   `world.get_fact(key, as_of=t)` and `world.fact_history(key)` answer "what did
   we believe on date X, and why" for the Operating Record. Bitemporal metadata
@@ -2287,7 +2285,7 @@ Settings and the installation wizard.
   screen/window/clipboard/keystroke/document content. Pausing, revoking,
   erasing, saving a draft, and activating automation remain distinct
   human-controlled actions. Provider
-  egress is reserved and unsupported in this release; it must remain false.
+  egress is reserved and unsupported; it must remain false.
   See
   [`ekko-work-discovery.md`](./ekko-work-discovery.md).
 
@@ -3003,8 +3001,8 @@ Built-in tool modules. Highlights by group (all under `tools/`):
   models the chokepoint as a state machine and TLC-verifies — for all
   interleavings — no silent downgrade to host exec under a container backend,
   scrubbed child env always, refused-never-ran, bounded execution budget, and
-  every command eventually terminal (checking the liveness property surfaced a
-  real modelling subtlety: dispatch fairness, now explicit). Verified: 982
+  every command eventually terminal (the liveness property assumes dispatch
+  fairness, stated explicitly in the spec). Verified: 982
   states, no errors; reproduction steps in the README.
   **Sigstore keyless signing** (`sigstore_signing.py`, `[sigstore]` extra,
   `python -m maverick.sigstore_signing sign|verify`): sign skill/plugin
@@ -3172,7 +3170,7 @@ dispatch path so a v2 handler works everywhere unchanged.
 
 8 run-to-completion backends (`sandbox/`): local subprocess, Docker, gVisor, SSH,
 Podman, devcontainer, Kubernetes, and Modal cloud (below), plus an **experimental
-Firecracker microVM scaffold** (the exec path does not yet mount the workspace).
+Firecracker microVM scaffold** (the exec path does not mount the workspace).
 Selected via `[sandbox] backend`.
 **Modal sandbox backend** (`sandbox/modal_backend.py`, `[sandbox] backend =
 "modal"`, `[modal]` extra): run agent shell in ephemeral Modal cloud sandboxes
@@ -3405,7 +3403,7 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   `messageId` in a tenant-and-principal-scoped durable ledger before execution,
   replays terminal results across workers/restarts, and refuses crash-left
   indeterminate claims rather than risking duplicate side effects. Local mode
-  uses SQLite; the existing governed-record Postgres selection now uses encrypted
+  uses SQLite; the governed-record Postgres selection uses encrypted
   shared claims with forced RLS and atomic claim/lookup/quota/terminal indexes
   (`a2a_store.py`, `governed_record_batch.py`). A protected local authority receipt
   rejects accidental downgrade or a replaced shared namespace. Cached task reads
@@ -3434,7 +3432,7 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   Recovery requires the peer to retry the same correlation; there is no automatic
   startup drain. Retained receipts, including erased-goal tombstones, count
   toward the existing 250,000-per-tenant / 50,000-per-peer capacity limits.
-  These limits no longer imply TTL eviction that could reopen old work.
+  These limits do not imply TTL eviction that could reopen old work.
 - **Agent Trust Plane** (`agent_trust.py`, engaged by enterprise mode or
   `[agent_trust] enforce = true` / `MAVERICK_AGENT_TRUST=1`) — the *single*
   registry + decision point for talking to **external** agents, unifying what
@@ -3805,7 +3803,7 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   extra/drift/ambiguity outcomes, leases, retry/dead-letter/replay and integrity
   without raw SQL, principals, addresses, credentials, statement IDs or
   provider payloads. It does not claim provider-log completeness or live
-  interoperability. The dashboard now supplies built-in DNS-pinned, redirect-
+  interoperability. The dashboard supplies built-in DNS-pinned, redirect-
   disabled, byte/time-bounded Snowflake and Databricks audit transports.
   Snowflake reads and corroborates `QUERY_HISTORY` plus `ACCESS_HISTORY`,
   validates result metadata/partitions/counts, follows subsecond keyset
@@ -3840,7 +3838,7 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   double-reads source/report/finding/review pins and supplies leases, retry,
   dead-letter/replay, revocation/cancellation, ambiguity reconciliation,
   retention, audit/integrity and a network-free-by-default injected worker.
-  The separately opt-in nested `remediation.scheduler` now owns bounded active-
+  The separately opt-in nested `remediation.scheduler` owns bounded active-
   tenant cycles, tenant/principal-derived worker identity, exact built-in target
   reconciliation before retry, durable interrupted-cycle recovery, interval/
   jitter/backoff, and process plus cross-process exclusion. Its API/UI status is
@@ -3932,7 +3930,7 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   SDK accept reauthentication only in a dedicated header, claim the server
   grant immediately, and return bounded package bytes only after an injected
   adapter's content hash matches the pinned package digest. The production
-  composition now lazily opens tenant/principal-bound stores, pins digest,
+  composition lazily opens tenant/principal-bound stores, pins digest,
   export-signing and package-encryption key references, re-resolves the exact
   orchestration case/package, and adapts the stock encrypted governed-document
   vault populated by privacy-rights retrieval. Vault document authority,
@@ -4119,7 +4117,7 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   `/api/v1/public/policies/{link_id}` retrieval route, which accepts no tenant or
   policy selector. A live edge/CDN, customer usability, recovery, concurrency,
   and scale acceptance campaign is not claimed.
-- The consent/data-use foundation is **not yet a complete accepted CMP/UCPM or
+- The consent/data-use foundation is **not a complete accepted CMP/UCPM or
   production data-control service**: production IdP/JWKS and subject-digest
   custody plus live identity acceptance,
   governed logo/media/custom-domain branding, integrated DSR intake, built-in
@@ -4144,7 +4142,7 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   **operator-defined constitutional rules** (custom regex policy via `[safety]
   constitution`, `maverick_shield/constitutional.py`),
   Constitutional-Classifier-v2 cascade (`safety/`, `maverick_shield/`) — whose
-  heuristic cheap probe can now ensemble a **trained classifier**
+  heuristic cheap probe can ensemble a **trained classifier**
   (`maverick_shield/probe_model.py`): plain-JSON linear weights over the probe's
   named features (no pickle → loading an operator model can't execute code),
   combined by MAX so the model only raises recall, opt-in via `[shield]
@@ -4582,10 +4580,9 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   delivered over the SSRF-safe webhook path. Best-effort and never blocks the
   sign-off; the payload carries the parsed deliverable (table rows) and
   attribution. Fires only on `approved` (`webhooks.fire_deliverable_handoff`).
-- **Deadline alerts** — nothing used to tell anyone that a data-subject
-  request, an incident's 72-hour notification clock, an assessment renewal or
-  review, a vendor contract renewal or an approval card was about to run out.
-  `maverick.deadline_alerts` evaluates every such record per workspace and
+- **Deadline alerts** — warn before a data-subject request, an incident's
+  72-hour notification clock, an assessment renewal or review, a vendor contract
+  renewal or an approval card runs out. `maverick.deadline_alerts` evaluates every such record per workspace and
   sends plain-language alerts (`due_soon_<lead>`, `due_today`, `overdue`;
   lead times per type under `[deadline_alerts.lead_days]` /
   `[deadline_alerts.lead_hours]`, quiet hours, immediate or one summary per
@@ -4598,7 +4595,7 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   owner`. Run by `maverick_dashboard.deadline_alerts_scheduler` (a wizard step,
   rows on All settings). On by default while the privacy register is on.
 - **Webhook subscriptions, delivery log and retries** — outbound webhooks are
-  now records (`maverick.webhook_subscriptions`: address, event filter, sealed
+  records (`maverick.webhook_subscriptions`: address, event filter, sealed
   secret, on/off, description) managed on Settings → Webhooks
   (`/settings/webhooks/manage`, `/api/v1/webhooks/subscriptions`,
   `/api/v1/webhooks/deliveries`) with "Send test event" and "Retry now"; the
@@ -4610,7 +4607,7 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   share one envelope (event id, type, occurred_at, workspace, record summary,
   link) documented in `docs/webhooks.md`; the HMAC signature scheme is
   unchanged. Addresses go through the same SSRF guard as the dispatcher.
-- **In-dashboard skill authoring** — the `/skills` page can now *create* a skill,
+- **In-dashboard skill authoring** — the `/skills` page can *create* a skill,
   not just install one: a form (name, trigger phrases, tools, instructions)
   composes a `SKILL.md` and writes it via the same validate + secret/shield-scan
   path as install (`skills.create_skill` / `build_skill_md`). Kebab-cased id,
@@ -4777,12 +4774,10 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   gate in CI is a flake generator.
 - **The production security posture is CI-enforced** (`posture_gate.py`,
   `posture.baseline.json`) — the suite runs with secure defaults off so
-  each control's on/off mechanics stay under test, which once meant
-  ~19,000 green tests describing a configuration no customer runs. The
-  same tree under the real posture (audit signing on, at-rest encryption
-  on, consent fail-closed for high-risk actions, tool-risk ceiling
-  applied) is measured every build; the debt register went 91 → **0**
-  and the job now BLOCKS on any posture failure.
+  each control's on/off mechanics stay under test, and the same tree is
+  measured every build under the real posture (audit signing on, at-rest
+  encryption on, consent fail-closed for high-risk actions, tool-risk
+  ceiling applied); the job BLOCKS on any posture failure.
 - **Process table** — `maverick ps` (unified view of runs/workers).
 - **Scheduling** — recurring autonomous goals from a prompt; `worker --once`
   cron-friendly drain (`scheduler.py`, `job_queue.py`, `worker.py`).
@@ -5148,8 +5143,7 @@ tested without spawning py-spy.
   (`for`/`id`, wrapping `<label>`, `aria-label`), `<html lang>`, positive
   `tabindex`, empty interactive controls, heading-level skips — with Jinja
   placeholders treated as opaque text. Complements the live `a11y` tool
-  (pa11y/axe); the audit pass fixed the two real findings it surfaced (chat
-  textarea + fleet-name input now labelled).
+  (pa11y/axe).
 - **TUI mouse mode** (`tui_mouse.py`, opt-in `[tui] mouse`): `maverick
   monitor`'s plan tree becomes clickable — SGR (xterm 1006) mouse tracking
   enabled/restored around the Live view, a click hit-tests its row to the
@@ -5625,15 +5619,15 @@ tested without spawning py-spy.
   The schema-bound API result covers the public `aiEvidenceAnalysisResult`
   outcome locally without claiming OneTrust wire compatibility, calibrated
   detection quality, preview entitlement or customer acceptance.
-  **Upgrade note:** the local evidence adapter is now revision 4, because its
-  implementation identity changed when the store began closing its SQLite
-  connections. An existing registry must enroll it again after this upgrade.
+  **Upgrade note:** the local evidence adapter is revision 4; its
+  implementation identity differs from revision 3 because the store closes its
+  SQLite connections. A registry that enrolled revision 3 must enroll it again.
   Enrollment is `POST /api/v1/ai-evidence-analysis/authorities/bootstrap`
   (global admin permission). The installed store and registry factories also
   enroll it on the first analysis or authority request, including the purge
   request `POST /api/v1/ai-evidence-analysis/retention/purge`, so those requests
-  need no separate step. No dashboard control or CLI command calls the bootstrap
-  yet. Until enrollment, the cross-suite context reports `integrity_unverified`
+  need no separate step. No dashboard control or CLI command calls the bootstrap.
+  Until enrollment, the cross-suite context reports `integrity_unverified`
   and readiness reports not ready. Analyses recorded before the upgrade carry the
   revision 3 adapter authority: review and `get_released` refuse them, but `get`,
   `history`, the analysis list and the cross-suite context still show their
@@ -6032,10 +6026,10 @@ tested without spawning py-spy.
   experimental features, prototypes and the Windows release candidate.
   Effective enablement is shown separately from acceptance and certification.
 
-Each new configurable surface is represented in Settings and the installer
-wizard. Local tests and synthetic browser journeys validate the stated code
-paths; they do not establish native signing, clean-machine installation,
-provider permissions, live external mutations, or customer acceptance.
+Each configurable surface is represented in Settings and the installer wizard.
+Native signing, clean-machine installation, provider permissions, live external
+mutations and customer acceptance are not qualified for the surfaces in this
+section.
 
 ### Document text coverage and private engine jobs
 
@@ -6057,11 +6051,11 @@ read-only endpoint without repeating a start. See
 [Attachment submissions](attachment-submissions.md) and
 [Client request lifecycle](client-request-lifecycle.md).
 
-Named OAuth renewal uses [per-connection refresh ownership](connection-refresh.md), with short shared-store transactions and conservative recovery for ambiguous rotating tokens.
+- **Named OAuth renewal** — [per-connection refresh ownership](connection-refresh.md), with short shared-store transactions and conservative recovery for ambiguous rotating tokens.
 
-Messaging delivery receipts and conservative recovery are described in [Durable channel delivery](channel-delivery.md).
+- **Messaging delivery receipts** — durable receipts and conservative recovery; see [Durable channel delivery](channel-delivery.md).
 
-Social notification pagination retains durable continuation and explicit incomplete status; see [Bounded social polling](channel-polling.md).
+- **Bounded social polling** — notification pagination retains durable continuation and explicit incomplete status; see [Bounded social polling](channel-polling.md).
 
 Signal/IRC readers run independently of serial durable agent work; see [Transport supervision](channel-transport-supervision.md).
 
@@ -6089,7 +6083,7 @@ PostgreSQL learning stores use tenant-scoped keys for addenda, line metadata, tr
 
 ### Personal daily work and first-job activation
 
-Today composes authorized native work, decisions, occurrences and template pins with personal card order, period and starting-page preferences. Employee activation keeps sample/real source drafts private, returns from scoped connection repair, starts through native submission receipts, requires current human acceptance and hands off reusable private workflow instructions. Both expose reviewed native Copilot operations; see [employee activation](employee-activation.md). These audit changes remain draft implementation awaiting final integrated qualification.
+Today composes authorized native work, decisions, occurrences and template pins with personal card order, period and starting-page preferences. Employee activation keeps sample/real source drafts private, returns from scoped connection repair, starts through native submission receipts, requires current human acceptance and hands off reusable private workflow instructions. Both expose reviewed native Copilot operations; see [employee activation](employee-activation.md).
 - **Selected-source analysis tasks** (`knowledge_task_context.py`, opt-in
   `[knowledge_access] task_context`): named members select exact approved sources
   in Knowledge for one budgeted, tool-free AI attempt. Native and typed Copilot
@@ -6110,7 +6104,7 @@ request, narrow existing Budget limits, no failover/retry, and a durable account
 receipt with native Stop and recovery. Copilot's Models family uses the same service.
 Tool support remains provider-reported and untested. See [model choice tests](model-choice-tests.md).
 
-- Historical metadata discovery: finder source/date/oldest filters, bounded
+- **Historical metadata discovery** — finder source/date/oldest filters, bounded
   current-authority continuation beyond recent-list caps, exact record and
   recovery links, and the shared typed Copilot operation. See
   [record search](record-search.md); governed by existing record-search Settings
@@ -6152,7 +6146,7 @@ metadata-only Stop remain available when the capability is off or its original
 workflow was removed. Current permissions, source versions, meaning and review
 dates are checked again at admission, execution and the physical writer.
 
-All settings, Chat's specialist questions and consent-banner withdrawal now
+All settings, Chat's specialist questions and consent-banner withdrawal
 have ordinary complete review and exact native original readback. Their
 Copilot paths share the same protected services or hand off to their complete
 ordinary forms. Copilot does not repeat uncertain original work.
@@ -6188,7 +6182,7 @@ supported bounds or clearly withhold a complete report. Governed-agent activity
 orders by actual last update, including after reopening the native store.
 
 Task maps package their pinned Cytoscape library locally with its MIT notice.
-Map, ordinary task navigation and live updates no longer need a public CDN.
+Map, ordinary task navigation and live updates do not need a public CDN.
 
 ### Available recovery controls and accurate learning signals
 
@@ -6200,11 +6194,11 @@ Copilot opens that protected form without starting a check or repairing settings
 AI-literacy assignment and completion forms expose every supported role and
 training choice through ordinary search while keeping selected choices. Hybrid
 context compaction keeps each workspace's existing weights and outcomes in its
-own native storage. Read-only file denials now remain refused tool results,
-instead of successful signals for an agent or its learning loop.
+own native storage. Read-only file denials remain refused tool results, not
+successful signals for an agent or its learning loop.
 
 Vendor evidence keeps incomplete sets visibly incomplete and their work-item
-freshness unknown. Failed documents no longer contribute an epoch date to usable
+freshness unknown. Failed documents do not contribute an epoch date to usable
 source freshness. API reference pages package their fixed Swagger distribution
 and notices locally, retaining the ordinary endpoints and sign-in behavior.
 
@@ -6246,14 +6240,14 @@ can roll back with the selected copy; their bytes stay hidden. Unsupported or
 unsafe inline-credential reviews refuse without changing settings. This does not
 restore workspaces, sign-in configuration or external services.
 
-The rehearsal evaluation bridge now reads the native current workspace queue
+The rehearsal evaluation bridge reads the native current workspace queue
 under the configured installation location, retaining explicit-path support and
-local-source filtering. Explicit deployment-isolation off values now agree with
+local-source filtering. Explicit deployment-isolation off values agree with
 the native work-area builder; independent container requirements and invalid-mode
 refusal remain enforced. Signed workflow callbacks distinguish unavailable
 workspaces from an unreadable workspace inventory before admitting continuation.
 
-Local ranking training now requires actual comparable saved work details.
+Local ranking training requires actual comparable saved work details.
 Missing details, zero-confidence comparisons and structurally indistinguishable
 examples cannot become invented training evidence. The ordinary form and
 Copilot show usable, skipped and unresolved counts before admission. Cross-checks
@@ -6275,13 +6269,13 @@ preserving the selected model string. Unsupported adapters are excluded. Probe
 ports agree with native Ollama and TGI dispatch; explicit role choices, the
 existing opt-in and configured fallback retain their precedence.
 
-Nightly learning review now stops the combined scheduled command visibly when
+Nightly learning review stops the combined scheduled command visibly when
 the native learning stop is active, configuration cannot be read, or the review
 fails. It reports a nonzero exit and warns that earlier changes may already be
 saved. Explicitly disabled review stays a no-op; failure payloads are not copied
 into the user-facing refusal.
 
-Page controllers and styles in trusted literal template tags now use the same
+Page controllers and styles in trusted literal template tags use the same
 content-versioned URLs as the shell. Public unchanged scripts and styles can
 revalidate without another response body; private or refused assets keep their
 native authorization and cache policy. File metadata changes refresh cached
