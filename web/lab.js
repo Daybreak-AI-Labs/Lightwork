@@ -21,8 +21,8 @@
     var ctx = stage.getContext("2d"), W, H, dpr = Math.min(window.devicePixelRatio || 1, 1.5), traces = [], parts = [], t0 = performance.now();
     var sun = { x: 0, y: 0 }, signed = 0, denied = 0, visible = true, raf = 0, lastT = 0;
     var GX = [0.42, 0.50, 0.58, 0.66, 0.74], GATES = (stage.getAttribute("data-gates") || "CAPABILITY,POLICY,SHIELD,BUDGET,AUDIT").split(",");
-    // data-stop-label / data-stop-rgb let a page say what a stopped action means (default: denied, red).
-    var STOP_LABEL = stage.getAttribute("data-stop-label") || "denied at the gate", STOP_RGB = stage.getAttribute("data-stop-rgb") || "255,92,92";
+    // data-stop-label / data-stop-tag / data-stop-rgb let a page say what a stopped action means (default: denied, red).
+    var STOP_LABEL = stage.getAttribute("data-stop-label") || "denied at the gate", STOP_RGB = stage.getAttribute("data-stop-rgb") || "255,92,92", STOP_TAG = stage.getAttribute("data-stop-tag") || "DENY";
     var elSigned = document.getElementById("hud-signed"), elDenied = document.getElementById("hud-denied");
     function build() {
       W = stage.clientWidth; H = stage.clientHeight; stage.width = W * dpr; stage.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -70,7 +70,7 @@
       for (p = 0; p < parts.length; p++) { var q = parts[p], pos2 = q.pos; if (!pos2) continue; var col = q.dead ? STOP_RGB : "255,255,255";
         var gg = ctx.createRadialGradient(pos2[0], pos2[1], 0, pos2[0], pos2[1], 9); gg.addColorStop(0, "rgba(" + col + ",.65)"); gg.addColorStop(1, "rgba(" + col + ",0)"); ctx.fillStyle = gg; ctx.beginPath(); ctx.arc(pos2[0], pos2[1], 9, 0, 6.283); ctx.fill();
         ctx.fillStyle = "rgba(" + col + ",1)"; ctx.beginPath(); ctx.arc(pos2[0], pos2[1], 2.2, 0, 6.283); ctx.fill();
-        if (q.dead) { ctx.fillStyle = "#FF5C5C"; ctx.font = MONO; ctx.textAlign = "center"; ctx.fillText("DENY", pos2[0], pos2[1] - 14); } }
+        if (q.dead) { ctx.fillStyle = "rgb(" + STOP_RGB + ")"; ctx.font = MONO; ctx.textAlign = "center"; ctx.fillText(STOP_TAG, pos2[0], pos2[1] - 14); } }
       if (!reduce) raf = visible ? requestAnimationFrame(draw) : 0;
     }
     build(); window.addEventListener("resize", build);
