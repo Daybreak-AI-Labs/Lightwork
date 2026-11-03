@@ -5,7 +5,7 @@ This is the second: **watch a person do their job, then build the agent that
 does it.** A demonstration is an ordered record of what a human did -- the
 actions they took, the systems they touched, and (optionally) their narration
 of why -- captured by any front-end (a screen/action logger, a narrated
-walkthrough via ``live_mic``, an exported activity log). This module turns that
+walkthrough, an exported activity log). This module turns that
 record into a live, sealed specialist:
 
     Demonstration --induce--> DomainProfile --(intake clamp)--> human approve

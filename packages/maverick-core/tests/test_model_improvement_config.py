@@ -5,7 +5,6 @@ import pytest
 from maverick import adapter_rung, config
 from maverick.migrate import KNOWN_SECTIONS
 from maverick.paths import tenant_scope
-from maverick.training import backends
 
 
 def test_model_improvement_defaults_are_inert(monkeypatch):
@@ -295,10 +294,10 @@ def test_malformed_toml_denies_training_and_adapter_promotion(
     config.reset_config_cache()
     try:
         with pytest.raises(
-            backends.TrainingBackendError,
+            config.ModelImprovementConfigError,
             match="policy source is invalid",
         ):
-            backends._configured_model_improvement()
+            config.get_model_improvement_mutation_policy()
         with pytest.raises(ValueError, match="policy source is invalid"):
             adapter_rung._model_improvement_policy()
     finally:

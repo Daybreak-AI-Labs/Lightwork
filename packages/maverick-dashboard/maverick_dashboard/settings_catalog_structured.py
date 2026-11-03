@@ -24,9 +24,6 @@ Not given a row, with the reason:
   migration with Lightwork stopped (move the client folder and its keys, check
   every sealed value still opens, then change the id and start again), not a
   page control.
-* The ``[deployment]`` GPU counts belong to a generated training-job file;
-  nothing in the product generates or starts such a job yet
-  (``generate_prime_rl_run_spec`` has no caller), so there is nothing to wire.
 * ``tech_risk_compliance.continuous_evidence.stock_collectors.sources``: each
   source belongs to the workspace's signed continuous-evidence definition,
   rather than this installation-wide overlay. Continuous evidence supplies

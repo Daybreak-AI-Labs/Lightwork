@@ -27,10 +27,8 @@ log = logging.getLogger(__name__)
 class AllAttemptsFailed(Exception):
     """Every candidate/attempt in a best-of-N / racing primitive failed.
 
-    Defined here once and re-exported by latency_best_of_n and
-    speculative_best_of_n so a caller catching it from one module also catches
-    it from the others (they previously each defined their own, so an
-    ``except`` on one silently missed the other)."""
+    Defined here once and re-exported by latency_best_of_n, so a caller
+    catching it from one module also catches it from the other."""
 
 
 def enabled() -> bool:

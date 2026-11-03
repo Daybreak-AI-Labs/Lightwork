@@ -183,22 +183,21 @@
   },
   "counts": {
     "governed": 142,
-    "artifact": 55,
+    "artifact": 52,
     "a2a": 4,
-    "preferences": 8,
-    "learning": 61,
+    "preferences": 7,
+    "learning": 60,
     "sqlite_domain": 82,
     "configuration": 75,
     "read_projection": 24,
-    "coordinator": 1,
-    "audit": 26,
-    "transient": 26,
-    "business_records": 22,
+    "audit": 25,
+    "transient": 25,
+    "business_records": 21,
     "execution": 47,
     "recovery": 12,
     "derived": 19,
     "composition": 62,
-    "external": 19,
+    "external": 18,
     "key_custody": 4,
     "storage_primitive": 12,
     "world": 5,
@@ -404,42 +403,6 @@
           "function": "_connect",
           "kind": "connect",
           "expression": "sqlite3.connect(str(path), timeout=10.0, isolation_level=None)"
-        }
-      ]
-    },
-    {
-      "path": "packages/maverick-core/maverick/achievements.py",
-      "contract": "preferences",
-      "owner": "packages/maverick-core/maverick/achievements.py",
-      "purpose": "Local achievements.",
-      "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
-      "governed_namespaces": [],
-      "literal_path_hints": [
-        "achievements.json"
-      ],
-      "observed_mechanism_markers": {
-        "cross_process_lock": 1,
-        "atomic_replace": 2
-      },
-      "source_sites": [
-        {
-          "line": 86,
-          "function": "_store_path",
-          "kind": "data_dir",
-          "expression": "data_dir('achievements.json')"
-        },
-        {
-          "line": 130,
-          "function": "evaluate",
-          "kind": "cross_process_lock",
-          "expression": "cross_process_lock(p)"
-        },
-        {
-          "line": 134,
-          "function": "evaluate",
-          "kind": "atomic_write_text",
-          "expression": "atomic_write_text(p, json.dumps(earned, sort_keys=True))"
         }
       ]
     },
@@ -756,46 +719,6 @@
           "function": "module",
           "kind": "GovernedRecordStore",
           "expression": "GovernedRecordStore('ai_bank_mrm_packages', 'BMP', 'ai_bank_mrm_package')"
-        }
-      ]
-    },
-    {
-      "path": "packages/maverick-core/maverick/ai_benchmark_coordinator.py",
-      "contract": "coordinator",
-      "owner": "packages/maverick-core/maverick/ai_benchmark_coordinator.py",
-      "purpose": "Operable, privacy-gated coordinator for the AI benchmark exchange.",
-      "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
-      "governed_namespaces": [],
-      "literal_path_hints": [],
-      "observed_mechanism_markers": {
-        "cross_process_lock": 3,
-        "atomic_replace": 2
-      },
-      "source_sites": [
-        {
-          "line": 395,
-          "function": "_save_state",
-          "kind": "atomic_write_text",
-          "expression": "atomic_write_text(self._state_path, payload.decode('ascii'), mode=384, encoding='utf-8')"
-        },
-        {
-          "line": 411,
-          "function": "_mutate",
-          "kind": "cross_process_lock",
-          "expression": "cross_process_lock(self._state_path, strict=True)"
-        },
-        {
-          "line": 607,
-          "function": "build_cohort_report",
-          "kind": "cross_process_lock",
-          "expression": "cross_process_lock(self._state_path, strict=True)"
-        },
-        {
-          "line": 676,
-          "function": "status",
-          "kind": "cross_process_lock",
-          "expression": "cross_process_lock(self._state_path, strict=True)"
         }
       ]
     },
@@ -2210,20 +2133,6 @@
           "expression": "cross_process_lock(_transaction_target(), strict=True)"
         }
       ]
-    },
-    {
-      "path": "packages/maverick-core/maverick/ai_vendor_portal_pilot.py",
-      "contract": "artifact",
-      "owner": "packages/maverick-core/maverick/ai_vendor_portal_pilot.py",
-      "purpose": "Consent-gated local acceptance pilot for the external AI vendor portal.",
-      "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
-      "governed_namespaces": [],
-      "literal_path_hints": [],
-      "observed_mechanism_markers": {
-        "revision": 17
-      },
-      "source_sites": []
     },
     {
       "path": "packages/maverick-core/maverick/ai_vendor_risk.py",
@@ -7474,35 +7383,6 @@
       ]
     },
     {
-      "path": "packages/maverick-core/maverick/meeting_listener.py",
-      "contract": "business_records",
-      "owner": "packages/maverick-core/maverick/meeting_listener.py",
-      "purpose": "ASR meeting listener.",
-      "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
-      "governed_namespaces": [],
-      "literal_path_hints": [
-        ".json"
-      ],
-      "observed_mechanism_markers": {
-        "atomic_replace": 2
-      },
-      "source_sites": [
-        {
-          "line": 223,
-          "function": "finalize",
-          "kind": "atomic_write_text",
-          "expression": "atomic_write_text(path, json.dumps(payload, indent=2), mode=384)"
-        },
-        {
-          "line": 218,
-          "function": "finalize",
-          "kind": "data_dir",
-          "expression": "data_dir('meetings')"
-        }
-      ]
-    },
-    {
       "path": "packages/maverick-core/maverick/memory_plane.py",
       "contract": "artifact",
       "owner": "packages/maverick-core/maverick/memory_plane.py",
@@ -10152,27 +10032,6 @@
       ]
     },
     {
-      "path": "packages/maverick-core/maverick/rectification.py",
-      "contract": "audit",
-      "owner": "packages/maverick-core/maverick/rectification.py",
-      "purpose": "Right-to-rectification (GDPR Art. 16) over the world model.",
-      "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
-      "governed_namespaces": [],
-      "literal_path_hints": [
-        "rectifications.jsonl"
-      ],
-      "observed_mechanism_markers": {},
-      "source_sites": [
-        {
-          "line": 219,
-          "function": "_trail_path",
-          "kind": "data_dir",
-          "expression": "data_dir(TRAIL_FILENAME)"
-        }
-      ]
-    },
-    {
       "path": "packages/maverick-core/maverick/red_team_assurance.py",
       "contract": "governed",
       "owner": "packages/maverick-core/maverick/red_team_assurance.py",
@@ -11879,42 +11738,6 @@
           "function": "_resolve_audit_dir",
           "kind": "data_dir",
           "expression": "data_dir('audit')"
-        }
-      ]
-    },
-    {
-      "path": "packages/maverick-core/maverick/speculative_decode.py",
-      "contract": "learning",
-      "owner": "packages/maverick-core/maverick/speculative_decode.py",
-      "purpose": "Cross-provider speculative drafting.",
-      "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
-      "governed_namespaces": [],
-      "literal_path_hints": [
-        "speculative_ledger.json"
-      ],
-      "observed_mechanism_markers": {
-        "cross_process_lock": 1,
-        "atomic_replace": 2
-      },
-      "source_sites": [
-        {
-          "line": 50,
-          "function": "module",
-          "kind": "data_dir",
-          "expression": "data_dir('speculative_ledger.json')"
-        },
-        {
-          "line": 123,
-          "function": "_cplock",
-          "kind": "cross_process_lock",
-          "expression": "cross_process_lock(self.path)"
-        },
-        {
-          "line": 140,
-          "function": "_save",
-          "kind": "atomic_write_text",
-          "expression": "atomic_write_text(self.path, json.dumps(self._data, sort_keys=True))"
         }
       ]
     },
@@ -14901,25 +14724,6 @@
       ]
     },
     {
-      "path": "packages/maverick-core/maverick/benchmarks/reproducible_v2.py",
-      "contract": "artifact",
-      "owner": "packages/maverick-core/maverick/benchmarks/reproducible_v2.py",
-      "purpose": "Reproducible benchmark harness v2.",
-      "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
-      "governed_namespaces": [],
-      "literal_path_hints": [],
-      "observed_mechanism_markers": {},
-      "source_sites": [
-        {
-          "line": 401,
-          "function": "_cmd_run",
-          "kind": "write_text",
-          "expression": "Path(args.out).write_text(text + '\\n', encoding='utf-8')"
-        }
-      ]
-    },
-    {
       "path": "packages/maverick-core/maverick/cache/learning.py",
       "contract": "derived",
       "owner": "packages/maverick-core/maverick/cache/learning.py",
@@ -16230,27 +16034,6 @@
       ]
     },
     {
-      "path": "packages/maverick-core/maverick/safety/honeytokens.py",
-      "contract": "transient",
-      "owner": "packages/maverick-core/maverick/safety/honeytokens.py",
-      "purpose": "Honeytoken planting and tripwires.",
-      "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
-      "governed_namespaces": [],
-      "literal_path_hints": [],
-      "observed_mechanism_markers": {
-        "atomic_replace": 2
-      },
-      "source_sites": [
-        {
-          "line": 157,
-          "function": "plant",
-          "kind": "atomic_write_text",
-          "expression": "atomic_write_text(path, body, mode=384)"
-        }
-      ]
-    },
-    {
       "path": "packages/maverick-core/maverick/sandbox/document_engine.py",
       "contract": "transient",
       "owner": "packages/maverick-core/maverick/sandbox/document_engine.py",
@@ -17105,27 +16888,6 @@
       ]
     },
     {
-      "path": "packages/maverick-core/maverick/tools/self_edit.py",
-      "contract": "external",
-      "owner": "packages/maverick-core/maverick/tools/self_edit.py",
-      "purpose": "Self-edit tool: propose-only diffs for Lightwork's own code / config.",
-      "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
-      "governed_namespaces": [],
-      "literal_path_hints": [],
-      "observed_mechanism_markers": {
-        "atomic_replace": 1
-      },
-      "source_sites": [
-        {
-          "line": 46,
-          "function": "_allowed_roots",
-          "kind": "data_dir",
-          "expression": "data_dir()"
-        }
-      ]
-    },
-    {
       "path": "packages/maverick-core/maverick/tools/spreadsheet.py",
       "contract": "external",
       "owner": "packages/maverick-core/maverick/tools/spreadsheet.py",
@@ -17411,24 +17173,6 @@
           "expression": "Path(path).expanduser().write_text(json.dumps(self.to_dict(), indent=2, sort_keys=True), encoding='utf-8')"
         }
       ]
-    },
-    {
-      "path": "packages/maverick-core/maverick/training/verifiers_adapter.py",
-      "contract": "artifact",
-      "owner": "packages/maverick-core/maverick/training/verifiers_adapter.py",
-      "purpose": "Pure, content-addressed exports for exact Verifiers compatibility profiles.",
-      "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
-      "governed_namespaces": [],
-      "literal_path_hints": [
-        "UPSTREAM.lock.json",
-        "manifest.json",
-        "tasks.jsonl"
-      ],
-      "observed_mechanism_markers": {
-        "atomic_replace": 5
-      },
-      "source_sites": []
     },
     {
       "path": "packages/maverick-core/maverick/vector_store/chroma_store.py",

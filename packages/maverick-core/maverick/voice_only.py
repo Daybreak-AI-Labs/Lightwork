@@ -10,9 +10,7 @@ Honesty notes:
 
 * **There is no live-microphone module in this tree**, so the input seam is
   an iterable of already-transcribed utterances — the operator's mic loop
-  (sounddevice + whisper, a phone bridge, ...) plugs in there. When a
-  ``maverick.live_mic`` module lands, its utterance stream is the natural
-  thing to pass as ``utterances``.
+  (sounddevice + whisper, a phone bridge, ...) plugs in there.
 * **The default ``speak`` adapter synthesizes, it does not play.** It routes
   through the existing TTS path (``maverick.tools.voice``, which also applies
   the voice-safety redaction pass) and writes an mp3; audio output hardware is

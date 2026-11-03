@@ -14,8 +14,8 @@ It fails on the defect classes a content teardown found across the roster:
 * an empty TOML field (a declared-but-blank contract);
 * a tool name (allowed, used in a workflow step, or denied) that exists
   nowhere: not in the built-in registry, not in the risk catalog, not one of
-  the audited operator-provisioned adapters, not a deliberately unregistered
-  tool such as ``self_edit``; and a deny written against a module name
+  the audited operator-provisioned adapters, not a deny-only tool name such as
+  ``self_edit``; and a deny written against a module name
   (``str_edit``) instead of the registered tool (``str_replace_editor``).
 
 ``--fix`` rewrites the mechanical classes (quotes, articles) in place without
@@ -88,9 +88,9 @@ _ARTICLE_RE = re.compile(
 # deployment prerequisites.
 # This is a ratchet: a new adapter name is a deliberate addition here, not a
 # typo that slips through.
-# Real tools that are deliberately NOT in the default registry but that a
-# pack may (and builders must) name in deny_tools: ``self_edit`` lives in
-# ``tools/self_edit.py`` and is kept importable for offline diff proposals only.
+# Tool names that no built-in tool carries but that a pack may (and builders
+# must) name in deny_tools: ``self_edit`` (editing Lightwork's own source or
+# controls) stays denied by name, so a plugin that registers it is still blocked.
 UNREGISTERED_TOOLS = frozenset({"self_edit"})
 # Deny-list names that were written against a module name or an abbreviation
 # instead of the registered tool name. A deny of a name that no tool carries

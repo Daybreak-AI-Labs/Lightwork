@@ -478,11 +478,9 @@ def run_git_apply(patch: str, workdir: Path, sb, *,
     """Stage ``patch`` and apply it to ``workdir`` via an ALREADY-RESOLVED backend
     ``sb`` (kernel rule 4: shell only via ``sandbox.exec``): ``git apply --check``
     first so a non-applying patch writes nothing, then the real ``git apply -p1``.
-    Returns ``(ok, message)``; never raises. This is the one shared apply
-    mechanic — both the isolated eval (:func:`git_apply`) and the live-tree
-    deploy (:func:`maverick.self_modify_apply.apply_change`) call it, so the
-    staging/``-p1``/cleanup can't drift between them; the only difference is which
-    backend the caller resolves.
+    Returns ``(ok, message)``; never raises. This is the shared apply mechanic
+    behind the isolated eval (:func:`git_apply`); the caller resolves the
+    backend.
 
     Strict-first with a ``--recount`` fallback: if the strict ``--check`` fails,
     retry with ``git apply --recount``, which re-derives each hunk's line counts

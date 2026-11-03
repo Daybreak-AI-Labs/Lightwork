@@ -1,7 +1,7 @@
 """Governed training and specialist-model improvement for Lightwork.
 
-The only piece that earns ML complexity is the trajectory donation
-flywheel + a learned what-to-keep gate + process-reward training. This package is where that work lands.
+The package holds the trajectory donation flywheel, a learned what-to-keep
+gate and process-reward training, plus the governance contracts around them.
 
 Layout:
 
@@ -21,12 +21,9 @@ Layout:
   specialist_models.py Evidence-labelled deployment-candidate catalog.
   qualification.py Exact artifact/runtime/hardware qualification policy.
   receipts.py     Tenant-private, externally verifiable training receipts.
-  backends.py     Non-executing external-training lifecycle and Prime RL plan.
-  verifiers_adapter.py Deterministic Verifiers taskset export bundles.
 
-Status (July 2026): the vendor-neutral environment, data-admission,
-qualification, receipt, and external-backend planning layers are implemented
-and default-off. PRM_TRAIN implements the AgentPRM head trainer (torch optional
+The vendor-neutral environment, data-admission, qualification and receipt
+layers are default-off. PRM_TRAIN implements the AgentPRM head trainer (torch optional
 extra); RLAIF implements the preference-pair / DPO data pipeline (load_klear,
 build_preference_pairs, reward + confidence scoring). Real specialist training
 still requires customer-authorized data, a sealed holdout, GPU execution, and
@@ -35,7 +32,6 @@ being installed.
 """
 
 __all__ = [
-    "backends",
     "environments",
     "export_texts",
     "ingest",
@@ -46,5 +42,4 @@ __all__ = [
     "rlaif",
     "schema",
     "specialist_models",
-    "verifiers_adapter",
 ]

@@ -179,7 +179,7 @@ def clap_model_name() -> str:
 
 
 def embed_waveform(waveform: list[float], rate: int) -> list[float]:
-    """CLAP-embed a decoded waveform (shared with maverick.audio_analysis)."""
+    """CLAP-embed a decoded waveform."""
     model, processor = _load_clap()
     import torch
     inputs = processor(audios=waveform, sampling_rate=rate, return_tensors="pt")

@@ -66,7 +66,6 @@ class TestBoundary:
 
     @pytest.mark.parametrize("module", [
         "self_modify.py",
-        "self_modify_apply.py",
         "self_modify_archive.py",
         "self_modify_capability.py",
         "self_modify_context.py",

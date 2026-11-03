@@ -42,9 +42,7 @@ to `packages/maverick-core/maverick/` unless noted.
 The kernel (`orchestrator.py`, `agent.py`, `swarm.py`) runs a recursive
 loop: decompose the goal, spawn sub-agents per sub-task, execute tools,
 verify, integrate. Verification is default-on (`verifier.py`), failed
-attempts retry with memory of why they failed (`reflexion.py`), and a
-graded critic gives structured accept/revise/reject feedback
-(`critic.py`). Richer planning topologies are available when a task
+attempts retry with memory of why they failed (`reflexion.py`). Richer planning topologies are available when a task
 warrants them: tree-of-thought, debate, plan-execute-reflect
 (`maverick plan-reflect GOAL`), speculative and latency-aware best-of-N.
 Spawning is capped (fan-out and total-spawn limits) so recursion can't run

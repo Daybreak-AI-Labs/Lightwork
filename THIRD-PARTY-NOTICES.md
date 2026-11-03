@@ -134,7 +134,6 @@ installed version:
 | pyserial | BSD-3-Clause |
 | smbus2 | MIT |
 | roslibpy | MIT |
-| aiortc | BSD-3-Clause |
 | twilio | MIT |
 | slack_sdk | MIT |
 | discord.py | MIT |

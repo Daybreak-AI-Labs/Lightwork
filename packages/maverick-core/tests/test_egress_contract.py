@@ -219,11 +219,9 @@ def test_the_cli_passes_on_the_real_repo() -> None:
 # -- the transports that had no gate --------------------------------------
 
 def test_webrtc_is_not_registered_by_default() -> None:
-    """Its own docstring always said so; the registration contradicted it.
-
-    A bidirectional P2P data channel to an arbitrary peer, registered by
-    default with no SSRF pin, no risk tier and no containment denial.
-    """
+    """No default tool opens a bidirectional P2P data channel to an arbitrary
+    peer. The ``webrtc`` name stays risk-tiered and containment-denied for a
+    plugin that registers it."""
     from maverick.tools import base_registry
 
     class _W:
@@ -235,7 +233,7 @@ def test_webrtc_is_not_registered_by_default() -> None:
     names = set(getattr(base_registry(world=_W(), sandbox=_S()), "_tools", {}))
     assert names, "anti-vacuity: the registry must have built"
     assert "websocket" in names, "control: sibling transports stay registered"
-    assert "webrtc" not in names, "webrtc must be opt-in, as its docstring says"
+    assert "webrtc" not in names, "no default tool may register as webrtc"
 
 
 @pytest.mark.parametrize("tool", ["webrtc", "websocket"])

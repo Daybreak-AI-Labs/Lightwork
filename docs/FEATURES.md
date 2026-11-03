@@ -18,12 +18,12 @@ catalogue of built features and tools.
 | [Sandboxes](#sandboxes) | prose |
 | [LLM providers and routing](#llm-providers-and-routing) | prose |
 | [MCP and agent interop](#mcp-and-agent-interop) | 20 |
-| [Safety and security](#safety-and-security) | 59 |
+| [Safety and security](#safety-and-security) | 53 |
 | [Governed agent runtime and onboarding](#governed-agent-runtime-and-onboarding) | 37 |
 | [Hosted control plane and multi-tenancy](#hosted-control-plane-and-multi-tenancy) | 11 |
 | [Evaluation and benchmarks](#evaluation-and-benchmarks) | prose |
 | [Observability and reliability](#observability-and-reliability) | prose |
-| [UX surfaces](#ux-surfaces) | 67 |
+| [UX surfaces](#ux-surfaces) | 58 |
 | [Packaged governance, evidence and external privacy control planes](#packaged-governance-evidence-and-external-privacy-control-planes) | 5 |
 | [Software development: the code vault](#software-development-the-code-vault) | 2 |
 | [Information-flow control](#information-flow-control) | 1 |
@@ -32,7 +32,7 @@ catalogue of built features and tools.
 | [Distribution and install](#distribution-and-install) | 19 |
 | [Customer workflow completion and readiness](#customer-workflow-completion-and-readiness) | 22 in 24 subsections |
 
-480 entries in 19 sections. This block is generated: `python scripts/features_toc.py --write` (the test suite fails when it is stale).
+465 entries in 19 sections. This block is generated: `python scripts/features_toc.py --write` (the test suite fails when it is stale).
 <!-- toc:end -->
 
 ## Agent kernel and orchestration
@@ -299,8 +299,7 @@ Settings and the installation wizard.
   or missing explicit approval stops the run cleanly. Distinct from the hard
   budget cap; inert and behavior-identical when unconfigured.
 - **Verifier default-on** across goal types (`verifier.py`); **reflexion** retry
-  loop with cross-session failure memory (`reflexion.py`); graded **critic** for
-  structured accept/revise/reject feedback (`critic.py`).
+  loop with cross-session failure memory (`reflexion.py`).
 - **Planning topologies** — tree-of-thought (`tree_of_thought.py`), debate
   (`debate.py`), **plan-execute-reflect** loop (`plan_execute_reflect.py`,
   `maverick plan-reflect GOAL`): a planner decomposes the goal, an executor runs
@@ -1591,11 +1590,8 @@ Settings and the installation wizard.
   projection. The tenant-scoped portal returns an opaque invitation credential
   once, stores only its hash, supports expiry/revocation and idempotent response,
   binds the exact questionnaire, requires explicit vendor attestation and
-  imports submissions as pending human review. Raw documents are not persisted;
-  `ai_vendor_portal_pilot.py` adds a consent-gated synthetic local pilot with
-  representative documents, contract-drift probes, exact retry/replay, revocation
-  and cross-tenant isolation evidence. Live document/vendor and ecosystem
-  acceptance do not ship.
+  imports submissions as pending human review. Raw documents are not persisted.
+  Live document/vendor and ecosystem acceptance do not ship.
 - **AI regulatory-impact bridge and Article 73 incidents**
   (`ai_regulatory_feed.py`, `eu_ai_incidents.py`, assurance API/cockpit,
   opt-in feature sections) — maps reviewed regulatory changes to exact affected
@@ -1661,17 +1657,12 @@ Settings and the installation wizard.
   interoperability is not production custody or relying-party acceptance; see
   `docs/security/c2pa-signing-custody.md`.
 - **Voluntary benchmark exchange** (`ai_benchmark_exchange.py`,
-  `ai_benchmark_exchange_transport.py`, `ai_benchmark_coordinator.py`,
-  assurance API/cockpit, opt-in
+  `ai_benchmark_exchange_transport.py`, assurance API/cockpit, opt-in
   `[ai_benchmark_exchange] enable`) — aggregate-only, pseudonymous contribution
   packages, exact methodology/revision binding, four-eyes export, versioned
   Ed25519 report-trust roots with rotation/revocation, and an explicitly enabled
   fixed-origin HTTPS coordinator client with bounded transport, idempotent
-  submission and literal manual consent. The restartable coordinator admits an
-  exact packet only after two distinct humans bind evidence for contribution
-  consent and inclusion and explicitly record that anonymity and differential
-  privacy are not claimed and a privacy budget is not applicable. Its trust-root
-  rotation ceremony is four-eyes and digest-bound. The default remains local
+  submission and literal manual consent. The default remains local
   and durable mutations are copy-on-write under a separately bounded state-file
   ceiling. No live cross-tenant network, anonymity/DP guarantee, privacy-budget
   accounting or participant acceptance is implied.
@@ -2938,14 +2929,9 @@ Built-in tool modules. Highlights by group (all under `tools/`):
   and offers explicit stopped-work migration. Settings and the installer control
   it and its shared native/Copilot review operations; no live-service acceptance
   is inferred from process startup.
-  **Retrospective generators (time-gated runs)** — the 2-/36-month
-  retrospectives ship as period generators the operator runs at the mark:
-  `safety_report` (safety), `benchmark_retrospective` (perf), and
-  **`ux_retrospective.py`** (`python -m maverick.ux_retrospective`): goal
-  volume/outcomes, top task verbs, channel mix, approval friction over a
-  window, plus a **reset worksheet** whose questions are answered from the
-  data rows (zero-use surfaces to cut, friction concentrations, dominant
-  verbs); empty sections say so.
+  **Retrospective generators** — period reports the operator runs over a
+  chosen window: `safety_report` (safety) and `benchmark_retrospective`
+  (perf).
   **AI Act conformance package** (`ai_act_package.py`, `python -m
   maverick.ai_act_package [-o out.md]`): assembles the Art. 11 / Annex IV
   technical-documentation skeleton from the deployment's *recorded* posture —
@@ -3269,26 +3255,11 @@ declared in one registry (target, replacement, deprecated_in, **remove_in**);
 gate** fails CI once the package version reaches an entry's removal version
 until the old path and its registry entry are deleted together — so
 deprecations can't rot. Seeded with the two live windows (plugin API v1
-manifests; bare-`str` channel handlers). **Cache-aware prompt assembly DSL** (`prompt_dsl.py`): a `PromptBuilder` that
-tags each segment STABLE (cacheable — system, tool catalog, exemplars) or
-VOLATILE (per-request); `assemble()` orders them stable-first and marks the
-**cache breakpoint** at the end of the stable prefix so a provider adapter
-places `cache_control` correctly by construction (a volatile token early in a
-hand-built prompt silently busts the cache for everything after it).
-`cache_fingerprint()` hashes only the stable prefix, and `lint_segments` flags
-anti-patterns (timestamp/nonce in a "stable" block, volatile-before-stable).
-**Critical-path-aware scheduling** (`task_graph.py`):
+manifests; bare-`str` channel handlers). **Critical-path-aware scheduling** (`task_graph.py`):
 `remaining_critical_weight()` gives each task its heaviest tail of not-yet-done
 work, and `ready_prioritized()` orders the runnable frontier longest-tail-first
 (the standard critical-path heuristic — start the work bounding the finish
 time before short-tail work); exposed as the `task_graph` tool's `schedule` op.
-**Speculative best-of-N with early pruning** (`speculative_best_of_n.py`):
-run N attempts but prune at the **first reasoning checkpoint** — each attempt
-emits a cheap partial (its plan / first step), an injected scorer ranks the
-partials, and only the top `keep` run to completion; the rest are cancelled
-before they finish, so the budget concentrates on the strongest candidates
-rather than N full runs. Distinct from latency best-of-N (the kill signal is
-early *quality*, not time); the scorer only ever sees the cheap partials.
 **JSON seam** (`fastjson.py`): stdlib `dumps`/`loads` with a compact serializer
 for tool output and cache snapshots. It returns `str`, honors `sort_keys`, and
 stringifies unsupported values. It uses the same backend regardless of whether
@@ -3704,12 +3675,6 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   reconciliation outcomes. Provider-specific independent readback adapters,
   live OAuth/tenant interoperability, schema provisioning, permissions,
   recovery/scale exercises and recipient/customer acceptance are not claimed.
-- **Consent standards boundary** (`consent_standards.py`) — exact GPC and DNT
-  parsing/precedence, policy/purpose/vendor/specification digest bindings,
-  MSPA US-National-relevant opt-out projection, Google Consent Mode v2
-  default/update mapping, and GPP v1 header golden-vector interoperability.
-  Unsupported TCF 2.3 and discrete GPP section wire formats fail closed and are
-  not represented as conformant implementations.
 - **Cohort-suppressed consent analytics** (`consent_analytics.py`,
   `[consent_preferences.analytics] enable = true`) — read-only aggregate event
   trends over immutable receipts with allow-listed dimensions, unique-profile
@@ -4260,10 +4225,6 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   a require-human-on-high-risk policy into the live governance policy
   (strictest-wins, via the same union the finance regimes use). Inert when
   unset — default behavior is unchanged.
-- **Refusal calibration** (`safety/refusal_calibration.py`) — score
-  {prompt, should_refuse, refused} samples into over/under-refusal rates with
-  configurable ceilings and CALIBRATED/OVER/UNDER verdicts; deterministic
-  `is_refusal` completion detector.
 - **Shield call rate-limit per goal** (`safety/shield_rate_limit.py`) — opt-in
   `[safety] shield_rate_limit = "100/60"` sliding-window token bucket per goal;
   throttling SKIPS the scan fail-open (the shield never blocks the agent by
@@ -4271,10 +4232,6 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
 - **Model cards per LLM** (`model_cards.py`) — aggregate the deployment's own
   usage ledger into per-model cards (roles, calls, tokens, dollars) rendered
   as markdown with a no-vendor-claims disclaimer; duck-typed world adapter.
-- **Behavioral diff on upgrades** (`behavioral_diff.py`) — replay a fixed probe
-  set before/after a model/prompt change; classify per-probe
-  unchanged/minor/major/refusal-flip, PASS verdict gated on flips + major-change
-  fraction.
 - **Goal risk-tier auto-classifier** (`safety/goal_risk.py`) — deterministic
   low/medium/high scoring of a goal's wording before it runs (money/infra/
   credential/bulk-comms/PII/irreversibility signals, read-only de-escalators,
@@ -4323,21 +4280,6 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   gap detection; fsync policy knob for test/throughput mode. Live sink:
   `[logging] crash_log` keeps a crash-safe copy of warnings and errors
   (`logging_config`).
-- **Right-to-rectification** (`rectification.py`) — **built, not yet wired:
-  no production code path reaches this module** (see
-  `maverick.reachability`), so it is available to call but is not part of any
-  shipped flow. GDPR Art. 16 counterpart to DSAR/erasure: find a subject's
-  occurrences across goals/turns/facts (snippets), rectify with dry-run
-  default inside one write transaction, and a subject-digest audit trail
-  (`rectifications.jsonl`) that never carries the old or new value.
-- **Honeytoken planting** (`safety/honeytokens.py`) — mint decoy credentials
-  (AWS-key-shaped, API-key, passphrase), plant a realistic 0600 secrets file,
-  and alert (once per fingerprint) when a decoy value appears in text — alerts
-  carry sha-fingerprints, never the live decoy.
-- **Public safety bulletin RSS** (`safety_bulletins.py`) — render
-  frontmattered bulletin markdown into a standards-shaped RSS 2.0 feed
-  (newest-first, malformed bulletins skipped loudly); self-host first: the
-  feed is a file you serve, not a hosted service.
 - **Tamper-evident screenshots** (`screenshot_seal.py`) — every capture is
   sealed into a per-directory hash-chained, HMAC-signed ledger (replace /
   edit / delete / reorder all detectable; re-capture legitimately
@@ -4867,12 +4809,7 @@ higher-is-better for success-rate/throughput) that exits non-zero on a
 regression beyond tolerance, gating a release the way tests do. Deterministic;
 the snapshot store is an atomic JSON keyed by release tag.
 
-**Reproducible benchmark v2** (`maverick.benchmarks.reproducible_v2`, `python
--m maverick.benchmarks.reproducible_v2 run|--verify`): runs a suite under
-pinned conditions (seed, model id, prompt-template hash, tool-set hash) and
-emits an HMAC-signed `{suite, seed, env_fingerprint, results, aggregate}`
-manifest; `--verify baseline current` diffs two runs and names the exact
-diverged task on non-determinism. **Marketplace moderation**
+**Marketplace moderation**
 (`marketplace_moderation.py`, `python -m maverick.marketplace_moderation
 <path>`): static pre-publication checks over a submitted skill/plugin —
 manifest completeness, permission-escalation (declared vs used), secret scan
@@ -4939,10 +4876,7 @@ strategies use native async completion under the agent's wall/halt guard; the
 default heuristic makes no model call. See [compaction execution and feature
 reuse](operations/compaction-execution.md); **cost projection at plan time** (`cost_projection.py`): token/dollar
 estimates per plan step from the role's model + MODEL_PRICES, iterations
-multiplier, OK/TIGHT/OVER budget verdicts; **provider migration calculator**
-(`migration_calculator.py`): re-price a usage ledger on target models
-(cheapest-first matrix, unpriceable rows excluded from both sides, honest
-tokenizer caveat always rendered); **cross-run learning cache**
+multiplier, OK/TIGHT/OVER budget verdicts; **cross-run learning cache**
 (`learning_cache.py`, opt-in `[memory] learning_cache`): memoize *verified*
 sub-results across runs (required `verified_by` provenance, TTL + LRU cap,
 refuses to store anything the secret detector flags; the orchestrator keys
@@ -4975,15 +4909,8 @@ return a sync generator of chunks — chunks stream to the registered listener
 the joined text, so the model protocol is unchanged; **tool-output cache**
 for read-only tools (`tool_cache.py`) with opt-in **warm-on-start** (`[tools]
 output_cache_snapshot`: persist entries to a JSONL snapshot, reload the
-still-fresh ones on the next run's first lookup); **memory-leak quarantine**
-(`leak_quarantine.py`): per-component watchdog that flags sustained monotonic
-growth and quarantines the component for recycling (sawtooth never trips it); **network egress accounting**
-(`egress_accounting.py`); **run health score** (`health_score.py`); **real-time anomaly detection**
-(`realtime_anomaly.py`): the online companion to the batch cross-run
-analyzer — feed a metric (latency / per-step cost / tokens) as it happens and
-a rolling-window z-score flags a spike *mid-run* (a `StreamMonitor` watches
-each stream independently), so a runaway is caught live, not in a post-mortem;
-**replayable
+still-fresh ones on the next run's first lookup); **network egress accounting**
+(`egress_accounting.py`); **run health score** (`health_score.py`); **replayable
 trace** format (`replay_trace.py`) with **trace pinning to commit**
 (`trace_pin.py`: every run stamps a `trace_meta` event carrying the
 workspace's commit/branch/dirty state at start — best-effort, never blocks —
@@ -5048,20 +4975,6 @@ tested without spawning py-spy.
   existing factor — replay/synthesis is practical), profiles are local
   embedding centroids (never raw audio, 0600) with first-class
   `delete_profile`, and the whole feature is off by default.
-- **Onboarding personalization v2** (`onboarding_v2.py`): post-install
-  personalization from *actual early usage* — long conversations suggest
-  compaction, repeated task verbs point at templates, a high approval-denial
-  ratio suggests the supervised director profile, repeated same-class
-  failures surface the self-healing remedy, multi-channel use suggests
-  channel niceties; every suggestion carries the observation that justifies
-  it and the exact action, nothing is applied, and thin usage returns an
-  honest "not enough usage yet" instead of generic tips.
-- **Self-healing UX** (`self_healing.py`): a failed run is diagnosed into
-  its failure class (budget exceeded, provider auth, rate-limited, shield
-  block, sandbox missing, timeout, killswitch) and answered with an ordered
-  list of concrete remedies — each carrying the exact command or config edit,
-  with reversible config suggestions tagged; **nothing is auto-applied** —
-  surfacing the fix is the healing, the human stays in charge.
 - **Power-user keymap** (`keymap.py`, `[tui.keys]` /
   `MAVERICK_TUI_KEYS`, `python -m maverick.keymap [--validate]`): validated
   TUI keybindings — conflicts, unknown actions, and invalid keys are
@@ -5070,11 +4983,6 @@ tested without spawning py-spy.
   `handle_key` is the pure key→action adapter the monitor/focus model
   consume; `maverick monitor` loads the keymap at start (quit, refresh,
   move/open/close plan steps, pause/follow).
-- **Achievements** (`achievements.py`): a local-only milestone ledger
-  *derived from recorded history* (never self-reported; nothing leaves the
-  machine) — first/10/100 completed goals, a 5+-sub-goal swarm, 3+ channels,
-  10 approval decisions — unlocking exactly once into an atomic 0600 store;
-  evaluated on view, never per-turn.
 - **Share links + device handoff** (`share_link.py`, `[sharing] secret`
   required — no unsigned mode): a share link is a signed, expiring,
   *read-only* token referencing a goal (carries no content; constant-time
@@ -5103,16 +5011,12 @@ tested without spawning py-spy.
   inbound message's signals (length, detected language, urgency, attachment
   types, an injected classifier) against a configurable rule table, with
   `explain()`; passthrough when unconfigured.
-- **Provider-side caching analytics** (`provider_cache_analytics.py`): parses
-  prompt-cache telemetry into a hit-rate / $-saved report (cache-read vs write
-  vs uncached at configured prices), per-role breakdown, and "unstable prefix"
-  recommendations for roles with a low hit rate.
-- **Consent ergonomics** (`consent_ergonomics.py`): improves the consent UX
-  without weakening it — batches related pending prompts into one grouped ask,
-  renders a plain-language summary, and remembers "ask once this session" for an
-  exact (action, scope) in an injected **session-scoped** store (expiring, NOT a
-  persistent grant); composes with `safety.consent`, never bypassing its
-  decision.
+- **Consent ergonomics** (`tools/consent_ergonomics.py`, the
+  `consent_ergonomics` tool): turns a raw permission request (action, scopes,
+  data, duration) into a minimal plain-language consent prompt with a
+  low/med/high risk badge and flags over-broad requests (wildcard scopes, more
+  scopes than the action needs). Deterministic and offline; it renders the
+  prompt and never decides consent.
 - **Static accessibility audit** (`a11y_audit.py`, `python -m
   maverick.a11y_audit --ci`, wired as a CI step): an offline structural WCAG
   pass over the shipped dashboard templates — img alt, form-control labels
@@ -5289,9 +5193,6 @@ tested without spawning py-spy.
   browser tool): drive the page via the accessibility tree — `snapshot`
   (stable node ids), `find` (role+name), `activate` (click/focus by node) —
   the live counterpart to the static `a11y_tree` extractor.
-- **WebRTC tool** (`tools/webrtc_tool.py`): the factory is not registered by
-  default. Offer, answer and send are disabled until ICE traffic can enforce
-  network policy; close remains available to release an existing connection.
 - **Audio understanding** (`tools/audio_understanding.py`, `[clap]` extra):
   zero-shot NON-SPEECH classification — a CLAP model embeds the clip and
   free-text labels ("glass breaking", "dog barking", "fire alarm") into one
@@ -5333,14 +5234,6 @@ tested without spawning py-spy.
   preserving the interrupted reply as partially-delivered. Fully offline-
   tested with scripted event sequences; the real streaming ASR + playback
   engine plug into the seams.
-- **Speech-to-action live mic** (`live_mic.py`): a hardware-free loop —
-  injected chunk source → injected transcriber → the deterministic
-  voice-command grammar → injected action callback, with risky intents
-  behind a strict confirm gate (only a real `True` authorises; no confirm
-  hook = fail-closed denied; a raising action is logged, not fatal).
-  `whisper_transcriber()` builds the real adapter on faster-whisper
-  (`[voice]` extra, `MAVERICK_WHISPER_MODEL`); any mic adapter that yields
-  bytes plugs in.
 - **Image edit tool** (`tools/image_edit.py`): the edit verbs to pair with
   replicate's generation — hosted inpaint/variation/upscale over the same
   Replicate API surface. All settings > AI models > Images and the installer
@@ -5350,19 +5243,6 @@ tested without spawning py-spy.
   images inlined as data URIs) and local crop/resize/rotate via Pillow
   (`[computer-use]` extra, no key). Every model-supplied path is
   workspace-confined.
-- **ASR meeting listener** (`meeting_listener.py`): consume any
-  transcript-segment stream into minutes — rolling timestamped transcript,
-  merged speaker turns, action items via a deterministic heuristic
-  (assignment patterns, imperative openers, `action item:`/`TODO:` markers)
-  with an optional llm seam that falls back to the heuristic on failure;
-  `finalize()` writes the session artifact to `data_dir("meetings")` 0600.
-  Injected clock, fully reproducible offline.
-- **Audio diarization + emotion** (`audio_analysis.py`): honest-scope
-  heuristic diarization — cosine-distance thresholding over injected frame
-  embeddings with centroid label reuse (S1-S2-S1 exchanges come back
-  labelled; no clustering/overlap/VAD, stated plainly) — plus zero-shot
-  emotion ranking over the same CLAP seams as audio understanding
-  (`[clap]` extra shared, real frame embedder included).
 - **Embedded-device tool** (`tools/embedded_device.py`): JTAG + I2C access
   to the **operator's own** devices. JTAG mediates OpenOCD strictly through
   `sandbox.exec()` — halt/resume/reset, bounded memory reads (reads never
@@ -5445,11 +5325,6 @@ tested without spawning py-spy.
   the current architecture adds image checks without avoiding guest startup,
   so automatic activation and startup benefits remain unqualified. See
   [sandbox policy handoff](operations/sandbox-pool.md) for ownership and limits.
-- **Speculative drafting across providers** (`speculative_decode.py`): a
-  cheap draft model proposes, the target verifies-or-revises in one call;
-  per-(draft,target) accept-rate ledger with a floor below which it falls
-  back to plain target calls — application-level drafting, explicitly not
-  logit-level decoding; models resolve by role, never hardcoded.
 - **Out-of-process model proxy** (`model_proxy.py`): the provider key lives
   in a separate proxy process; the agent's `base_url` points at it with only a
   proxy client token, not the provider credential — the proxy authenticates the

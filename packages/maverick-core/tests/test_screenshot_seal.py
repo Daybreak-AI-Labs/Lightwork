@@ -1,11 +1,9 @@
-"""Safety bulletin RSS + tamper-evident screenshot seals."""
+"""Tamper-evident screenshot seals."""
 from __future__ import annotations
 
 import json
-import xml.etree.ElementTree as ET
 
 import pytest
-from maverick.safety_bulletins import load_bulletins, parse_bulletin, render_rss
 from maverick.screenshot_seal import (
     SealKeyMissing,
     _anchor_path,
@@ -13,65 +11,6 @@ from maverick.screenshot_seal import (
     verify_file,
     verify_ledger,
 )
-
-BULLETIN = """---
-id: MAV-2027-001
-title: Sandbox escape via crafted args
-severity: high
-date: 2027-03-31
----
-
-A crafted args array could bypass path confinement.
-
-Details follow.
-"""
-
-
-# ---- bulletins ----
-
-def test_parse_and_summary(tmp_path):
-    p = tmp_path / "b1.md"
-    p.write_text(BULLETIN)
-    b = parse_bulletin(p)
-    assert b.id == "MAV-2027-001" and b.severity == "high"
-    assert b.summary.startswith("A crafted args array")
-
-
-def test_load_orders_and_skips(tmp_path):
-    (tmp_path / "old.md").write_text(BULLETIN.replace("2027-03-31", "2026-01-01")
-                                     .replace("MAV-2027-001", "MAV-2026-001"))
-    (tmp_path / "new.md").write_text(BULLETIN)
-    (tmp_path / "bad.md").write_text("no frontmatter here")
-    bulletins, skipped = load_bulletins(tmp_path)
-    assert [b.id for b in bulletins] == ["MAV-2027-001", "MAV-2026-001"]
-    assert skipped and "bad.md" in skipped[0]
-
-
-def test_rss_is_valid_xml_with_items(tmp_path):
-    (tmp_path / "b.md").write_text(BULLETIN)
-    bulletins, _ = load_bulletins(tmp_path)
-    xml = render_rss(bulletins, base_url="https://sec.example/bulletins")
-    root = ET.fromstring(xml)
-    assert root.tag == "rss"
-    item = root.find("channel/item")
-    assert item is not None
-    assert "[HIGH]" in item.findtext("title")
-    assert item.findtext("link") == "https://sec.example/bulletins/MAV-2027-001"
-    assert item.findtext("guid") == "MAV-2027-001"
-
-
-def test_rss_empty_feed_parses():
-    assert ET.fromstring(render_rss([])).find("channel/item") is None
-
-
-def test_bulletin_validation(tmp_path):
-    bad = tmp_path / "x.md"
-    bad.write_text("---\nid: A\ntitle: T\nseverity: enormous\ndate: 2027-01-01\n---\nbody")
-    with pytest.raises(ValueError, match="severity"):
-        parse_bulletin(bad)
-
-
-# ---- screenshot seals ----
 
 KEY = "seal-key"
 

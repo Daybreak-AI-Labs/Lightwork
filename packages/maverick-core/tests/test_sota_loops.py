@@ -1,5 +1,5 @@
 """SOTA loop/workflow additions: adaptive compute, best-of-N, skill synthesis,
-experience-guided orchestration, salience memory. Each retains a disabled/no-op
+experience-guided orchestration. Each retains a disabled/no-op
 path; these cover the decision logic and primitives."""
 from __future__ import annotations
 
@@ -245,41 +245,6 @@ class TestExperience:
         fake_llm.scripted = [make_llm_response(text="- should not be called")]
         assert await synthesize_task_skill("private task", fake_llm) is None
         assert fake_llm.calls == []
-
-
-# --------------------------------------------------------------------- memory
-class TestMemoryStore:
-    def test_add_and_recall_by_relevance(self):
-        from maverick.memory import MemoryStore
-        m = MemoryStore()
-        m.add("the auth token lives in vault path secret/app", source="researcher")
-        m.add("the weather is sunny today", source="chitchat")
-        hits = m.recall("where is the auth token", k=1)
-        assert len(hits) == 1 and "vault" in hits[0].content
-
-    def test_provenance_recorded(self):
-        from maverick.memory import MemoryStore
-        m = MemoryStore()
-        it = m.add("fact", source="coder", confidence=0.8)
-        assert it.source == "coder" and it.confidence == 0.8
-
-    def test_recall_bumps_salience_and_hits(self):
-        from maverick.memory import MemoryStore
-        m = MemoryStore()
-        m.add("important deploy step uses blue green", source="ops")
-        before = m.items[0].salience
-        m.recall("deploy step", k=1)
-        assert m.items[0].hits == 1 and m.items[0].salience > before
-
-    def test_capacity_evicts_lowest_salience_not_newest(self):
-        from maverick.memory import MemoryStore
-        m = MemoryStore(capacity=2)
-        a = m.add("alpha keyword", source="x", salience=5.0)  # high salience
-        m.add("beta filler", source="x", salience=0.1)
-        m.add("gamma filler", source="x", salience=0.1)        # triggers eviction
-        contents = [it.content for it in m.items]
-        assert a.content in contents  # the salient one survived
-        assert len(m.items) == 2
 
 
 # ------------------------------------------------------------- config getters

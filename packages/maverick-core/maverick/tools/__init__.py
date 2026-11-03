@@ -1654,18 +1654,7 @@ def base_registry(
     _register_local_workspace_tool(reg, sandbox, latex_tool, has_local_workdir)
     _register_local_workspace_tool(reg, sandbox, diagram_tool, has_local_workdir)
     reg.register(websocket_tool())
-    # webrtc is NOT registered by default. Its own module docstring has always
-    # said "Factory exported, NOT registered in the default tool set: callers
-    # opt in" -- the registration contradicted it. It holds a bidirectional P2P
-    # data channel to an arbitrary remote peer, and unlike `websocket` it had
-    # no SSRF pin, no risk tier, and no containment denial, so it was the one
-    # default-on transport that no control covered. Both are fixed below; the
-    # registration now matches the documented contract.
     reg.register(teams_tool())
-    # self_edit intentionally is not registered in the default tool set.
-    # It can edit Lightwork source/config and cannot rely on a model-supplied
-    # boolean as a real human approval gate. Keep it importable for explicit
-    # offline diff proposal workflows, but do not expose it to agents by default.
 
     # Runtime / introspection tools.
     from ..cost.curve_fitter import cost_curve_tool
