@@ -1314,10 +1314,14 @@ maverick audit verify
 full environment-variable reference.
 
 Evidence PDF extraction runs in a child process with a 30-second timeout and a
-per-process concurrency limit. This bounds worker occupancy; it does not impose
-OS memory or CPU limits, isolate filesystem or network access, or coordinate
-limits across workers. Deployments that accept untrusted PDFs still need
-OS-enforced resource limits and process isolation around the service.
+per-process concurrency limit. On supported POSIX systems it also sets CPU,
+address-space and file-size limits; their enforcement depends on the operating
+system and process privileges. The parent discards stderr and reads at most
+16 MiB of child output. Evidence PDF extraction fails closed on non-POSIX systems
+or when resource limits cannot be set. These controls do not
+isolate filesystem or network access, contain subprocess descendants, or
+coordinate limits across workers. Deployments accepting untrusted PDFs still
+need operating-system process and network isolation around the service.
 
 The interactive browser connects through the same DNS-pinning proxy used by the
 consent scanner. It refuses private addresses and permits outbound TCP only on

@@ -30,6 +30,7 @@ import logging
 import os
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -37,6 +38,23 @@ log = logging.getLogger(__name__)
 
 MAX_INPUT_BYTES = 64 * 1024 * 1024   # refuse absurd inputs before any parse
 DEFAULT_TIMEOUT = 60.0
+_EVIDENCE_OUTPUT_LIMIT = 16 * 1024 * 1024
+_POSIX_RESOURCE_LIMITS = os.name == "posix"
+
+# Applied inside the child, before loading data or importing the parser. A
+# preexec_fn in the multi-threaded parent can deadlock after fork.
+_EVIDENCE_LIMITS = '''\
+import resource
+def limit_resource(which, requested):
+    soft, hard = resource.getrlimit(which)
+    finite = [v for v in (soft, hard) if v != resource.RLIM_INFINITY]
+    value = min([requested, *finite])
+    resource.setrlimit(which, (value, value))
+limit_resource(resource.RLIMIT_AS, 768 * 1024 * 1024)
+limit_resource(resource.RLIMIT_CPU, 25)
+limit_resource(resource.RLIMIT_FSIZE, 16 * 1024 * 1024)
+limit_resource(resource.RLIMIT_CORE, 0)
+'''
 
 
 @dataclass(frozen=True)
@@ -89,6 +107,7 @@ def should_isolate() -> bool:
 
 _CHILD_TEMPLATE = """\
 import json, sys
+{resource_limits}
 sys.path.insert(0, {import_root!r})
 data = sys.stdin.buffer.read()
 from importlib import import_module
@@ -126,23 +145,43 @@ def parse_isolated(name: str, data: bytes, *, timeout: float = DEFAULT_TIMEOUT,
     code = _CHILD_TEMPLATE.format(
         import_root=import_root, module=entry.module, func=entry.func,
         kwargs_json=json.dumps(kwargs, default=str),
+        resource_limits=_EVIDENCE_LIMITS if name == "evidence_pdf_text" else "",
     )
     from .tools import scrub_child_env
     try:
-        proc = subprocess.run(
-            [sys.executable, "-I", "-c", code],
-            input=data, capture_output=True, timeout=timeout,
-            env=scrub_child_env(), cwd=os.path.abspath(os.sep),
-        )
+        if name == "evidence_pdf_text":
+            if not _POSIX_RESOURCE_LIMITS:
+                raise RuntimeError("evidence PDF extraction requires POSIX resource limits")
+            # stdout is a regular file so the child's RLIMIT_FSIZE bounds it;
+            # stderr is discarded rather than buffered into the parent. Even an
+            # erroring parser cannot fill the parent's memory through either.
+            with tempfile.TemporaryFile() as output:
+                proc = subprocess.run(
+                    [sys.executable, "-I", "-c", code], input=data,
+                    stdout=output, stderr=subprocess.DEVNULL, timeout=timeout,
+                    env=scrub_child_env(), cwd=os.path.abspath(os.sep),
+                )
+                output.seek(0)
+                stdout = output.read(_EVIDENCE_OUTPUT_LIMIT + 1)
+            if len(stdout) > _EVIDENCE_OUTPUT_LIMIT:
+                raise RuntimeError("evidence PDF parser output exceeded its bound")
+            stderr = b""
+        else:
+            proc = subprocess.run(
+                [sys.executable, "-I", "-c", code],
+                input=data, capture_output=True, timeout=timeout,
+                env=scrub_child_env(), cwd=os.path.abspath(os.sep),
+            )
+            stdout, stderr = proc.stdout, proc.stderr
     except subprocess.TimeoutExpired as e:
         raise RuntimeError(f"parser {name!r} timed out after {timeout}s") from e
     if proc.returncode != 0:
         # a segfault/abort on hostile bytes lands HERE, not in the kernel
         raise RuntimeError(
             f"parser child {name!r} died (exit {proc.returncode}): "
-            f"{proc.stderr.decode('utf-8', 'replace')[-200:]}")
+            f"{stderr.decode('utf-8', 'replace')[-200:]}")
     try:
-        payload = json.loads(proc.stdout.decode("utf-8"))
+        payload = json.loads(stdout.decode("utf-8"))
     except ValueError as e:
         raise RuntimeError(f"parser {name!r} returned non-JSON output") from e
     if not payload.get("ok"):
