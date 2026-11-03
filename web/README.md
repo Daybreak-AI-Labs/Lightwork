@@ -26,7 +26,7 @@ on a Lightwork dashboard's own origin; see [`widget/README.md`](widget/README.md
 | `_redirects` | Cloudflare Pages redirects for retired pages (`/second-shift`, `/daybreak-forge`, `/onepager`) |
 | `sitemap.xml`, `robots.txt` | Search engines |
 | `shots/` | Dashboard screenshots taken with synthetic sample data; captions on the pages say so |
-| `styles.css`, `lab.js`, `fonts/`, `*.png` | Design system; the live canvases (the home hero, the ambient version behind every inner-page hero, the Cortex lattice), which answer the pointer and honor reduced motion; the panel hover effects and the scroll reveal; self-hosted fonts; brand assets |
+| `styles.css`, `lab.js`, `fonts/`, `*.png` | Design system; the live canvases (the home hero, the ambient version behind every inner-page hero, the Cortex lattice), which answer the pointer and honor reduced motion; the page-wide layer (a living sky behind every page, the route that connects the section headings, staged arrivals, count-ups, the moving exception desk and workflow, the home ticker, figure depth and the reading-progress line); the panel hover effects and the scroll reveal; self-hosted fonts; brand assets |
 
 ## Copy rules
 
