@@ -38,6 +38,68 @@ def _records(monkeypatch) -> list[tuple]:
 
 # -- the gate denies, and records the denial -------------------------------
 
+@pytest.mark.parametrize("origin", ["flow", "workflow"])
+def test_non_agent_dispatch_refuses_when_capabilities_enforced(monkeypatch, origin):
+    from maverick import capability
+    seen = _records(monkeypatch)
+    monkeypatch.setattr(capability, "capability_enforced", lambda: True)
+    denial = tool_authz.authorize("http_fetch", {"url": "https://example.com"}, origin=origin)
+    assert denial and "capability enforcement" in denial
+    assert any(kw.get("rule") == "capability_unavailable" for _, kw in seen)
+
+
+def test_library_workflow_refuses_before_registry_dispatch(monkeypatch):
+    from maverick import capability
+    from maverick.workflow import Step, Workflow
+    monkeypatch.setattr(capability, "capability_enforced", lambda: True)
+
+    class Registry:
+        def run(self, *_args):
+            pytest.fail("registry dispatch must not occur")
+
+    with pytest.raises(RuntimeError, match="capability enforcement"):
+        Workflow([Step("call", "http_fetch")]).run(Registry())
+
+
+def test_library_workflow_rechecks_capability_policy_between_steps(monkeypatch):
+    from maverick import capability
+    from maverick.workflow import Step, Workflow
+    checks = iter([False, True])
+    monkeypatch.setattr(capability, "capability_enforced", lambda: next(checks))
+    calls = []
+
+    class Registry:
+        async def run(self, tool, _args):
+            calls.append(tool)
+            return "ok"
+
+    with pytest.raises(RuntimeError, match="capability enforcement"):
+        Workflow([Step("one", "first"), Step("two", "second", depends_on=["one"])]).run(Registry())
+    assert calls == ["first"]
+
+
+def test_flow_action_refuses_before_registry_when_capability_is_active(monkeypatch):
+    from maverick import capability, tools
+    from maverick.flow.execution import default_action_runner
+    _records(monkeypatch)
+    monkeypatch.setattr(capability, "capability_enforced", lambda: False)
+    monkeypatch.setattr(tools, "base_registry", lambda *_a, **_k: pytest.fail("registry created"))
+    with tools.bind_tool_capability_active(True):
+        with tools.bind_tool_capability_active(False):
+            result, score = default_action_runner(world=None)("http_fetch", {"url": "https://example.com"}, {})
+    assert "capability enforcement" in result
+    assert score == 0.0
+
+
+def test_non_agent_dispatch_refuses_if_capability_policy_fails(monkeypatch):
+    from maverick import capability
+    _records(monkeypatch)
+    def broken():
+        raise RuntimeError("policy unavailable")
+    monkeypatch.setattr(capability, "capability_enforced", broken)
+    assert "capability enforcement" in tool_authz.authorize("http_fetch", {}, origin="flow")
+
+
 def test_unclassified_tool_is_denied(monkeypatch) -> None:
     seen = _records(monkeypatch)
     denial = tool_authz.authorize("totally_made_up_tool", {}, origin="flow")

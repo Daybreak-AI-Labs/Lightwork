@@ -24,6 +24,7 @@ from ..tool_results import ToolOutcome
 
 # Host scope is trusted execution context, never a model-supplied argument.
 _TOOL_HOST_SCOPE: ContextVar[tuple[str, ...] | None] = ContextVar("tool_host_scope", default=None)
+_TOOL_CAPABILITY_ACTIVE: ContextVar[bool] = ContextVar("tool_capability_active", default=False)
 
 
 @contextlib.contextmanager
@@ -33,6 +34,19 @@ def bind_tool_host_scope(hosts: tuple[str, ...] | None):
         yield
     finally:
         _TOOL_HOST_SCOPE.reset(token)
+
+
+@contextlib.contextmanager
+def bind_tool_capability_active(active: bool):
+    token = _TOOL_CAPABILITY_ACTIVE.set(active or _TOOL_CAPABILITY_ACTIVE.get())
+    try:
+        yield
+    finally:
+        _TOOL_CAPABILITY_ACTIVE.reset(token)
+
+
+def tool_capability_active() -> bool:
+    return _TOOL_CAPABILITY_ACTIVE.get()
 
 
 def _env_true(name: str) -> bool:

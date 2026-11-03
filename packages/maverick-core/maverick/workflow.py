@@ -157,17 +157,24 @@ class Workflow:
         stop_on_error: bool = True,
     ) -> WorkflowResult:
         import time
+        from .tool_authz import non_agent_capability_required
         result = WorkflowResult()
         outputs: dict[str, str] = {}
         for step in self._topo_order:
+            if non_agent_capability_required():
+                raise RuntimeError(
+                    "workflow tool dispatch is unavailable while capability enforcement or an inherited grant is active"
+                )
             args = self._interpolate(step.args, outputs)
             t0 = time.monotonic()
             try:
-                # NOT routed through tool_authz, deliberately. This is a library
+                # Not routed through the full tool_authz gate. This is a library
                 # API: the caller supplies the registry, so its tools need not
                 # appear in the deployment's risk classifier, and applying the
                 # flow gate here would reject every in-process registry rather
-                # than protect anything. It is safe to leave ungated only
+                # than protect anything. This remains a library-only API; its
+                # capability-on refusal above prevents executing without a
+                # bound grant. It is safe to omit the other gates only
                 # because nothing in production calls Workflow.run -- and that
                 # is not left to a comment: maverick.dispatch_contract asserts
                 # the absence of a production caller and fails the build the

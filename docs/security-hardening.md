@@ -1332,6 +1332,13 @@ unavailable. Recalculation has a separate parsing path and does not yet share
 this isolation; the same filesystem, network, descendant and cross-worker
 limits above apply.
 
+Direct flow and workflow tool actions are unavailable when capability
+enforcement is enabled, including in enterprise mode, or when they inherit an
+active agent grant during tool dispatch. These runners do not yet carry and
+enforce the originating agent's attenuated tool, path and host grant. Direct
+registry calls and independently started jobs need their own authorization.
+Use governed agent steps until that propagation is implemented.
+
 The interactive browser connects through the same DNS-pinning proxy used by the
 consent scanner. It refuses private addresses and permits outbound TCP only on
 ports 80 and 443, even when `MAVERICK_FETCH_ALLOW_PRIVATE` is enabled. The proxy

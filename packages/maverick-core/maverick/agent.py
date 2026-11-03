@@ -3618,6 +3618,7 @@ class Agent:
         call_id: str,
         call_commitment: str,
         principal: str | None,
+        capability_active: bool = False,
     ) -> str:
         """Run one already-authorized, already-audited dispatch to termination."""
         from .audit import TOOL_CALL_COMMITMENT_ALGORITHM
@@ -3677,10 +3678,11 @@ class Agent:
             # until it happened to return.
             from .connector_attempts import bind_tool_budget
             from .immune import twin
-            from .tools import bind_tool_host_scope
+            from .tools import bind_tool_capability_active, bind_tool_host_scope
 
             hosts = args.get("_capability_allow_hosts") if isinstance(args, dict) else None
-            with bind_tool_budget(self.ctx.budget), bind_tool_host_scope(hosts):
+            with (bind_tool_budget(self.ctx.budget), bind_tool_host_scope(hosts),
+                  bind_tool_capability_active(capability_active)):
                 output = await self._await_wall_clock_guarded(
                     lambda: twin.dispatch(self.ctx.goal_id, name, args,
                                            lambda: self.tools.run(name, args)),
@@ -4115,6 +4117,7 @@ class Agent:
             call_id=call_id,
             call_commitment=call_commitment,
             principal=principal,
+            capability_active=cap is not None,
         )
 
     def _maybe_speculate_reads(self) -> None:

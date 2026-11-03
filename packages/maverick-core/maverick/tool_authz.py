@@ -37,7 +37,8 @@ false about.
 Deliberately NOT covered here, so nobody reads this as more than it is:
 per-agent capability attenuation, the autonomy servo, the rehearsal twin,
 compartment quarantine, and PreToolUse hooks. Those need an agent. A flow node
-is therefore governed less tightly than an agent tool call, and
+is refused when capability enforcement is enabled; otherwise it is governed
+less tightly than an agent tool call, and
 :func:`gate_summary` states that in words for the operator rather than leaving
 it to be inferred from an absence.
 """
@@ -50,6 +51,16 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 _PROFILE_KEYS_UNSET = object()
+
+
+def non_agent_capability_required() -> bool:
+    """Whether a non-agent runner lacks required effective authority."""
+    try:
+        from .capability import capability_enforced
+        from .tools import tool_capability_active
+        return capability_enforced() or tool_capability_active()
+    except Exception:
+        return True
 
 #: Dispatch sites permitted to call the registry directly, enforced by
 #: ``maverick.dispatch_contract``. Everything else must come through here.
@@ -93,6 +104,17 @@ def authorize(
     Ordered so that deny wins and the cheapest check runs first.
     """
     params = params or {}
+
+    # Non-agent runners do not carry the originating agent's attenuated grant.
+    # Creating a root grant here would silently widen its tool, host or path
+    # authority, so refuse until the effective grant is enforced at dispatch.
+    if non_agent_capability_required():
+        _record_denial(tool, origin, goal_id, "capability_unavailable",
+                       "non-agent dispatch has no enforceable capability")
+        return (
+            "ERROR: non-agent tool dispatch is unavailable while capability "
+            "enforcement or an inherited grant is active; use a governed agent step"
+        )
 
     # 1. Tool policy: unsafe-by-construction, or not risk-classified by an
     #    operator. Runtime repeats this even though the graph validator ran it,
@@ -273,6 +295,7 @@ def gate_summary() -> dict[str, list[str]]:
     """
     return {
         "enforced": [
+            "non-agent dispatch refused when capability enforcement is enabled",
             "tool policy (unsafe list + operator risk classification)",
             "shield scan of the tool name and rendered params",
             "org governance policy (deny)",
