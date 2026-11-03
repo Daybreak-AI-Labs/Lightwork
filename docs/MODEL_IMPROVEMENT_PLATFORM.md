@@ -21,7 +21,7 @@ per-tenant learning loop, without claiming results that have not been measured.
 
 ## What is implemented
 
-| Layer | Current implementation | Honest status |
+| Layer | Implementation | Status |
 |---|---|---|
 | Environment contract | `maverick.training.environments` | Built and deterministic |
 | Seed environments | PIA scoring, DSAR routing, Article 28 clause review | Built for integration/bakeoff; deliberately not promotion-grade |
@@ -239,9 +239,7 @@ for sovereign deployments.
     configured role model.
 12. Monitor acceptance, safety, drift, latency, cost, and rollback triggers.
 
-## Status and planned work
-
-### Implemented
+## Implemented components
 
 - Vendor-neutral environments and deterministic rewards.
 - Structured consent/redaction/data-boundary enforcement.
@@ -252,46 +250,10 @@ for sovereign deployments.
 - Default-off configuration and installer controls.
 - Optional external-backend export specifications.
 
-### Planned
-
-No trained specialist weights exist yet. The steps below are the intended
-order; each has its own completion criteria.
-
-1. **First real-data corpus.** Pick one work product; PIA scoring is the
-   recommended first environment. Agree the allowed purpose, retention,
-   deletion, hosting, and derived artifacts with the data owner. Collect real
-   reviewer accept/edit/reject signals and reason codes. Build at least 20
-   independent train families and 20 separately authored sealed holdout
-   families; expect to need hundreds of cases before training lift is stable.
-   Establish reviewer agreement and adjudication before labels become ground
-   truth. Complete when privacy approval, a taskset lock, a contamination
-   check, a label-quality report, and baseline measurements exist.
-2. **Base-model bakeoff.** Run edge, single-GPU, and upper-bound candidates on
-   the exact same sealed protocol. Eliminate candidates on quality/safety
-   before optimizing cost. Select one dense primary and one upper-bound
-   reference per work product. Complete when reproducible qualification
-   records exist on target deployment hardware, with no model silently marked
-   "best."
-3. **Per-tenant specialist adapter.** Start with supervised or DPO/QLoRA where
-   deterministic labels and reviewer preferences support it. Use online RL
-   only where an interactive task/harness actually warrants it. Compare base
-   versus adapter with confidence intervals and quantization loss. Complete
-   with statistically credible heldout lift, no safety regression, a signed
-   receipt, Model Risk approval, and one-step rollback.
-4. **Serving.** Canary by role and tenant through existing routing. Measure
-   first-pass acceptance, review time, latency, cost, and incident rate. Roll
-   back automatically on technical health failures; require human authority
-   for model-risk decisions.
-5. **Additional work products**, in recommended order: DSAR routing; Article
-   28 clause review; control/evidence classification; regulatory-change
-   triage; finance anomaly disposition support; sanctions-case narrative
-   support, never autonomous screening disposition. Each environment earns a
-   separate model; do not force one specialist to cover unrelated risk
-   boundaries.
-6. **Fleet learning research** is explicitly deferred. Begin only after
-   multiple tenants have sufficient volume and have separately opted in, and
-   only after completing the secure-aggregation/privacy/poisoning threat
-   model. Per-tenant adapters remain the production default.
+No trained specialist weights ship with Lightwork. Producing one requires
+authorized real data, a sealed holdout, a GPU training run and the approvals
+in the promotion lifecycle above. Fleet learning across tenants is not supported;
+per-tenant adapters are the supported model.
 
 ## Operating metrics
 
@@ -338,8 +300,8 @@ server startup environment, supplied by a supervisor whose configuration the
 service account cannot write. The value is captured at process startup; restart
 to change it. The service-writable wizard `.env` file is not a trust source.
 Mutable `approver_keys` configuration and files in
-`approver_keys_dir` no longer establish trust: migrate intended keys into that
-environment variable before upgrading. Human-gated promotions always require
+`approver_keys_dir` do not establish trust; put intended keys in that
+environment variable. Human-gated promotions always require
 signed approvals, so a deployment without environment keys fails closed. This
 can also prevent existing promotion receipts from being verified until their
 historical approver keys are included.

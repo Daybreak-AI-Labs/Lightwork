@@ -105,15 +105,15 @@ signed audit (`audit/signing.py`), and least-privilege attenuating capabilities
   goals across process restarts, but Lightwork is not a long-lived
   supervisor of independent agent *services* (no per-agent process lifecycle,
   health-checked restart, or placement). The kernel runs a swarm per goal.
-- **Durable checkpointing is single-agent (Phase 1).** Crash-resume covers a
-  linear, non-spawning agent's loop state; resuming a full spawn tree is a
-  later phase (`checkpoint.py`).
+- **Durable checkpointing is single-agent.** Crash-resume covers a linear,
+  non-spawning agent's loop state; resuming a full spawn tree is not supported
+  (`checkpoint.py`).
 - **Tenancy is partial.** The cross-session memory store and audit signing keys
-  are tenant-scoped; routing the rest of the world model through the same
-  partition is an ongoing increment (`paths.py`).
+  are tenant-scoped; the rest of the world model does not use the same
+  partition (`paths.py`).
 - **Several governance primitives are opt-in and default-open.** Capability
   enforcement, per-principal quotas, OIDC, and OpenTelemetry are all off unless
-  configured, so a single-user install behaves exactly as before. Enterprise
+  configured, so a single-user install runs without them. Enterprise
   mode flips the relevant defaults to fail-closed (see [safety.md](safety.md)).
 
 In summary: Lightwork's runtime primitives are strongest on budgets,

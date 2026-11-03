@@ -24,7 +24,6 @@ already have accepted a message. Ordinary alert content is never stored for
 replay. Repeated event producers can supply `delivery_key` to deduplicate a
 transition within the receipt retention window.
 
-The existing Copilot catalog does not yet expose these operations. The direct
-UI and API are implemented; shared Copilot status/test/retry registration,
-recipient preferences/digests and end-to-end delivery qualification remain
-separate incomplete work.
+These operations are available in the direct UI and API; Copilot does not
+expose delivery status, test or retry. Recipient preferences and digests are
+not supported, and end-to-end delivery to each provider is not qualified.

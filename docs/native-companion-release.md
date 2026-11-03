@@ -1,19 +1,20 @@
 # Native companion preview and release evidence
 
-All four companion surfaces remain **preview** until the exact packaged build
-passes the installed-host checks below. Mock tests and TypeScript checks do not
-qualify Keychain, Android Keystore, VoiceOver/TalkBack or native networking.
+The companion surfaces are **previews**. Each becomes supported only when its
+exact packaged build passes the installed-host checks below. Mock tests and
+TypeScript checks do not qualify Keychain, Android Keystore, VoiceOver/TalkBack
+or native networking.
 These build paths create no store listing, signed download, distribution
 certificate or platform account. Watch has no delivered complication target.
 
-| Client | Reproducible project input | Build host / minimum deployment target | Current evidence |
+| Client | Reproducible project input | Build host / minimum deployment target | Qualification required before support |
 | --- | --- | --- | --- |
-| iOS phone/tablet | `apps/mobile-companion/package-lock.json`, Expo 52.0.49, local LightworkTransport module, `build-native.cjs` | macOS + Xcode; iOS 15.1 | Mocked UI/protocol tests and TypeScript checks; native installed qualification pending |
-| Android phone/tablet | Same locked Expo project and native transport | JDK 17 + Android SDK; SDK versions from pinned Expo generation | Pinned-template Android project generation and native-module autolinking checked; not yet built with the Android SDK |
-| watchOS | `apps/apple-companions/project.yml`, XcodeGen 2.42.0, Swift entry point and hosted model test target | macOS + Xcode 16/watchOS SDK; watchOS 10 | Auth/response-cap/model tests authored; not yet built with Xcode |
-| visionOS | Same generated project, volume entry point and hosted model test target | macOS + Xcode 16/visionOS SDK; visionOS 1 | Model tests authored; device comfort/accessibility and build qualification pending |
-| JetBrains | Gradle 8.13 wrapper/checksum, pinned SDK 2024.3.6, Kotlin 2.1.20, `apps/jetbrains-plugin/build.py` | JDK 21; compile target IntelliJ Community 243 only | Local SDK compile and synthetic loopback transport checks; installed IDE/PasswordSafe/accessibility qualification pending |
-| Zed | Rust 1.97.1, exact API 0.7.0, Cargo.lock, `apps/zed-extension/build.py` | wasm32-wasip2; selected host must support API 0.7.0 | Locked release WASM build and unsigned source/component bundle; installed-host/MCP/accessibility qualification pending |
+| iOS phone/tablet | `apps/mobile-companion/package-lock.json`, Expo 52.0.49, local LightworkTransport module, `build-native.cjs` | macOS + Xcode; iOS 15.1 | Installed-host Keychain, VoiceOver and native networking checks |
+| Android phone/tablet | Same locked Expo project and native transport | JDK 17 + Android SDK; SDK versions from pinned Expo generation | Android SDK build; installed-host Keystore, TalkBack and native networking checks |
+| watchOS | `apps/apple-companions/project.yml`, XcodeGen 2.42.0, Swift entry point and hosted model test target | macOS + Xcode 16/watchOS SDK; watchOS 10 | Xcode build and test run; installed-host checks |
+| visionOS | Same generated project, volume entry point and hosted model test target | macOS + Xcode 16/visionOS SDK; visionOS 1 | Xcode build and test run; device comfort and accessibility checks |
+| JetBrains | Gradle 8.13 wrapper/checksum, pinned SDK 2024.3.6, Kotlin 2.1.20, `apps/jetbrains-plugin/build.py` | JDK 21; compile target IntelliJ Community 243 only | Installed IDE, PasswordSafe and accessibility checks |
+| Zed | Rust 1.97.1, exact API 0.7.0, Cargo.lock, `apps/zed-extension/build.py` | wasm32-wasip2; selected host must support API 0.7.0 | Installed-host, MCP and accessibility checks |
 
 For editor integrations, use [JetBrains build instructions](../apps/jetbrains-plugin/BUILDING.md)
 and [Zed build instructions](../apps/zed-extension/BUILDING.md). The installable

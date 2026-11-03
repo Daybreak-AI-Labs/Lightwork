@@ -1,6 +1,7 @@
-# Plugin API v2 — release notes
+# Plugin API v2 reference
 
-`MAVERICK_API_VERSION = "2"`. Declare it in your `maverick-plugin.toml`:
+The current plugin contract is `MAVERICK_API_VERSION = "2"`. Declare it in your
+`maverick-plugin.toml`:
 
 ```toml
 [plugin]
@@ -9,7 +10,7 @@ version     = "0.1.0"
 api_version = "2"
 ```
 
-## What's new in v2
+## The v2 contract
 
 - **Structured channel replies.** Channel handlers may return
   `maverick_channels.Reply` (text + attachments + thread_ref) instead of bare
@@ -35,14 +36,14 @@ api_version = "2"
 
 ## Compatibility
 
-- `SUPPORTED_API_MAJORS = (1, 2)`: a v1 plugin **keeps loading** for one minor
-  release, with a deprecation warning in its manifest validation. Migrate by
-  bumping `api_version = "2"` (and adopting `Reply` if you ship a channel).
+- `SUPPORTED_API_MAJORS = (1, 2)`: a v1 plugin **loads** during its deprecation
+  window, with a deprecation warning in its manifest validation. Migrate by
+  setting `api_version = "2"` (and adopting `Reply` if you ship a channel).
 - A plugin declaring `api_version = "3"` (or malformed) is refused — the
   kernel never loads a contract it doesn't understand.
 
-## Unchanged from v1
+## Shared with v1
 
 Entry-point groups (`maverick.tools` / `.channels` / `.skills` /
 `.personas`), the allowlist (`[plugins] enabled`), and the name-squat defense
-(`name@dist` pinning) all work exactly as before.
+(`name@dist` pinning) work the same way for v1 and v2 plugins.

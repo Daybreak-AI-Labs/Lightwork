@@ -1,8 +1,7 @@
 # Employee companions: bounded conversation preview
 
-This is a preview feature covered by local regression tests; installed-app and
-provider behavior are not qualified. Passing local tests does not establish
-release or customer acceptance.
+Employee companions are a preview feature. Installed-app and provider behavior
+are not qualified; see [Limits](#limits).
 
 ## What the preview provides
 
@@ -141,15 +140,14 @@ updates; there is no scheduled purge worker. Already-rendered browser text and
 backups have separate lifecycles. The browser stores no companion text in local
 storage and clears its view when it detects an account/workspace change.
 
-## Limits and remaining work
+## Limits
 
 The preview is **not a complete personal companion**. Cross-session learned
 memory, connector/document retrieval, write approvals, active-run
-steering/cancellation, notifications and live voice are not implemented. Source
-ACL propagation must be qualified before adding enterprise retrieval. Provider
-contracts and routing must be qualified before deployment. Every external effect
-will need current authority checks and exact approval/replay semantics at its
-execution boundary.
+steering/cancellation, notifications and live voice are not implemented. The
+preview does not propagate source ACLs, so it offers no enterprise retrieval,
+and its provider contracts and routing are not qualified for production
+deployment.
 
 Administrators have no automatic content access to existing employee tasks and
 chats. Named accounts list their own task content; administrator policy
@@ -163,39 +161,25 @@ deployment-wide privacy certification.
 No-egress, compliance, privileged-host confidentiality and immutable audit
 retention are not promised. Operating-system/key holders remain trusted; the
 companion metadata journal is bounded and mutable.
-The shared runtime's usage settlement retains its existing best-effort behavior;
-this feature does not make global audit or billing failure handling fail-closed.
+The shared runtime's usage settlement is best-effort; this feature does not
+make global audit or billing failure handling fail-closed.
 
-The authority is host-local; shared PostgreSQL policy storage, replicated
+The authority is host-local. Shared PostgreSQL policy storage, replicated
 deployment coordination, scheduled deletion, backup erasure, and retirement of
-offboarded employees' retained files are unfinished. A deployment that omits its
-replica-count declaration is not proof of single-host operation. Keep this
-preview disabled in distributed deployments until that storage work is complete.
+offboarded employees' retained files are not supported. A deployment that omits
+its replica-count declaration is not proof of single-host operation. Keep this
+preview disabled in distributed deployments.
 
 On Your companion, Global Copilot can check the owner's saved-exchange
 count, retention and pending-reply state without exposing conversation text.
 It can clear saved history and cancel a pending reply only after a fresh review
 and explicit confirmation. The native page uses the same history revision, and
 an exact Copilot retry reads its saved clear receipt rather than clearing again.
-Copilot still cannot enroll an employee, change policy or converse as that
-person's companion. Installed-app and provider acceptance remain unverified;
-the customer experience contract is only partially implemented.
+Copilot cannot enroll an employee, change policy or converse as that person's
+companion.
 
-## Qualification and remaining checks
-
-Regression tests cover policy validation, revision conflicts, tenant and employee
-isolation, administrator metadata privacy, retention, deletion, persistence
-failure, current membership/revocation, configured-model isolation, physical
-attempt guards, request replay, late-result suppression and API behavior. The
-tests use synthetic providers and isolated stores.
-
-The draft coordinator separates source admission and durable turn reservation
-(`_prepare_draft_turn`) from model I/O, which occurs outside authority locks;
-physical dispatch and publication keep their current-authority checks.
-
-Local mocked provider exchanges do not qualify real model behavior,
-provider retention or billing, an installed distribution, customer accessibility
-or distributed deployment. Desktop/narrow layouts, keyboard use, stale tabs,
-policy revocation, retention changes, missing encryption support, corrupted
-stores and account switches remain subject to their recorded browser/native
-coverage and any unexecuted installed acceptance checks before enablement.
+Source admission and durable turn reservation are separate from model I/O,
+which runs outside authority locks; physical dispatch and publication keep
+their current-authority checks. Real model behavior, provider retention and
+billing, installed distributions and distributed deployment are not qualified
+for this preview.

@@ -589,7 +589,7 @@ Heartbeats are limited to 240/minute per agent.
 ## The learning plane over REST
 
 With `[fleet_memory] enable = true`, enrolled agents reach the governed
-learning plane through the same gateway bearer (previously MCP-only):
+learning plane through the same gateway bearer as over MCP:
 
 - `POST /api/v1/external/memory/ingest` `{kind: success|failure|lesson,
   goal_text, reflection?, tools_used?, domain?}` deposits an experience
@@ -607,7 +607,7 @@ learning plane through the same gateway bearer (previously MCP-only):
 
 ## Approval notifications
 
-A parked approval no longer waits silently for someone to open the queue:
+A parked approval notifies people instead of waiting for someone to open the queue:
 
 - The ops push transport (`[alerts]` / `[notifications]`, when configured)
   gets a high-priority "external agent waiting on approval #N" push.

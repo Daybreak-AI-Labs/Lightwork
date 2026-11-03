@@ -160,7 +160,6 @@ A visitor cannot:
   root. A host page whose content security policy forbids inline styles may
   block it, so the panel would appear unstyled.
 - The client address behind a proxy comes only from a pinned trusted proxy.
-  This is covered by a test of the address rule; it was not checked against a
-  real proxy deployment.
-- The widget was checked by reading its source. Its placement and text
-  insertion were not run in a real browser.
+  Behavior behind a specific proxy deployment is not qualified.
+- The widget's placement and text insertion are not qualified in a real
+  browser.

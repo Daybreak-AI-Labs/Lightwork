@@ -50,8 +50,8 @@ maverick donate status             # see what's queued in the outbox
 ### The reliable way to get DPO pairs: best-of-N + objective tests
 
 The rejected-draft path above depends on the verifier rejecting — but a strong
-proposer + a strong verifier rarely rejects (observed: a verifier-confidence
-spread of only 0.03–0.10 across ~100 real runs), so it produces few pairs. The
+proposer + a strong verifier rarely rejects (verifier confidence tends to vary
+very little between runs), so it produces few pairs. The
 **robust** source of a quality gradient is *objective*, not the verifier:
 
 - **best-of-N** runs N independent attempts at one coding task and scores each by
