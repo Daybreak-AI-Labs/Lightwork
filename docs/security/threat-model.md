@@ -49,8 +49,8 @@ fronted by its own authenticated, fail-closed surface:
    API / SDK / MCP   ---> | gRPC goal API + MCP server |  bearer / per-caller
    clients               |  - capability-attenuated    |  trust token; TLS
                          +----------------------------+
-   peer Lightwork     ---> | federation + A2A + channel |  Ed25519 signed
-   swarms / agents       |  + marketplace federation   |  envelopes; per-peer
+   peer Lightwork     ---> | federation + A2A           |  Ed25519 signed
+   swarms / agents       |                             |  envelopes; per-peer
                          |  - Agent Trust Plane gate    |  token; pinned keys
                          +----------------------------+
                                       |
@@ -175,8 +175,8 @@ or unknown caller is refused before any work is done.
 ## Networked / multi-principal threats (enterprise + federated)
 
 These cover the inbound boundaries in the second diagram: the dashboard,
-the gRPC/MCP APIs, cross-instance federation (federation / A2A / channel /
-marketplace), and the cross-host queue. Every mitigation below is
+the gRPC/MCP APIs, cross-instance federation (federation / A2A), and the
+cross-host queue. Every mitigation below is
 implemented today (not roadmap); the named mechanism is the enforcement
 point.
 
@@ -193,7 +193,6 @@ point.
 | Threat | Mitigation |
 |--------|------------|
 | A captured federation message is **replayed** at the same peer | Every delegation, including token-only peers, is bound to a bounded per-peer `correlation_id` ledger: identical concurrent/retry requests coalesce, while the same id with changed content is refused. Signed peers additionally carry a `created_at` freshness window and signature replay protection. |
-| An **older** signed marketplace bundle is replayed to resurrect a withdrawn (e.g. malicious) listing | Per-origin monotonic `created_at` watermark — an import must be strictly newer than the last applied from that origin (also blocks exact-replay). |
 | A delegated capability grant is tampered with in transit / on the queue | gRPC and the queue worker **re-intersect** any wire-supplied capability with the receiver's own local policy (`_rpc_capability` / `_worker_capability`); a grant can only narrow, never broaden. |
 | Audit chain edited after the fact | Ed25519 hash-chain with cross-file anchoring; `maverick audit verify --pubkey <externally-held hex>` is required for third-party tamper-evidence (a co-located key only catches non-privileged edits). |
 
@@ -213,7 +212,6 @@ point.
 | A peer reads webhook/push secrets back from config | `get_push_config` masks the token; support bundles redact secret-named keys. |
 | Provider session cookies readable by another local user mid-write | Written **mode-at-creation** (`os.open(..., 0600)`), closing the world-readable window the old write-then-chmod left. |
 | Cross-tenant data decryption | Per-tenant DEK + AEAD context binding (`tenant/kms.py`); a tenant's key/ciphertext can't open another's (GCM auth fails). |
-| Forwarded channel user-ids leak across peers | Pseudonymized per-peer (HMAC under a per-pair secret) before they leave the host; no secret = no forwarding. |
 | A malicious A2A push target probes internal services | Push configuration accepts only a strict bounded schema, forbids URL credentials/control characters, and applies fail-closed SSRF validation before retaining the target. |
 | A remote gRPC client sends bearer credentials or goal data over plaintext | Both listener binds and client dials reject non-loopback plaintext by default. TLS/mTLS is the production path; `MAVERICK_ALLOW_INSECURE_GRPC=1` is the explicit trusted-network escape hatch. |
 
@@ -223,7 +221,7 @@ point.
 |--------|------------|
 | A deeply-nested signed envelope crashes verification (`RecursionError` in the canonical-JSON digest) before the signature is even checked | Recursion-safe depth guard rejects over-nested envelopes first (`federation_envelope._within_depth`). |
 | A hostile A2A client sends a malformed `id`/`message.parts` shape to crash the task engine into a 500 | Parsers are shape-defensive: a non-string id resolves to "not found", a non-list `parts` yields empty text. A standing fuzz harness (`test_parser_fuzz`) holds the "never raises / fail-closed" contract across every untrusted-input parser. |
-| An outward surface is flooded | Per-peer token-bucket rate limiting (channel federation); bounded thread pools + `maximum_concurrent_rpcs` (gRPC/federation/webhooks); SSE/WS offload + a WS concurrency cap (dashboard); A2A applies per-request/task/artifact/global byte ceilings and terminalizes canceled semaphore waiters so cancellation cannot permanently consume capacity. |
+| An outward surface is flooded | Bounded thread pools + `maximum_concurrent_rpcs` (gRPC/federation/webhooks); SSE/WS offload + a WS concurrency cap (dashboard); A2A applies per-request/task/artifact/global byte ceilings and terminalizes canceled semaphore waiters so cancellation cannot permanently consume capacity. |
 | A client-supplied budget/deadline bypasses caps | Clamped down to operator ceilings (A2A `_limits`, federation `clamp_budget`); budget caps are enforced at record time, never bypassed. |
 | ReDoS via adversarial text on the scanning surfaces | Secret-detector / shield regexes are anchored (verified <0.15s on 100 KB adversarial inputs). |
 

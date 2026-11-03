@@ -1,21 +1,19 @@
 """Agent Trust Plane — the single registry + decision point for talking to
 *external* agents.
 
-Lightwork grew several independent cross-agent pathways, each with its own
-enable flag, its own auth model, and its own "who's allowed" list:
+Lightwork has several cross-agent pathways, each with its own enable flag,
+auth model and "who's allowed" list:
 
   * federation (``[federation] peers``)        — shared-secret tokens;
   * A2A tasks (``[a2a]``)                       — a single bearer token;
-  * fleet memory (``agents.ndjson`` roster)     — a registration list;
-  * channel/marketplace federation             — Ed25519 pinned keys.
+  * fleet memory (``agents.ndjson`` roster)     — a registration list.
 
-So the one question a company actually asks — *"which outside agents may our
-agents talk to, and what may they do or see?"* — had no single answer; it was
-smeared across five config surfaces in three incompatible identity models, the
-weakest of which (a symmetric shared secret) sat on the most powerful path
-(goal delegation).
+The question a company asks — *"which outside agents may our agents talk to,
+and what may they do or see?"* — needs one answer across all of them, and the
+weakest identity model (a symmetric shared secret) must not be the only gate
+on the most powerful path (goal delegation).
 
-This module is the rebuild: **one registry** (``[agent_trust] agents``) that
+This module provides **one registry** (``[agent_trust] agents``) that
 names every trusted external agent by its *pinned Ed25519 public key* (the same
 asymmetric identity ``federation_envelope`` already uses), declares the
 **direction** it may communicate, and bounds **what it may do** (a tool/risk
@@ -70,8 +68,7 @@ log = logging.getLogger(__name__)
 # An agent id becomes an audit field and a federation principal segment, so the
 # charset matches federation_envelope's origin rules: no "/", no whitespace.
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
-# Raw Ed25519 public key, hex-encoded: exactly 32 bytes (matches
-# federation_envelope._PUBKEY_RE).
+# Raw Ed25519 public key, hex-encoded: exactly 32 bytes.
 _PUBKEY_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _RISK_LEVELS = ("low", "medium", "high")
 _DIRECTIONS = frozenset({"inbound", "outbound", "both"})

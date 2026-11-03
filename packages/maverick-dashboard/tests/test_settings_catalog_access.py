@@ -145,7 +145,6 @@ _TEXT = {
     "license.api_url": "https://license.example.com/v1/license",
     "external_agents.approval_webhook": "https://hooks.example.com/approvals",
     "a2a.base_url": "https://agents.example.com",
-    "federation.origin": "east-1",
 }
 _LIST = {
     "auth.proxy.trusted_proxies": ["10.0.0.5", "10.1.0.0/16"],
@@ -213,10 +212,6 @@ def _sample(setting, tmp_path):  # noqa: C901 - one branch per control
         return [{"name": "acme", "allow": ["api.example.com"], "deny": ["*.bad.example"]}]
     if setting.id == "federation.peers":
         return [{"name": "west-1", "target": "west.example.com:50052", "token": _SECRET}]
-    if setting.id == "federation.channel_peers":
-        return [{"origin": "west-1", "pubkey": "ab" * 32, "secret": _SECRET}]
-    if setting.id == "federation.marketplace_peers":
-        return [{"origin": "west-1", "pubkey": "ab" * 32}]
     if setting.id == "dashboard.themes":
         return [dict(_THEME, name="midnight")]
     columns = setting.columns
@@ -235,7 +230,7 @@ def _expected(setting, value):
         return {"acme": {"allow": ["api.example.com"], "deny": ["*.bad.example"]}}
     if setting.control == "table":
         return {value[0]["name"]: value[0][setting.columns[0].key]}
-    if setting.id in {"federation.peers", "federation.channel_peers"}:
+    if setting.id == "federation.peers":
         return value  # the kernel reads the passwords unsealed
     return value
 
@@ -824,7 +819,7 @@ def test_saved_values_reach_their_kernel_readers(monkeypatch, tmp_path, as_token
 
     monkeypatch.setenv("MAVERICK_CLIENT_ID", "acme-corp")  # chosen at install
     from maverick import client as binding
-    from maverick import grpc_tls, oidc, paths, proxy_auth, share_link
+    from maverick import grpc_tls, oidc, paths, proxy_auth
     from maverick.tenant import kms as tenant_kms
     from maverick.world_model_backends import postgres
     from maverick_dashboard import invites, request_size
@@ -837,7 +832,6 @@ def test_saved_values_reach_their_kernel_readers(monkeypatch, tmp_path, as_token
         {"id": "auth.proxy.header", "value": "X-Auth-User"},
         {"id": "dashboard.max_request_mb", "value": 50},
         {"id": "dashboard.invite_session_days", "value": 7},
-        {"id": "sharing.secret", "value": _SECRET},
         {"id": "tenancy.by_user", "value": True},
         {"id": "grpc.tls", "value": True},
         {"id": "kms.dek_cache_ttl", "value": 120},
@@ -850,18 +844,15 @@ def test_saved_values_reach_their_kernel_readers(monkeypatch, tmp_path, as_token
     assert proxy_auth.proxy_header_name() == "X-Auth-User"
     assert request_size.max_request_bytes() == 50 * 1024 * 1024
     assert invites.session_ttl_seconds() == 7 * 86400
-    assert share_link._secret() == _SECRET
     assert paths.tenant_by_user_enabled() is True
     assert grpc_tls.tls_enabled("grpc") is True and grpc_tls._section("elsewhere") == {}
     assert tenant_kms._dek_cache_ttl() == 120
     assert postgres._configured_dsn() == _SECRETS["world_model.dsn"]
     assert binding.client_id() == "acme-corp" and binding.client_binding_enforced() is True
     stored = config.dashboard_overrides_path().read_text(encoding="utf-8")
-    assert _SECRET not in stored and "pw@db" not in stored
+    assert "pw@db" not in stored
     monkeypatch.setenv("MAVERICK_PG_DSN", "postgres://env@db/lightwork")
-    monkeypatch.setenv("MAVERICK_SHARE_SECRET", "from-the-environment")
-    assert share_link._secret() == "from-the-environment"
-    assert _row("sharing.secret")["locked"] is True
+    assert _row("world_model.dsn")["locked"] is True
 
 
 def test_the_dashboard_session_key_is_sealed_in_the_settings_file(tmp_path, as_token,
@@ -1090,28 +1081,16 @@ def _row_with(headers, setting_id):
     raise AssertionError(setting_id)
 
 
-def test_linked_server_names_keys_and_install_record_reach_their_readers(as_token,
-                                                                          audit_rows):
-    from maverick import config, federation_envelope
+def test_install_record_and_profile_reach_their_readers(as_token, audit_rows):
+    from maverick import config
 
-    peer = {"origin": "west-1", "pubkey": "AB" * 32, "secret": _SECRET}
-    r = _save([{"id": "federation.origin", "value": "east-1"},
-               {"id": "federation.channel_peers", "value": [peer]},
-               {"id": "federation.marketplace_peers",
-                "value": [{"origin": "west-1", "pubkey": "cd" * 32}]},
-               {"id": "deployment.type", "value": "vps"}], confirm=True)
+    r = _save([{"id": "deployment.type", "value": "vps"}], confirm=True)
     assert r.status_code == 200, r.text
-    assert federation_envelope.local_origin() == "east-1"
-    channel = federation_envelope.peer_allowlist("channel_peers")
-    assert channel["west-1"]["secret"] == _SECRET and channel["west-1"]["pubkey"] == "ab" * 32
-    assert federation_envelope.peer_allowlist("marketplace_peers")["west-1"]["pubkey"] == "cd" * 32
-    assert federation_envelope.peer_allowlist("somewhere_else") == {}
     assert config.get_deployment()["type"] == "vps"
     from maverick import profile
 
     assert _save([{"id": "profile.name", "value": "enterprise"}]).status_code == 200
     assert profile.active_profile() == "enterprise"
-    assert _SECRET not in config.dashboard_overrides_path().read_text(encoding="utf-8")
 
 
 def test_the_oversight_report_sees_delegation_rules_set_on_the_page():

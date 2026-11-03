@@ -1,5 +1,5 @@
 """Signed federation envelopes — the shared primitive for instance-to-instance
-exchange (marketplace listings, channel messages).
+exchange (signed delegations and trust-plane identity).
 
 An *envelope* is a flat JSON object carrying a ``schema`` tag
 (``maverick-<thing>-fed/1``), the sender's ``origin`` name, a ``created_at``
@@ -19,52 +19,23 @@ audit chain, stored under ``data_dir("audit", "keys")``):
     hash produced under the same key.
 
 Trust model — **fail-closed, pinned keys**: verification only succeeds when
-the envelope's ``origin`` appears in the operator's ``[federation]`` peer
-list AND the signature verifies against the *pinned* public key configured
-for that origin. The envelope's self-carried ``pubkey`` is never a trust
-anchor (anyone can mint a key); it is informational and covered by the
-signature. No peers configured means every import is rejected. A missing
-``cryptography`` library also rejects — an unverifiable envelope is never
-applied.
-
-Peer list format (``~/.maverick/config.toml``)::
-
-    [federation]
-    origin = "my-instance"            # this host's name in outbound envelopes
-    marketplace_peers = [
-        { origin = "ops-eu", pubkey = "<64-hex Ed25519 raw public key>" },
-    ]
-    channel_peers = [
-        { origin = "ops-eu", pubkey = "<64 hex>", secret = "<per-pair secret>" },
-    ]
-
-String entries ``"origin=pubkeyhex"`` are also accepted. Reciprocity is
-per-direction: each side pins the other's key; there is no key exchange
-protocol here — operators swap pubkeys out of band
-(``data_dir("audit","keys")/<key_id>.pub``, hex-encoded).
+the envelope's ``origin`` appears in the caller's peer map AND the signature
+verifies against the *pinned* public key configured for that origin. The
+envelope's self-carried ``pubkey`` is never a trust anchor (anyone can mint a
+key); it is informational and covered by the signature. An empty peer map
+rejects every envelope. A missing ``cryptography`` library also rejects — an
+unverifiable envelope is never applied.
 """
 from __future__ import annotations
 
 import hashlib
 import json
-import logging
 import re
 
 from .constant_time import text_equals
 
-log = logging.getLogger(__name__)
-
-# Origins become path/name segments ("origin/name" namespacing, "fed:<origin>"
-# channels), so the charset is locked down: no "/", no whitespace, 64 max.
+# Origins are lowercase names: no "/", no whitespace, 64 max.
 _ORIGIN_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
-# Raw Ed25519 public key, hex-encoded: exactly 32 bytes.
-_PUBKEY_RE = re.compile(r"^[0-9a-fA-F]{64}$")
-_MAX_PEERS = 64
-
-DEFAULT_ORIGIN = "local"
-# The ``[federation]`` peer lists this module reads: linked servers that may
-# pass on chat messages, and those that may share marketplace listings.
-PEER_TABLES = ("channel_peers", "marketplace_peers")
 
 
 class FederationError(Exception):
@@ -73,68 +44,6 @@ class FederationError(Exception):
 
 def valid_origin(origin: object) -> bool:
     return isinstance(origin, str) and bool(_ORIGIN_RE.fullmatch(origin))
-
-
-def local_origin(cfg: dict | None = None) -> str:
-    """This instance's origin name (``[federation] origin``), default "local"."""
-    if cfg is None:
-        try:
-            from .config import load_config
-            cfg = load_config() or {}
-        except Exception:  # pragma: no cover - config never blocks reads
-            cfg = {}
-    origin = (cfg.get("federation") or {}).get("origin")
-    if valid_origin(origin):
-        return origin  # type: ignore[return-value]
-    if origin:
-        log.warning("[federation] origin %r is invalid (want %s); using %r",
-                    origin, _ORIGIN_RE.pattern, DEFAULT_ORIGIN)
-    return DEFAULT_ORIGIN
-
-
-def peer_allowlist(kind: str, cfg: dict | None = None) -> dict[str, dict]:
-    """Pinned peers from ``[federation] <kind>`` as ``{origin: entry}``.
-
-    Entries are ``{origin, pubkey}`` tables (plus extra fields such as
-    ``secret`` for channel peers) or ``"origin=pubkeyhex"`` strings. Malformed
-    entries are skipped with a warning — they simply never match, which is the
-    fail-closed direction. An unreadable config yields an empty allowlist
-    (reject everything), never an exception.
-    """
-    if kind not in PEER_TABLES:
-        return {}  # an unknown list never borrows another list's peers
-    if cfg is None:
-        try:
-            from .config import load_config
-            cfg = load_config() or {}
-        except Exception:
-            log.warning("federation: config unreadable; peer allowlist is empty")
-            return {}
-    raw = (cfg.get("federation") or {}).get(kind)
-    out: dict[str, dict] = {}
-    if not isinstance(raw, list):
-        if raw is not None:
-            log.warning("[federation] %s must be a list; ignoring", kind)
-        return out
-    for item in raw[:_MAX_PEERS]:
-        if isinstance(item, str):
-            origin, _, pubkey = item.partition("=")
-            entry: dict = {"origin": origin.strip(), "pubkey": pubkey.strip()}
-        elif isinstance(item, dict):
-            entry = dict(item)
-        else:
-            log.warning("[federation] %s: skipping non-table entry %r", kind, item)
-            continue
-        origin = str(entry.get("origin") or "")
-        pubkey = str(entry.get("pubkey") or "")
-        if not valid_origin(origin) or not _PUBKEY_RE.fullmatch(pubkey):
-            log.warning("[federation] %s: skipping entry with bad origin/pubkey "
-                        "(origin=%r)", kind, origin)
-            continue
-        entry["origin"] = origin
-        entry["pubkey"] = pubkey.lower()
-        out[origin] = entry
-    return out
 
 
 def _digest(payload: dict) -> str:
@@ -158,8 +67,8 @@ def _envelope_message(digest_hex: str) -> bytes:
     return FEDERATION_ENVELOPE_MESSAGE_VERSION.encode("utf-8") + b"\x00" + bytes.fromhex(digest_hex)
 
 
-# Envelopes are flat field maps; the deepest legitimate shape is a marketplace
-# bundle (a list of flat listing dicts) — depth ~3. A hostile peer can otherwise
+# Envelopes are flat field maps; a legitimate envelope nests a few levels at
+# most. A hostile peer can otherwise
 # send a deeply-nested object whose canonical-JSON encoding (``_digest`` ->
 # ``json.dumps``) recurses until it raises ``RecursionError``, an unauthenticated
 # DoS reachable BEFORE signature verification (only the public pinned pubkey
@@ -260,11 +169,8 @@ def verify_envelope(
 
 __all__ = [
     "FederationError",
-    "local_origin",
-    "peer_allowlist",
     "sign_envelope",
     "verify_envelope",
     "valid_origin",
-    "DEFAULT_ORIGIN",
     "FEDERATION_ENVELOPE_MESSAGE_VERSION",
 ]

@@ -52,7 +52,6 @@ _HOST_PORT = r"[A-Za-z0-9.-]{1,253}(:[0-9]{1,5})?|\[[0-9A-Fa-f:.]{2,45}\](:[0-9]
 _AZURE_ID = r"[A-Za-z0-9][A-Za-z0-9.-]{0,254}"
 _REDIS = r"(rediss?|unix)://\S{1,500}"
 _PAGE = r"/[A-Za-z0-9/_.-]{0,200}"
-_ORIGIN = r"[a-z0-9][a-z0-9._-]{0,63}"
 _ALGORITHMS = (("RS256", "RS256 (RSA)"), ("RS384", "RS384 (RSA)"), ("RS512", "RS512 (RSA)"),
                ("ES256", "ES256 (elliptic curve)"), ("ES384", "ES384 (elliptic curve)"),
                ("ES512", "ES512 (elliptic curve)"), ("PS256", "PS256 (RSA-PSS)"),
@@ -578,15 +577,6 @@ def _people(S) -> tuple:  # noqa: N803 -- the catalog's row type
           warning="Records may be kept without a client name, and this computer may be "
                   "trusted without sign-in again.",
           aliases="client binding enforce"),
-        S("sharing", "secret", "Share link key",
-          "The key that signs links for sharing a record with someone outside Lightwork. "
-          "Setting it turns share links on. Use at least 32 characters. It is stored sealed "
-          "and never shown again.",
-          "secret", grp, "", "maverick.share_link", subgroup="Sharing", pattern=_SECRET32,
-          max_length=512, env=("MAVERICK_SHARE_SECRET",), weaker="change",
-          warning="Share links will work with this key, and every link made with the old key "
-                  "will stop working.",
-          aliases="share links secret"),
         S("role_assignments", "default", "Agent permissions for everyone else",
           "The permission set every person and agent without one of their own works under. "
           "Reset to default to use none.",
@@ -1053,24 +1043,6 @@ def _server(S) -> tuple:  # noqa: N803 -- the catalog's row type
           "toggle", grp, True, "maverick.world_model", subgroup=store, weaker=False,
           warning="Upgrades will change the records file without a copy to go back to.",
           aliases="backup migration"),
-        S("world_model", "archive_after_days", "Move old records to the archive after",
-          "When the archive runs, records older than this move to the archive folder below. "
-          "Leave empty to never archive.",
-          "number", grp, None, "maverick.tiered_storage", subgroup=store, minimum=1,
-          maximum=36500, integer=True, unit="days",
-          env=("MAVERICK_WORLD_ARCHIVE_AFTER_DAYS",), none_text="Never",
-          aliases="archive cold storage"),
-        S("world_model", "cold_dir", "Archive folder",
-          "The folder on the server that archived records move to.",
-          "path", grp, "", "maverick.tiered_storage", subgroup=store, path_kind="folder",
-          path_writable=True, max_length=400, env=("MAVERICK_WORLD_COLD_DIR",),
-          aliases="archive folder"),
-        S("world_model", "cold_codec", "Archive file type",
-          "How archived records are packed.",
-          "select", grp, "auto", "maverick.tiered_storage", subgroup=store,
-          choices=(("auto", "Automatic"), ("parquet", "Column files"),
-                   ("zstd", "Compressed (fast)"), ("gzip", "Compressed (widely readable)")),
-          env=("MAVERICK_WORLD_COLD_CODEC",)),
         S("workspace", "snapshot_dir", "Folder for workspace snapshots",
           "Where saved copies of agent workspaces are kept. Leave empty to use Lightwork's own "
           "folder.",
@@ -1214,14 +1186,6 @@ def _server(S) -> tuple:  # noqa: N803 -- the catalog's row type
           env=("MAVERICK_FEDERATION_ENABLED",), weaker=True,
           warning="Linked Lightwork servers will be able to send this server work.",
           aliases="federation peers"),
-        S("federation", "origin", "This server's name for chat messages",
-          "The name this server signs chat messages and marketplace listings with, as the "
-          "other linked servers know it.",
-          "text", grp, "local", "maverick.federation_envelope", subgroup=fed, pattern=_ORIGIN,
-          max_length=64, weaker="change",
-          warning="Linked servers that know this server by its old name will refuse its "
-                  "messages.",
-          aliases="origin"),
         S("federation", "node", "This server's name",
           "The name linked servers know this server by.",
           "text", grp, "maverick", "maverick.federation", subgroup=fed, pattern=_NAME,
@@ -1262,18 +1226,6 @@ def _server(S) -> tuple:  # noqa: N803 -- the catalog's row type
           maximum=10000, integer=True, restart=True,
           env=("MAVERICK_FEDERATION_MAX_CONCURRENT",),
           none_text="As many as the threads above"),
-        S("federation", "channel_rate_per_min", "Chat messages accepted from linked servers",
-          "How many chat messages a minute each linked server may pass on.",
-          "number", grp, 30, "maverick.channel_federation", subgroup=fed, minimum=0.001,
-          maximum=10000, unit="per minute", restart=True, weaker="higher",
-          warning="Linked servers will be able to pass on more messages."),
-        S("federation", "channel_max_age_seconds", "Oldest message accepted",
-          "Messages passed on by linked servers older than this are refused.",
-          "number", grp, 3600, "maverick.channel_federation", subgroup=fed, minimum=1,
-          maximum=604800, unit="seconds", restart=True,
-          env=("MAVERICK_FEDERATION_CHANNEL_MAX_AGE",), weaker="higher",
-          warning="Older messages from linked servers will be accepted, which makes replaying "
-                  "them easier."),
         # ------------------------------------------------------ license
         S("license", "enforce", "Limit features to the license",
           "Turn off the features your license does not include. Off: every feature works.",
@@ -1403,32 +1355,6 @@ def entries(S, C, Column) -> tuple:  # noqa: N803,ARG001 -- the catalog's row an
         warning="Another server will be able to send this server work, or a linked server's "
                 "details change.",
         aliases="federation peers"))
-    origin = C("origin", "Server name", "text", required=True, unique=True, pattern=_ORIGIN,
-               max_length=64, item_error="a lowercase server name")
-    pubkey = C("pubkey", "Signing key", "text", required=True, pattern=r"[0-9A-Fa-f]{64}",
-               max_length=64, item_error="a 64-character signing key")
-    rows.append(S(
-        "federation", "channel_peers", "Servers that may pass on chat messages",
-        "Linked servers whose chat messages this server accepts: each one's name, the key its "
-        "messages are signed with, and the password used to hide people's chat names. "
-        "Passwords are stored sealed and never shown again; leave one empty to keep it.",
-        "rules", "Server & deployment", [], "maverick.federation_envelope",
-        subgroup="Linked Lightwork servers",
-        columns=(origin, pubkey,
-                 C("secret", "Shared password", "secret", required=True, pattern=_SECRET32,
-                   max_length=512, item_error="at least 32 characters with no spaces")),
-        item_label="Server", add_label="Add a server", empty_text="No servers yet.",
-        weaker="grow", warning="Another server will be able to pass on chat messages.",
-        aliases="channel federation peers"))
-    rows.append(S(
-        "federation", "marketplace_peers", "Servers that may share marketplace listings",
-        "Linked servers whose marketplace listings this server accepts: each one's name and "
-        "the key its listings are signed with.",
-        "rules", "Server & deployment", [], "maverick.federation_envelope",
-        subgroup="Linked Lightwork servers", columns=(origin, pubkey),
-        item_label="Server", add_label="Add a server", empty_text="No servers yet.",
-        weaker="grow", warning="Another server will be able to share listings with this one.",
-        aliases="marketplace federation peers"))
     colour = [C(key, label, "color", required=key in {"bg", "panel", "text", "accent"})
               for key, label in (("bg", "Page background"), ("panel", "Panels"),
                                  ("text", "Text"), ("accent", "Highlights"),

@@ -33,7 +33,7 @@ def _isolated(tmp_path, monkeypatch):
                  "MAVERICK_REVIEW_CHECKPOINT_DOLLARS", "MAVERICK_REVIEW_CHECKPOINT_TOOL_CALLS",
                  "MAVERICK_REVIEW_CHECKPOINT_WALL_SECONDS", "MAVERICK_PROVIDER_CAPS_PERIOD",
                  "MAVERICK_GOVERNED_ACTIONS", "MAVERICK_EKKO", "MAVERICK_KNOWLEDGE_ACCESS",
-                 "MAVERICK_CANDIDATE_PROMOTION", "MAVERICK_COMPUTER_MONITOR",
+                 "MAVERICK_CANDIDATE_PROMOTION",
                  "MAVERICK_SELF_HARNESS", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"):
         monkeypatch.delenv(name, raising=False)
     config.reset_config_cache()
@@ -440,14 +440,10 @@ def test_bedrock_sign_in_is_saved_and_kept_when_its_key_is_cleared(audit_rows):
 
 
 def test_screen_control_settings_reach_the_kernel(audit_rows):
-    from maverick.multi_monitor import pinned_monitor
     from maverick.vision_click import min_confidence_floor
 
-    assert _row("computer_use.monitor")["value_text"] == "Main screen"
-    assert _save([{"id": "computer_use.monitor", "value": 2},
-                  {"id": "computer_use.vision_min_confidence", "value": 70}]).status_code == 200
+    assert _save([{"id": "computer_use.vision_min_confidence", "value": 70}]).status_code == 200
     _loaded()
-    assert pinned_monitor() == 2
     assert min_confidence_floor() == pytest.approx(0.7)
     _loosens({"id": "computer_use.vision_min_confidence", "value": 40}, audit_rows)
 

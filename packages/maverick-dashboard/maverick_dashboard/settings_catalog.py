@@ -2435,11 +2435,6 @@ _POLICY: tuple[Setting, ...] = (
       "select", "Integrations", "iam", "maverick.llm", subgroup="Amazon Bedrock",
       choices=(("iam", "AWS sign-in or server role (recommended)"),
                ("api_key", "A Bedrock access key"))),
-    S("computer_use", "monitor", "Screen agents use",
-      "Which screen agents see and control, counting from 1. Leave empty for the main "
-      "screen.", "number", "Integrations", None, "maverick.multi_monitor",
-      subgroup="Computer control", minimum=1, maximum=16, integer=True, unit="",
-      env=("MAVERICK_COMPUTER_MONITOR",), none_text="Main screen"),
     S("computer_use", "vision_min_confidence", "How sure agents must be before clicking",
       "Agents click an item they found by looking at the screen only when at least this sure.",
       "number", "Integrations", 0.5, "maverick.vision_click", subgroup="Computer control",

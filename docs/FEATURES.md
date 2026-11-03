@@ -23,7 +23,7 @@ catalogue of built features and tools.
 | [Hosted control plane and multi-tenancy](#hosted-control-plane-and-multi-tenancy) | 11 |
 | [Evaluation and benchmarks](#evaluation-and-benchmarks) | prose |
 | [Observability and reliability](#observability-and-reliability) | prose |
-| [UX surfaces](#ux-surfaces) | 58 |
+| [UX surfaces](#ux-surfaces) | 52 |
 | [Packaged governance, evidence and external privacy control planes](#packaged-governance-evidence-and-external-privacy-control-planes) | 5 |
 | [Software development: the code vault](#software-development-the-code-vault) | 2 |
 | [Information-flow control](#information-flow-control) | 1 |
@@ -32,7 +32,7 @@ catalogue of built features and tools.
 | [Distribution and install](#distribution-and-install) | 19 |
 | [Customer workflow completion and readiness](#customer-workflow-completion-and-readiness) | 22 in 24 subsections |
 
-465 entries in 19 sections. This block is generated: `python scripts/features_toc.py --write` (the test suite fails when it is stale).
+459 entries in 19 sections. This block is generated: `python scripts/features_toc.py --write` (the test suite fails when it is stale).
 <!-- toc:end -->
 
 ## Agent kernel and orchestration
@@ -3416,8 +3416,7 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   migration path). **Per-caller A2A identity**: an `[agent_trust] a2a_token`
   resolves an A2A caller to principal `agent:<id>`, so the registry governs
   individual A2A callers (admission + per-caller tool ceiling) rather than one
-  shared surface. **Channel and marketplace federation** are gated by the
-  registered (signature-verified) origin. **Org governance**: accepting a
+  shared surface. **Org governance**: accepting a
   federation delegation routes through `governance.evaluate` when engaged —
   `DENY` refuses and `REQUIRE_HUMAN` refuses fail-closed (no silent
   auto-accept), a no-op without a `[governance]` policy. The **gRPC goal API**
@@ -4855,13 +4854,7 @@ inside (tools) — sample rate via `MAVERICK_SENTRY_TRACES_SAMPLE_RATE`, PII off
 /api/v1/diag/tail-latency`): flags tools with a fat tail (p99/p50 ≥ ratio) —
 usually fast, occasionally terrible — which is where the bug hides, not just
 the slowest by p95; opt-in per-tool **latency budget** (`latency_budget.py`) and
-cross-span **budget propagation** (`latency_span_budget.py`); **tiered storage**
-(`tiered_storage.py`, opt-in `[world_model] cold_dir` + `archive_after_days`):
-archive old episodes/goal_events to cold parquet (pyarrow when present, gzip
-JSONL always, or **zstd** JSONL via `[world_model] cold_codec = "zstd"` + the
-`[zstd]` extra — smaller/faster, with graceful gzip fallback) with
-write-before-delete safety, fact-pinned rows kept hot, and `read_cold`
-(every codec, mixed dirs OK) so archives stay queryable; **speculative tool execution**
+cross-span **budget propagation** (`latency_span_budget.py`); **speculative tool execution**
 (`speculative_tools.py`, opt-in `[tools] speculative`): pre-execute predicted
 read-only (`parallel_safe`) tool calls concurrently into the tool-output cache
 — `predict_from_history` warms only calls repeated across turns; the agent
@@ -4949,14 +4942,12 @@ tested without spawning py-spy.
   portal_dir` onto the built-ins so an operator drops in a community
   translation and the dashboard speaks it with no rebuild (malformed catalogs
   skipped, never blanking the UI).
-- **Computer-use calibration + multi-monitor + vision clicking**
-  (`computer_calibration.py`, `multi_monitor.py`, `vision_click.py`):
+- **Computer-use calibration + vision clicking**
+  (`computer_calibration.py`, `vision_click.py`):
   per-axis affine calibration fitted by least squares over clicked targets
   (deterministic target grid, residual/drift report, atomic 0600
-  persistence) corrects model-space clicks to screen space; a
-  `VirtualDesktop` models multi-monitor geometry (negative origins,
-  `monitor_at`, global/local transforms, `[computer_use] monitor` pinning)
-  over lazily-imported mss; `resolve_click("the blue button")` consults the
+  persistence) corrects model-space clicks to screen space;
+  `resolve_click("the blue button")` consults the
   GUI element memory first, falls back to an injected vision seam with a
   confidence floor (`LowConfidenceError` below it, nothing memorized on
   refusal), upserts what it learns, and applies the saved calibration.
@@ -4983,13 +4974,6 @@ tested without spawning py-spy.
   `handle_key` is the pure key→action adapter the monitor/focus model
   consume; `maverick monitor` loads the keymap at start (quit, refresh,
   move/open/close plan steps, pause/follow).
-- **Share links + device handoff** (`share_link.py`, `[sharing] secret`
-  required — no unsigned mode): a share link is a signed, expiring,
-  *read-only* token referencing a goal (carries no content; constant-time
-  verification, expiry/signature fail closed); a device handoff is a
-  *one-time* signed code moving a session between the user's devices —
-  `claim()` consumes the nonce so a replayed/stolen-but-used code is dead
-  (5-minute default TTL, expired nonces pruned).
 - **Director mode** (`director_mode.py`): state an *outcome* and pick the
   autonomy level — `supervised` / `semi` / `autonomous` profiles map to the
   existing controls (consent mode, review-checkpoint intervals, a budget
@@ -5216,12 +5200,6 @@ tested without spawning py-spy.
   a tested deterministic speech-shaping pass that turns markdown/code into a
   spoken summary ("I wrote 40 lines to app.py"). Mic capture + playback
   hardware are the operator's adapters behind the seams.
-- **Voice macros** (`voice_macros.py`): named multi-step command sequences
-  ("morning routine" → status, failures, summary) triggered by one phrase;
-  persisted 0600, each step **re-validated against the grammar at trigger
-  time** (a smuggled unparseable step is skipped, never dispatched) and
-  risky steps keep their confirm gates **individually** — a macro never
-  pre-authorizes. Bounded step count.
 - **Augmented terminal charts** (`terminal_charts.py`, `maverick charts`):
   inline sparklines (▁▂▃▄▅▆▇█) and bars for spend/day (usage ledger), goal
   throughput (world), and tool-latency percentiles (`tool_latency`) — the
@@ -5268,28 +5246,6 @@ tested without spawning py-spy.
   list capped, no secrets — enforced by test) the app caches in
   AsyncStorage and renders behind an "as of N min ago — offline" banner
   when the dashboard is unreachable.
-- **Marketplace federation** (`marketplace_federation.py` +
-  `federation_envelope.py`): export/import signed listing bundles between
-  instances (`maverick-marketplace-fed/1`) — import verifies the Ed25519
-  envelope **fail-closed** (bad/missing signature, unknown origin, or a
-  missing `cryptography` library all reject the whole envelope), enforces
-  the `[federation] marketplace_peers` trust list, namespaces imports as
-  `origin/name` so they can never shadow local listings, and re-runs the
-  local moderation scan on every import. Ratings do NOT federate — their
-  provenance can't be verified, stated plainly.
-- **Channel federation** (`channel_federation.py`): forward messages
-  between instances' channels over the same envelope discipline — a
-  bounded 0600 outbound queue with user ids pseudonymized via per-pair
-  HMAC, inbound verify fail-closed against the pinned per-origin key,
-  addressed-to-us check, per-peer token-bucket rate limit (injected
-  clock), and delivery into the normal handler as `channel="fed:<origin>"`
-  so federated traffic hits every existing chokepoint. The HTTP binding is
-  deliberately the operator's; the transport is an injected seam.
-- **Marketplace donate-direct** (`marketplace_donations.py`): skill authors
-  declare a donation link; validation enforces https + an allowlist of
-  donation hosts (GitHub Sponsors, Ko-fi, Open Collective, Liberapay, Buy
-  Me a Coffee) and the federation import strips invalid ones. Links only —
-  no payment processing, no checkout proxying, no referral codes.
 - **Benchmark reproducibility audits** (`benchmark_reproducibility.py`):
   every new benchmark run can carry a manifest
   (`maverick-bench-repro/1`: host fingerprint, config + input digests, env
@@ -5402,12 +5358,6 @@ tested without spawning py-spy.
   screen — active count, today's done/failed, today's spend (summed from the
   usage ledger), and the last terminal result (60-char bound) — computed in
   one cheap pass and served at `GET /api/v1/glance`.
-- **Mobile push v2** (`push_v2.py`): a device registry layered on the v1
-  notify path — each device registers a backend, a minimum priority floor,
-  and optional quiet hours; routing fans out only to eligible devices, with
-  `urgent` always breaking through quiet hours (page-me semantics); every
-  fan-out lands in a bounded delivery ledger so "did my phone get that?" is
-  answerable.
 - **Smart notification batching** — opt-in `[notifications]
   batch_window_seconds` (`notification_batcher.py`): coalesces the
   low/normal-priority push stream (ntfy/Pushover/Discord/Slack) into one

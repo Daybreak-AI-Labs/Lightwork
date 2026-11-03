@@ -11,8 +11,6 @@ from maverick import (
     failure_telemetry,
     shield_updates,
     supply_chain,
-    tiered_storage,
-    voice_macros,
 )
 from maverick import benchmark_reproducibility as benchmark
 from maverick.encryption_migrate import backup_world_db
@@ -164,42 +162,6 @@ def test_supply_chain_pins_refuse_shared_custom_parent_without_mutation(
 
     _assert_shared_unchanged(shared, unrelated, before)
     assert not path.exists()
-
-
-def test_voice_macros_refuse_shared_custom_parent_without_mutation(tmp_path):
-    shared, unrelated, before = _shared_fixture(tmp_path)
-    path = shared / "voice-macros.json"
-
-    with pytest.raises(PermissionError, match="must already be private"):
-        voice_macros.record_macro("morning", ["status report"], path=path)
-
-    _assert_shared_unchanged(shared, unrelated, before)
-    assert not path.exists()
-    assert not (shared / "voice-macros.json.lock").exists()
-
-
-def test_cold_archive_refuses_shared_custom_directory_without_mutation(
-    tmp_path, monkeypatch,
-):
-    shared, unrelated, before = _shared_fixture(tmp_path)
-    monkeypatch.setenv("MAVERICK_WORLD_COLD_CODEC", "gzip")
-    rows = [{"id": 1, "ended_at": 1_700_000_000.0, "summary": "private"}]
-
-    with pytest.raises(PermissionError, match="must already be private"):
-        tiered_storage._write_cold_file(
-            shared, "episodes", "ended_at", rows,
-        )
-
-    class FakeWorld:
-        _writing = object()
-
-    with pytest.raises(PermissionError, match="must already be private"):
-        tiered_storage.archive(
-            FakeWorld(), older_than_days=30, cold_dir=shared, tables=(),
-        )
-
-    _assert_shared_unchanged(shared, unrelated, before)
-    assert {path.name for path in shared.iterdir()} == {unrelated.name}
 
 
 def test_manifest_refuses_preexisting_shared_manifest_directory(

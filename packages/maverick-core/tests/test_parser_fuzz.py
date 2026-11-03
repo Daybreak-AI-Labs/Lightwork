@@ -1,7 +1,7 @@
 """Deterministic fuzz harness for the untrusted-input parsers.
 
 Every verifier/decoder that handles data from an external party (federation
-peers, A2A clients, webhook senders, share-link holders, the math tool) documents
+peers, A2A clients, webhook senders, the math tool) documents
 a fail-closed contract: on malformed input it returns an error / ``None`` / a
 rejection tuple, or raises ONLY its one documented exception — it must never leak
 an unexpected exception (``RecursionError``, ``KeyError``, ``TypeError`` …) or
@@ -147,26 +147,6 @@ def test_fuzz_load_peers():
                                          else {"federation": {"peers": v}}))
 
 
-# ---- channel + marketplace inbound (consume verify_envelope) -----------------
-
-def test_fuzz_channel_federation_apply():
-    from maverick.channel_federation import InboundApplier, TokenBucket
-    ap = InboundApplier(
-        lambda m: "ok",
-        peers={"peer-a": {"origin": "peer-a", "pubkey": "ab" * 32, "secret": "s"}},
-        local="home", limiter=TokenBucket(clock=lambda: 0.0))
-    _run("channel_federation.apply", ap.apply)
-
-
-def test_fuzz_marketplace_import(tmp_path):
-    from maverick.marketplace import federation as mf
-    store = tmp_path / "imports.json"
-    _run("marketplace.import_listings",
-         lambda v: mf.import_listings(
-             v, peers={"peer-a": {"origin": "peer-a", "pubkey": "ab" * 32}},
-             store_path=store))
-
-
 # ---- A2A discovery + task lifecycle ------------------------------------------
 
 def test_fuzz_a2a_card():
@@ -236,24 +216,6 @@ def test_fuzz_webhook_signature():
              v if isinstance(v, str) else "sha256=00",
              "secret",
              timestamp=v if isinstance(v, str) else None))
-
-
-def test_fuzz_share_link(monkeypatch):
-    monkeypatch.setenv("MAVERICK_SHARE_SECRET", "s3cr3t")
-    from maverick import share_link
-    _run("verify_share_link",
-         lambda v: share_link.verify_share_link(v if isinstance(v, str) else "a.b.c"),
-         allowed=(ValueError,))
-
-
-def test_fuzz_claim_handoff(monkeypatch, tmp_path):
-    monkeypatch.setenv("MAVERICK_SHARE_SECRET", "s3cr3t")
-    from maverick import share_link
-    nonces = tmp_path / "nonces.json"
-    _run("claim_handoff",
-         lambda v: share_link.claim_handoff(
-             v if isinstance(v, str) else "a.b", nonce_path=nonces),
-         allowed=(ValueError,))
 
 
 # ---- OIDC + the math evaluator -----------------------------------------------

@@ -182,25 +182,25 @@
     }
   },
   "counts": {
-    "governed": 142,
+    "governed": 141,
     "artifact": 52,
     "a2a": 4,
     "preferences": 7,
     "learning": 60,
-    "sqlite_domain": 82,
-    "configuration": 75,
+    "sqlite_domain": 81,
+    "configuration": 72,
     "read_projection": 24,
     "audit": 25,
     "transient": 25,
     "business_records": 21,
-    "execution": 47,
+    "execution": 46,
     "recovery": 12,
     "derived": 19,
     "composition": 62,
     "external": 18,
     "key_custody": 4,
     "storage_primitive": 12,
-    "world": 5,
+    "world": 4,
     "mixed_api": 8,
     "knowledge": 4,
     "draft": 3,
@@ -2909,87 +2909,6 @@
           "function": "_fetch_index_raw",
           "kind": "write_text",
           "expression": "cache.write_text(json.dumps(data))"
-        }
-      ]
-    },
-    {
-      "path": "packages/maverick-core/maverick/channel_federation.py",
-      "contract": "execution",
-      "owner": "packages/maverick-core/maverick/channel_federation.py",
-      "purpose": "Channel federation \u2014 forward channel messages between Lightwork instances.",
-      "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
-      "governed_namespaces": [],
-      "literal_path_hints": [
-        "channel_federation_outbox.json",
-        "channel_rate.json",
-        "channel_replay.json"
-      ],
-      "observed_mechanism_markers": {
-        "cross_process_lock": 4,
-        "atomic_replace": 7,
-        "outbox": 1
-      },
-      "source_sites": [
-        {
-          "line": 174,
-          "function": "_save",
-          "kind": "atomic_write_text",
-          "expression": "atomic_write_text(self.path, json.dumps(data, ensure_ascii=False))"
-        },
-        {
-          "line": 327,
-          "function": "_save",
-          "kind": "atomic_write_text",
-          "expression": "atomic_write_text(self.path, json.dumps({'schema': _RATE_LEDGER_SCHEMA, 'buckets': {key: list(value) for key, value in state.items()}}, sort_keys=True))"
-        },
-        {
-          "line": 487,
-          "function": "_save",
-          "kind": "atomic_write_text",
-          "expression": "atomic_write_text(self.path, json.dumps({'schema': _REPLAY_LEDGER_SCHEMA, 'seen': seen}, sort_keys=True))"
-        },
-        {
-          "line": 291,
-          "function": "__init__",
-          "kind": "data_dir",
-          "expression": "data_dir('federation', 'channel_rate.json')"
-        },
-        {
-          "line": 447,
-          "function": "__init__",
-          "kind": "data_dir",
-          "expression": "data_dir('federation', 'channel_replay.json')"
-        },
-        {
-          "line": 497,
-          "function": "claim",
-          "kind": "cross_process_lock",
-          "expression": "cross_process_lock(self.path, strict=True)"
-        },
-        {
-          "line": 514,
-          "function": "release",
-          "kind": "cross_process_lock",
-          "expression": "cross_process_lock(self.path, strict=True)"
-        },
-        {
-          "line": 142,
-          "function": "__init__",
-          "kind": "data_dir",
-          "expression": "data_dir()"
-        },
-        {
-          "line": 156,
-          "function": "_locked",
-          "kind": "cross_process_lock",
-          "expression": "cross_process_lock(self.path, strict=True)"
-        },
-        {
-          "line": 339,
-          "function": "allow",
-          "kind": "cross_process_lock",
-          "expression": "cross_process_lock(self.path, strict=True)"
         }
       ]
     },
@@ -9812,49 +9731,6 @@
       ]
     },
     {
-      "path": "packages/maverick-core/maverick/push_v2.py",
-      "contract": "configuration",
-      "owner": "packages/maverick-core/maverick/push_v2.py",
-      "purpose": "Mobile push v2 \u2014 device registry + per-device routing.",
-      "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
-      "governed_namespaces": [],
-      "literal_path_hints": [
-        "push_deliveries.json",
-        "push_devices.json"
-      ],
-      "observed_mechanism_markers": {
-        "cross_process_lock": 1,
-        "atomic_replace": 2
-      },
-      "source_sites": [
-        {
-          "line": 94,
-          "function": "_write",
-          "kind": "atomic_write_text",
-          "expression": "atomic_write_text(path, json.dumps(data))"
-        },
-        {
-          "line": 56,
-          "function": "__init__",
-          "kind": "data_dir",
-          "expression": "data_dir('push_devices.json')"
-        },
-        {
-          "line": 59,
-          "function": "__init__",
-          "kind": "data_dir",
-          "expression": "data_dir('push_deliveries.json')"
-        },
-        {
-          "line": 74,
-          "function": "_locked",
-          "kind": "cross_process_lock",
-          "expression": "cross_process_lock(path)"
-        }
-      ]
-    },
-    {
       "path": "packages/maverick-core/maverick/query_execution.py",
       "contract": "external",
       "owner": "packages/maverick-core/maverick/query_execution.py",
@@ -10080,68 +9956,6 @@
           "function": "module",
           "kind": "GovernedRecordStore",
           "expression": "GovernedRecordStore('red_team_schedules', 'RTS', 'red_team_schedule')"
-        }
-      ]
-    },
-    {
-      "path": "packages/maverick-core/maverick/red_team_campaigns.py",
-      "contract": "governed",
-      "owner": "packages/maverick-core/maverick/red_team_campaigns.py",
-      "purpose": "Consent-gated red-team campaign product foundation.",
-      "referenced_store_owners": [
-        ".governed_records"
-      ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
-      "governed_namespaces": [
-        {
-          "namespace": "red_team_campaign_product_specs",
-          "line": 41,
-          "recovery_policy": "red_team_product_schedule_authority"
-        },
-        {
-          "namespace": "red_team_campaign_product_runs",
-          "line": 44,
-          "recovery_policy": "red_team_product_execution_authority"
-        },
-        {
-          "namespace": "red_team_campaign_product_reports",
-          "line": 47,
-          "recovery_policy": "red_team_report_authority"
-        },
-        {
-          "namespace": "red_team_campaign_product_drifts",
-          "line": 50,
-          "recovery_policy": "red_team_drift_authority"
-        }
-      ],
-      "literal_path_hints": [],
-      "observed_mechanism_markers": {
-        "revision": 17
-      },
-      "source_sites": [
-        {
-          "line": 41,
-          "function": "module",
-          "kind": "GovernedRecordStore",
-          "expression": "GovernedRecordStore('red_team_campaign_product_specs', 'RTCS', 'red_team_campaign_spec')"
-        },
-        {
-          "line": 44,
-          "function": "module",
-          "kind": "GovernedRecordStore",
-          "expression": "GovernedRecordStore('red_team_campaign_product_runs', 'RTCR', 'red_team_campaign_run')"
-        },
-        {
-          "line": 47,
-          "function": "module",
-          "kind": "GovernedRecordStore",
-          "expression": "GovernedRecordStore('red_team_campaign_product_reports', 'RTCP', 'red_team_campaign_report')"
-        },
-        {
-          "line": 50,
-          "function": "module",
-          "kind": "GovernedRecordStore",
-          "expression": "GovernedRecordStore('red_team_campaign_product_drifts', 'RTCD', 'red_team_campaign_drift')"
         }
       ]
     },
@@ -11506,42 +11320,6 @@
       ]
     },
     {
-      "path": "packages/maverick-core/maverick/share_link.py",
-      "contract": "configuration",
-      "owner": "packages/maverick-core/maverick/share_link.py",
-      "purpose": "Universal share link + cross-device handoff.",
-      "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
-      "governed_namespaces": [],
-      "literal_path_hints": [
-        "handoff_nonces.json"
-      ],
-      "observed_mechanism_markers": {
-        "cross_process_lock": 1,
-        "atomic_replace": 2
-      },
-      "source_sites": [
-        {
-          "line": 106,
-          "function": "_nonce_store_path",
-          "kind": "data_dir",
-          "expression": "data_dir('handoff_nonces.json')"
-        },
-        {
-          "line": 123,
-          "function": "_save_nonces",
-          "kind": "atomic_write_text",
-          "expression": "atomic_write_text(path, json.dumps(data, sort_keys=True, separators=(',', ':')))"
-        },
-        {
-          "line": 127,
-          "function": "_nonce_store_lock",
-          "kind": "cross_process_lock",
-          "expression": "cross_process_lock(path, strict=True)"
-        }
-      ]
-    },
-    {
       "path": "packages/maverick-core/maverick/shield_updates.py",
       "contract": "configuration",
       "owner": "packages/maverick-core/maverick/shield_updates.py",
@@ -12847,20 +12625,6 @@
       ]
     },
     {
-      "path": "packages/maverick-core/maverick/tiered_storage.py",
-      "contract": "world",
-      "owner": "packages/maverick-core/maverick/tiered_storage.py",
-      "purpose": "Tiered world-model storage: hot SQLite + cold archive files.",
-      "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
-      "governed_namespaces": [],
-      "literal_path_hints": [],
-      "observed_mechanism_markers": {
-        "atomic_replace": 1
-      },
-      "source_sites": []
-    },
-    {
       "path": "packages/maverick-core/maverick/trajectory_store.py",
       "contract": "learning",
       "owner": "packages/maverick-core/maverick/trajectory_store.py",
@@ -13555,42 +13319,6 @@
           "function": "rollback_committed",
           "kind": "atomic_write_bytes",
           "expression": "atomic_write_bytes(active_path, after_payload, mode=384)"
-        }
-      ]
-    },
-    {
-      "path": "packages/maverick-core/maverick/voice_macros.py",
-      "contract": "configuration",
-      "owner": "packages/maverick-core/maverick/voice_macros.py",
-      "purpose": "Voice macros \u2014 named multi-step command sequences for the voice surface.",
-      "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
-      "governed_namespaces": [],
-      "literal_path_hints": [
-        "voice_macros.json"
-      ],
-      "observed_mechanism_markers": {
-        "cross_process_lock": 1,
-        "atomic_replace": 2
-      },
-      "source_sites": [
-        {
-          "line": 68,
-          "function": "macros_path",
-          "kind": "data_dir",
-          "expression": "data_dir('voice_macros.json')"
-        },
-        {
-          "line": 119,
-          "function": "save_macros",
-          "kind": "atomic_write_text",
-          "expression": "atomic_write_text(p, json.dumps(macros, indent=2))"
-        },
-        {
-          "line": 60,
-          "function": "_locked",
-          "kind": "cross_process_lock",
-          "expression": "cross_process_lock(target)"
         }
       ]
     },
@@ -15726,42 +15454,6 @@
           "function": "main",
           "kind": "write_text",
           "expression": "GOLDEN_PATH.write_text(json.dumps(current, indent=2, sort_keys=True) + '\\n', encoding='utf-8')"
-        }
-      ]
-    },
-    {
-      "path": "packages/maverick-core/maverick/marketplace/federation.py",
-      "contract": "sqlite_domain",
-      "owner": "packages/maverick-core/maverick/marketplace/federation.py",
-      "purpose": "Skill-marketplace federation \u2014 signed listing bundles between instances.",
-      "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
-      "governed_namespaces": [],
-      "literal_path_hints": [
-        "marketplace_federation_imports.json"
-      ],
-      "observed_mechanism_markers": {
-        "cross_process_lock": 1,
-        "atomic_replace": 3
-      },
-      "source_sites": [
-        {
-          "line": 189,
-          "function": "_save_store",
-          "kind": "atomic_write_text",
-          "expression": "atomic_write_text(path, json.dumps(data, ensure_ascii=False, sort_keys=True))"
-        },
-        {
-          "line": 174,
-          "function": "_store_path",
-          "kind": "data_dir",
-          "expression": "data_dir()"
-        },
-        {
-          "line": 205,
-          "function": "_import_locked",
-          "kind": "cross_process_lock",
-          "expression": "cross_process_lock(path)"
         }
       ]
     },

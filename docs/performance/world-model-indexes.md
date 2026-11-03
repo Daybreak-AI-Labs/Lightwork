@@ -72,8 +72,4 @@ upgrading a large database takes longer while the indexes are built.
 
 ## Related
 
-- Old `episodes` and `goal_events` rows can be moved out of SQLite into cold
-  parquet or gzip JSONL files with `maverick/tiered_storage.py`. Archiving is
-  off by default and never runs on its own; it needs `[world_model] cold_dir`
-  and `archive_after_days`.
 - Partitioning the `goal_events` table by `goal_id` range is not implemented.

@@ -78,7 +78,7 @@ _PROTECTED_FILES = frozenset({
     # Agent/fleet identity, routing, and authenticated handoff control plane.
     "agent_bus.py", "bus_handoff.py", "agent_trust.py", "handoff.py",
     "swarm.py", "federation.py", "federation_envelope.py",
-    "channel_federation.py", "emergent_protocol.py", "grpc_tls.py",
+    "emergent_protocol.py", "grpc_tls.py",
     "grpc_dispatcher.py", "grpc_plugin_host.py", "proxy_auth.py",
     "oauth_vault.py", "browser_auth_vault.py", "mcp_oauth.py",
     "workflow.py",

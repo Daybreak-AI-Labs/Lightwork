@@ -1,7 +1,7 @@
 """Phase 3 — gate the remaining external surfaces and add per-caller A2A
 identity. Covers A2A per-caller bearer -> agent identity + admission + ceiling,
-governance gating on federation delegation (DENY + fail-closed REQUIRE_HUMAN),
-and channel/marketplace federation gating by registered origin."""
+and governance gating on federation delegation (DENY + fail-closed
+REQUIRE_HUMAN)."""
 from __future__ import annotations
 
 import asyncio
@@ -242,32 +242,6 @@ def test_federation_governance_allow_is_noop(monkeypatch):
     _federation, svc = _fed(monkeypatch, reg)
     reply = _delegate(svc)
     assert reply["accepted"] is True
-
-
-# ---- channel / marketplace gating by registered origin --------------------
-
-
-def test_channel_federation_gated_by_registry(monkeypatch):
-    from maverick import channel_federation as cf
-    # Bypass signature crypto; we're testing the trust-origin gate that follows.
-    monkeypatch.setattr(cf, "verify_envelope", lambda *a, **k: (True, "ok"))
-    _patch(monkeypatch, {})  # engaged, empty registry -> origin not registered
-    applier = cf.InboundApplier(handler=lambda m: None, peers={}, local="me")
-    env = {"schema": "maverick-channel-fed/1", "origin": "ghost", "to": "me",
-           "channel": "slack", "user_id": "u", "text": "hi",
-           "pubkey": "x", "key_id": "k", "sig": "s"}
-    res = applier.apply(env)
-    assert res["applied"] is False and "trust registry" in res["reason"]
-
-
-def test_marketplace_federation_gated_by_registry(monkeypatch):
-    from maverick.marketplace import federation as mf
-    monkeypatch.setattr(mf, "verify_envelope", lambda *a, **k: (True, "ok"))
-    _patch(monkeypatch, {})
-    env = {"schema": "maverick-marketplace-fed/1", "origin": "ghost",
-           "listings": [], "pubkey": "x", "key_id": "k", "sig": "s"}
-    report = mf.import_listings(env, peers={"ghost": {"origin": "ghost", "pubkey": "x"}})
-    assert "trust registry" in (report.get("reason") or "")
 
 
 # ---- per-surface token isolation ------------------------------------------
