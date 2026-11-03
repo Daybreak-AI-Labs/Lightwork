@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
-TASKS = ROOT / "docs" / "research" / "tree-test" / "tasks.csv"
+TASKS = ROOT / "docs" / "tree-test" / "tasks.csv"
 ROLES = ("viewer", "operator", "auditor", "admin")
 
 

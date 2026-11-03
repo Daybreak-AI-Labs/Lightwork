@@ -440,9 +440,10 @@ Settings and the installation wizard.
   reversibility, and the signed audit, and **requires `[self_improvement]
   enable`**. An accepted line is recalled into the system prompt for *that model
   only* (`recall_addendum`, keyed on the agent's resolved model), never a
-  kernel-template mutation. Reflexions now carry a `model_id` for the per-model
+  kernel-template mutation. Reflexions carry a `model_id` for the per-model
   mining. After *Self-Harness: Harnesses That Improve Themselves* (arXiv
-  2606.09498); design in [`docs/proposals/self-harness.md`](./proposals/self-harness.md).
+  2606.09498); see the
+  [sealed evaluation boundary](./self-learning.md#sealed-self-harness-evaluation-boundary).
 - **Governed harness self-refinement** (`harness_refine.py`, opt-in
   `[harness_refine] enable` / `MAVERICK_HARNESS_REFINE=1`, OFF by default) —
   an agent **proposes** a change to its own operating instructions from an
@@ -486,8 +487,8 @@ Settings and the installation wizard.
   launder drift). The loop is enabled by default, but the evaluator rung remains
   above the default auto-promotion ceiling and therefore requires human approval.
   After *The Red Queen Gödel Machine:
-  Co-Evolving Agents and Their Evaluators* (arXiv 2606.26294); design in
-  [`docs/proposals/evaluator-co-evolution.md`](./proposals/evaluator-co-evolution.md).
+  Co-Evolving Agents and Their Evaluators* (arXiv 2606.26294); see
+  [evaluator co-evolution](./self-learning.md#evaluator-co-evolution).
 - **Shared generic insight promotion** — when explicitly enabled with
   `[dreaming] promote_shared`, only recurring *unscoped* failures can become
   shared insights. Department-scoped failures remain compartment-local and are
@@ -3028,7 +3029,7 @@ Built-in tool modules. Highlights by group (all under `tools/`):
   **Trained cheap-probe seam + offline trainer** (`probe_model.probe_features`
   n-gram extension + `maverick_shield/probe_train.py`, `python -m
   maverick_shield.probe_train --corpus … --out model.json`): `probe_features`
-  now additively emits deterministic hashed char n-gram features (`ng:<bucket>`,
+  additionally emits deterministic hashed char n-gram features (`ng:<bucket>`,
   blake2b — stable across processes) when `ngram_buckets > 0`, so a model can
   carry lexical content the 7 hand-named signals can't; `ngram_buckets = 0` keeps
   the original contract, so every existing artifact is byte-for-byte unaffected.
@@ -3037,8 +3038,8 @@ Built-in tool modules. Highlights by group (all under `tools/`):
   configurable benign false-positive ceiling (`--max-fp`, default 1%), and exports
   the `{bias, weights, threshold, ngram_buckets, ngram_sizes}` JSON the shield
   already loads. Still OFF by default and MAX-ensembled with the heuristic (can
-  only raise recall). Recommended datasets/model and the ship-gate are in
-  [`docs/research/shield-model-recommendation.md`](research/shield-model-recommendation.md).
+  only raise recall). Datasets, licences and the enablement gate are in
+  [training a probe model](security/shield-benchmark.md#training-a-probe-model).
   **Annual safety report generator** (`safety_report.py`, `python -m
   maverick.safety_report --since --until`): aggregates what the deployment
   actually recorded — shield blocks, capability denials, killswitch
