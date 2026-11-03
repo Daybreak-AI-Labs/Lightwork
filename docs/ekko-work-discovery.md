@@ -282,6 +282,13 @@ Discovery combines three sources:
 - Tasks explicitly supplied in the optional additional-work field. These are
   customer requests, not inferred observations or proven automation benefits.
 
+Autonomous Shoring starter-team specialist stages are excluded from the
+Lightwork work-history source and Work value economic estimates. Several
+internal handoffs in one team run do not establish repeated customer requests.
+Their native goals, execution costs, and results remain available. Aggregating
+direct or scheduled team occurrences into discovery requires a separate
+team-occurrence adapter, which is not implemented in this release.
+
 Existing workflows with the same exact normalized business title are offered
 for review. A stable source identity also preserves an earlier Ekko draft after
 the customer edits its title. Existing definitions are never overwritten.

@@ -123,6 +123,15 @@ not a completed customer engagement, a compliance attestation, or live
 integration readiness. Do not upload synthetic sample content as a customer
 export to represent it as real work.
 
+Native specialist stages remain available with their original goals, execution
+costs, and results. They are excluded from Work value request discovery and
+economic estimates, including Ekko's repeated-work suggestions. Intake,
+analysis, and review are contributions to one team occurrence; they are not
+three independent customer requests. A team-occurrence adapter for those
+surfaces is not implemented. This limitation applies to direct runs and each
+separately approved scheduled occurrence, and does not change native cost
+records or claim whole-team Shoring SLA aggregation.
+
 ## Authority, durability, and recovery
 
 Setup review binds the team definition, owner, scope, limits, authenticated

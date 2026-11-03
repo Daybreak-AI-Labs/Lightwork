@@ -43,6 +43,80 @@ def report(world):
     return calculation.report(service.refresh(world), start=time.time() - 86400, end=time.time() + 60)
 
 
+def _starter_stage_goals(world, occurrence, *, scheduled=False):
+    from maverick.starter_team_checks import get_team
+    from maverick.starter_team_runtime import _PHASES, StarterTeamRuntime
+
+    team = get_team("revenue_operations")
+    phases = ["intake", "analysis", "review"]
+    review = {"scope": "Synthetic reviewed scope", "owner_label": "Taylor",
+              "envelope": [{"phase": phase} for phase in phases],
+              "phases": _PHASES, "deliverable": team["deliverable"]}
+    case = {"as_of": team["sample"]["as_of"], "tables": team["sample"]["tables"], "output": {}}
+    identifiers = []
+    for index, specialist in enumerate(team["specialists"]):
+        description = StarterTeamRuntime._prompt(review, {"stages": []}, case, team, index)
+        identifier = world.create_goal(team["title"] + ": " + phases[index], description,
+            owner="alice", domain=specialist, execution_principal=f"agent:starter-team.{occurrence}.{index}")
+        if scheduled:
+            world.record_goal_origin(identifier, "schedule", "SCH-synthetic")
+        episode = world.start_episode(identifier)
+        world.end_episode(episode, "Synthetic stage draft", "success", cost_dollars=0.5)
+        world.set_goal_status(identifier, "done", result="Synthetic stage draft")
+        audit.audit_event("goal_end", goal_id=identifier, agent="orchestrator", status="succeeded")
+        identifiers.append(identifier)
+    return identifiers
+
+
+@pytest.mark.parametrize("scheduled", [False, True])
+@pytest.mark.parametrize("occurrences", [1, 3])
+def test_starter_team_handoffs_do_not_become_work_requests_or_value(world, scheduled, occurrences):
+    from maverick.intent_value import sources
+
+    identifiers = [identifier for occurrence in range(occurrences)
+                   for identifier in _starter_stage_goals(world, str(occurrence), scheduled=scheduled)]
+    # Before the source boundary, one real catalog roster can be mistaken for
+    # three proposal-review requests and trigger Ekko's recurrence threshold.
+    assert all(sources._classify_goal(world.get_goal(identifier))["intents"] == ["proposal.review"]
+               for identifier in identifiers)
+    native = {identifier: copy.deepcopy(world.get_goal(identifier)) for identifier in identifiers}
+    normal = goal(world, "Review a proposal")
+    value = report(world)
+    active = [row for row in service.refresh(world) if not row["deleted"]]
+    assert len(active) == 1 and active[0]["source"]["goal_ids"] == [normal]
+    assert value["totals"]["performed_work"] == 1
+    assert value["totals"]["known_execution_costs"] == {"USD": 2}
+    assert {row["key"] for row in sources.collect(world)} == {f"goal:{normal}"}
+    assert all(world.get_goal(identifier) == original for identifier, original in native.items())
+    costs = {row[0]: row[1] for row in world.query("SELECT goal_id,SUM(cost_dollars) FROM episodes GROUP BY goal_id")}
+    assert all(costs[identifier] == 0.5 for identifier in identifiers)
+
+
+def test_refresh_retires_old_stage_value_without_deleting_native_work(world, monkeypatch):
+    from maverick.intent_value import sources
+
+    identifiers = _starter_stage_goals(world, "previous")
+    current_reader = sources._goal_rows
+
+    def before_stage_exclusion(value):
+        _goals, origins, turns, memberships = current_reader(value)
+        return value.list_goals(limit=sources.MAX_RECORDS + 1), origins, turns, memberships
+
+    # Reproduce the old projection once. A normal refresh must remove its
+    # credits from discovery/totals while retaining explanatory history.
+    with monkeypatch.context() as patch:
+        patch.setattr(sources, "_goal_rows", before_stage_exclusion)
+        previous = service.refresh(world)
+    assert len(previous) == 3 and all(not row["deleted"] for row in previous)
+    native = {identifier: copy.deepcopy(world.get_goal(identifier)) for identifier in identifiers}
+    current = service.refresh(world)
+    assert all(row["deleted"] and not row["source"]["goal_ids"] for row in current)
+    assert {row["id"]: row["estimates"] for row in current} == {row["id"]: row["estimates"] for row in previous}
+    assert report(world)["totals"]["performed_work"] == 0
+    assert all(world.get_goal(identifier) == original for identifier, original in native.items())
+    assert world.query("SELECT SUM(cost_dollars) FROM episodes")[0][0] == 1.5
+
+
 def test_taxonomy_covers_business_and_distinguishes_actions():
     rows = taxonomy.catalog()
     assert len({row["family"] for row in rows}) == 9

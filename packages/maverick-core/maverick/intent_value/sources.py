@@ -63,6 +63,13 @@ def audit_population():
 def _goal_rows(world):
     # list_goals owns decryption and tenant enforcement on SQLite and Postgres.
     goals = _bounded(world.list_goals(limit=MAX_RECORDS + 1), "Task history")
+    # Starter-team goals are internal stages of one reviewed occurrence, not
+    # independent customer requests or completed business deliverables. Keep
+    # their native goals, receipts and costs intact, but exclude them from
+    # request/value discovery until a team-occurrence adapter can distinguish
+    # partial handoffs, final completion and business acceptance. In particular,
+    # three stages must not become three repeated requests in Ekko.
+    goals = [goal for goal in goals if not (goal.execution_principal or "").startswith("agent:starter-team.")]
     origins = {int(row[0]): (str(row[1]), str(row[2])) for row in world.query(
         "SELECT goal_id,kind,ref FROM goal_origins")}
     turns = _bounded(world.query(

@@ -79,7 +79,7 @@ def web(tmp_path, monkeypatch):
         return OfflineRuntime()
 
     monkeypatch.setattr(starter_team_schedule.StarterTeamScheduleService, "_runtime", runtime)
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     setup_service = native.service(None)
     setup_review = setup_service.preview_setup("data_quality_operations", "Taylor", "Approved synthetic records")
     state["setup"] = setup_service.save_setup(setup_review, confirmed=True)

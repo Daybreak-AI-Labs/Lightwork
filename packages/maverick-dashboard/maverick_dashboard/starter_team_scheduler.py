@@ -21,6 +21,7 @@ log = logging.getLogger(__name__)
 _lock = threading.Lock()
 _stop = None
 _thread = None
+_stopping = False
 _cursor = ""
 _runtime_cursors = {}
 _POLL_SECONDS = 30
@@ -55,6 +56,8 @@ def authorize_worker(context, operation, team):
 
     if operation not in {"read", "run", "runtime_read", "runtime_start"} or context.human:
         return False
+    if _stopping and operation in {"run", "runtime_start"}:
+        return False
     try:
         if (current_tenant_id_strict() != context.tenant or not shoring.enabled()
                 or config.config_source_errors(include_tenant=True)):
@@ -71,8 +74,11 @@ def authorize_worker(context, operation, team):
         if not ui_visibility.is_visible(ui_visibility.page_for("/starter-teams"), role):
             return False
         required = {suite for name in team["specialists"] for suite in suites_for_domain(name)}
-        return all((suites is None or suite in suites) and department_entitled(suite, tenant=context.tenant)
-                   for suite in required)
+        allowed = all((suites is None or suite in suites) and department_entitled(suite, tenant=context.tenant)
+                      for suite in required)
+        # This callback also runs inside the durable effect guard. A stop that
+        # arrived during the current-authority reads must close that admission.
+        return allowed and not (_stopping and operation in {"run", "runtime_start"})
     except Exception:
         return False
 
@@ -83,14 +89,14 @@ def runtime_cycle(tenant, *, runtime_factory=None):
     from maverick.starter_teams import StarterTeamService, get_team
 
     register_runtime_authorizer()
-    if current_tenant_id_strict() != tenant or not shoring.enabled():
+    if _stopping or current_tenant_id_strict() != tenant or not shoring.enabled():
         return 0
     advanced = attempted = 0
     rows = sorted(worker_runtimes(), key=lambda row: row["id"])
     cursor = _runtime_cursors.get(tenant, "")
     rotation = [row for row in rows if row["id"] > cursor] + [row for row in rows if row["id"] <= cursor]
     for row in rotation:
-        if attempted >= 5:
+        if _stopping or attempted >= 5:
             break
         review = row["review"]
         # A scheduled occurrence belongs exclusively to its scheduler, including
@@ -103,6 +109,8 @@ def runtime_cycle(tenant, *, runtime_factory=None):
             continue
         service = StarterTeamService(context, authorize_worker, workspace_id=row["workspace"])
         runtime = (runtime_factory or StarterTeamRuntime)(service)
+        if _stopping:
+            break
         attempted += 1
         _runtime_cursors[tenant] = row["id"]
         try:
@@ -118,7 +126,7 @@ def workspace_cycle(tenant, *, schedule_factory=None, now=None):
     from maverick.starter_team_schedule import StarterTeamScheduleService, worker_schedules
 
     register_runtime_authorizer()
-    if current_tenant_id_strict() != tenant or not shoring.enabled():
+    if _stopping or current_tenant_id_strict() != tenant or not shoring.enabled():
         return 0
     current = time.time() if now is None else now
     advanced = attempted = 0
@@ -127,7 +135,7 @@ def workspace_cycle(tenant, *, schedule_factory=None, now=None):
     rows = worker_schedules()
     rows.sort(key=lambda row: (row.get("next_due", 0), row["id"]))
     for row in rows:
-        if attempted >= 5:
+        if _stopping or attempted >= 5:
             break
         definition = row["definition"]
         if (row["paused"] or row["status"] == "awaiting_confirmation"
@@ -142,6 +150,8 @@ def workspace_cycle(tenant, *, schedule_factory=None, now=None):
         service = factory(context, authorize_worker, workspace_id=row["workspace"])
         if not row.get("active_item_id") and not any(item["status"] == "approved" for item in service.list_items(row["id"])):
             continue
+        if _stopping:
+            break
         key = "worker:" + digest({"schedule": row["id"], "poll": int(current // _POLL_SECONDS)})
         attempted += 1
         try:
@@ -160,7 +170,7 @@ def cycle():
 
     from .automation_queue import _configured_tenant_floor
 
-    if config.config_source_errors(include_tenant=False) or not shoring.enabled():
+    if _stopping or config.config_source_errors(include_tenant=False) or not shoring.enabled():
         return 0
     tenants = {row.id for row in list_tenants() if row.active}
     floor = _configured_tenant_floor()
@@ -170,8 +180,12 @@ def cycle():
     rotation = [value for value in ordered if value > _cursor] + [value for value in ordered if value <= _cursor]
     advanced = 0
     for tenant in rotation[:10]:
+        if _stopping:
+            break
         with tenant_scope(tenant=tenant):
             for advance in (workspace_cycle, runtime_cycle):
+                if _stopping:
+                    break
                 try:
                     advanced += advance(tenant)
                 except Exception as exc:
@@ -189,13 +203,14 @@ def _loop(stop):
 
 
 def start_starter_team_scheduler():
-    global _stop, _thread
+    global _stop, _thread, _stopping
     register_runtime_authorizer()
     with _lock:
         if _thread is not None and _thread.is_alive():
-            return True
+            return not _stopping
         if not shoring.enabled():
             return False
+        _stopping = False
         _stop = threading.Event()
         _thread = threading.Thread(target=_loop, args=(_stop,), name="starter-team-schedules", daemon=True)
         _thread.start()
@@ -203,8 +218,11 @@ def start_starter_team_scheduler():
 
 
 def stop_starter_team_scheduler(timeout=5.0, wait=True):
-    global _stop, _thread
+    global _stop, _thread, _stopping
     with _lock:
+        # Signalling must not wait for an effect fence or provider. The current
+        # authority callback observes this flag at the existing guarded write.
+        _stopping = True
         thread = _thread
         if _stop is not None:
             _stop.set()

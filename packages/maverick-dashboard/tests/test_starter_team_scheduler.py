@@ -24,6 +24,7 @@ def isolated_runtime_authorizer(monkeypatch):
 
     monkeypatch.setattr(starter_team_runtime, "_worker_authorizer", None)
     monkeypatch.setattr(worker, "_runtime_cursors", {})
+    monkeypatch.setattr(worker, "_stopping", False)
 
 
 @pytest.fixture
@@ -280,12 +281,14 @@ def test_tenant_cycle_uses_explicit_scope_and_limits_rotation(monkeypatch):
 
 def test_worker_start_stop_are_idempotent_and_disabled_gate_blocks_start(monkeypatch):
     worker.stop_starter_team_scheduler(timeout=0.1)
+    assert worker._stopping is True
     monkeypatch.setattr(worker.shoring, "enabled", lambda: False)
     assert worker.start_starter_team_scheduler() is False
     assert worker.worker_status()["running"] is False
     monkeypatch.setattr(worker.shoring, "enabled", lambda: True)
     try:
         assert worker.start_starter_team_scheduler() is True
+        assert worker._stopping is False
         original_thread = worker._thread
         assert worker.start_starter_team_scheduler() is True
         assert worker._thread is original_thread
@@ -294,6 +297,7 @@ def test_worker_start_stop_are_idempotent_and_disabled_gate_blocks_start(monkeyp
         worker.stop_starter_team_scheduler(timeout=0.2)
     assert worker.worker_status()["running"] is False
     assert worker._thread is None
+    assert worker._stopping is True
 
 
 def test_disabled_scheduler_still_registers_native_runtime_authority(monkeypatch):
@@ -592,3 +596,126 @@ def test_direct_worker_rebuilds_runtime_and_completes_saved_roster(tmp_path, mon
     finally:
         governed_records._reset_process_authority_pin_for_testing()
         config.reset_config_cache()
+
+
+def test_shutdown_revokes_new_worker_admission_but_keeps_read_authority(current_authority):
+    context, team = _context(), {"specialists": ["control", "contract"]}
+    assert worker.authorize_worker(context, "runtime_start", team) is True
+    worker.stop_starter_team_scheduler(wait=False)
+    for operation in ("run", "runtime_start"):
+        assert worker.authorize_worker(context, operation, team) is False
+    for operation in ("read", "runtime_read"):
+        assert worker.authorize_worker(context, operation, team) is True
+
+
+def test_shutdown_during_authority_reads_refuses_guarded_record_claim(tmp_path, monkeypatch, current_authority):
+    from maverick import config, governed_records
+    from maverick.starter_teams import StarterTeamService
+
+    governed_records._reset_process_authority_pin_for_testing()
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    for name in ("MAVERICK_GOVERNED_RECORDS_BACKEND", "MAVERICK_PG_DSN",
+                 "MAVERICK_REPLICA_COUNT", "MAVERICK_ALLOW_MULTIPLE_CONTROL_PLANES"):
+        monkeypatch.delenv(name, raising=False)
+    config.reset_config_cache()
+    service = StarterTeamService(_context(), worker.authorize_worker)
+    team = {"specialists": ["control", "contract"]}
+    service._authorize("runtime_start", team)
+
+    def stop_during_current_authority_read(context):
+        worker.stop_starter_team_scheduler(wait=False)
+        return True
+
+    monkeypatch.setattr(worker, "_workspace_current", stop_during_current_authority_read)
+    store = governed_records.GovernedRecordStore("starter_shutdown_test", "TSS", "starter_shutdown_test",
+                                               required_backend="local")
+    record_id = "TSS-" + "a" * 32
+    try:
+        with service._write(record_id):
+            with pytest.raises(PermissionError, match="Current authority"):
+                store.create({"id": record_id}, action="test_claim", actor=service.context.actor,
+                             effect_guard=lambda: service._authorize("runtime_start", team))
+            assert store.get(record_id) is None
+    finally:
+        governed_records._reset_process_authority_pin_for_testing()
+        config.reset_config_cache()
+
+
+def test_shutdown_during_direct_run_leaves_later_rows_unclaimed(direct_cycle_setup):
+    state, _ = direct_cycle_setup
+    state["rows"] = [_runtime_row("SRT-first"), _runtime_row("SRT-second")]
+    untouched = copy.deepcopy(state["rows"][1])
+
+    class StopAfterCurrent:
+        def start_runtime(self, review, *, confirmed):
+            assert confirmed is False
+            state["calls"].append(review["id"])
+            worker.stop_starter_team_scheduler(wait=False)
+            return {"status": "ready"}
+
+    def factory(service):
+        return StopAfterCurrent()
+
+    assert worker.runtime_cycle("tenant-a", runtime_factory=factory) == 1
+    assert worker.runtime_cycle("tenant-a", runtime_factory=factory) == 0
+    assert state["calls"] == ["SRV-SRT-first"]
+    assert state["rows"][1] == untouched
+    assert worker._runtime_cursors["tenant-a"] == "SRT-first"
+
+
+def test_shutdown_during_scheduled_run_leaves_later_rows_unclaimed(cycle_setup):
+    state, _ = cycle_setup
+    state["rows"] = [_schedule("SCH-first"), _schedule("SCH-second")]
+    untouched = copy.deepcopy(state["rows"][1])
+
+    class StopAfterCurrent:
+        def list_items(self, schedule_id):
+            return [{"status": "approved"}]
+
+        def tick(self, schedule_id, *, idempotency_key):
+            state["calls"].append(schedule_id)
+            worker.stop_starter_team_scheduler(wait=False)
+
+    def factory(*args, **kwargs):
+        state["factories"].append(args)
+        return StopAfterCurrent()
+
+    assert worker.workspace_cycle("tenant-a", schedule_factory=factory, now=120) == 1
+    assert worker.workspace_cycle("tenant-a", schedule_factory=factory, now=120) == 0
+    assert state["calls"] == ["SCH-first"]
+    assert len(state["factories"]) == 1
+    assert state["rows"][1] == untouched
+
+
+@pytest.mark.parametrize("stop_after", ["workspace_cycle", "runtime_cycle"])
+def test_shutdown_stops_remaining_worker_types_and_tenants(monkeypatch, stop_after):
+    from maverick.paths import current_tenant_id_strict
+    from maverick.tenant import registry
+    from maverick_dashboard import automation_queue
+
+    monkeypatch.setattr(worker.config, "config_source_errors", lambda **kwargs: [])
+    monkeypatch.setattr(worker.shoring, "enabled", lambda: True)
+    monkeypatch.setattr(registry, "list_tenants", lambda: [SimpleNamespace(id=value, active=True)
+                                                        for value in ("tenant-a", "tenant-b")])
+    monkeypatch.setattr(automation_queue, "_configured_tenant_floor", lambda: None)
+    monkeypatch.setattr(worker, "_cursor", "")
+    seen = []
+
+    def callback(name):
+        def advance(tenant):
+            assert current_tenant_id_strict() == tenant
+            seen.append((name, tenant))
+            if name == stop_after:
+                worker.stop_starter_team_scheduler(wait=False)
+            return 1
+        return advance
+
+    monkeypatch.setattr(worker, "workspace_cycle", callback("workspace_cycle"))
+    monkeypatch.setattr(worker, "runtime_cycle", callback("runtime_cycle"))
+    expected = [("workspace_cycle", "tenant-a")]
+    if stop_after == "runtime_cycle":
+        expected.append(("runtime_cycle", "tenant-a"))
+    assert worker.cycle() == len(expected)
+    assert worker.cycle() == 0
+    assert seen == expected

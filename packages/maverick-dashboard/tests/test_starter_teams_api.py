@@ -49,7 +49,7 @@ def web(tmp_path, monkeypatch):
 
     monkeypatch.setattr(native, "context", trusted_context)
     monkeypatch.setattr(native, "require_team", suite_authority)
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     yield client, state
     governed_records._reset_process_authority_pin_for_testing()
     config.reset_config_cache()
