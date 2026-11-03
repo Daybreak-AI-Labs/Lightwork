@@ -7,13 +7,12 @@
 //! `SecretMatch` (incl. its preview) and does the string splicing, so behaviour
 //! can never drift from the pure-Python redactor. Patterns are compiled once.
 //!
-//! Engine: `fancy-regex`. Most patterns compile to its linear `regex` backend;
-//! the Lightwork capability-token boundaries use fixed look-around. Routing
-//! every detector through one engine keeps semantics identical to Python's
-//! `re` and lets us share the fail-safe error path (any engine error => caller
-//! falls back to pure Python, i.e. err toward over-redaction).
+//! Lookaround-free patterns compile to the linear regex backend. Capability
+//! token boundaries are checked against the original input outside the engine.
+//! Engine failures are returned to bindings; callers must handle errors rather
+//! than assume a scan produced a complete result.
 
-use crate::{byte_spans_to_char, compile_pattern};
+use crate::{byte_spans_to_char, compile_pattern, filtered_matches};
 use fancy_regex::Regex;
 use std::collections::HashSet;
 use std::sync::LazyLock;
@@ -65,12 +64,12 @@ static DEFS: &[(&str, &str, bool)] = &[
     ("stripe_test_key", r"\bsk_test_[0-9a-zA-Z]{24,}\b", false),
     (
         "lightwork_agent_token",
-        r"(?<![A-Za-z0-9_-])lw-(?:rest|mcp)-[A-Za-z0-9_-]{20,}(?![A-Za-z0-9_-])",
+        r"lw-(?:rest|mcp)-[A-Za-z0-9_-]{20,}",
         false,
     ),
     (
         "lightwork_flow_approval_token",
-        r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{16,}\.[0-9a-fA-F]{64}(?![0-9a-fA-F])",
+        r"eyJ[A-Za-z0-9_-]{16,}\.[0-9a-fA-F]{64}",
         false,
     ),
     (
@@ -120,8 +119,8 @@ static PATTERNS: LazyLock<Vec<Pattern>> = LazyLock::new(|| {
 });
 
 /// Mirror of `secret_detector.scan`, returning `(name, cp_start, cp_end)` triples
-/// in Python's emission order. `Err` on any engine failure so the caller can fall
-/// back to pure Python (fail-safe: never silently under-redact).
+/// in Python's emission order. `Err` on any engine failure; bindings must not
+/// interpret that error as a successful scan.
 pub fn scan_spans(text: &str) -> Result<Vec<(String, usize, usize)>, String> {
     if text.is_empty() {
         return Ok(Vec::new());
@@ -129,6 +128,33 @@ pub fn scan_spans(text: &str) -> Result<Vec<(String, usize, usize)>, String> {
     let mut byte_spans: Vec<(&'static str, usize, usize)> = Vec::new();
     let mut seen: HashSet<(usize, usize)> = HashSet::new();
     for pat in PATTERNS.iter() {
+        if matches!(
+            pat.name,
+            "lightwork_agent_token" | "lightwork_flow_approval_token"
+        ) {
+            // A candidate cannot contain another valid token start: each
+            // interior start has an ASCII word/hyphen before it; the only dot
+            // is followed solely by hex, which cannot contain either prefix.
+            // Skip the whole rejected candidate to avoid quadratic rescans.
+            for m in filtered_matches(&pat.re, text, false, |source, start, end| {
+                let left = source[..start].chars().next_back();
+                let right = source[end..].chars().next();
+                let word = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-';
+                let left_ok = !left.is_some_and(word);
+                let right_ok = if pat.name == "lightwork_agent_token" {
+                    !right.is_some_and(word)
+                } else {
+                    !right.is_some_and(|c| c.is_ascii_hexdigit())
+                };
+                Ok(left_ok && right_ok)
+            })? {
+                let span = (m.start(), m.end());
+                if seen.insert(span) {
+                    byte_spans.push((pat.name, span.0, span.1));
+                }
+            }
+            continue;
+        }
         for cap in pat.re.captures_iter(text) {
             let cap = cap.map_err(|e| e.to_string())?;
             let m = if pat.val_group {
@@ -175,6 +201,27 @@ mod tests {
             &"export API_SECRET=supersecretvalue\n"[..env.1],
             "export API_SECRET="
         );
+    }
+
+    #[test]
+    fn long_input_preserves_trailing_token_and_boundaries() {
+        let token = format!("{}{}", "lw-rest-", "a".repeat(24));
+        let text = format!("{} {token}", "ordinary ".repeat(140_000));
+        assert!(names(&text).contains(&"lightwork_agent_token".to_string()));
+        assert!(!names(&format!("x{token}")).contains(&"lightwork_agent_token".to_string()));
+    }
+
+    #[test]
+    fn rejected_overlapping_token_candidates_do_not_rescan_suffixes() {
+        let text = format!("x{}{} trailing", "lw-rest-".repeat(20_000), "a".repeat(24));
+        assert!(!names(&text).contains(&"lightwork_agent_token".to_string()));
+    }
+
+    #[test]
+    fn approval_token_rejects_extra_hex_suffix() {
+        let token = format!("eyJ{}.{}", "x".repeat(20), "a".repeat(64));
+        assert!(names(&token).contains(&"lightwork_flow_approval_token".to_string()));
+        assert!(!names(&format!("{token}f")).contains(&"lightwork_flow_approval_token".to_string()));
     }
 
     #[test]

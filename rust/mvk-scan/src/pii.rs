@@ -4,12 +4,12 @@
 //! ipv6, phone_us, street_address) emitted in that order, then Luhn-validated
 //! credit cards, then the SAME overlap-coalescing (stable sort by
 //! `(start, -len)`, merge clusters keeping the first kind). The phone and SSN
-//! patterns use look-behind / look-ahead — the reason this carve needs
-//! `fancy-regex` rather than the `regex` crate. We return only
+//! patterns check lookaround boundaries outside their linear regex candidates.
+//! We return only
 //! `(kind, cp_start, cp_end)`; the Python shim attaches the constant mask and
 //! splices, so it can never drift from the pure-Python redactor.
 
-use crate::{byte_spans_to_char, compile_pattern};
+use crate::{byte_spans_to_char, compile_pattern, filtered_matches};
 use fancy_regex::Regex;
 use std::sync::LazyLock;
 
@@ -20,10 +20,7 @@ static DEFS: &[(&str, &str)] = &[
         "email",
         r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b",
     ),
-    (
-        "ssn",
-        r"\b(?!000|666|9\d{2})\d{3}-(?!00)\d{2}-(?!0000)\d{4}\b",
-    ),
+    ("ssn", r"\b\d{3}-\d{2}-\d{4}\b"),
     (
         "ipv4",
         r"\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b",
@@ -38,7 +35,7 @@ static DEFS: &[(&str, &str)] = &[
     // Leading (?<!\d) look-behind stops a 10-digit sub-run of a longer number.
     (
         "phone_us",
-        r"(?<!\d)(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b",
+        r"(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b",
     ),
     (
         "street_address",
@@ -50,7 +47,7 @@ static DEFS: &[(&str, &str)] = &[
 // space/dash separators, anchored on DIGIT boundaries (not \b). Luhn-checked
 // per cc_run_has_card. Mirrors pii_detector._CC -- the old `\b...{13,19}\b`
 // matched NOTHING for runs of >=20 digits, leaking concatenated cards.
-static CC: &str = r"(?<!\d)\d(?:[ -]*\d){12,}(?!\d)";
+static CC: &str = r"\d(?:[ -]*\d){12,}";
 
 struct Compiled {
     kind: &'static str,
@@ -153,8 +150,8 @@ fn cc_run_has_card(run: &str) -> Result<bool, String> {
 }
 
 /// Mirror of `pii_detector.scan`, returning coalesced `(kind, cp_start, cp_end)`
-/// triples. `Err` on any engine failure or Luhn ambiguity so the caller can fall
-/// back to pure Python (fail-safe).
+/// triples. `Err` on engine failure or Luhn ambiguity; bindings must handle
+/// the error instead of treating it as a successful scan.
 pub fn scan_spans(text: &str) -> Result<Vec<(String, usize, usize)>, String> {
     if text.is_empty() {
         return Ok(Vec::new());
@@ -162,6 +159,37 @@ pub fn scan_spans(text: &str) -> Result<Vec<(String, usize, usize)>, String> {
     // Raw byte-offset matches in Python's insertion order.
     let mut raw: Vec<(&'static str, usize, usize)> = Vec::new();
     for pat in PATTERNS.iter() {
+        if matches!(pat.kind, "ssn" | "phone_us") {
+            // Phone candidates have bounded length and may overlap after a
+            // rejected leading digit; retry from the next character.
+            for m in filtered_matches(&pat.re, text, true, |source, start, end| {
+                if pat.kind == "ssn" {
+                    let mut groups = source[start..end].split('-');
+                    let area = groups.next().unwrap_or("");
+                    let group = groups.next().unwrap_or("");
+                    let serial = groups.next().unwrap_or("");
+                    Ok(area != "000"
+                        && area != "666"
+                        && !area.starts_with('9')
+                        && group != "00"
+                        && serial != "0000")
+                } else if let Some(ch) = source[..start].chars().next_back() {
+                    static DIGIT: LazyLock<Regex> = LazyLock::new(|| {
+                        compile_pattern(r"^\d$").expect("digit pattern must compile")
+                    });
+                    let mut encoded = [0; 4];
+                    DIGIT
+                        .is_match(ch.encode_utf8(&mut encoded))
+                        .map(|is_digit| !is_digit)
+                        .map_err(|e| e.to_string())
+                } else {
+                    Ok(true)
+                }
+            })? {
+                raw.push((pat.kind, m.start(), m.end()));
+            }
+            continue;
+        }
         for m in pat.re.find_iter(text) {
             let m = m.map_err(|e| e.to_string())?;
             raw.push((pat.kind, m.start(), m.end()));
@@ -231,6 +259,23 @@ mod tests {
     fn phone_not_a_subrun_of_longer_number() {
         // (?<!\d) means a 13-digit run is not redacted as a phone.
         assert!(!kinds("1234567890123").contains(&"phone_us".to_string()));
+    }
+
+    #[test]
+    fn long_input_preserves_trailing_ssn() {
+        let text = format!("{} 123-45-6789", "ordinary ".repeat(140_000));
+        assert!(kinds(&text).contains(&"ssn".to_string()));
+    }
+
+    #[test]
+    fn phone_boundary_uses_unicode_decimal_digits() {
+        assert!(!kinds("١(555) 123-4567").contains(&"phone_us".to_string()));
+        assert!(kinds("²(555) 123-4567").contains(&"phone_us".to_string()));
+    }
+
+    #[test]
+    fn card_run_rejects_non_ascii_digits() {
+        assert!(scan_spans("٤١١١١١١١١١١١١١١١").is_err());
     }
 
     #[test]
