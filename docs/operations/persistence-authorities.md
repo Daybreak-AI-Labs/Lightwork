@@ -1,13 +1,13 @@
 # Persistence authority and recovery inventory
 
-The control plane still requires one active owner. Selecting PostgreSQL for the
+The control plane requires one active owner. Selecting PostgreSQL for the
 world model or governed records does not make every queue, file, key, approval,
 audit chain and instruction store shared. This inventory does not enable high
 availability or relax deployment guards.
 
 The machine-readable [inventory](persistence-authorities.json) classifies each
-Python source file found by the persistence-seam scan and later owner reviews,
-including the shared A2A store, PostgreSQL primitives, learning-key schema helper
+Python source file found by the persistence-seam scan or classified by owner
+review, including the shared A2A store, PostgreSQL primitives, learning-key schema helper
 and signed client-erasure receipts. The learning-key helper changes the keys of
 the four existing learning tables in the owning transaction; it creates no
 separate business namespace. The inventory includes
@@ -19,11 +19,11 @@ limits. Mechanism markers are source observations, not proof that every write
 uses them. A `data_dir`, `connect`, or `write_text` call alone proves no durable
 authority.
 
-This is a source and contract review. All listed persistence seams and module
-purposes were examined; representative owning implementations and the existing
-recovery registry were read more deeply. It is not a test of every branch or a
-native deployment qualification. Line references describe the source at the time
-of review and will move with edits.
+The inventory is a source and contract classification: every listed persistence
+seam and module purpose is classified, and the owning implementations and the
+recovery registry define the contracts. It is not a test of every branch or a
+native deployment qualification. Line references describe the source when the
+inventory was last updated and move with edits.
 
 ## Store owners and boundaries
 
