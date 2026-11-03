@@ -30,10 +30,10 @@ catalogue of built features and tools; planned work is listed in
 | [Information-flow control](#information-flow-control) | 1 |
 | [Adaptive immunity](#adaptive-immunity) | 5 |
 | [Unified cross-suite audit projection](#unified-cross-suite-audit-projection) | 6 |
-| [Distribution and install](#distribution-and-install) | 21 |
+| [Distribution and install](#distribution-and-install) | 20 |
 | [Customer workflow completion and readiness](#customer-workflow-completion-and-readiness) | 18 in 24 subsections |
 
-478 entries in 19 sections. This block is generated: `python scripts/features_toc.py --write` (the test suite fails when it is stale).
+477 entries in 19 sections. This block is generated: `python scripts/features_toc.py --write` (the test suite fails when it is stale).
 <!-- toc:end -->
 
 ## Agent kernel and orchestration
@@ -5865,12 +5865,6 @@ tested without spawning py-spy.
   bearer injected upstream; a seeder creates finished demo goals through
   the real world model; DNS, TLS and hosting a public instance are outside
   the blueprint. Contract-tested like the other reference architectures.
-- **Mobile skill execution scaffolds** (`apps/mobile-skills/`): a Pyodide
-  runner page (vendored-only Pyodide, no CDN; pinned release + fill-on-
-  download checksum) executing a verified pure-stdlib repo module in a
-  mobile browser, and a Kivy shell + buildozer.spec for Android — store
-  builds are maintainer acts; the hard limits (no sandbox/subprocess on
-  mobile, relay for network) are documented, not papered over.
 - **RFCs** — [RFC 0001: Lightwork 2.0](./rfcs/0001-maverick-2.0.md) (config
   schema v2 + async-only channel SDK + connector re-homing, migration story
   riding `maverick migrate`) and [RFC 0002: Plugin API v2](./rfcs/0002-plugin-api-v2.md)
