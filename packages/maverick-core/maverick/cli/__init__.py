@@ -3716,12 +3716,12 @@ def diag_cost_by_tag(as_json: bool) -> None:
 
 @main.group("mcp-registry")
 def mcp_registry_group() -> None:
-    """Discover + install external MCP servers from a registry.
+    """Discover external MCP servers from a registry.
 
     A registry is a self-hostable `<base>/mcp/index.json` (point
-    `[mcp_registries] indexes` at your own). `add` writes the chosen server into
-    `[mcp_servers.<name>]` in ~/.maverick/config.toml; the kernel loads it on the
-    next run. (`maverick mcp` — without `-registry` — starts Lightwork's own MCP
+    `[mcp_registries] indexes` at your own). Registry installation is disabled
+    until publisher authentication is available. (`maverick mcp` — without
+    `-registry` — starts Lightwork's own MCP
     server; this group manages the servers Lightwork *consumes*.)
     """
 
@@ -3741,13 +3741,13 @@ def mcp_registry_browse() -> None:
         if e.summary:
             click.echo(f"    {e.summary}")
     click.echo("")
-    click.echo("install one with:  maverick mcp-registry add <name>")
+    click.echo("Registry installation is unavailable; independently review and configure servers.")
 
 
 @mcp_registry_group.command("add")
 @click.argument("name")
 def mcp_registry_add(name: str) -> None:
-    """Install a registry MCP server by name into config."""
+    """Explain why registry-supplied servers cannot currently be installed."""
     from ..mcp_registry import add_mcp_server_to_config, install_mcp_from_registry
     try:
         spec = install_mcp_from_registry(name)

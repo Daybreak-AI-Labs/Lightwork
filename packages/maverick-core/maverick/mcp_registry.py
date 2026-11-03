@@ -12,7 +12,8 @@ Unlike skills (whose installable artifact is a fetched ``SKILL.md`` verified by
 (command/args/env or url/headers). A registry entry carries that spec inline.
 An executable hash does not authenticate its arguments or child workloads, so
 registry-sourced local commands are refused; administrators must independently
-review and configure local servers. Remote HTTP entries remain available.
+review and configure servers. Registry-provided HTTP entries are also refused
+until their complete configuration can be authenticated by a trusted publisher.
 
 Install validates the spec through `MCPServerSpec.from_config` (the same
 subprocess-injection / url checks the kernel applies to hand-written config),
@@ -216,7 +217,10 @@ def spec_from_entry(entry: catalog.CatalogEntry) -> MCPServerSpec:
             "Registry-provided local commands cannot be authenticated as a complete "
             "workload. Configure and review local MCP servers directly instead."
         )
-    return spec
+    raise ValueError(
+        "Registry-provided MCP server configuration is not authenticated. "
+        "Independently review and configure the server directly instead."
+    )
 
 
 def install_mcp_from_registry(name: str, *, indexes: list[str] | None = None) -> MCPServerSpec:

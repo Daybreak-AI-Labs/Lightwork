@@ -86,11 +86,11 @@ def test_load_and_resolve(fake_registry):
     assert mcp_registry.resolve_mcp("absent", indexes=fake_registry) is None
 
 
-def test_install_builds_validated_spec(fake_registry):
+def test_install_refuses_unauthenticated_registry_specs(fake_registry):
     with pytest.raises(ValueError):
         mcp_registry.install_mcp_from_registry("github", indexes=fake_registry)
-    http = mcp_registry.install_mcp_from_registry("remote-thing", indexes=fake_registry)
-    assert http.is_http and http.url == "https://mcp.example.com/sse"
+    with pytest.raises(ValueError, match="not authenticated"):
+        mcp_registry.install_mcp_from_registry("remote-thing", indexes=fake_registry)
 
 
 def test_install_unknown_name_raises(fake_registry):
@@ -240,11 +240,10 @@ def test_remove_preserves_unrelated_config(tmp_path):
     assert parsed["budget"]["max_dollars"] == 5.0
 
 
-def test_install_to_config_roundtrip(tmp_path, fake_registry):
-    # End to end: resolve from registry -> validated spec -> write -> read back
-    # -> same spec via the loader path the kernel uses.
+def test_operator_configured_http_server_roundtrip(tmp_path):
+    # Operator-authored config stays available independently of the registry.
     cfg = tmp_path / "config.toml"
-    spec = mcp_registry.install_mcp_from_registry("remote-thing", indexes=fake_registry)
+    spec = MCPServerSpec(name="remote-thing", url="https://mcp.example.com/sse")
     mcp_registry.add_mcp_server_to_config(spec.name, spec.to_dict(), path=cfg)
     server_cfg = _toml_load(cfg)["mcp_servers"]["remote-thing"]
     assert MCPServerSpec.from_config("remote-thing", server_cfg) == spec

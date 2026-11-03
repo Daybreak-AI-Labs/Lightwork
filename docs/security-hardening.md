@@ -1349,6 +1349,12 @@ information to destinations; direct calls to raw tool functions do not pass
 through the registry's connector wrapper. Use destination controls and process
 isolation where untrusted content can influence outgoing requests.
 
+MCP catalog entries are available for discovery, but installing or probing a
+registry-provided server is unavailable until the complete server configuration
+can be authenticated against trusted publisher keys. Administrators can still
+independently configure servers. This change does not remove servers previously
+installed from a registry; review those configurations and their destinations.
+
 The interactive browser connects through the same DNS-pinning proxy used by the
 consent scanner. It refuses private addresses and permits outbound TCP only on
 ports 80 and 443, even when `MAVERICK_FETCH_ALLOW_PRIVATE` is enabled. The proxy

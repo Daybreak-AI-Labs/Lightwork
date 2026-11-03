@@ -603,7 +603,7 @@ auto_run = true                  # run the fleet cycle on the dashboard's overni
 [self_learning]            # governed local learning (default on)
 enable = true
 create_tools = false       # generated executable code remains a separate opt-in
-allow_mcp_acquisition = false # starting third-party MCP remains a separate opt-in
+allow_mcp_acquisition = false # legacy setting; catalog MCP acquisition is unavailable
 allow_provider_egress = false # extra learning-only model calls may cross providers
 preflight = true           # default uses a local redacted catalog match; the
                            # LLM needs-analysis call requires provider egress above

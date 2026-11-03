@@ -1,15 +1,15 @@
 # Design Spec: MCP Server Registry
 
-**Status:** Discovery and HTTP configuration install are available; registry-supplied local commands are refused. · **Related:** [`catalog.md`](./catalog.md), [`skill-index.md`](./skill-index.md)
+**Status:** Discovery is available; all registry-supplied installation and probing are disabled pending publisher authentication. · **Related:** [`catalog.md`](./catalog.md), [`skill-index.md`](./skill-index.md)
 
 ## 1. Problem
 
 Lightwork can *consume* external MCP servers once they're in
 `[mcp_servers.<name>]` (stdio via `MCPClient`, remote HTTP via
 `StreamableHttpMCPClient`). What was missing is **discovery +
-install**: `maverick mcp-registry browse` / `add <name>` supports discovery
-and remote HTTP configuration. Local commands require direct administrator
-configuration because an executable hash does not authenticate its workload.
+install**: `maverick mcp-registry browse` supports discovery, but adding a
+registry entry is unavailable. Servers require independently reviewed
+administrator configuration because the index does not authenticate its publisher.
 
 OAuth 2.1 (the other half of B2) is out of scope here — it needs real accounts
 to validate. Static-bearer remote servers already work via `auth_token`.
@@ -76,10 +76,8 @@ leave it empty and keep fetching `source`.
 - `pin_sha256` checks the selected executable's bytes. It does not authenticate
   arguments, loaded files, child executables, or an untrusted registry's choice
   of executable. Registry-supplied local commands are therefore refused.
-- On install, the spec is validated through `MCPServerSpec.from_config` — the
-  same subprocess-injection / shell-metacharacter / url-scheme checks the kernel
-  applies to hand-written config — so a hostile entry (`command` with a shell
-  metacharacter, a non-http url) is rejected, not written.
+- Registry entries cannot be installed or probed; schema validation alone does
+  not authenticate their endpoint or executable.
 - A directly configured local server still needs independent review and a
   suitable OS isolation boundary before it runs.
 
@@ -89,9 +87,8 @@ leave it empty and keep fetching `source`.
 
 - `load_mcp_registry()` / `resolve_mcp(name)` → `catalog.load_catalog("mcp", …)`
   with the `[mcp_registries] indexes`.
-- `spec_from_entry(entry)` → a validated `MCPServerSpec` from `entry.spec`.
-- `install_mcp_from_registry(name)` → resolve + validate, returns the spec (pure;
-  the caller writes config, so a preview/dry-run is possible).
+- `spec_from_entry(entry)` and `install_mcp_from_registry(name)` refuse
+  unauthenticated registry-provided configuration.
 - `add_mcp_server_to_config(name, spec_dict)` / `remove_mcp_server_from_config(name)`
   — dependency-free TOML mutation (append the one table on add; text-scan removal
   on remove) so the rest of a hand-edited `config.toml` — comments, ordering,
@@ -107,8 +104,7 @@ used to serialize a resolved spec into config.
 Lightwork's *own* server):
 
 - `browse` — list registry servers (name, version, transport, verified badge).
-- `add <name>` — resolve + validate + write `[mcp_servers.<name>]`; loads on the
-  next run. Refuses to overwrite an existing entry.
+- `add <name>` — currently refuses unauthenticated registry entries.
 - `remove <name>` — drop the table from config.
 - `list` — show the MCP servers currently configured (via the kernel's loader).
 
@@ -135,5 +131,5 @@ The registry may describe local stdio servers for discovery, but installation
 and probing of registry-supplied local commands are disabled: pinning an
 executable does not authenticate its arguments or additional programs it may
 run. An administrator can independently review and configure a local MCP
-server directly. HTTP registry entries retain their separate network trust
-requirements.
+server directly. HTTP registry entries are also unavailable for installation
+or probing until their publisher and full configuration can be authenticated.

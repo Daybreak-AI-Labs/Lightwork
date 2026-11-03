@@ -39,17 +39,13 @@ explicit, edit `~/.maverick/config.toml`:
 enable           = true  # master switch (default true; set false to opt out)
 preflight        = true  # pre-acquire likely skills before each run
 create_tools     = false # separate opt-in: generate + run new executable tools
-allow_mcp_acquisition = false  # let the agent propose catalog MCP servers (off)
+allow_mcp_acquisition = false  # legacy setting; catalog acquisition is unavailable
 allow_provider_egress = false  # extra task/result-bearing learning model calls
 distill_local    = true  # distill successful local trajectories into skills
 max_acquisitions = 5     # cap on auto-acquisitions per run
 ```
 
-> `allow_mcp_acquisition` is a **separate, higher-trust** opt-in that ships off
-> even when the rest of self-learning is on. It enables a constrained form of
-> MCP-server acquisition: see "MCP-server acquisition" below. Set it via
-> config or `MAVERICK_ALLOW_MCP_ACQUISITION=1`. An older config that still sets
-> the retired `add_mcp_servers` key is tolerated and ignored.
+> MCP catalog acquisition is unavailable until publisher authentication is implemented. The legacy `allow_mcp_acquisition` setting and environment override do not enable it.
 
 With `allow_provider_egress = false`, preflight still performs a local,
 secret-redacted catalog match and never calls a model. Enabling the egress knob
@@ -78,7 +74,7 @@ realises mid-task that it's missing something, it calls this tool:
 | --- | --- |
 | `search` | find catalog skills / MCP servers / plugins matching a need, plus already-loaded tools |
 | `acquire_skill` | install a catalog skill by name (hash-verified) and inject its steps immediately |
-| `add_mcp_server` | add a catalog MCP server **by name** — command + SHA come from the curated, hash-pinned catalog entry (no free-text command), gated behind `allow_mcp_acquisition` **and** operator approval (see below). Off by default. |
+| `add_mcp_server` | unavailable until MCP catalog publisher authentication is implemented. |
 | `create_tool` | generate a Python tool from a description, validate it, and register it live |
 | `find_api` | discover an API's OpenAPI spec (probe a `base_url` or web-search), list its operations, and drive it via the built-in `openapi_runner` (no new code) |
 
@@ -106,10 +102,7 @@ is accepted) and the same human approval `save_profile` requires.
 ## What persists
 
 - **Skills** install to `~/.maverick/skills/*.md` (the normal skill store).
-- **MCP servers** are only written when `allow_mcp_acquisition` is on **and**
-  you approve the specific server. The approved server is persisted as a normal
-  `[mcp_servers.<name>]` block (with its `pin_sha256`) so it also loads on the
-  next run. Operators can still add trusted blocks by hand.
+- **MCP servers** must be independently reviewed and configured by an operator; catalog acquisition is unavailable.
 - **Generated tools** are written to `~/.maverick/generated_tools/*.py`.
   When self-learning is enabled, the kernel loads them as first-class
   tools at the start of every run.
@@ -156,9 +149,7 @@ Self-learning honors the same chokepoints as the rest of the kernel:
 - **Catalog trust** — `acquire_skill` only installs curated,
   SHA-256-pinned catalog entries, so a fetched skill must match the
   index byte-for-byte.
-- **MCP subprocess safety** — see "MCP-server acquisition" below: the agent
-  can never launch a model-supplied command. Only catalog-pinned, SHA-verified
-  servers, and only after explicit operator approval.
+- **MCP subprocess safety** — catalog acquisition is disabled; independently configured servers still require review and an appropriate isolation boundary.
 
 ### Trust model for generated tools
 
@@ -290,39 +281,9 @@ paused: it runs only under `[self_improvement] enable` **and** the
 
 ## MCP-server acquisition
 
-Letting the agent add and hot-start an MCP server from a model-supplied
-`command`/`args` would be a remote-code-execution / supply-chain hole: the model
-could pick the command line. Lightwork supports the *capability* without that
-hole by closing two gaps at once — **no free-text command, and an operator in
-the loop**:
-
-1. **Catalog-pinned only.** `op=add_mcp_server` takes a catalog **name**, not a
-   command. The command, args, and `pin_sha256` come from the curated `mcp`
-   catalog entry (resolved read-only via the federated index). A request that
-   carries a free-text `command`/`args` is rejected outright, and a name with
-   no catalog entry is rejected too.
-2. **Explicit operator consent.** Before anything is persisted or started, the
-   proposal goes through the same consent queue as other risky actions
-   (`require_consent`), but silent `auto-approve` mode is not accepted for this
-   high-trust path. Use a prior ledger grant, `MAVERICK_CONSENT_MODE=dashboard`
-   (parks in the approvals queue for `maverick approve`), or `ask` mode on a
-   TTY. Denied, auto-deny, default auto-approve without a ledger grant, or a
-   non-interactive context → **not persisted, not started**.
-3. **Existing spec defenses.** The pinned command still goes through
-   `MCPServerSpec` validation (shell-metacharacter / NUL / newline rejection)
-   and `pin_sha256` is verified against the on-disk binary at launch
-   (CVE-2026-30615).
-
-The launch path is: catalog-pinned entry → operator-approved → validated
-`MCPServerSpec` → the same `MCPClient.start()` the static config loader uses.
-Acquisition adds no separate subprocess spawn.
-
-The whole path is **off by default** and gated behind `allow_mcp_acquisition`
-(or `MAVERICK_ALLOW_MCP_ACQUISITION=1`) — independent of the self-learning
-master switch. With it off, `op=add_mcp_server` returns an informative
-"disabled" error.
-
-> Note: catalog `mcp` entries encode their launch command in the entry's
-> `source` field (e.g. `source = "npx -y @scope/server"`); Lightwork splits it
-> into `command` + `args`. The entry's `sha256` becomes the server's
-> `pin_sha256`.
+Catalog-sourced MCP server acquisition and hot-start are unavailable until the
+publisher and full server configuration can be authenticated. An executable hash
+alone does not authenticate its arguments or additional workloads. The legacy
+`allow_mcp_acquisition` setting and `MAVERICK_ALLOW_MCP_ACQUISITION` override do
+not enable this path. Operators can independently review and configure servers
+under `[mcp_servers.<name>]`. Review any servers previously added from a catalog.
