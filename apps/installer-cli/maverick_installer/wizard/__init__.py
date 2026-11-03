@@ -5638,11 +5638,9 @@ def write_consumer_config(
 ) -> str:
     """Write a consumer-mode config with the safe defaults.
 
-    Single source of truth shared by the CLI consumer flow
-    (``run_consumer``) and the desktop installer sidecar
-    (``maverick_installer.bridge``) so the two front ends can't drift.
-    ``profile`` is the governance level from :data:`GOVERNANCE_PROFILES`
-    (unknown values fall back to the default) -- it layers the learning
+    Used by the consumer setup flow (``run_consumer``). ``profile`` is the
+    governance level from :data:`GOVERNANCE_PROFILES` (unknown values fall
+    back to the default) -- it layers the learning
     lifecycle + governance posture on top of the safe-default base, which
     is identical at every level. Creates the workspace dir, and the sample
     workspace for ``first_outcome`` (a department slug from
@@ -5950,8 +5948,7 @@ GOVERNANCE_PROFILES: dict[str, dict[str, Any]] = {
 DEFAULT_GOVERNANCE_PROFILE = "essentials"
 
 # Menu strings start with the profile name so the picker can split()[0] them,
-# same convention as pick_mode(). Public: the desktop sidecar (bridge.py)
-# imports these so the two front ends show the SAME menu and cannot drift.
+# same convention as pick_mode().
 GOVERNANCE_CHOICES: list[str] = [
     "essentials - small business: learn + improve, stay out of my way (a gym, a studio, a shop)",
     "standard   - growing company: + signed audit trail, fairness and memory checks "

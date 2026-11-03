@@ -98,7 +98,7 @@ Writes `~/.maverick/config.toml`, then runs a smoke test.
 
 ### `apps/installer-desktop/`
 
-Tauri source-bootstrap app (Cargo + tauri.conf.json + Svelte UI + Python sidecar bridge): one window that runs the same bootstrap as the command-line installers (`deploy/desktop/install.{ps1,sh}`) behind a progress screen. It is not a self-contained installer; `.github/workflows/desktop.yml` builds it as an unsigned engineering artifact that is not attached to releases.
+Tauri source-bootstrap app (Cargo + tauri.conf.json + Svelte UI): one window that runs the same bootstrap as the command-line installers (`deploy/desktop/install.{ps1,sh}`) behind a progress screen. It is not a self-contained installer; `.github/workflows/desktop.yml` builds it as an unsigned engineering artifact that is not attached to releases.
 
 ## Governance, learning & enterprise layers
 

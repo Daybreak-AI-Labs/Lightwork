@@ -1,7 +1,7 @@
 """The installer wizard is a package: a facade plus step modules behind seams.
 
 ``maverick_installer.wizard`` keeps every name and every monkeypatch seam the
-tests and the desktop bridge rely on.  The biggest steps live in their own
+tests rely on.  The biggest steps live in their own
 modules and reach the prompt primitives, the console and the ``CONFIG_*``
 paths through ``_seams`` at call time, so a patch on the facade applies to
 them exactly as it did when they were defined in the facade.

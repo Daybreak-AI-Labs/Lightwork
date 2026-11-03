@@ -1,6 +1,6 @@
 """Late-bound access to the wizard facade's patchable names.
 
-Tests (and the desktop bridge) patch prompt primitives on the facade module,
+Tests patch prompt primitives on the facade module,
 ``maverick_installer.wizard._q_confirm`` and friends, plus ``console`` and the
 ``CONFIG_*`` paths.  A step module that imported those names directly would
 bind the originals at import time and miss the patch.  Everything here looks

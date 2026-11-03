@@ -1,14 +1,10 @@
 """A setup retry must leave an existing customer's choices and keys intact."""
 from __future__ import annotations
 
-import json
-import os
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
-from maverick_installer import bridge, wizard
+from maverick_installer import wizard
 
 
 @pytest.fixture
@@ -91,64 +87,10 @@ def test_unreadable_setup_path_is_not_assumed_absent(tmp_path, monkeypatch):
         assert wizard._existing_setup() is True
 
 
-def test_desktop_bridge_keeps_existing_setup(saved_setup, monkeypatch):
-    home, config, secrets = saved_setup
-    sent = []
-    received = []
-
-    def receive():
-        received.append(True)
-        if len(received) > 1:
-            raise AssertionError("the desktop bridge must not ask setup questions")
-        return ""
-
-    monkeypatch.setattr(bridge, "_recv", receive)
-    monkeypatch.setattr(bridge, "_send", sent.append)
-    monkeypatch.setattr(bridge, "write_consumer_config", lambda **_kwargs: pytest.fail("setup was replaced"))
-    with pytest.raises(FileExistsError, match="Nothing was changed") as stopped:
-        bridge.run()
-
-    assert len(received) == 1
-    assert sent == []
-    assert "Settings" in str(stopped.value)
-    assert wizard.CONFIG_FILE.read_bytes() == config
-    assert wizard.ENV_FILE.read_bytes() == secrets
-    assert not (home / "config.toml.bak").exists()
-    assert not (home / ".env.bak").exists()
-
-
-def test_desktop_bridge_protocol_reports_existing_key_file(tmp_path):
-    home = tmp_path / "lightwork"
-    home.mkdir()
-    keys = home / ".env"
-    keys.write_text("CUSTOM_SECRET=keep-me\n", encoding="utf-8")
-    environment = os.environ.copy()
-    environment["MAVERICK_HOME"] = str(home)
-    environment.pop("MAVERICK_CONFIG", None)
-
-    result = subprocess.run(
-        [sys.executable, "-m", "maverick_installer.bridge"],
-        input="\n",
-        text=True,
-        capture_output=True,
-        env=environment,
-        check=False,
-        timeout=10,
-    )
-
-    assert result.returncode == 1
-    step = json.loads(result.stdout.strip())
-    assert step["id"] == "__error__"
-    assert "Nothing was changed" in step["question"]
-    assert "CUSTOM_SECRET" not in result.stdout
-    assert keys.read_text(encoding="utf-8") == "CUSTOM_SECRET=keep-me\n"
-    assert not (home / "config.toml").exists()
-
-
 def test_a_setup_saved_meanwhile_leaves_the_work_folder_untouched(saved_setup, tmp_path):
-    # Both front ends check for saved setup before the questions; one saved by
-    # another installer while these were answered still refused the write,
-    # but only after the work folder and the sample files had been created.
+    # Setup checks for a saved setup before the questions. One saved by
+    # another installer while they were answered must still refuse the write,
+    # before the work folder and the sample files are created.
     home, config, secrets = saved_setup
     workdir = tmp_path / "work"
     with pytest.raises(FileExistsError):
