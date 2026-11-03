@@ -23,6 +23,35 @@ def test_missing_config_returns_empty_dict():
     assert cfg == {}
 
 
+@pytest.mark.parametrize("tenant", [False, True])
+@pytest.mark.parametrize("initially_present", [False, True])
+def test_empty_config_avoids_path_resolution_but_rechecks_new_values(
+    tmp_path, monkeypatch, tenant, initially_present,
+):
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("TEST_OPERATOR_SECRET", "private-value")
+    path = (tmp_path / "tenants" / "workspace" / "config.toml"
+            if tenant else tmp_path / "config.toml")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if initially_present:
+        path.write_text("", encoding="utf-8")
+    resolved = []
+    original = config_module._is_tenant_config_path
+
+    def classify(candidate):
+        resolved.append(candidate)
+        return original(candidate)
+
+    monkeypatch.setattr(config_module, "_is_tenant_config_path", classify)
+    assert load_config(path) == {}
+    assert resolved == []  # no values can interpolate environment references
+
+    path.write_text('[models]\norchestrator = "${TEST_OPERATOR_SECRET}"\n', encoding="utf-8")
+    expected = "${TEST_OPERATOR_SECRET}" if tenant else "private-value"
+    assert load_config(path)["models"]["orchestrator"] == expected
+    assert resolved == [path]  # a later nonempty source still checks its authority
+
+
 def test_corrupt_config_fails_soft_to_empty_dict():
     """A corrupt/unparseable config.toml must not crash the agent loop; it
     fails soft to {} like a missing file. Regression: load_config raised
@@ -902,9 +931,10 @@ def test_a_parse_of_a_file_replaced_meanwhile_does_not_clear_the_new_files_error
     real = config.atomic_read_bytes
     parsed, resume = threading.Event(), threading.Event()
 
-    def slow_first_read(target):
-        data = real(target)
-        if threading.current_thread() is not threading.main_thread():
+    def slow_first_read(target, **kwargs):
+        data = real(target, **kwargs)
+        if not kwargs and threading.current_thread() is not threading.main_thread():
+            # Pause the parse read, not Windows' earlier content-digest read.
             parsed.set()
             resume.wait(10)
         return data
@@ -939,9 +969,10 @@ def test_a_failed_parse_of_a_file_replaced_meanwhile_is_reported_until_the_next_
     real = config.atomic_read_bytes
     parsed, resume = threading.Event(), threading.Event()
 
-    def slow_first_read(target):
-        data = real(target)
-        if threading.current_thread() is not threading.main_thread():
+    def slow_first_read(target, **kwargs):
+        data = real(target, **kwargs)
+        if not kwargs and threading.current_thread() is not threading.main_thread():
+            # Pause the parse read, not Windows' earlier content-digest read.
             parsed.set()
             resume.wait(10)
         return data
@@ -1134,12 +1165,13 @@ def test_a_slower_clean_read_does_not_clear_a_newer_reads_error(config_home, mon
     real = config.atomic_read_bytes
     parsed, resume = threading.Event(), threading.Event()
 
-    def locked_or_slow(target):
+    def locked_or_slow(target, **kwargs):
         if threading.current_thread() is threading.main_thread():
             raise PermissionError("the file is locked by another program")
-        data = real(target)
-        parsed.set()
-        resume.wait(10)
+        data = real(target, **kwargs)
+        if not kwargs:
+            parsed.set()
+            resume.wait(10)
         return data
 
     monkeypatch.setattr(config, "atomic_read_bytes", locked_or_slow)
@@ -1464,12 +1496,12 @@ def _windows_stat_without_change_time(monkeypatch, home):
             st = real(path, *args, **kwargs)
             if not str(path).startswith(str(home)):
                 return st
-            return os.stat_result(
-                (st.st_mode, st.st_ino, st.st_dev, st.st_nlink, st.st_uid, st.st_gid,
-                 st.st_size, int(st.st_atime), int(st.st_mtime), 0),
-                {"st_atime": st.st_atime, "st_mtime": st.st_mtime, "st_ctime": 0.0,
-                 "st_atime_ns": st.st_atime_ns, "st_mtime_ns": st.st_mtime_ns,
-                 "st_ctime_ns": 0})
+            # Keep native reparse-point/file attributes used by key-file checks;
+            # reconstructing only POSIX fields gives them None on Windows.
+            attributes = {name: getattr(st, name) for name in dir(st)
+                          if name.startswith("st_")}
+            attributes.update(st_ctime=0.0, st_ctime_ns=0)
+            return os.stat_result((*st[:9], 0), attributes)
         return stat_result
 
     monkeypatch.setattr(os, "stat", without_change_time(os.stat))

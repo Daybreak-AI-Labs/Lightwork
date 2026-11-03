@@ -455,7 +455,9 @@ def _load_config_file(path: Path, *, interpolate: bool = True) -> dict:
     # Dashboard and tenant authors do not have authority to read process
     # secrets. Only operator-owned configuration layers can interpolate env.
     raw = _read_toml_raw(path)
-    loaded = (_interp(raw) if (interpolate and path.name != DASHBOARD_OVERRIDES_BASENAME
+    # An empty source has no values to interpolate. Avoid resolving filesystem
+    # paths on this common hot path; a later nonempty read still checks scope.
+    loaded = (_interp(raw) if (raw and interpolate and path.name != DASHBOARD_OVERRIDES_BASENAME
                                and not _is_tenant_config_path(path))
               else copy.deepcopy(raw))
     if path.name == DASHBOARD_OVERRIDES_BASENAME:

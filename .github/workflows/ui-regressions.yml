@@ -81,7 +81,19 @@ jobs:
             ${{ runner.temp }}/lightwork-browser-results
             packages/maverick-dashboard/tests/browser/browser-report
             packages/maverick-dashboard/tests/browser/test-results/results.json
+            .browser-approval-copilot-results
+            .browser-consent-creation-results
+            .browser-department-boards-results
+            .browser-department-team-results
+            .browser-results-ekko-discovery
             .browser-results-intent-value
+            .browser-privacy-handoff-results
+            .browser-retention-maintenance-results
+            .browser-structured-action-results
+            .browser-task-signoff-results
+            .browser-webhook-recovery-results
+          # Only the explicitly listed synthetic fixture outputs are included.
+          include-hidden-files: true
           retention-days: 14
 
       - name: Explicit synthetic setup and connection recovery journeys

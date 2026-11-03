@@ -250,7 +250,7 @@ def get_cached(
     """Return ``(hit, value)``. ``(False, None)`` when disabled / not cacheable /
     missing / expired."""
     global _hits, _misses
-    if not enabled() or not cacheable(tool):
+    if not cacheable(tool) or not enabled():
         return (False, None)
     token = _sync_epoch()
     if token is None:
@@ -302,7 +302,7 @@ def store_cached(
     generation: int | None = None,
 ) -> None:
     """Memoize a successful, non-error result for a cacheable tool."""
-    if not enabled() or not cacheable(tool):
+    if not cacheable(tool) or not enabled():
         return
     if not isinstance(value, str) or value.startswith("ERROR:"):
         return
