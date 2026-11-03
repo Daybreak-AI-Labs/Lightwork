@@ -11,7 +11,7 @@ from maverick_dashboard.app import app
 
 pytest.importorskip("cryptography", reason="receipts are always signed")
 
-client = TestClient(app, headers={"Origin": "http://testserver"})
+client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 BASE = "/api/v1/audit/receipts"
 DAY = "2026-01-01"
 
@@ -236,7 +236,7 @@ def test_every_route_is_audit_gated(monkeypatch):
 
 def test_cross_origin_minting_is_refused_by_the_csrf_check():
     _write_day()
-    foreign = TestClient(app, headers={"Origin": "http://evil.example"})
+    foreign = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://evil.example"})
     assert foreign.post(f"{BASE}/mint", json={"day": DAY, "row_hash": "a" * 64}).status_code == 403
 
 

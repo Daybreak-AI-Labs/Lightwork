@@ -17,7 +17,7 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(job_queue, "JobQueue", lambda *a, **k: queue)
     for name in ("MAVERICK_DASHBOARD_TOKEN", "MAVERICK_DASHBOARD_REQUIRE_AUTH", "MAVERICK_TENANT"):
         monkeypatch.delenv(name, raising=False)
-    return TestClient(app, headers={"Origin": "http://testserver"}), queue
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}), queue
 
 
 def test_summary_counts_work_and_describes_failures_plainly(client) -> None:

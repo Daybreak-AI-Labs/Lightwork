@@ -49,7 +49,7 @@ def client(world_with_tree, monkeypatch):
     from maverick_dashboard import app as app_mod
     w, g1, g2, g3, g4 = world_with_tree
     monkeypatch.setattr(app_mod, "_world", lambda: w)
-    return TestClient(app_mod.app)
+    return TestClient(app_mod.app, base_url="http://127.0.0.1")
 
 
 def test_plan_tree_api_returns_root_with_children(client, world_with_tree):

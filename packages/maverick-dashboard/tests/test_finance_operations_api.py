@@ -64,7 +64,7 @@ enable = true
 
     app = FastAPI()
     app.include_router(finance_api.router)
-    with TestClient(app, raise_server_exceptions=False) as client:
+    with TestClient(app, base_url="http://127.0.0.1", raise_server_exceptions=False) as client:
         yield client, permission_calls
 
     config.reset_config_cache()

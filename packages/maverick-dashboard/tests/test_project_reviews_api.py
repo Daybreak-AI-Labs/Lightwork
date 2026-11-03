@@ -59,7 +59,7 @@ def setup(tmp_path, monkeypatch):
             return await call_next(request)
 
     app.include_router(api.router)
-    with TestClient(app, headers={"Origin": "http://testserver"}) as client:
+    with TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}) as client:
         yield client, project, goal, world, active
     for value in worlds.values():
         value.close()

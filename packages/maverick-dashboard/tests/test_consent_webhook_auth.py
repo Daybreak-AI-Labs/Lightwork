@@ -65,7 +65,7 @@ _BODY = json.dumps({
 
 def test_signed_delivery_is_accepted_when_dashboard_sign_in_is_on(monkeypatch):
     monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "dashboard-token")  # pragma: allowlist secret
-    cmp_client = TestClient(app)  # no dashboard bearer, no Origin: the HMAC is the credential
+    cmp_client = TestClient(app, base_url="http://127.0.0.1")  # no dashboard bearer, no Origin: the HMAC is the credential
     resp = cmp_client.post("/consent/webhook", content=_BODY, headers=_signed(_BODY))
     assert resp.status_code == 202, resp.text
     assert resp.json() == {"imported": 1, "skipped": 0}
@@ -73,7 +73,7 @@ def test_signed_delivery_is_accepted_when_dashboard_sign_in_is_on(monkeypatch):
 
 def test_bad_signature_is_still_refused_when_dashboard_sign_in_is_on(monkeypatch):
     monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "dashboard-token")  # pragma: allowlist secret
-    cmp_client = TestClient(app)
+    cmp_client = TestClient(app, base_url="http://127.0.0.1")
     headers = _signed(_BODY)
     headers["X-Lightwork-Signature"] = "0" * 64
     resp = cmp_client.post("/consent/webhook", content=_BODY, headers=headers)
@@ -84,7 +84,7 @@ def test_bad_signature_is_still_refused_when_dashboard_sign_in_is_on(monkeypatch
 
 def test_signed_delivery_is_accepted_with_proxy_sign_in_on(monkeypatch):
     monkeypatch.setenv("MAVERICK_PROXY_AUTH", "1")
-    cmp_client = TestClient(app)
+    cmp_client = TestClient(app, base_url="http://127.0.0.1")
     resp = cmp_client.post("/consent/webhook", content=_BODY, headers=_signed(_BODY))
     assert resp.status_code == 202, resp.text
 

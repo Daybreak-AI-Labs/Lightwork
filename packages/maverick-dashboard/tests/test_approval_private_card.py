@@ -16,7 +16,7 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-ORIGIN = {"Origin": "http://testserver"}
+ORIGIN = {"Origin": "http://127.0.0.1"}
 COMMAND = "mkdir -p archive && echo moved > archive/README.txt"
 SAM = "user:sam.lee@northwind.example"
 DANA = "user:dana.admin@northwind.example"
@@ -40,7 +40,7 @@ def env(monkeypatch, tmp_path):
     world = WorldModel(tmp_path / "world.db")
     from maverick_dashboard.app import app
 
-    yield TestClient(app, headers=ORIGIN), world
+    yield TestClient(app, base_url="http://127.0.0.1", headers=ORIGIN), world
     world.close()
     config.reset_config_cache()
 

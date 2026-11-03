@@ -12,7 +12,7 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-ORIGIN = {"Origin": "http://testserver"}
+ORIGIN = {"Origin": "http://127.0.0.1"}
 BASE = "/api/v1/admin/services"
 _REAL_COMMAND = __import__("maverick_dashboard.service_supervisor", fromlist=["command"]).command  # before any stand-in
 _CHILD = ("import sys, time\n"
@@ -38,7 +38,7 @@ def client(monkeypatch, tmp_path):
         monkeypatch.delenv(name, raising=False)
     config.reset_config_cache()
     monkeypatch.setattr(service_supervisor, "command", lambda kind: [sys.executable, "-c", _CHILD])
-    yield TestClient(dash_app.app, headers=ORIGIN)
+    yield TestClient(dash_app.app, base_url="http://127.0.0.1", headers=ORIGIN)
     service_supervisor.stop_all(timeout=5.0)
     config.reset_config_cache()
     audit_writer._defaults.clear()
@@ -112,7 +112,7 @@ def _row_raw_not_running():
 
 def test_start_stop_restart_one_instance_with_confirmation_and_records(client, monkeypatch):
     seen = _audit_verbs(monkeypatch)
-    assert TestClient(client.app).post(f"{BASE}/start", json={"service": "worker"}).status_code == 403
+    assert TestClient(client.app, base_url="http://127.0.0.1").post(f"{BASE}/start", json={"service": "worker"}).status_code == 403
     assert client.post(f"{BASE}/start", json={"service": "nope"}).status_code == 422
     started = client.post(f"{BASE}/start", json={"service": "worker"})
     assert started.status_code == 200 and started.json()["service"]["running"] is True

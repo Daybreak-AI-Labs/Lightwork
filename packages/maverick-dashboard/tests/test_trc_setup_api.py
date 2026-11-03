@@ -47,7 +47,7 @@ def environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             "enable": True, "enabled_collectors": list(state["allowed"])}}}
     app.include_router(api.router, prefix="/api/v1")
     app.include_router(setup.router)
-    return TestClient(app, headers={"Origin": "http://testserver"}), state
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}), state
 
 
 def test_local_checks_are_listed_without_fingerprints_or_scopes(environment):

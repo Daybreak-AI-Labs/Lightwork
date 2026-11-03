@@ -34,7 +34,7 @@ def _shared(w, result: str = RESULT) -> str:
 
 def test_result_is_handed_to_the_markdown_renderer_not_printed_in_a_pre(_world):
     token = _shared(_world)
-    page = TestClient(app).get(f"/share/{token}")
+    page = TestClient(app, base_url="http://127.0.0.1").get(f"/share/{token}")
     assert page.status_code == 200
     html = page.text
     # Not a code block: the raw text must not sit inside <pre>.
@@ -49,7 +49,7 @@ def test_result_is_handed_to_the_markdown_renderer_not_printed_in_a_pre(_world):
 
 def test_markup_in_the_result_stays_escaped_text(_world):
     token = _shared(_world)
-    html = TestClient(app).get(f"/share/{token}").text
+    html = TestClient(app, base_url="http://127.0.0.1").get(f"/share/{token}").text
     assert "<script>alert(1)</script>" not in html
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
 
@@ -58,14 +58,14 @@ def test_files_on_the_page_are_rendered_the_same_way(_world):
     token = _shared(_world, result="Done.")
     goal_id = _world.resolve_share_link(token)
     _world.add_artifact(goal_id, "text", "Notes", "# File heading\n\n- one")
-    html = TestClient(app).get(f"/share/{token}").text
+    html = TestClient(app, base_url="http://127.0.0.1").get(f"/share/{token}").text
     assert not re.search(r"<pre[^>]*>\s*# File heading", html)
     assert re.search(r"<div[^>]*\bdata-markdown\b[^>]*>\s*# File heading", html)
 
 
 def test_recipient_without_a_sign_in_can_load_the_renderer(monkeypatch):
     monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "share-test-token-xyz")  # pragma: allowlist secret
-    anonymous = TestClient(app)  # no bearer, no Origin: an external recipient
+    anonymous = TestClient(app, base_url="http://127.0.0.1")  # no bearer, no Origin: an external recipient
     assert anonymous.get("/goals").status_code == 401  # ordinary pages stay gated
     script = anonymous.get("/static/lightwork-markdown.js")
     assert script.status_code == 200

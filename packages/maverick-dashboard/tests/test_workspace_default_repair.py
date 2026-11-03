@@ -45,7 +45,7 @@ def env(monkeypatch, tmp_path):
     monkeypatch.setattr(api_mod, "_world", lambda: world)
     monkeypatch.setattr(dashboard, "require_provider_or_400", lambda: None)
     monkeypatch.setattr(dashboard, "check_goal_rate_limit", lambda request: None)
-    yield TestClient(dashboard.app, headers={"Origin": "http://testserver"}), world
+    yield TestClient(dashboard.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}), world
     world.close()
     client.reset_client_cache()
 

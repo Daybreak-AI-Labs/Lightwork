@@ -120,7 +120,7 @@ def test_api_binds_account_and_workspace_before_collection(monkeypatch):
     monkeypatch.setattr(api, "context_for", lambda request: context)
     calls = []
     monkeypatch.setattr(api, "sources_for", lambda request, kind: calls.append(kind) or {"vendors":lambda:search.Source([record("v1")])})
-    with TestClient(app, headers={"Origin":"http://testserver"}) as client:
+    with TestClient(app, base_url="http://127.0.0.1", headers={"Origin":"http://127.0.0.1"}) as client:
         rejected = client.post("/api/v1/records/search", headers={"X-Lightwork-Search-Context":"b" * 64}, json={"query":"Acme"})
         assert rejected.status_code == 409 and calls == []
         found = client.post("/api/v1/records/search", headers={"X-Lightwork-Search-Context":context}, json={"query":"Acme", "kind":"vendor"})
@@ -136,7 +136,7 @@ def test_api_binds_account_and_workspace_before_collection(monkeypatch):
 def test_non_ascii_search_context_header_is_refused_before_collection(monkeypatch):
     monkeypatch.setattr(api, "context_for", lambda request: "a" * 64)
     monkeypatch.setattr(api, "sources_for", lambda request, kind: pytest.fail("non-ASCII context reached the sources"))
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     response = client.post("/api/v1/records/search", headers={"X-Lightwork-Search-Context": "contéxt".encode()},
                            json={"query": "Acme"})
     assert response.status_code == 409
@@ -188,7 +188,7 @@ def test_vault_and_report_use_request_bound_factories_and_project_only_metadata(
 
 
 def test_shell_renders_search_context_and_serves_new_assets():
-    with TestClient(app, headers={"Origin":"http://testserver"}) as client:
+    with TestClient(app, base_url="http://127.0.0.1", headers={"Origin":"http://127.0.0.1"}) as client:
         page = client.get("/goals")
         assert page.status_code == 200, page.text
         assert 'name="lightwork-search-context"' in page.text and 'id="navfinder-kind"' in page.text
@@ -208,7 +208,7 @@ def test_chat_shell_emits_search_context_so_record_search_can_run():
     gid = world.create_goal("find the vendor", "")
     world.close()
     marker = 'name="lightwork-search-context" content="'
-    with TestClient(app, headers={"Origin": "http://testserver"}) as client:
+    with TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}) as client:
         for path in ("/chat", f"/chat/goal/{gid}"):
             page = client.get(path)
             assert page.status_code == 200, (path, page.text)
@@ -223,7 +223,7 @@ def test_chat_shell_emits_search_context_so_record_search_can_run():
 
 def test_review_links_reach_registered_pages_with_bounded_references(monkeypatch):
     monkeypatch.setenv("MAVERICK_TENANT", "workspace-a")
-    with TestClient(app, headers={"Origin":"http://testserver"}) as client:
+    with TestClient(app, base_url="http://127.0.0.1", headers={"Origin":"http://127.0.0.1"}) as client:
         for path, key in (("/third-party/vendor-onboarding", "case"),
                           ("/administration/document-vault", "document"),
                           ("/third-party/executive-reports", "report")):
@@ -245,7 +245,7 @@ def test_finder_knowledge_mode_delegates_current_native_acl_and_metadata_never_c
         calls.append(payload)
         return {"items": [{"reference": {"kind": "dataset", "asset_id": "source", "version": "v1", "manifest_sha256": "b" * 64}, "title": "Current source", "summary": "Approved passage", "eligibility": {"fresh_until": 2000000000}}], "complete": True, "next_cursor": None}
     monkeypatch.setattr(knowledge, "search", native)
-    with TestClient(app, headers={"Origin": "http://testserver", "X-Lightwork-Search-Context": context}) as client:
+    with TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1", "X-Lightwork-Search-Context": context}) as client:
         assert client.post("/api/v1/records/search", json={"query": "name"}).status_code == 200
         assert calls == []
         approved = client.post("/api/v1/records/search", json={"query": "name", "mode": "knowledge", "purpose": "business"})

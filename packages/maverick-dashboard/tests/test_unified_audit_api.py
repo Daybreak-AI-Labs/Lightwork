@@ -115,9 +115,9 @@ def environment(monkeypatch: pytest.MonkeyPatch, tmp_path):
     app.state.unified_audit_projector_factory = factory
     app.include_router(api.router, prefix="/api/v1")
     client = TestClient(
-        app,
+        app, base_url="http://127.0.0.1",
         headers={
-            "Origin": "http://testserver",
+            "Origin": "http://127.0.0.1",
             "X-Test-Role": "auditor",
             "X-Test-Subject": "operator",
         },

@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-_ORIGIN = {"origin": "http://testserver"}
+_ORIGIN = {"origin": "http://127.0.0.1"}
 
 
 @pytest.fixture
@@ -15,7 +15,7 @@ def client(monkeypatch, tmp_path):
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
     from maverick_dashboard import app as dash_app
     dash_app._world_cache.clear()
-    return TestClient(dash_app.app, headers=_ORIGIN)
+    return TestClient(dash_app.app, base_url="http://127.0.0.1", headers=_ORIGIN)
 
 
 def test_page_starts_with_no_limits_and_plain_controls(client):
@@ -110,7 +110,7 @@ def test_changes_require_same_origin(monkeypatch, tmp_path):
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     from maverick_dashboard import app as dash_app
-    c = TestClient(dash_app.app, headers={"origin": "http://evil.example"})
+    c = TestClient(dash_app.app, base_url="http://127.0.0.1", headers={"origin": "http://evil.example"})
     r = c.post("/spending-limits/workspace",
                data={"choice": "limit", "amount": "5", "period": "day"},
                follow_redirects=False)

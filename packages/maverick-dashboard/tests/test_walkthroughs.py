@@ -32,7 +32,7 @@ def client(world, monkeypatch):
     from maverick_dashboard import app as app_mod
     monkeypatch.setattr(app_mod, "_world", lambda: world)
     monkeypatch.setattr(api_mod, "_world", lambda: world)
-    return TestClient(app_mod.app, headers={"Origin": "http://testserver"})
+    return TestClient(app_mod.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def test_page_empty_state_is_honest(client, home):

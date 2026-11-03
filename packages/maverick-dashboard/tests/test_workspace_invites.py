@@ -19,7 +19,7 @@ def _client(monkeypatch, tmp_path):
     from maverick_dashboard import app as dash_app
 
     dash_app._world_cache.clear()
-    return TestClient(dash_app.app, headers={"Origin": "http://testserver"})
+    return TestClient(dash_app.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def _as_workspace_admin(client, email="alice@example.com", role="admin"):
@@ -108,7 +108,7 @@ def _global_invitation_path(response):
 
 
 def _invitee(client):
-    return TestClient(client.app, headers={"Origin": "http://testserver"})
+    return TestClient(client.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 PASSPHRASE_FORM = {"password": "synthetic workspace invite passphrase",  # pragma: allowlist secret

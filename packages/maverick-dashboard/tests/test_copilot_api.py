@@ -19,8 +19,8 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setattr(api, "require_permission", lambda _request, _permission: None)
     monkeypatch.setattr(dashboard_app, "check_goal_rate_limit", lambda *_args, **_kwargs: None)
     return TestClient(
-        dashboard_app.app,
-        headers={"Origin": "http://testserver"},
+        dashboard_app.app, base_url="http://127.0.0.1",
+        headers={"Origin": "http://127.0.0.1"},
     )
 
 

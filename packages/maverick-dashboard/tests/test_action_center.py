@@ -450,7 +450,7 @@ def _client_model(monkeypatch):
     value = model()
     monkeypatch.setattr(api, "_model", lambda request: copy.deepcopy(value))
     monkeypatch.setattr(api, "context_for", lambda request: CTX)
-    return TestClient(app, headers={"Origin":"http://testserver", "X-Lightwork-Action-Context":CTX}), value
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin":"http://127.0.0.1", "X-Lightwork-Action-Context":CTX}), value
 
 
 def test_api_preferences_recheck_current_source_then_paginate_and_keep_snoozed_overdue_visible(monkeypatch):
@@ -547,7 +547,7 @@ def test_supplier_reconciliations_follow_the_vendor_onboarding_switch(monkeypatc
 
     monkeypatch.setattr(api.action_center, "collect", collect)
     monkeypatch.setattr(api, "context_for", lambda request: CTX)
-    client = TestClient(app, headers={"Origin": "http://testserver", "X-Lightwork-Action-Context": CTX})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1", "X-Lightwork-Action-Context": CTX})
     try:
         assert client.get("/api/v1/action-center").status_code == 200
     finally:

@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 
 def _client(host="testclient"):
     from maverick_dashboard.app import app
-    return TestClient(app, headers={"Origin": "http://testserver"}, client=(host, 50000))
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}, client=(host, 50000))
 
 
 def _isolate(monkeypatch, tmp_path, triggers="1"):

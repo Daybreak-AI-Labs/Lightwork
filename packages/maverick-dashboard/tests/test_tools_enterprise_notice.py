@@ -56,7 +56,7 @@ def _client(monkeypatch, tmp_path: Path, tools, *, refused: frozenset[str]) -> T
     monkeypatch.setattr(dashboard_app, "_world", lambda: object())
     monkeypatch.setattr(sandbox_module, "build_sandbox", lambda: object())
     monkeypatch.setattr(tools_module, "base_registry", lambda **_kw: _Registry(tools))
-    return TestClient(dashboard_app.app)
+    return TestClient(dashboard_app.app, base_url="http://127.0.0.1")
 
 
 def _rows(html: str) -> dict[str, str]:

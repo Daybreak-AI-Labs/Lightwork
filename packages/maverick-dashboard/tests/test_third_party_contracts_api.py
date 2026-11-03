@@ -84,7 +84,7 @@ def environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         return await call_next(request)
 
     app.include_router(api.create_third_party_contracts_router(dependencies), prefix="/api/v1")
-    return TestClient(app), state
+    return TestClient(app, base_url="http://127.0.0.1"), state
 
 
 def _contract_body(**updates: object) -> dict[str, object]:

@@ -91,7 +91,7 @@ def _canvas(theme: str) -> str:
 @pytest.mark.parametrize("theme", sorted(themes_mod.BUILTIN_THEMES))
 def test_browser_chrome_colour_matches_the_theme_canvas(theme):
     assert themes_mod.theme_color(theme).lower() == _canvas(theme).lower()
-    page = TestClient(app).get("/overview", params={"theme": theme})
+    page = TestClient(app, base_url="http://127.0.0.1").get("/overview", params={"theme": theme})
     assert page.status_code == 200
     meta = re.findall(r'<meta name="theme-color" content="([^"]+)"', page.text)
     assert [value.lower() for value in meta] == [_canvas(theme).lower()]
@@ -101,7 +101,7 @@ def test_browser_chrome_colour_uses_an_operator_theme_background(monkeypatch):
     palette = {"bg": "#101020", "panel": "#181830", "text": "#e0e0f0", "accent": "#7aa2f7"}
     monkeypatch.setattr(app_module, "custom_themes", lambda: {"midnight": dict(palette)})
     assert themes_mod.theme_color("midnight", {"midnight": palette}) == "#101020"
-    page = TestClient(app).get("/overview", params={"theme": "midnight"})
+    page = TestClient(app, base_url="http://127.0.0.1").get("/overview", params={"theme": "midnight"})
     assert 'name="theme-color" content="#101020"' in page.text
     # Unknown names fall back to the default (dark) canvas.
     assert themes_mod.theme_color("nope").lower() == _canvas("dark").lower()

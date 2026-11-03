@@ -8,7 +8,7 @@ from maverick_dashboard.app import app
 
 from test_support.element_text import element_attributes, element_texts
 
-client = TestClient(app)
+client = TestClient(app, base_url="http://127.0.0.1")
 
 _FORECAST_RESULT = """\
 Rolling 13-week cash forecast, every figure tied to its system of record.

@@ -37,8 +37,8 @@ def test_tenant_operator_controls_do_not_leak_global_authority(monkeypatch, tmp_
     config.reset_config_cache()
 
     client = TestClient(
-        dashboard_app.app,
-        headers={"Origin": "http://testserver"},
+        dashboard_app.app, base_url="http://127.0.0.1",
+        headers={"Origin": "http://127.0.0.1"},
     )
     learning = client.get("/learning")
     permissions = client.get("/permissions")

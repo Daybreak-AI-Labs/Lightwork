@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 from maverick_dashboard.app import app
 
-client = TestClient(app, headers={"Origin": "http://testserver"})
+client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 @pytest.fixture(autouse=True)
@@ -106,7 +106,7 @@ def test_owner_scoping_hides_another_principal_s_run(monkeypatch):
     gid, child, _ = _forked_run(owner="user:ada")
 
     def _as(user):
-        return {"Origin": "http://testserver", "Authorization": f"Bearer {user}"}
+        return {"Origin": "http://127.0.0.1", "Authorization": f"Bearer {user}"}
 
     assert client.get(f"/api/v1/run-tree/{gid}", headers=_as("bob")).status_code == 404
     assert "No tasks have branches yet" in client.get(

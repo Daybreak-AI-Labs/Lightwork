@@ -46,8 +46,8 @@ def environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         prefix="/api/v1",
     )
     client = TestClient(
-        app,
-        headers={"Origin": "http://testserver", "X-Test-Subject": "research-admin"},
+        app, base_url="http://127.0.0.1",
+        headers={"Origin": "http://127.0.0.1", "X-Test-Subject": "research-admin"},
     )
     return client, store, monkeypatch
 

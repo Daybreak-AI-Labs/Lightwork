@@ -75,7 +75,7 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     app.state.trust_center_branding_store_factory = factory
     app.include_router(api.router, prefix="/api/v1")
-    return TestClient(app, headers={"Origin": "http://testserver"}), tenant, permissions
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}), tenant, permissions
 
 
 def test_lists_are_view_gated_and_workspace_scoped(client) -> None:

@@ -29,7 +29,7 @@ def resume_env(monkeypatch, tmp_path):
     monkeypatch.setattr("maverick.runner.run_goal_in_background_async", run)
     goal_id = world.create_goal("Review a draft", "")
     world.set_goal_status(goal_id, "blocked", result="Budget exhausted")
-    yield TestClient(app, headers={"Origin": "http://testserver"}), world, goal_id, calls
+    yield TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}), world, goal_id, calls
     world.close()
 
 

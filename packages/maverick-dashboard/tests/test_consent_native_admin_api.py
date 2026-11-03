@@ -62,7 +62,7 @@ def _admin_app(monkeypatch):
 
 def test_admin_routes_derive_tenant_and_principal_and_preserve_exact_cas(monkeypatch) -> None:
     application, calls, permissions = _admin_app(monkeypatch)
-    client = TestClient(application)
+    client = TestClient(application, base_url="http://127.0.0.1")
 
     forbidden_authority = client.post(
         "/api/v1/consent/native/applications",
@@ -147,7 +147,7 @@ def test_list_routes_are_audit_gated_and_tenant_derived(monkeypatch) -> None:
 
     application.state.consent_native_admin_applications = applications
     application.state.consent_native_admin_devices = devices
-    client = TestClient(application)
+    client = TestClient(application, base_url="http://127.0.0.1")
 
     listed = client.get("/api/v1/consent/native/applications?tenant_id=attacker")
     assert listed.status_code == 200, listed.text
@@ -170,7 +170,7 @@ def test_list_routes_require_an_active_workspace(monkeypatch) -> None:
     application, _calls, _permissions = _admin_app(monkeypatch)
     application.state.consent_native_admin_applications = lambda **_kwargs: {"items": []}
     monkeypatch.setattr(native_api, "current_tenant_id_strict", lambda: None)
-    response = TestClient(application).get("/api/v1/consent/native/applications")
+    response = TestClient(application, base_url="http://127.0.0.1").get("/api/v1/consent/native/applications")
     assert response.status_code == 409
 
 
@@ -196,7 +196,7 @@ def test_public_receipt_keys_are_discoverable_without_ambient_authority(
         ],
     }
     application.include_router(native_api.create_consent_native_public_metadata_router())
-    client = TestClient(application)
+    client = TestClient(application, base_url="http://127.0.0.1")
     discovery_path = "/api/v1/public/consent/native/receipt-keys"
     path = "/api/v1/public/consent/native/receipt-keys/mobile-prod"
 

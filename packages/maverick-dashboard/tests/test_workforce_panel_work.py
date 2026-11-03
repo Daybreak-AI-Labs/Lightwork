@@ -19,7 +19,7 @@ def client(monkeypatch, tmp_path):
 
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     dash_app._world_cache.clear()
-    yield TestClient(app, headers={"Origin": "http://testserver"})
+    yield TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     dash_app._world_cache.clear()
 
 

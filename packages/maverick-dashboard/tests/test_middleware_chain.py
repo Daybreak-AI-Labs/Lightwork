@@ -100,7 +100,7 @@ def test_merged_and_separate_layers_answer_alike(method, path, body):
     results = []
     for merged in (False, True):
         seen = []
-        client = TestClient(_app(merged, seen), raise_server_exceptions=False)
+        client = TestClient(_app(merged, seen), base_url="http://127.0.0.1", raise_server_exceptions=False)
         response = client.request(method, path, content=body)
         results.append((response.status_code, response.text, response.headers.get("x-context-after"),
                         response.headers.get("content-type"), seen))

@@ -17,7 +17,7 @@ def isolated(tmp_path, monkeypatch):
 
 
 def test_every_readiness_link_is_a_registered_page():
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     # FastAPI's included routers are lazy; a root app.routes scan misses them.
     for row in readiness.CATALOG:
         if row["href"]:
@@ -26,7 +26,7 @@ def test_every_readiness_link_is_a_registered_page():
 
 
 def test_readiness_renders_limits_and_never_equates_enablement_with_acceptance():
-    response = TestClient(app, headers={"Origin": "http://testserver"}).get("/workflow-readiness")
+    response = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}).get("/workflow-readiness")
     assert response.status_code == 200
     assert "does not prove it works for your business" in response.text
     assert "Needs a real-world check" in response.text
@@ -60,7 +60,7 @@ def test_supplier_catalog_points_to_setup_and_reports_unsupported_profile(monkey
 def test_turned_off_page_explains_and_links_admins_to_settings(tmp_path):
     (tmp_path / "config.toml").write_text("[features]\nworkflow_readiness = false\n", encoding="utf-8")
     config.reset_config_cache()
-    response = TestClient(app, headers={"Origin": "http://testserver"}).get("/workflow-readiness")
+    response = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}).get("/workflow-readiness")
     assert response.status_code == 403
     assert "This page is turned off" in response.text
     assert 'href="/settings#settings-sections"' in response.text

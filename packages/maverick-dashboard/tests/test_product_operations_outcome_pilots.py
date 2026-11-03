@@ -55,7 +55,7 @@ def _harness(monkeypatch):
     monkeypatch.setattr(ops, "adapters", lambda: {entry.id: entry for entry in pilots.entries()})
     app = FastAPI()
     app.include_router(ops.router)
-    return TestClient(app), current
+    return TestClient(app, base_url="http://127.0.0.1"), current
 
 
 def test_selected_pilot_release_is_read_only_and_rechecks_fresh_state(monkeypatch):

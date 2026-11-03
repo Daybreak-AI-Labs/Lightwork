@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from maverick.oidc import VerifiedPrincipal
 from maverick_dashboard.app import app
 
-client = TestClient(app, headers={"Origin": "http://testserver"})
+client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 @pytest.fixture(autouse=True)
@@ -44,7 +44,7 @@ def _isolated(tmp_path, monkeypatch):
 
 
 def _as(user: str) -> dict[str, str]:
-    return {"Authorization": f"Bearer {user}", "Origin": "http://testserver"}
+    return {"Authorization": f"Bearer {user}", "Origin": "http://127.0.0.1"}
 
 
 def _finished(owner: str, title: str, cost: float) -> int:

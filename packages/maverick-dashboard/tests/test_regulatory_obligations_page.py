@@ -29,7 +29,7 @@ def _app(monkeypatch, allowed) -> TestClient:
                         lambda _request, permission: permission in allowed)
     app = FastAPI()
     app.include_router(page.create_regulatory_obligations_page_router(_templates()))
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def test_page_is_wired_and_hardened(monkeypatch) -> None:

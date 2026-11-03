@@ -50,7 +50,7 @@ def _client(monkeypatch, principal="user:alice", role="operator"):
         monkeypatch.setattr(importlib.import_module(name), "caller_principal", lambda _request: principal)
     rbac.set_role(principal, role)
     from maverick_dashboard.app import app
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def _url(run_id):

@@ -84,7 +84,7 @@ def environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         return await call_next(request)
 
     app.include_router(api.create_ai_entity_tasks_router(deps), prefix="/api/v1")
-    return TestClient(app), state
+    return TestClient(app, base_url="http://127.0.0.1"), state
 
 
 def _create_body(**updates: object) -> dict[str, object]:

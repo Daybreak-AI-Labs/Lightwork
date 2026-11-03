@@ -13,7 +13,7 @@ import zipfile
 import pytest
 from fastapi.testclient import TestClient
 
-ORIGIN = {"Origin": "http://testserver"}
+ORIGIN = {"Origin": "http://127.0.0.1"}
 _BANNED = re.compile(
     r"\b(tenant|principal|payload|endpoint|schema|uuid|sha-?256|digest|json|revision|"
     r"idempoten\w*|lease|toml|yaml|stdout|traceback)\b|/api/v1|HTTP \d{3}|maverick |MAVERICK_|config\.toml",
@@ -49,7 +49,7 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(ro, "OVERRIDES_PATH", tmp_path / "runtime-overrides.toml")
     config.reset_config_cache()
     dash_app._world_cache.clear()
-    yield TestClient(dash_app.app, headers=ORIGIN)
+    yield TestClient(dash_app.app, base_url="http://127.0.0.1", headers=ORIGIN)
     config.reset_config_cache()
     dash_app._world_cache.clear()
     audit_writer._defaults.clear()
@@ -104,7 +104,7 @@ def test_lessons_are_installation_admin_only(client, monkeypatch):
     assert client.post("/api/v1/learning-exchange/import", content=b"{}").status_code == 403
     # Cross-site posts are refused before anything else.
     _as(monkeypatch, "admin", "user:ada")
-    assert TestClient(client.app).post("/api/v1/learning-exchange/preview", content=b"{}").status_code == 403
+    assert TestClient(client.app, base_url="http://127.0.0.1").post("/api/v1/learning-exchange/preview", content=b"{}").status_code == 403
 
 
 def test_lesson_file_from_an_untrusted_installation_is_refused_plainly(client, monkeypatch):

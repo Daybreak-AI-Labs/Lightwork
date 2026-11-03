@@ -14,7 +14,7 @@ from maverick_dashboard.consent_public_api import (
     PublicConsentCredentialStore,
 )
 
-client = TestClient(app, headers={"Origin": "http://testserver"})
+client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 API = "/api/v1/consent/public-clients"
 NOW = 1_800_000_000.0
 ORIGIN = "https://www.example.com"

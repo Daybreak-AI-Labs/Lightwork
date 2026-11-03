@@ -309,7 +309,7 @@ def test_lifespan_attachment_starts_and_stops_exactly_once() -> None:
             app,
             runtime=LifecycleRuntime(),  # type: ignore[arg-type]
         )
-    with TestClient(app):
+    with TestClient(app, base_url="http://127.0.0.1"):
         assert runtime.starts == 1
         assert runtime.stops == 0
     assert runtime.stops == 1

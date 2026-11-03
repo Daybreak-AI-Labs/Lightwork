@@ -35,7 +35,7 @@ def environment(tmp_path, monkeypatch):
         from maverick.chat_threads import question_version
         q = world.open_questions(goal_id=goal_id)[0]
         version = question_version(q.id, q.asked_at, q.question)
-        client = TestClient(dashboard.app, headers={"Origin": "http://testserver"})
+        client = TestClient(dashboard.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
         yield client, world, goal_id, question_id, runs, version
 
 

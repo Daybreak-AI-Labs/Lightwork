@@ -178,7 +178,7 @@ so their own threads do not compete with a second worker
 - pytest-asyncio runs in strict mode, so async tests need an explicit
   `@pytest.mark.asyncio` marker.
 - Dashboard tests create the client with
-  `TestClient(app, headers={"Origin": "http://testserver"})`, because mutating
+  `TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})`, because mutating
   `/api/v1` requests must pass the same-origin check, and use a fixture that
   points `world_model.DEFAULT_DB` at `tmp_path` so that tests never touch a real
   database. Copy an existing dashboard test.

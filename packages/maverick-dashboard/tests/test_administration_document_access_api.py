@@ -90,7 +90,7 @@ def _client(monkeypatch, tmp_path, *, enabled=True, include_service=True, readin
     )
     app = FastAPI()
     app.include_router(create_administration_document_access_router(dependencies))
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     return client, calls, services
 
 

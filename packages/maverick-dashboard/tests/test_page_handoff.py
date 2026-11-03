@@ -13,7 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 from maverick_dashboard import page_handoff
 
-_ORIGIN = {"origin": "http://testserver"}
+_ORIGIN = {"origin": "http://127.0.0.1"}
 
 
 @pytest.fixture(autouse=True)
@@ -80,7 +80,7 @@ def _prep(monkeypatch, tmp_path, started):
 def _send():
     from maverick_dashboard.app import app
 
-    return TestClient(app).post("/chat/send", data={"title": "summarize this", "description": ""},
+    return TestClient(app, base_url="http://127.0.0.1").post("/chat/send", data={"title": "summarize this", "description": ""},
                                 headers=_ORIGIN, follow_redirects=False)
 
 
@@ -97,7 +97,7 @@ def test_the_task_page_starts_the_run_it_was_waiting_for(monkeypatch, tmp_path):
         time.sleep(0.01)
     [(goal_id, entry)] = page_handoff._pending.items()
     assert entry["wake"] is not None and started == [], "the run waits for its page"
-    page = TestClient(app).get(f"/chat/goal/{goal_id}", headers=_ORIGIN)
+    page = TestClient(app, base_url="http://127.0.0.1").get(f"/chat/goal/{goal_id}", headers=_ORIGIN)
     served_at = time.monotonic()
     sender.join(timeout=8)
     assert page.status_code == 200 and sent[0].status_code == 303

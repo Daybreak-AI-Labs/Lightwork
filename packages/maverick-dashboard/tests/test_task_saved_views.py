@@ -26,8 +26,8 @@ def setup(tmp_path, monkeypatch):
     monkeypatch.setattr(auth, "caller_principal", lambda request: request.headers.get("x-test-account", "user:alice"))
     monkeypatch.setattr(native, "context_for", lambda request: hashlib.sha256(auth.caller_principal(request).encode()).hexdigest())
     request = Request({"type": "http", "method": "POST", "scheme": "http", "path": "/api/v1/views",
-                       "headers": [(b"host", b"testserver"), (b"origin", b"http://testserver")]})
-    client = TestClient(app.app, headers={"Origin": "http://testserver"})
+                       "headers": [(b"host", b"127.0.0.1"), (b"origin", b"http://127.0.0.1")]})
+    client = TestClient(app.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     return store, request, client
 
 

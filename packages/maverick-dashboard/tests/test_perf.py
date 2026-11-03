@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 
 def _client():
     from maverick_dashboard.app import app
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def test_world_model_reused_across_requests(monkeypatch, tmp_path: Path):

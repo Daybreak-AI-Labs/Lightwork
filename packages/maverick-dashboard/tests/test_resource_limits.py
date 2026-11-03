@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 
 def _client():
     from maverick_dashboard.app import app
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def _setup(monkeypatch, tmp_path):
@@ -141,7 +141,7 @@ def test_a2a_oversized_body_rejected(monkeypatch):
 
     app = FastAPI()
     a2a.mount(app)
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1")
 
     # >256 KiB body must be rejected before parsing/auth.
     big = "x" * (300 * 1024)
@@ -169,7 +169,7 @@ def test_finance_body_cap_rejects_declared_length_before_parsing(monkeypatch):
         headers={
             "Content-Type": "application/json",
             "Content-Length": "65",
-            "Origin": "http://testserver",
+            "Origin": "http://127.0.0.1",
         },
     )
     assert response.status_code == 413
@@ -192,7 +192,7 @@ def test_finance_body_cap_streams_chunked_body_without_content_length(monkeypatc
         headers={
             "Content-Type": "application/json",
             "Transfer-Encoding": "chunked",
-            "Origin": "http://testserver",
+            "Origin": "http://127.0.0.1",
         },
     )
     assert response.status_code == 413

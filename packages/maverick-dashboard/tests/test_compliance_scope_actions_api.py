@@ -214,7 +214,7 @@ def environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     app.state.compliance_scope_actions_store_factory = store_factory
     app.state.compliance_scope_actions_apply_callback = applier
     app.include_router(api.router, prefix="/api/v1")
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     return client, database, state, applier
 
 

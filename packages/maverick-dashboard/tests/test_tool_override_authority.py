@@ -17,7 +17,7 @@ from maverick.paths import reset_tenant, set_tenant
 from maverick_dashboard import auth, rbac
 from maverick_dashboard.app import app
 
-client = TestClient(app, headers={"Origin": "http://testserver"})
+client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 DISABLE = "/api/v1/permissions/tools/shell/disable"
 ENABLE = "/api/v1/permissions/tools/shell/enable"
 

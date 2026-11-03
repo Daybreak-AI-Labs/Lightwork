@@ -21,7 +21,7 @@ API = "/api/v1/automation-imports"
 
 def _client(user="alice"):
     from maverick_dashboard.app import app
-    return TestClient(app, headers={"Origin": "http://testserver", "X-Forwarded-User": user})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1", "X-Forwarded-User": user})
 
 
 def _review(client, source, definitions, **choices):

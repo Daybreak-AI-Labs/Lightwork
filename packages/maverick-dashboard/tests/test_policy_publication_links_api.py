@@ -80,8 +80,8 @@ def environment(tmp_path: Path):
     app.include_router(admin_router, prefix="/api/v1")
     app.include_router(public_router, prefix="/api/v1")
     client = TestClient(
-        app,
-        headers={"Origin": "http://testserver", "X-Test-Actor": "actor-a"},
+        app, base_url="http://127.0.0.1",
+        headers={"Origin": "http://127.0.0.1", "X-Test-Actor": "actor-a"},
     )
     return client, stores, registry, clock, tenant, tmp_path
 
@@ -438,7 +438,7 @@ def test_audit_retention_integrity_bounds_and_public_rate_limit(
     _admin, public_router = create_policy_publication_routers(deps)
     app = FastAPI()
     app.include_router(public_router, prefix="/api/v1")
-    public_client = TestClient(app, headers={"Origin": "http://testserver"})
+    public_client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     assert public_client.get(f"{PUBLIC}/{link['link_id']}").status_code == 200
     assert public_client.get(f"{PUBLIC}/{link['link_id']}").status_code == 200
     limited_response = public_client.get(f"{PUBLIC}/{link['link_id']}")

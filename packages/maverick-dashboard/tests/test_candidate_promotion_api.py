@@ -198,7 +198,7 @@ def client(monkeypatch):
     from maverick_dashboard import app as app_module
 
     monkeypatch.setattr(app_module, "_require_same_origin", lambda _request: None)
-    with TestClient(application, headers={"Origin": "http://testserver"}) as value:
+    with TestClient(application, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}) as value:
         yield value, service, application
 
 

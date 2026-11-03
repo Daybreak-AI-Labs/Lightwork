@@ -23,7 +23,7 @@ def _request(
             "path": "/",
             "headers": headers,
             "query_string": b"",
-            "server": ("testserver", 80),
+            "server": ("127.0.0.1", 80),
             "client": ("127.0.0.1", 50000),
             "scheme": "http",
             "app": app,

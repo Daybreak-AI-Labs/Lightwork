@@ -13,7 +13,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-ORIGIN = {"Origin": "http://testserver"}
+ORIGIN = {"Origin": "http://127.0.0.1"}
 ANA = "user:ana@corp.com"
 DANA = "user:dana@corp.com"
 VIC = "user:vic@corp.com"
@@ -41,7 +41,7 @@ def client(monkeypatch, tmp_path):
     audit_writer._defaults.clear()
     from maverick_dashboard.app import app
 
-    yield TestClient(app, headers=ORIGIN)
+    yield TestClient(app, base_url="http://127.0.0.1", headers=ORIGIN)
     config.reset_config_cache()
     audit_writer._default = None
     audit_writer._defaults.clear()

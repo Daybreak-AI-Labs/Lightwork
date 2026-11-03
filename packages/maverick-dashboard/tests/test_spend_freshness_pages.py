@@ -6,7 +6,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-_ORIGIN = {"origin": "http://testserver"}
+_ORIGIN = {"origin": "http://127.0.0.1"}
 
 
 @pytest.fixture
@@ -23,7 +23,7 @@ def client(monkeypatch, tmp_path):
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
     from maverick_dashboard import app as dash_app
     dash_app._world_cache.clear()
-    yield TestClient(dash_app.app, headers=_ORIGIN)
+    yield TestClient(dash_app.app, base_url="http://127.0.0.1", headers=_ORIGIN)
     config.reset_config_cache()
 
 

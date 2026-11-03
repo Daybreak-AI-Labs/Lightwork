@@ -15,7 +15,7 @@ from maverick_dashboard.app import app
 @pytest.fixture
 def noauth(monkeypatch):
     monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "secret-token")  # pragma: allowlist secret
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def test_brand_mark_is_public_png(noauth):

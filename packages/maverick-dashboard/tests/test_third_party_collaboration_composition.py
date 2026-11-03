@@ -51,7 +51,7 @@ def _request(path: str) -> Request:
             "query_string": b"",
             "headers": [],
             "client": ("198.51.100.10", 43123),
-            "server": ("testserver", 80),
+            "server": ("127.0.0.1", 80),
         }
     )
 
@@ -311,7 +311,7 @@ def test_cold_routing_index_build_runs_off_the_event_loop() -> None:
         request.app.state.third_party_collaboration_rate_limit("a" * 64, "contract")
         return {"portal_ref": portal_ref}
 
-    response = TestClient(app).get(f"/api/v1/external/third-party-collaboration/{portal}/contract")
+    response = TestClient(app, base_url="http://127.0.0.1").get(f"/api/v1/external/third-party-collaboration/{portal}/contract")
     assert response.status_code == 200
     assert len(registry_threads) == len(route_threads) == 1
     assert registry_threads[0] != route_threads[0]
@@ -428,7 +428,7 @@ def _limited_app(
         request.app.state.third_party_collaboration_rate_limit(credential, "contract")
         return {"portal_ref": portal_ref}
 
-    return TestClient(app), app, portal_ref
+    return TestClient(app, base_url="http://127.0.0.1"), app, portal_ref
 
 
 def test_random_credentials_and_spoofed_xff_cannot_bypass_source_limit() -> None:
@@ -599,7 +599,7 @@ def test_evidence_uploads_have_their_own_rate_limited_action() -> None:
         request.app.state.third_party_collaboration_rate_limit("0" * 64, action)
         return {"portal_ref": portal_ref}
 
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1")
     path = f"/api/v1/external/third-party-collaboration/{portal}/evidence"
     assert client.post(path, headers={"X-Test-Action": "contract"}).status_code == 429
     assert [client.post(path).status_code for _ in range(3)] == [200, 200, 429]

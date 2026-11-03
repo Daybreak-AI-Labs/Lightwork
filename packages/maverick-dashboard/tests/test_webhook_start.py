@@ -19,7 +19,7 @@ from maverick_dashboard.app import app
 
 # /webhook/start authenticates via HMAC, not the dashboard bearer / Origin,
 # so no Origin header is needed (it's in _AUTH_EXEMPT).
-client = TestClient(app)
+client = TestClient(app, base_url="http://127.0.0.1")
 
 SECRET = "test-webhook-secret"
 

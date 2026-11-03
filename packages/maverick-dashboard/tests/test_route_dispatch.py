@@ -17,7 +17,7 @@ def client(monkeypatch, tmp_path):
 
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     dash_app._world_cache.clear()
-    yield TestClient(dash_app.app, headers={"Origin": "http://testserver"})
+    yield TestClient(dash_app.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     dash_app._world_cache.clear()
 
 
@@ -99,7 +99,7 @@ def test_a_route_that_matches_on_the_host_turns_the_memory_off():
 
     app.router.routes.insert(0, Host("special.example", app=Route("/page", lambda request: PlainTextResponse("special"))))
     assert route_dispatch.install(app.router)
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1")
     for _ in range(2):
         assert client.get("/page", headers={"host": "special.example"}).text == "special"
         assert client.get("/page").text == "any host"

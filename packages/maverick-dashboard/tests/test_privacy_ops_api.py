@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from maverick.oidc import VerifiedPrincipal
 from maverick_dashboard.app import app
 
-client = TestClient(app, headers={"Origin": "http://testserver"})
+client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 DPA_TEXT = """The processor shall process personal data only on documented
 instructions from the controller, is bound by confidentiality, implements the
@@ -76,7 +76,7 @@ def _enable_oidc(monkeypatch):
 def _as(user: str) -> dict:
     return {
         "Authorization": f"Bearer {user}",
-        "Origin": "http://testserver",
+        "Origin": "http://127.0.0.1",
     }
 
 
@@ -517,7 +517,7 @@ def test_static_dashboard_token_is_an_exact_attributed_actor(monkeypatch):
     monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", token)
     response = client.post(
         "/api/v1/privacy/dpa-reviews",
-        headers={"Authorization": f"Bearer {token}", "Origin": "http://testserver"},
+        headers={"Authorization": f"Bearer {token}", "Origin": "http://127.0.0.1"},
         json={"vendor": "Acme", "text": DPA_TEXT},
     )
     assert response.status_code == 201, response.text
@@ -555,7 +555,7 @@ def test_static_dashboard_token_document_access_uses_only_its_saved_connection(
     )
     headers = {
         "Authorization": f"Bearer {token}",
-        "Origin": "http://testserver",
+        "Origin": "http://127.0.0.1",
     }
 
     ambient_denied = client.get(

@@ -83,7 +83,7 @@ def test_native_preferences_page_renders_memory_source(monkeypatch):
     from maverick_dashboard.app import app
 
     monkeypatch.setattr(auth, "caller_principal", lambda request: "user:alice")
-    with TestClient(app, headers={"Origin": "http://testserver"}) as client:
+    with TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}) as client:
         response = client.get("/preferences")
     assert response.status_code == 200, response.text[:500]
     assert 'data-product-copy' in response.text and 'Source:' in response.text

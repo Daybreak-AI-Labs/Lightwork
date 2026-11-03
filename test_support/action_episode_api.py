@@ -88,7 +88,7 @@ def harness(tmp_path, monkeypatch, request):
             fn=lambda args, name=name: perform(name, args),
         ))
     monkeypatch.setattr(tools, "base_registry", lambda *args, **kwargs: registry)
-    client = TestClient(app, headers={"Origin": "http://testserver",
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1",
                                      "Authorization": "Bearer alice"})
     yield SimpleNamespace(client=client, calls=calls, flags=flags, monkeypatch=monkeypatch,
                           native=execution.default_action_runner(None, user_id=OWNER))

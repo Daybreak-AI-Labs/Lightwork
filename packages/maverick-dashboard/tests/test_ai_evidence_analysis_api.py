@@ -296,7 +296,7 @@ def environment(monkeypatch: pytest.MonkeyPatch):
         return await call_next(request)
 
     app.include_router(api.create_ai_evidence_analysis_router(deps), prefix="/api/v1")
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     return client, state, app
 
 
@@ -555,7 +555,7 @@ def test_missing_or_misbound_server_composition_fails_closed(environment) -> Non
         ),
         prefix="/api/v1",
     )
-    no_lifetime = TestClient(no_lifetime_app, headers={"Origin": "http://testserver"})
+    no_lifetime = TestClient(no_lifetime_app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     no_lifetime_response = no_lifetime.post(
         f"{BASE}/analyses", headers=_upload_headers(), content=b"bounded"
     )
@@ -705,7 +705,7 @@ def test_status_without_composition_reports_not_ready_without_constructing_anyth
     monkeypatch.setattr(api, "require_permission", lambda _request, _permission: None)
     app = FastAPI()
     app.include_router(api.create_ai_evidence_analysis_router(), prefix="/api/v1")
-    response = TestClient(app, headers={"Origin": "http://testserver"}).get(f"{BASE}/status")
+    response = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}).get(f"{BASE}/status")
 
     assert response.status_code == 200
     assert response.json()["enabled"] is False
@@ -854,7 +854,7 @@ def test_api_round_trip_with_real_core_store_and_distinct_human_reviewer(
         ),
         prefix="/api/v1",
     )
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     upload_metadata = _metadata(
         expected_artifact_authority_sha256=artifact_authority.authority_sha256,
         expected_criteria_authority_sha256=criteria.authority_sha256,

@@ -21,7 +21,7 @@ PREFLIGHT_HEADERS = {
 
 def _client():
     from maverick_dashboard.app import app
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 @pytest.fixture(autouse=True)

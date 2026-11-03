@@ -58,7 +58,7 @@ def _render_body(template_name: str, **context) -> str:
     templates.env.globals.update(nav_groups=[])
     request = Request({
         "type": "http", "method": "GET", "scheme": "http", "path": "/feature",
-        "query_string": b"", "headers": [], "server": ("testserver", 80),
+        "query_string": b"", "headers": [], "server": ("127.0.0.1", 80),
         "client": ("127.0.0.1", 50000),
     })
     response = templates.TemplateResponse(request, template_name, context)

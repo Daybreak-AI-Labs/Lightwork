@@ -69,7 +69,7 @@ def test_ordinary_requests_count_while_event_streams_and_sockets_do_not(monkeypa
     monkeypatch.setattr(request_activity, "_in_flight", 1)
     monkeypatch.setattr(request_activity, "_last_start", 0.0)
     seen = []
-    client = TestClient(_app(seen))
+    client = TestClient(_app(seen), base_url="http://127.0.0.1")
     assert client.get("/work").json() == {"ok": True}
     # A browser's EventSource asks for the stream, so it is never counted, even
     # while GZip holds the response start until the first event.

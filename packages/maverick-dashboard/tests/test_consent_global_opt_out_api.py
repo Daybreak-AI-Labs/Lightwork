@@ -86,7 +86,7 @@ def client(tmp_path, monkeypatch):
         "live_customer_acceptance": False,
     }
     app.include_router(api.router, prefix="/api/v1")
-    return TestClient(app), store
+    return TestClient(app, base_url="http://127.0.0.1"), store
 
 
 def _create_body() -> dict:

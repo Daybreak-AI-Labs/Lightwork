@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 from maverick_dashboard.app import app
 
-client = TestClient(app, headers={"Origin": "http://testserver"})
+client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 API = "/api/v1/privacy/notice-publication/targets"
 TARGET = {
     "tenant_id": "acme",
@@ -151,7 +151,7 @@ def test_installer_targets_can_be_changed_but_not_removed(audit_rows):
 def test_only_admins_on_the_same_origin_may_change_targets(monkeypatch, audit_rows):
     from maverick_dashboard import auth, rbac
 
-    assert TestClient(app).put(f"{API}/primary",
+    assert TestClient(app, base_url="http://127.0.0.1").put(f"{API}/primary",
                                json={**TARGET, "confirm": True}).status_code == 403
     rbac.set_role("user:vera", "viewer")
     monkeypatch.setattr(auth, "caller_principal", lambda request: "user:vera")

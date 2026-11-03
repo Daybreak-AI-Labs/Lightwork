@@ -32,7 +32,7 @@ def test_external_secret_cannot_report_saved_overlay_as_active(source, tmp_path,
         (directory / "MAVERICK_WEBHOOK_SECRET").write_text(external, encoding="utf-8")
         monkeypatch.setenv("MAVERICK_SECRETS_BACKEND", "file")
         monkeypatch.setenv("MAVERICK_SECRETS_DIR", str(directory))
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     response = client.post("/settings/webhooks", data={"secret": replacement}, follow_redirects=False)
     # Actual verifier remains controlled by the deployment secret.
     assert webhooks._load_config_outbound()[1] == external
@@ -44,7 +44,7 @@ def test_external_secret_cannot_report_saved_overlay_as_active(source, tmp_path,
 
 
 def client():
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def status(http):
@@ -252,7 +252,7 @@ def test_invalid_new_values_never_echoed(value):
 def test_cross_origin_current_token_still_denied():
     http = client()
     reviewed = status(http)
-    response = TestClient(app).post("/settings/webhooks", data={"secret": "synthetic-key",
+    response = TestClient(app, base_url="http://127.0.0.1").post("/settings/webhooks", data={"secret": "synthetic-key",
         "expected_generation": reviewed["expected_generation"]})
     assert response.status_code == 403
 

@@ -22,7 +22,7 @@ def parked(tmp_path, monkeypatch):
     with queue._conn() as connection:
         connection.execute("UPDATE jobs SET status='failed',attempts=1,recurrence_reconcile_required=1 WHERE id=?", (first,))
     request = Request({"type": "http", "method": "POST", "scheme": "http", "path": "/api/v1/copilot/product-operations/execute",
-                       "headers": [(b"host", b"testserver"), (b"origin", b"http://testserver")]})
+                       "headers": [(b"host", b"127.0.0.1"), (b"origin", b"http://127.0.0.1")]})
     args = {"job_id": first, "action": "rearm", "successor_id": None,
             "old_workers_stopped": True, "rationale": "Verified old workers stopped"}
     return queue, request, args

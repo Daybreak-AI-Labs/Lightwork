@@ -16,7 +16,7 @@ def test_catalog_asset_preserves_every_translation_and_current_revision(language
     revision, content = i18n_journeys.browser_catalog_asset(language)
     assert hashlib.sha256(content).hexdigest() == revision
     url = f"/static/lightwork-i18n-catalog/{language}/{revision}.js"
-    with TestClient(app, headers={"Origin": "http://testserver"}) as client:
+    with TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}) as client:
         response = client.get(url)
         assert response.status_code == 200 and response.content == content
         assert "immutable" in response.headers["cache-control"]
@@ -34,7 +34,7 @@ def test_catalog_asset_preserves_every_translation_and_current_revision(language
 
 @pytest.mark.parametrize("language", i18n.LANGS)
 def test_settings_initial_page_stays_bounded_in_every_supported_language(language):
-    with TestClient(app, headers={"Origin": "http://testserver"}) as client:
+    with TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}) as client:
         response = client.get("/settings/all", params={"lang": language})
     assert response.status_code == 200 and len(response.content) < 300_000
     metadata = re.search(r'id="lightwork-i18n-data">(.*?)</script>', response.text, re.DOTALL)
@@ -62,7 +62,7 @@ def test_english_catalog_is_identity_so_pages_can_skip_it():
 
 @pytest.mark.parametrize("path", ["/chat", "/goals", "/approvals", "/settings"])
 def test_english_shells_load_no_catalog_script_or_preload(path):
-    with TestClient(app, headers={"Origin": "http://testserver"}) as client:
+    with TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}) as client:
         english = client.get(path, params={"lang": "en"})
         french = client.get(path, params={"lang": "fr"})
     assert english.status_code == 200 and french.status_code == 200
@@ -72,6 +72,6 @@ def test_english_shells_load_no_catalog_script_or_preload(path):
 
 
 def test_catalog_rejects_unknown_languages_without_reflecting_request_content():
-    with TestClient(app, headers={"Origin": "http://testserver"}) as client:
+    with TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}) as client:
         response = client.get("/static/lightwork-i18n-catalog/private-employee/" + "0" * 64 + ".js")
     assert response.status_code == 404 and "private-employee" not in response.text

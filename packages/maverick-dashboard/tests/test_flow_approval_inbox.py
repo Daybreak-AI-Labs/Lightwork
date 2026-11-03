@@ -30,7 +30,7 @@ def setup(monkeypatch, tmp_path):
     app.dependency_overrides[auth.require_principal_in_request_context] = bind
     monkeypatch.setattr(auth, "role_for_principal", lambda _principal: "operator")
     try:
-        yield TestClient(app, headers={"Origin": "http://testserver"}), actor
+        yield TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}), actor
     finally:
         app.dependency_overrides.clear()
         config.reset_config_cache()

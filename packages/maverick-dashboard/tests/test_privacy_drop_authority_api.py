@@ -86,7 +86,7 @@ def _client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
 
     app.include_router(authority_api.create_privacy_drop_authority_router(), prefix="/api/v1")
     app.include_router(management_api.create_privacy_drop_management_router(), prefix="/api/v1")
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def _approve(client: TestClient, proposal: dict[str, object], *, reviewer: str = "reviewer-b"):

@@ -28,7 +28,7 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(runtime_overrides, "OVERRIDES_PATH", tmp_path / "runtime-overrides.toml")
     config.reset_config_cache()
     dash_app._world_cache.clear()
-    yield TestClient(dash_app.app, headers={"Origin": "http://testserver"})
+    yield TestClient(dash_app.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     config.reset_config_cache()
     dash_app._world_cache.clear()
     audit_writer._defaults.clear()

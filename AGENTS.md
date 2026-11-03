@@ -56,7 +56,7 @@ Each rule is backed by a CI gate or a failure seen in practice.
    configured.
 10. Relative imports inside packages, absolute imports in tests; renames must
     update `docs/FEATURES.md` too.
-11. Dashboard tests need `TestClient(app, headers={"Origin": "http://testserver"})`
+11. Dashboard tests need `TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})`
     and the tmp-path world-DB fixture.
 12. pytest aborts everything on one collection error; a pyo3 `PanicException`
     usually hides a missing import on the stderr line above it.

@@ -44,7 +44,7 @@ def client(monkeypatch):
     app.include_router(
         page.create_assessment_evidence_autopopulation_page_router(_templates())
     )
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def test_liquid_glass_workbench_is_store_free_closed_and_copilot_bound(client):

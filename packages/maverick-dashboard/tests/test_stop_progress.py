@@ -20,7 +20,7 @@ def chat(monkeypatch, tmp_path):
     world = WorldModel(tmp_path / "world.db")
     monkeypatch.setattr(dashboard, "_world", lambda: world)
     monkeypatch.setattr(api, "_world", lambda: world)
-    yield TestClient(dashboard.app, headers={"Origin": "http://testserver"}), world
+    yield TestClient(dashboard.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}), world
     world.close()
 
 

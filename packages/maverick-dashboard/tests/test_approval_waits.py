@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 from maverick.logging_config import reset_goal_context, set_goal_context
 
-_ORIGIN = {"Origin": "http://testserver"}
+_ORIGIN = {"Origin": "http://127.0.0.1"}
 
 
 @pytest.fixture
@@ -21,7 +21,7 @@ def env(monkeypatch, tmp_path):
     world = WorldModel(tmp_path / "world.db")
     from maverick_dashboard.app import app
 
-    yield TestClient(app, headers=_ORIGIN), world
+    yield TestClient(app, base_url="http://127.0.0.1", headers=_ORIGIN), world
     world.close()
 
 

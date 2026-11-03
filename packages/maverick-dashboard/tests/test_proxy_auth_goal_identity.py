@@ -40,9 +40,9 @@ def test_api_goal_creation_passes_proxy_user_to_runner(monkeypatch, tmp_path):
     calls: list[tuple[tuple, dict]] = []
     monkeypatch.setattr(runner, "run_goal_in_thread", lambda *a, **kw: calls.append((a, kw)))
 
-    resp = TestClient(app).post(
+    resp = TestClient(app, base_url="http://127.0.0.1").post(
         "/api/v1/goals",
-        headers={"Origin": "http://testserver", "X-Forwarded-User": "alice"},
+        headers={"Origin": "http://127.0.0.1", "X-Forwarded-User": "alice"},
         json={"title": "secure goal", "description": "run as alice"},
     )
 
@@ -63,9 +63,9 @@ def test_chat_goal_creation_passes_proxy_user_to_runner(monkeypatch, tmp_path):
     calls: list[tuple[tuple, dict]] = []
     monkeypatch.setattr(runner, "run_goal_in_thread", lambda *a, **kw: calls.append((a, kw)))
 
-    resp = TestClient(app).post(
+    resp = TestClient(app, base_url="http://127.0.0.1").post(
         "/chat/send",
-        headers={"Origin": "http://testserver", "X-Forwarded-User": "bob"},
+        headers={"Origin": "http://127.0.0.1", "X-Forwarded-User": "bob"},
         data={"title": "secure chat goal", "description": "run as bob"},
         follow_redirects=False,
     )
@@ -79,7 +79,7 @@ def test_chat_goal_creation_passes_proxy_user_to_runner(monkeypatch, tmp_path):
 def test_unassigned_proxy_user_can_view_but_cannot_operate(monkeypatch, tmp_path):
     _enable_proxy_identity(monkeypatch)
     app = _isolated_app(monkeypatch, tmp_path)
-    client = TestClient(app, headers={"Origin": "http://testserver", "X-Forwarded-User": "alice"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1", "X-Forwarded-User": "alice"})
     assert client.get("/providers").status_code == 200
     assert client.post("/api/v1/goals", json={"title": "work"}).status_code == 403
     assert client.post("/api/v1/approvals/1/approve").status_code == 403
@@ -93,7 +93,7 @@ def test_proxy_mode_without_require_auth_never_falls_back_to_local_admin(
     monkeypatch.delenv("MAVERICK_DASHBOARD_REQUIRE_AUTH", raising=False)
     _enable_proxy_identity(monkeypatch)
     app = _isolated_app(monkeypatch, tmp_path)
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
     assert client.get("/api/v1/providers").status_code == 401
     assert client.get(

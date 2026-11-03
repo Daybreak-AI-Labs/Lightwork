@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 from maverick_dashboard.app import app
 
-client = TestClient(app, headers={"Origin": "http://testserver"})
+client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 @pytest.fixture(autouse=True)
@@ -102,7 +102,7 @@ def test_trust_page_has_register_form_and_row_actions():
 
 def test_mutations_are_csrf_gated():
     # no Origin/Referer on a mutating call in no-token mode -> blocked
-    bare = TestClient(app)
+    bare = TestClient(app, base_url="http://127.0.0.1")
     assert bare.post("/api/v1/trust/agents",
                      json={"id": "x"}).status_code == 403
 

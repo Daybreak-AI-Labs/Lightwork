@@ -18,7 +18,7 @@ from maverick_dashboard.app import app
 
 from test_support.settings_pages import save_catalog
 
-client = TestClient(app, headers={"Origin": "http://testserver"})
+client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 API = "/api/v1/settings/catalog"
 _EA = "ai_evidence_analysis"
 _ENTRA = "ai_identity_governance_connectors.scheduler.providers.entra"

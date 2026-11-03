@@ -30,7 +30,7 @@ def test_page_is_liquid_glass_copilot_wired_and_permission_aware(monkeypatch) ->
     app = FastAPI()
     app.include_router(page.create_shared_governance_inventory_page_router(_templates()))
 
-    response = TestClient(app).get(page.PAGE_PATH)
+    response = TestClient(app, base_url="http://127.0.0.1").get(page.PAGE_PATH)
 
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-store, private, max-age=0"
@@ -66,7 +66,7 @@ def test_page_rejects_unknown_query_parameters(monkeypatch) -> None:
     app = FastAPI()
     app.include_router(page.create_shared_governance_inventory_page_router(_templates()))
 
-    response = TestClient(app).get(
+    response = TestClient(app, base_url="http://127.0.0.1").get(
         page.PAGE_PATH + "?return_to=https://attacker.invalid"
     )
 
@@ -78,7 +78,7 @@ def test_shipped_app_mounts_page_api_and_private_asset(monkeypatch) -> None:
     monkeypatch.setattr(page, "_tenant_selected", lambda: None)
     from maverick_dashboard.app import app
 
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     assert client.get(page.PAGE_PATH).status_code == 200
     assert client.get(f"{page.API_BASE}/status").status_code == 200
     asset = client.get(page.ASSET_PATH)

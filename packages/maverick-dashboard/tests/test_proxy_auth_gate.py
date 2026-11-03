@@ -26,7 +26,7 @@ def _req(headers=None, host="127.0.0.1", path="/metrics"):
 
 
 def _ws(headers=None, host="127.0.0.1"):
-    values = {"Origin": "http://testserver", "Host": "testserver"}
+    values = {"Origin": "http://127.0.0.1", "Host": "127.0.0.1"}
     values.update(headers or {})
     return SimpleNamespace(
         headers=Headers(values),
@@ -517,7 +517,7 @@ def test_auth_off_websocket_rejects_dns_rebinding_host(monkeypatch):
 
 @pytest.mark.parametrize(
     "host",
-    ["localhost", "localhost:8000", "127.0.0.1:8000", "[::1]:8000", "testserver"],
+    ["localhost", "localhost:8000", "127.0.0.1:8000", "[::1]:8000", "127.0.0.1"],
 )
 def test_auth_off_websocket_accepts_explicit_loopback_request_hosts(
     monkeypatch, host,
@@ -529,3 +529,24 @@ def test_auth_off_websocket_accepts_explicit_loopback_request_hosts(
 
     assert auth._websocket_loopback_request_host(websocket) is True
     assert auth.websocket_authorized(websocket) is True
+
+
+def test_testserver_is_not_trusted_as_a_loopback_host(monkeypatch):
+    from fastapi.testclient import TestClient
+    from maverick_dashboard import app as dashboard
+
+    monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
+    monkeypatch.setattr(auth, "auth_genuinely_off", lambda: True)
+    monkeypatch.setattr("maverick.client.client_binding_enforced", lambda: False)
+    assert dashboard._is_loopback_request_host(
+        SimpleNamespace(url=SimpleNamespace(hostname="testserver"))
+    ) is False
+    websocket = _ws(headers={"Origin": "http://testserver", "Host": "testserver"})
+    assert auth._websocket_same_origin(websocket) is True
+    assert auth._websocket_loopback_request_host(websocket) is False
+    assert auth.websocket_authorized(websocket) is False
+
+    with TestClient(dashboard.app, base_url="http://testserver") as client:
+        response = client.get("/api/v1/goals", headers={"Origin": "http://testserver"})
+        assert response.status_code == 401
+        assert response.json()["detail"].startswith("Remote access to this dashboard")

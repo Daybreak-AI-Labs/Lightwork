@@ -48,7 +48,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     )
     app = FastAPI()
     app.include_router(page.create_privacy_drop_management_page_router(templates))
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def test_drop_workbench_uses_shared_shell_and_lists_on_arrival(

@@ -17,7 +17,7 @@ from maverick.paths import tenant_scope
 from maverick_dashboard import external_gateway
 from maverick_dashboard.app import app
 
-client = TestClient(app)
+client = TestClient(app, base_url="http://127.0.0.1")
 
 _TENANT = "tenant-a"
 _AGENT_ID = "network-sensor"

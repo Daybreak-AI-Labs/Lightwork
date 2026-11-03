@@ -69,7 +69,7 @@ def _app(monkeypatch, tmp_path):
 
 def test_stock_composition_closes_resolver_issuer_and_delivery_loop(monkeypatch, tmp_path):
     app = _app(monkeypatch, tmp_path)
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     uploaded = client.post(
         "/administration/document-vault/documents",
         params={
@@ -114,7 +114,7 @@ def test_stock_composition_closes_resolver_issuer_and_delivery_loop(monkeypatch,
 
 def test_stock_resolver_accepts_incident_principal_but_rejects_spoof(monkeypatch, tmp_path):
     app = _app(monkeypatch, tmp_path)
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     uploaded = client.post(
         "/administration/document-vault/documents",
         params={

@@ -204,7 +204,7 @@ def _request(app: FastAPI, *, principal: str | None = "user:operator") -> Reques
             "query_string": b"",
             "headers": [],
             "client": ("127.0.0.1", 1),
-            "server": ("testserver", 443),
+            "server": ("127.0.0.1", 443),
             "app": app,
         }
     )

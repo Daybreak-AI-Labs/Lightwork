@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 def _client():
     from maverick_dashboard.app import app
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def _owner_client(monkeypatch):
@@ -22,7 +22,7 @@ def _owner_client(monkeypatch):
     monkeypatch.setattr(auth, "oidc_enabled", lambda: True)
     monkeypatch.setattr(auth, "verify_oidc_token", lambda token, **kwargs: VerifiedPrincipal(
         sub=token, issuer="https://issuer.example", audience="maverick", claims={"sub": token}))
-    return TestClient(app, headers={"Authorization": "Bearer dana"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Authorization": "Bearer dana"})
 
 
 def _isolate(monkeypatch, tmp_path):

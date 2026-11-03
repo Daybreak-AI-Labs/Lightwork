@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from maverick_dashboard.app import app
 from maverick_dashboard.deliverables import build_inbox, persona_roles_for
 
-client = TestClient(app, headers={"Origin": "http://testserver"})
+client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 @dataclass

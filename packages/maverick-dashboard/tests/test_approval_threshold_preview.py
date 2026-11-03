@@ -27,7 +27,7 @@ def client(tmp_path, monkeypatch):
     config.reset_config_cache()
     from maverick_dashboard.app import _world_cache, app
     _world_cache.clear()
-    yield TestClient(app, headers={"Origin": "http://testserver"})
+    yield TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     config.reset_config_cache()
 
 

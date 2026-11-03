@@ -139,7 +139,7 @@ def test_api_is_tenant_derived_minimized_and_has_no_source_registration(
         api.create_shared_governance_inventory_router(dependencies),
         prefix="/api/v1",
     )
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1")
     assert client.get("/api/v1/governance/inventory/status").status_code == 200
     current = client.get("/api/v1/governance/inventory/snapshots/current")
     assert current.status_code == 200

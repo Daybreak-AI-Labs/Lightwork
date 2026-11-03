@@ -57,7 +57,7 @@ def setup(tmp_path, monkeypatch):
             replay = entry.recover(request, selection, args, preview.native, body["operation_id"])
             return {"status": result.status, "recovery": replay.status, "review": preview.changes}
         return {"review": preview.changes, "native": preview.native}
-    with TestClient(application, headers={"Origin": "http://testserver"}) as client:
+    with TestClient(application, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}) as client:
         yield client, project, goal, active, world
     for value in worlds.values():
         value.close()

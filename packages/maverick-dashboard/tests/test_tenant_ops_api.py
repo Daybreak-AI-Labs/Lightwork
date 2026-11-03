@@ -9,7 +9,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-ORIGIN = {"Origin": "http://testserver"}
+ORIGIN = {"Origin": "http://127.0.0.1"}
 BASE = "/api/v1/admin/workspace-ops"
 _BANNED = re.compile(r"\b(tenant|principal|payload|kek|dek|kms|json|toml|uuid)\b|/api/v1|MAVERICK_", re.IGNORECASE)
 
@@ -32,7 +32,7 @@ def client(monkeypatch, tmp_path):
     dash_app._world_cache.clear()
     from maverick.tenant import kms
     kms._clear_cache()
-    yield TestClient(dash_app.app, headers=ORIGIN)
+    yield TestClient(dash_app.app, base_url="http://127.0.0.1", headers=ORIGIN)
     kms._clear_cache()
     config.reset_config_cache()
     dash_app._world_cache.clear()

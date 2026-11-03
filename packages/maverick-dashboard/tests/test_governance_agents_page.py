@@ -40,7 +40,7 @@ def page_client() -> TestClient:
             },
         )
 
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def test_page_exposes_all_agents_with_buttons_that_start_disabled(page_client) -> None:
@@ -217,8 +217,8 @@ def test_dashboard_route_passes_exact_tenant_and_global_permissions(
         lambda: True,
     )
     response = TestClient(
-        app_module.app,
-        headers={"Origin": "http://testserver", "X-Test-Role": role},
+        app_module.app, base_url="http://127.0.0.1",
+        headers={"Origin": "http://127.0.0.1", "X-Test-Role": role},
     ).get("/governance-agents")
 
     assert response.status_code == 200
@@ -292,6 +292,6 @@ def test_page_is_plain_language(page_client) -> None:
 def test_governance_assistant_script_is_served() -> None:
     from maverick_dashboard.app import app
 
-    response = TestClient(app).get("/static/lightwork-governance-agents.js")
+    response = TestClient(app, base_url="http://127.0.0.1").get("/static/lightwork-governance-agents.js")
     assert response.status_code == 200
     assert "ga-root" in response.text

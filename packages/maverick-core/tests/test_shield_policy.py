@@ -184,7 +184,7 @@ def test_dashboard_loopback_disabled_under_client_binding(monkeypatch):
     client.reset_client_cache()
     from maverick_dashboard.app import app
     from starlette.testclient import TestClient
-    c = TestClient(app, headers={"Origin": "http://testserver"})
+    c = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     # A loopback request that would normally be served no-token is now refused.
     r = c.get("/api/v1/goals")
     assert r.status_code == 401

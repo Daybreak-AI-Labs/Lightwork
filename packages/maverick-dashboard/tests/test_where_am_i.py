@@ -61,7 +61,7 @@ def client(monkeypatch, tmp_path):
     api._world_cache.clear()
     from maverick_dashboard import rbac
     rbac.set_role("user:customer", "admin")
-    yield TestClient(app.app, headers={"Origin": "http://testserver"})
+    yield TestClient(app.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     config.reset_config_cache()
     api._world_cache.clear()
 

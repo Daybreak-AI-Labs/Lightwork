@@ -38,7 +38,7 @@ def ui(tmp_path, monkeypatch):
     monkeypatch.setattr(model_tests, "run", fake_run)
     app = FastAPI()
     app.include_router(native.router)
-    with TestClient(app, headers={"Origin": "http://testserver"}) as client:
+    with TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}) as client:
         yield SimpleNamespace(client=client, state=state, calls=calls)
 
 

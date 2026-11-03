@@ -30,7 +30,7 @@ def page_client() -> TestClient:
             {"consent_scan_notice_proposals_enabled": enabled},
         )
 
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def test_page_exposes_complete_honest_operator_workbench(page_client) -> None:
@@ -175,7 +175,7 @@ def test_main_dashboard_mounts_page_api_visibility_tips_and_parent_links(
         templates / "consent_scan_inventory.html"
     ).read_text(encoding="utf-8")
 
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     response = client.get("/consent/scan-notice-proposals")
     assert response.status_code == 200, response.text
     assert "Disclosure suggestions" in response.text

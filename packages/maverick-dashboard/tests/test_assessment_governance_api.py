@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from maverick.oidc import VerifiedPrincipal
 from maverick_dashboard.app import app
 
-client = TestClient(app, headers={"Origin": "http://testserver"})
+client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 @pytest.fixture(autouse=True)
@@ -60,7 +60,7 @@ def _enable_oidc(monkeypatch) -> None:
 
 
 def _as(user: str) -> dict:
-    return {"Authorization": f"Bearer {user}", "Origin": "http://testserver"}
+    return {"Authorization": f"Bearer {user}", "Origin": "http://127.0.0.1"}
 
 
 def _template_body(type_: str, title: str, *, headers: dict | None = None) -> dict:

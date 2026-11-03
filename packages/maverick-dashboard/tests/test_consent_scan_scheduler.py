@@ -450,7 +450,7 @@ def test_lifespan_attachment_starts_and_stops_the_runtime() -> None:
     attach_consent_scan_scheduler(app, runtime=runtime)
     assert attach_consent_scan_scheduler(app, runtime=runtime) is runtime
 
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         assert client.get("/openapi.json").status_code == 200
         assert entered.wait(1.0)
         assert runtime.status()["running"] is True

@@ -23,7 +23,7 @@ def _client():
     # Mutating /api/v1 requests in no-token mode need the same-origin CSRF header;
     # the HMAC-exempt /webhook/run ignores it.
     from maverick_dashboard.app import app
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def _sign_headers(body: bytes) -> dict:
@@ -640,7 +640,7 @@ def test_static_token_operator_manages_the_triggers_it_created(monkeypatch, tmp_
     monkeypatch.setattr("maverick.audit.audit_event", lambda *a, **k: True)
     from maverick_dashboard import triggers_store
     from maverick_dashboard.app import app
-    c = TestClient(app, headers={"Origin": "http://testserver",
+    c = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1",
                                  "Authorization": "Bearer static-operator-token-for-tests"})
     body = {"template": "weekly-report", "params": {"topic": "rivals"}}
 

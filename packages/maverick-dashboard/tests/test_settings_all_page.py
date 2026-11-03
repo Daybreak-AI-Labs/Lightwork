@@ -17,7 +17,7 @@ from maverick_dashboard.app import app
 
 from test_support.settings_pages import every_group, save_catalog
 
-client = TestClient(app, headers={"Origin": "http://testserver"})
+client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 API = "/api/v1/settings/catalog"
 
 
@@ -395,7 +395,7 @@ def test_deployment_controlled_settings_are_locked(monkeypatch, audit_rows):
 
 # ---------------------------------------------------------- permissions
 def test_cross_origin_writes_are_refused(audit_rows):
-    bare = TestClient(app)
+    bare = TestClient(app, base_url="http://127.0.0.1")
     r = _save([{"id": "ifc.mode", "value": "block"}], http=bare)
     assert r.status_code == 403
     assert "ifc" not in _loaded()

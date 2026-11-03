@@ -24,7 +24,7 @@ def test_start_page_has_no_commands_or_paths(tmp_path, monkeypatch):
     config.reset_config_cache()
     from maverick_dashboard import app as dash_app
     dash_app._world_cache.clear()
-    page = TestClient(dash_app.app).get("/start").text
+    page = TestClient(dash_app.app, base_url="http://127.0.0.1").get("/start").text
     text = visible_text(page)
     for word in ("maverick ", "--json", "config.toml", ".maverick", "[evidence_graph]", "preflight",
                  "SYNTHETIC", "operator", "tenant"):

@@ -184,7 +184,7 @@ def run_load(world_db: Path, *, workers: int = _DEFAULT_WORKERS,
                 base_url=base_url, headers={"Origin": base_url}, timeout=30.0)
         # No context manager: the suite-wide pattern drives the app without
         # entering its lifespan, and N concurrent startups are not the test.
-        return TestClient(app, headers={"Origin": "http://testserver"})
+        return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
     def _worker(worker_id: int) -> None:
         client = _client()

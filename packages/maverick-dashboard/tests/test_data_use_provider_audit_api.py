@@ -250,8 +250,8 @@ def environment(monkeypatch: pytest.MonkeyPatch):
     app.state.data_use_provider_audit_read_grant_factory = read_grant_factory
     app.include_router(api.router, prefix="/api/v1")
     client = TestClient(
-        app,
-        headers={"Origin": "http://testserver", "X-Test-Subject": "operator"},
+        app, base_url="http://127.0.0.1",
+        headers={"Origin": "http://127.0.0.1", "X-Test-Subject": "operator"},
     )
     return client, state, stores, worker, grants
 
@@ -500,6 +500,6 @@ def test_disabled_or_missing_runtime_fails_closed(environment):
         ),
         prefix="/api/v1",
     )
-    isolated = TestClient(app, headers={"Origin": "http://testserver"})
+    isolated = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     # Merely importing/mounting the isolated module grants no store access.
     assert isolated.get(f"{API}/counts").status_code == 503

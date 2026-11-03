@@ -75,7 +75,7 @@ def _harness(monkeypatch):
     monkeypatch.setattr(suggested.changes, "authority", authority)
     app = FastAPI()
     app.include_router(ops.router)
-    return TestClient(app), state
+    return TestClient(app, base_url="http://127.0.0.1"), state
 
 
 def _catalog(client):

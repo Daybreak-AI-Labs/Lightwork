@@ -101,8 +101,8 @@ def environment(monkeypatch: pytest.MonkeyPatch):
     app = FastAPI()
     app.include_router(api.create_ai_governance_loop_router(deps), prefix="/api/v1")
     client = TestClient(
-        app,
-        headers={"Origin": "http://testserver", "X-Test-Subject": "reviewer"},
+        app, base_url="http://127.0.0.1",
+        headers={"Origin": "http://127.0.0.1", "X-Test-Subject": "reviewer"},
     )
     return client, state, app
 
@@ -293,7 +293,7 @@ def test_missing_or_mismatched_runtime_and_closed_core_errors_fail_closed(
         ),
         prefix="/api/v1",
     )
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     assert client.get(f"{BASE}/status").status_code == 503
 
     def mismatched(_tenant, principal, _request):
@@ -309,7 +309,7 @@ def test_missing_or_mismatched_runtime_and_closed_core_errors_fail_closed(
         ),
         prefix="/api/v1",
     )
-    mismatch_client = TestClient(mismatch, headers={"Origin": "http://testserver"})
+    mismatch_client = TestClient(mismatch, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     assert mismatch_client.get(f"{BASE}/status").status_code == 503
 
     class Failing(Runtime):
@@ -334,7 +334,7 @@ def test_missing_or_mismatched_runtime_and_closed_core_errors_fail_closed(
         ),
         prefix="/api/v1",
     )
-    failed_client = TestClient(failed, headers={"Origin": "http://testserver"})
+    failed_client = TestClient(failed, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     assert failed_client.get(f"{BASE}/cases/{ASSET}").status_code == 404
     integrity = failed_client.get(f"{BASE}/cases/{ASSET}/integrity")
     assert integrity.status_code == 503

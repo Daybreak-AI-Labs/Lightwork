@@ -127,7 +127,7 @@ def _add_routes(app: FastAPI) -> FastAPI:
 def _client(app: FastAPI | None = None) -> TestClient:
     # The dashboard builds its app with these options; see app.py.
     app = app or _app(**request_spans.fastapi_telemetry_kwargs())
-    return TestClient(app, raise_server_exceptions=False)
+    return TestClient(app, base_url="http://127.0.0.1", raise_server_exceptions=False)
 
 
 def _sdk_provider():

@@ -21,7 +21,7 @@ def _app(limit: int) -> TestClient:
         return {"bytes": len(await request.body())}
 
     app.add_middleware(RequestSizeLimitMiddleware, limit=limit)
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def test_small_uploads_pass_and_oversize_uploads_are_refused_plainly():

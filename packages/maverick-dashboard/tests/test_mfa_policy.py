@@ -204,7 +204,7 @@ def test_reauthenticate_url_prefers_the_browser_login(monkeypatch):
     monkeypatch.setenv("MAVERICK_OIDC_SESSION_SECRET", "s")
     # Browser login is on only when fully configured (maverick.oidc.login_enabled).
     monkeypatch.setenv("MAVERICK_OIDC_CLIENT_SECRET", "x")  # pragma: allowlist secret
-    monkeypatch.setenv("MAVERICK_OIDC_REDIRECT_URI", "http://testserver/auth/callback")
+    monkeypatch.setenv("MAVERICK_OIDC_REDIRECT_URI", "http://127.0.0.1/auth/callback")
     monkeypatch.setenv("MAVERICK_OIDC_AUDIENCE", "c")
     url = step_up.reauthenticate_url(
         SimpleNamespace(url=SimpleNamespace(path="/users", query="a=1"), method="GET"))

@@ -40,7 +40,7 @@ def test_new_native_fields_keep_validation_errors_value_free(monkeypatch, tmp_pa
         path = "/application"
         body.update(provider="google", client_id="synthetic-client")
     body[field] = "synthetic-private-submitted-value"
-    with TestClient(app, headers={"Origin": "http://testserver"}) as client:
+    with TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}) as client:
         response = client.request("PUT" if field == "desktop_return" else "POST", "/api/v1/connection-setup" + path, json=body)
     assert response.status_code == 422
     assert "synthetic-private-submitted-value" not in response.text
@@ -60,7 +60,7 @@ def test_remote_native_capability_has_only_four_scoped_commands():
 
 
 def test_native_helper_is_served_by_real_asset_handler():
-    with TestClient(app, headers={"Origin": "http://testserver"}) as client:
+    with TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}) as client:
         response = client.get("/static/lightwork-native-account-return.js")
     assert response.status_code == 200
     assert "javascript" in response.headers["content-type"]

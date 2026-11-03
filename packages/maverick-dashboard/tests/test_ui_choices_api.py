@@ -34,7 +34,7 @@ def client(tmp_path, monkeypatch):
             return await call_next(request)
 
     app.include_router(api.router)
-    with TestClient(app) as c:
+    with TestClient(app, base_url="http://127.0.0.1") as c:
         yield c
     config.reset_config_cache()
 

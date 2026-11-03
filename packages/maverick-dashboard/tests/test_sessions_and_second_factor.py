@@ -19,7 +19,7 @@ AUTH_ENDPOINT = "https://idp.example.com/authorize"
 TOKEN_ENDPOINT = "https://idp.example.com/token"
 SESSION_SECRET = "unit-test-session-secret"  # pragma: allowlist secret
 ISSUER = "https://idp.example.com"
-ORIGIN = {"Origin": "http://testserver"}
+ORIGIN = {"Origin": "http://127.0.0.1"}
 
 
 @pytest.fixture(autouse=True)
@@ -32,7 +32,7 @@ def login_env(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_OIDC_AUDIENCE", "maverick")
     monkeypatch.setenv("MAVERICK_OIDC_CLIENT_ID", "test-client-id")
     monkeypatch.setenv("MAVERICK_OIDC_CLIENT_SECRET", "test-client-secret")
-    monkeypatch.setenv("MAVERICK_OIDC_REDIRECT_URI", "http://testserver/auth/callback")
+    monkeypatch.setenv("MAVERICK_OIDC_REDIRECT_URI", "http://127.0.0.1/auth/callback")
     monkeypatch.setenv("MAVERICK_OIDC_SESSION_SECRET", SESSION_SECRET)
     monkeypatch.setenv("MAVERICK_OIDC_AUTHORIZATION_ENDPOINT", AUTH_ENDPOINT)
     monkeypatch.setenv("MAVERICK_OIDC_TOKEN_ENDPOINT", TOKEN_ENDPOINT)
@@ -66,7 +66,7 @@ def _login(client, monkeypatch, *, sub="user-xyz", claims=None, path="/auth/logi
 
 @pytest.fixture
 def client():
-    return TestClient(app, headers=ORIGIN)
+    return TestClient(app, base_url="http://127.0.0.1", headers=ORIGIN)
 
 
 # ---- sign-in with a second factor --------------------------------------------
@@ -125,7 +125,7 @@ def test_policy_on_accepts_amr_and_configured_acr(client, monkeypatch, tmp_path)
     assert resp.status_code == 303 and resp.headers["location"] == "/"
     # The configured context was also requested from the provider.
     assert q["acr_values"] == ["urn:x:mfa"]
-    fresh = TestClient(app, headers=ORIGIN)
+    fresh = TestClient(app, base_url="http://127.0.0.1", headers=ORIGIN)
     resp, _ = _login(fresh, monkeypatch, claims={"amr": ["mfa"]})
     assert resp.status_code == 303 and resp.headers["location"] == "/"
 
@@ -134,7 +134,7 @@ def test_fresh_login_asks_the_provider_to_authenticate_again(client):
     resp = client.get("/auth/login?fresh=1&return_to=/users", follow_redirects=False)
     q = parse_qs(urlparse(resp.headers["location"]).query)
     assert q["prompt"] == ["login"] and q["max_age"] == ["0"]
-    plain = TestClient(app).get("/auth/login", follow_redirects=False)
+    plain = TestClient(app, base_url="http://127.0.0.1").get("/auth/login", follow_redirects=False)
     assert "prompt" not in parse_qs(urlparse(plain.headers["location"]).query)
 
 
@@ -181,7 +181,7 @@ def test_step_up_does_not_apply_without_the_policy_or_without_named_sign_in(clie
     for name in ("MAVERICK_OIDC_ENABLED", "MAVERICK_DASHBOARD_ADMINS"):
         monkeypatch.delenv(name)
     monkeypatch.setenv("MAVERICK_MFA_REQUIRE", "1")
-    local = TestClient(app, headers=ORIGIN)
+    local = TestClient(app, base_url="http://127.0.0.1", headers=ORIGIN)
     assert local.post("/users/set", data={"principal": "user:bob", "role": "viewer"},
                       follow_redirects=False).status_code == 303
 
@@ -228,7 +228,7 @@ def test_unusable_auth_time_falls_back_to_the_sign_in_time(client, monkeypatch):
     import time as _time
 
     for n, bad in enumerate(("soon", True, _time.time() + 3600, float("nan"))):
-        other = TestClient(app, headers=ORIGIN)
+        other = TestClient(app, base_url="http://127.0.0.1", headers=ORIGIN)
         ol._CONSUMED_TX_IDS.clear()
         _login(other, monkeypatch, claims={"amr": ["mfa"], "auth_time": bad})
         payload = _session_payload(other)
@@ -285,7 +285,7 @@ def _audit_rows(monkeypatch):
 def test_sign_out_this_device_ends_only_that_session(client, monkeypatch):
     rows = _audit_rows(monkeypatch)
     _login(client, monkeypatch, claims={"amr": ["mfa"]})
-    other = TestClient(app, headers=ORIGIN)
+    other = TestClient(app, base_url="http://127.0.0.1", headers=ORIGIN)
     _login(other, monkeypatch, claims={"amr": ["mfa"]})
     mine = client.get("/api/v1/sessions").json()["sessions"]
     assert len(mine) == 2
@@ -302,7 +302,7 @@ def test_sign_out_this_device_ends_only_that_session(client, monkeypatch):
 def test_sign_out_everywhere_ends_every_session_and_legacy_cookies(client, monkeypatch):
     rows = _audit_rows(monkeypatch)
     _login(client, monkeypatch, claims={"amr": ["mfa"]})
-    legacy = TestClient(app, headers=ORIGIN)
+    legacy = TestClient(app, base_url="http://127.0.0.1", headers=ORIGIN)
     import time as _time
 
     from maverick.web_session import sign_session
@@ -321,7 +321,7 @@ def test_sign_out_everywhere_ends_every_session_and_legacy_cookies(client, monke
 
 def test_only_an_administrator_sees_or_ends_other_peoples_sessions(client, monkeypatch):
     _login(client, monkeypatch, claims={"amr": ["mfa"]})
-    admin = TestClient(app, headers=ORIGIN)
+    admin = TestClient(app, base_url="http://127.0.0.1", headers=ORIGIN)
     _login(admin, monkeypatch, sub="admin-1", claims={"amr": ["mfa"]})
     assert client.get("/api/v1/sessions?principal=user:admin-1").status_code == 403
     assert client.get("/api/v1/sessions?all=1").json()["sessions"][0]["principal"] == "user:user-xyz"
@@ -355,7 +355,7 @@ def test_a_session_whose_record_is_unknown_is_not_a_session(client, monkeypatch)
 def test_sessions_page_works_in_local_mode(monkeypatch):
     for name in ("MAVERICK_OIDC_ENABLED", "MAVERICK_DASHBOARD_ADMINS"):
         monkeypatch.delenv(name)
-    local = TestClient(app, headers=ORIGIN)
+    local = TestClient(app, base_url="http://127.0.0.1", headers=ORIGIN)
     page = local.get("/settings/sessions", headers={"Accept": "text/html"})
     assert page.status_code == 200 and "No active sessions are recorded" in page.text
     assert local.get("/api/v1/sessions").json() == {"sessions": []}

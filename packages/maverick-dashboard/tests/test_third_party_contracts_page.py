@@ -43,7 +43,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setattr(page, "has_global_permission", lambda _request, _permission: True)
     app = FastAPI()
     app.include_router(page.create_third_party_contracts_page_router(_templates()))
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def test_workbench_is_store_free_closed_and_copilot_enabled(client: TestClient) -> None:
@@ -202,7 +202,7 @@ def test_custom_theme_uses_same_csp_nonce(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(page, "has_global_permission", lambda _request, _permission: True)
     app = FastAPI()
     app.include_router(page.create_third_party_contracts_page_router(_templates()))
-    response = TestClient(app, headers={"Origin": "http://testserver"}).get(ROUTE)
+    response = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}).get(ROUTE)
     parser = _Markup()
     parser.feed(response.text)
     nonces = [attrs.get("nonce") for tag, attrs in parser.tags if tag == "style"]

@@ -24,7 +24,7 @@ from maverick_dashboard.app import app
 
 from test_support.settings_pages import every_group, save_catalog
 
-client = TestClient(app, headers={"Origin": "http://testserver"})
+client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 API = "/api/v1/settings/catalog"
 CHECK = API + "/test"
 ROWS = [catalog.BY_ID[s.id] for s in access.entries(catalog.S, catalog.C, catalog.Column)]
@@ -433,7 +433,7 @@ def test_check_validates_the_entered_value_first(audit_rows):
 
 
 def test_checks_are_admin_same_origin_bounded_and_only_where_offered(monkeypatch, audit_rows):
-    assert TestClient(app).post(CHECK, json={"id": "license.api_url"}).status_code == 403
+    assert TestClient(app, base_url="http://127.0.0.1").post(CHECK, json={"id": "license.api_url"}).status_code == 403
     r = client.post(CHECK, json={"id": "safety.profile"})
     assert r.status_code == 404 and r.json()["message"] == "This setting has nothing to test."
     monkeypatch.setattr(page, "_CHECK_LIMIT", 2)
@@ -662,7 +662,7 @@ def _invite_client(email: str) -> TestClient:
     """A browser signed in with an invitation session (a real, signed cookie)."""
     from maverick_dashboard import invites
 
-    return TestClient(app, headers={"Origin": "http://testserver"},
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"},
                       cookies={"mvk_session": invites.mint_local_session(email)})
 
 

@@ -46,7 +46,7 @@ def env(monkeypatch, tmp_path):
     rows: list[dict] = []
     monkeypatch.setattr(audit, "audit_event",
                         lambda kind, **payload: rows.append({"kind": kind, **payload}) or True)
-    yield TestClient(dash_app.app), handled, rows
+    yield TestClient(dash_app.app, base_url="http://127.0.0.1"), handled, rows
     config.reset_config_cache()
 
 

@@ -41,7 +41,7 @@ def _client(monkeypatch, tmp_path, *, enabled=True):
         lambda _tenant, _request: store
     )
     app.include_router(create_governed_document_vault_router())
-    return TestClient(app, headers={"Origin": "http://testserver"}), store
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}), store
 
 
 def test_disabled_status_and_ingestion_fail_without_touching_authority(monkeypatch, tmp_path):

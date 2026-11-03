@@ -25,7 +25,7 @@ from maverick_dashboard.app import app
 
 from test_support.consent_public_seed import browser_headers, seed
 
-client = TestClient(app, headers={"Origin": "http://testserver"})
+client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 KEY_API = "/api/v1/consent/publishing/signing-key"
 SETTINGS_API = "/api/v1/settings/catalog"
 CONFIGURATION = "/api/v1/public/consent/configuration"
@@ -305,7 +305,7 @@ def test_replacing_the_key_keeps_earlier_signatures_trusted(audit_rows):
 def test_only_installation_administrators_can_change_the_key(monkeypatch, audit_rows):
     from maverick_dashboard import auth, rbac
 
-    assert TestClient(app).post(f"{KEY_API}/rotate", json={"confirm": True}).status_code == 403
+    assert TestClient(app, base_url="http://127.0.0.1").post(f"{KEY_API}/rotate", json={"confirm": True}).status_code == 403
     assert _rotate(extra="field").status_code == 422
     assert client.post(f"{KEY_API}/rotate", json={"confirm": False}).status_code == 422
     rbac.set_role("user:vera", "viewer")

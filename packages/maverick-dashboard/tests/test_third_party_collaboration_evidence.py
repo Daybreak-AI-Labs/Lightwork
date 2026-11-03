@@ -153,7 +153,7 @@ def portal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     )
     app = FastAPI()
     app.include_router(api.create_external_third_party_collaboration_router(dependencies))
-    return TestClient(app), spy, tokens, rate
+    return TestClient(app, base_url="http://127.0.0.1"), spy, tokens, rate
 
 
 def _upload(client: TestClient, token: str, content: bytes, **headers: str):
@@ -292,7 +292,7 @@ def test_upload_checks_run_before_any_file_bytes_are_read(portal) -> None:
     )
     assert chunked.status_code == 411
     assert "measure_evidence" not in spy.calls
-    assert _upload(client, token, PDF, Origin="http://testserver").status_code == 200
+    assert _upload(client, token, PDF, Origin="http://127.0.0.1").status_code == 200
 
 
 class _Stream:

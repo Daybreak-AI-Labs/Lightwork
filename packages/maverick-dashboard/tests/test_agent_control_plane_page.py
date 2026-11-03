@@ -38,7 +38,7 @@ def _app(
     monkeypatch.setattr(page, "_shared_halt_backend", lambda: shared_halt)
     app = FastAPI()
     app.include_router(page.create_agent_control_plane_page_router(_templates()))
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def test_page_is_wired_hardened_and_permission_aware(monkeypatch) -> None:

@@ -83,7 +83,7 @@ def _app(monkeypatch, *, permitted: bool = True, audit: bool = True,
     monkeypatch.setattr(page, "_audit_tail", lambda n: list(_TAIL if tail is None else tail))
     app = FastAPI()
     app.include_router(page.create_cortex_page_router(_templates()))
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def test_page_renders_the_brain_and_is_hardened(monkeypatch) -> None:
@@ -244,7 +244,7 @@ def test_mounted_page_renders_through_the_dashboard_shell(monkeypatch, tmp_path)
     audit_writer._defaults.clear()
     dash_app._world_cache.clear()
     try:
-        client = TestClient(dash_app.app, headers={"Origin": "http://testserver"})
+        client = TestClient(dash_app.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
         response = client.get(page.PAGE_PATH)
         assert response.status_code == 200, response.text[:400]
         assert "<title>Cortex memory diagnostics · Lightwork</title>" in response.text
@@ -269,7 +269,7 @@ def test_cortex_script_is_served_same_origin(monkeypatch) -> None:
     and the recall console silently blank."""
     from maverick_dashboard.app import app as real_app
     monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "secret-token")  # pragma: allowlist secret
-    client = TestClient(real_app, headers={"Origin": "http://testserver",
+    client = TestClient(real_app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1",
                                            "Authorization": "Bearer secret-token"})
     r = client.get("/static/lightwork-cortex.js")
     assert r.status_code == 200

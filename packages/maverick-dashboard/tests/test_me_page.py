@@ -11,7 +11,7 @@ from urllib.parse import urlencode
 import pytest
 from fastapi.testclient import TestClient
 
-ORIGIN = {"Origin": "http://testserver"}
+ORIGIN = {"Origin": "http://127.0.0.1"}
 SECRET = "8f742231b10e8888abcd99yyyzzz85a5"  # pragma: allowlist secret -- Slack's doc example
 
 
@@ -52,7 +52,7 @@ def _as(monkeypatch, principal, role="operator"):
 def _client():
     from maverick_dashboard.app import app
 
-    return TestClient(app, headers=ORIGIN, follow_redirects=False)
+    return TestClient(app, base_url="http://127.0.0.1", headers=ORIGIN, follow_redirects=False)
 
 
 def _world(tmp_path):

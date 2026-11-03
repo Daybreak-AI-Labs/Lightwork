@@ -97,7 +97,7 @@ def environment(monkeypatch):
         return await call_next(request)
 
     app.include_router(api.create_consent_application_scanner_router(deps), prefix="/api/v1")
-    return TestClient(app, headers={"Origin": "http://testserver"}), state, service
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}), state, service
 
 
 def test_api_is_strict_role_gated_and_decodes_transient_manifest_bytes(environment) -> None:

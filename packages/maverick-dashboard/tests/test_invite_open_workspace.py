@@ -13,7 +13,7 @@ from starlette.requests import Request
 
 def _request() -> Request:
     return Request({"type": "http", "method": "POST", "path": "/auth/invite/t/workspace", "headers": [],
-                    "query_string": b"", "client": ("127.0.0.1", 1), "server": ("testserver", 80), "scheme": "http"})
+                    "query_string": b"", "client": ("127.0.0.1", 1), "server": ("127.0.0.1", 80), "scheme": "http"})
 
 
 def _receipt(monkeypatch, tenant="acme"):

@@ -71,7 +71,7 @@ def client(tmp_path, monkeypatch):
             return await call_next(request)
 
     app.include_router(api.router)
-    return TestClient(app, headers={"Origin": "http://testserver"}), alice["id"]
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}), alice["id"]
 
 
 def test_named_user_sees_only_owned_admissions_and_no_store_metadata(client):

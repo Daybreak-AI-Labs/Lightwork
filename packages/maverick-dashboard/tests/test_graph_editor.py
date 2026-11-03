@@ -97,7 +97,7 @@ def client(world, monkeypatch):
     from maverick_dashboard import app as app_mod
     monkeypatch.setattr(app_mod, "_world", lambda: world)
     monkeypatch.setattr(api_mod, "_world", lambda: world)
-    return TestClient(app_mod.app, headers={"Origin": "http://testserver"})
+    return TestClient(app_mod.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 @pytest.fixture
@@ -201,7 +201,7 @@ def test_create_child_rejects_blank_title_and_missing_parent(client, tree):
 def test_mutations_blocked_cross_origin(client, world, tree):
     """The central CSRF gate covers the new endpoints (no Origin -> 403)."""
     g1, *_ = tree
-    bare = TestClient(client.app)  # no Origin header
+    bare = TestClient(client.app, base_url="http://127.0.0.1")  # no Origin header
     r = bare.post(f"/api/v1/goals/{g1}/retitle", json={"title": "evil"})
     assert r.status_code == 403
     assert world.get_goal(g1).title == "root"
@@ -216,7 +216,7 @@ def test_task_map_page_reads_plainly(tmp_path, monkeypatch):
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     from test_support.plain_language import developer_terms
 
-    r = TestClient(app, headers={"Origin": "http://testserver"}).get("/graph-editor")
+    r = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}).get("/graph-editor")
     assert r.status_code == 200
     assert "Task map" in r.text and "Add smaller task" in r.text
     assert "request failed (" not in r.text and '"#" + n.id' not in r.text

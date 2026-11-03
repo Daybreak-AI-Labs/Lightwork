@@ -5,12 +5,12 @@ import time
 
 from fastapi.testclient import TestClient
 
-_ORIGIN = {"Origin": "http://testserver"}
+_ORIGIN = {"Origin": "http://127.0.0.1"}
 
 
 def _client():
     from maverick_dashboard.app import app
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def _isolate(monkeypatch, tmp_path):

@@ -18,7 +18,7 @@ from maverick.oidc import VerifiedPrincipal
 
 def _client():
     from maverick_dashboard.app import app
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def _save_team(client, key):
@@ -159,7 +159,7 @@ def test_authenticated_owner_can_observe_real_principal_bound_fleet_run(
     client = _client()
     owner_headers = {
         "Authorization": "Bearer dana",
-        "Origin": "http://testserver",
+        "Origin": "http://127.0.0.1",
     }
     response = client.post(
         "/api/v1/fleets/acme/run",

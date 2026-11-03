@@ -29,7 +29,7 @@ def client(monkeypatch: pytest.MonkeyPatch):
         return await call_next(request)
 
     app.include_router(api.router, prefix="/api/v1")
-    return TestClient(app), state
+    return TestClient(app, base_url="http://127.0.0.1"), state
 
 
 def test_lists_real_principals_of_the_active_workspace(client) -> None:

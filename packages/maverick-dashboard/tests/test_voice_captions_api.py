@@ -10,7 +10,7 @@ from maverick.live_captions import Segment, register_source, unregister_source
 from maverick.oidc import VerifiedPrincipal
 from maverick_dashboard.app import app
 
-client = TestClient(app)
+client = TestClient(app, base_url="http://127.0.0.1")
 
 
 @pytest.fixture

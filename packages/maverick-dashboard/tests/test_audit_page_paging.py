@@ -37,7 +37,7 @@ def client(monkeypatch, tmp_path):
                               payload={"section": "features", "key": f"setting{index:02d}", "event_id": f"{index:032x}"}))
     from maverick_dashboard.app import app
 
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def _rows(page):

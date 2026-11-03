@@ -36,7 +36,7 @@ def test_memo_is_per_request_and_follows_the_threadpool():
         pooled = await run_in_threadpool(_request_memo.memoized, "k", compute)
         return {"first": first, "again": again, "pooled": pooled}
 
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1")
     assert client.get("/x").json() == {"first": 1, "again": 1, "pooled": 1}
     assert client.get("/x").json() == {"first": 2, "again": 2, "pooled": 2}
     assert _request_memo.in_scope() is False  # nothing leaks past the request
@@ -61,7 +61,7 @@ def test_auth_predicates_are_answered_once_per_request(monkeypatch):
             auth.non_static_auth_configured()
         return {"calls": calls["n"]}
 
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1")
     assert client.get("/x").json() == {"calls": 1}
     assert client.get("/x").json() == {"calls": 2}  # a new request asks again
     # Outside a request the predicate still reads live configuration.
@@ -153,7 +153,7 @@ def test_a_request_still_reads_policy_errors_variables_and_the_key_live(tmp_path
         return seen
 
     try:
-        assert TestClient(app).get("/x").json() == {
+        assert TestClient(app, base_url="http://127.0.0.1").get("/x").json() == {
             "key": [None, "sk-test-not-a-real-key"],  # pragma: allowlist secret
             "value": ["one", "two"],
             "budget": 7.0,
@@ -277,7 +277,7 @@ def test_a_page_reads_the_configuration_files_about_once(tmp_path, monkeypatch):
     real = config._read_global_config
     monkeypatch.setattr(config, "_read_global_config", lambda: reads.append(1) or real())
     monkeypatch.setattr(config, "_KEEP_READ_SECONDS", 600.0)  # a slow render is not what is tested
-    client = TestClient(dashboard.app, headers={"Origin": "http://testserver"})
+    client = TestClient(dashboard.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     try:
         assert client.get("/approvals").status_code == 200
         reads.clear()

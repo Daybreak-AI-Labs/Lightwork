@@ -3,12 +3,12 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-_ORIGIN = {"origin": "http://testserver"}
+_ORIGIN = {"origin": "http://127.0.0.1"}
 
 
 def _client():
     from maverick_dashboard.app import app
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def _prep(monkeypatch, tmp_path):
@@ -53,7 +53,7 @@ def test_chat_send_empty_file_input_still_works(monkeypatch, tmp_path):
     ).encode()
     r = _client().post(
         "/chat/send", content=body, follow_redirects=False,
-        headers={"origin": "http://testserver",
+        headers={"origin": "http://127.0.0.1",
                  "content-type": f"multipart/form-data; boundary={b}"},
     )
     assert r.status_code == 303

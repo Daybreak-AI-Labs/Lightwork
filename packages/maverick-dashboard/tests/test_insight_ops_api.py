@@ -10,7 +10,7 @@ import sys
 import pytest
 from fastapi.testclient import TestClient
 
-ORIGIN = {"Origin": "http://testserver"}
+ORIGIN = {"Origin": "http://127.0.0.1"}
 
 
 @pytest.fixture
@@ -33,7 +33,7 @@ def client(monkeypatch, tmp_path):
     audit_writer._defaults.clear()
     dash_app._world_cache.clear()
     try:
-        yield TestClient(dash_app.app, headers=ORIGIN)
+        yield TestClient(dash_app.app, base_url="http://127.0.0.1", headers=ORIGIN)
     finally:
         config.reset_config_cache()
         audit_writer._default = None

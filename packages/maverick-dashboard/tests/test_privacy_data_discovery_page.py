@@ -35,7 +35,7 @@ def page_client():
             },
         )
 
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def test_page_renders_full_operator_contract(page_client: TestClient) -> None:

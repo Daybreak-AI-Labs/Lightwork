@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 def _client():
     from maverick_dashboard.app import app
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def _isolate(monkeypatch, tmp_path):
@@ -114,7 +114,7 @@ def test_legacy_approve_is_blocked_but_deny_remains_available(monkeypatch, tmp_p
     r = client.post(
         f"/api/v1/approvals/{aid}/approve",
         json={"acknowledged": True, "confirmation": "approve"},
-        headers={"Origin": "http://testserver"},
+        headers={"Origin": "http://127.0.0.1"},
     )
     assert r.status_code == 409
     assert "predates exact-operation review" in r.json()["detail"]
@@ -122,7 +122,7 @@ def test_legacy_approve_is_blocked_but_deny_remains_available(monkeypatch, tmp_p
 
     deny = client.post(
         f"/api/v1/approvals/{aid}/deny",
-        headers={"Origin": "http://testserver"},
+        headers={"Origin": "http://127.0.0.1"},
     )
     assert deny.status_code == 204
     assert w.get_approval(aid).status == "denied"
@@ -137,7 +137,7 @@ def test_deny_transitions_state(monkeypatch, tmp_path):
 
     r = client.post(
         f"/api/v1/approvals/{aid}/deny",
-        headers={"Origin": "http://testserver"},
+        headers={"Origin": "http://127.0.0.1"},
     )
     assert r.status_code == 204
     assert w.get_approval(aid).status == "denied"
@@ -165,7 +165,7 @@ def test_revision_requires_rationale_supersedes_old_and_requires_fresh_card(
     missing = client.post(
         f"/api/v1/approvals/{old_id}/revise",
         json={"rationale": "   "},
-        headers={"Origin": "http://testserver"},
+        headers={"Origin": "http://127.0.0.1"},
     )
     assert missing.status_code == 422
     assert w.get_approval(old_id).status == "pending"
@@ -173,7 +173,7 @@ def test_revision_requires_rationale_supersedes_old_and_requires_fresh_card(
     revised = client.post(
         f"/api/v1/approvals/{old_id}/revise",
         json={"rationale": "Use the corrected customer and amount."},
-        headers={"Origin": "http://testserver"},
+        headers={"Origin": "http://127.0.0.1"},
     )
     assert revised.status_code == 200
     body = revised.json()
@@ -188,7 +188,7 @@ def test_revision_requires_rationale_supersedes_old_and_requires_fresh_card(
         f"/api/v1/approvals/{old_id}/approve",
         json={"acknowledged": True, "confirmation": "approve"},
         headers={
-            "Origin": "http://testserver",
+            "Origin": "http://127.0.0.1",
             "X-Lightwork-Approval-Binding": old_card["binding_sha256"],
         },
     )
@@ -214,7 +214,7 @@ def test_revision_requires_rationale_supersedes_old_and_requires_fresh_card(
         f"/api/v1/approvals/{fresh_id}/approve",
         json={"acknowledged": True, "confirmation": "approve"},
         headers={
-            "Origin": "http://testserver",
+            "Origin": "http://127.0.0.1",
             "X-Lightwork-Approval-Binding": fresh_card["binding_sha256"],
         },
     )
@@ -227,7 +227,7 @@ def test_approve_unknown_is_404(monkeypatch, tmp_path):
     r = client.post(
         "/api/v1/approvals/9999/approve",
         json={"acknowledged": True, "confirmation": "approve"},
-        headers={"Origin": "http://testserver"},
+        headers={"Origin": "http://127.0.0.1"},
     )
     assert r.status_code == 404
 
@@ -269,7 +269,7 @@ def test_decision_is_anchored_in_audit_chain(monkeypatch, tmp_path):
         f"/api/v1/approvals/{aid}/approve",
         json={"acknowledged": True, "confirmation": "approve"},
         headers={
-            "Origin": "http://testserver",
+            "Origin": "http://127.0.0.1",
             "X-Lightwork-Approval-Binding": card["binding_sha256"],
         },
     )
@@ -294,7 +294,7 @@ def test_no_audit_event_when_decision_is_a_noop(monkeypatch, tmp_path):
                         lambda kind, **p: recorded.append((kind, p)) or True)
     client = _client()
     r = client.post("/api/v1/approvals/999999/deny",
-                    headers={"Origin": "http://testserver"})
+                    headers={"Origin": "http://127.0.0.1"})
     assert r.status_code == 404
     assert recorded == []
 
@@ -326,7 +326,7 @@ def test_structured_card_is_visible_escaped_and_requires_exact_binding(
     missing = client.post(
         f"/api/v1/approvals/{aid}/approve",
         json={"acknowledged": True, "confirmation": "approve"},
-        headers={"Origin": "http://testserver"},
+        headers={"Origin": "http://127.0.0.1"},
     )
     assert missing.status_code == 409
     assert w.get_approval(aid).status == "pending"
@@ -334,7 +334,7 @@ def test_structured_card_is_visible_escaped_and_requires_exact_binding(
         f"/api/v1/approvals/{aid}/approve",
         json={"acknowledged": True, "confirmation": "approve"},
         headers={
-            "Origin": "http://testserver",
+            "Origin": "http://127.0.0.1",
             "X-Lightwork-Approval-Binding": "b" * 64,
         },
     )
@@ -344,7 +344,7 @@ def test_structured_card_is_visible_escaped_and_requires_exact_binding(
         f"/api/v1/approvals/{aid}/approve",
         json={"acknowledged": True, "confirmation": "approve"},
         headers={
-            "Origin": "http://testserver",
+            "Origin": "http://127.0.0.1",
             "X-Lightwork-Approval-Binding": card["binding_sha256"],
         },
     )
@@ -406,7 +406,7 @@ def test_expired_structured_card_never_mutates_approval(monkeypatch, tmp_path):
         f"/api/v1/approvals/{aid}/approve",
         json={"acknowledged": True, "confirmation": "approve"},
         headers={
-            "Origin": "http://testserver",
+            "Origin": "http://127.0.0.1",
             "X-Lightwork-Approval-Binding": card["binding_sha256"],
         },
     )
@@ -437,7 +437,7 @@ def test_view_only_approval_submission_is_audited_without_sensitive_content(
     response = _client().post(
         f"/api/v1/approvals/{aid}/approve",
         json={"acknowledged": True, "confirmation": "approve"},
-        headers={"Origin": "http://testserver"},
+        headers={"Origin": "http://127.0.0.1"},
     )
 
     assert response.status_code == 403
@@ -467,7 +467,7 @@ def test_view_only_submission_stays_pending_when_denial_audit_is_unavailable(
     response = _client().post(
         f"/api/v1/approvals/{approval_id}/approve",
         json={"acknowledged": True, "confirmation": "approve"},
-        headers={"Origin": "http://testserver"},
+        headers={"Origin": "http://127.0.0.1"},
     )
 
     assert response.status_code == 503
@@ -535,7 +535,7 @@ def test_decision_routes_run_the_blocking_decision_in_a_worker_thread(monkeypatc
         return Response(status_code=204)
 
     monkeypatch.setattr(api, "_decide_approval", decide)
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     response = client.post(f"/api/v1/approvals/{approval_id}/{verb}", json={})
     assert response.status_code == 204, response.text
     assert seen == ["worker thread"]

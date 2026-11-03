@@ -214,7 +214,7 @@ def environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     )
     app = FastAPI()
     app.include_router(consent_scan_inventory_api.router, prefix="/api/v1")
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     yield client, inventory, scanner, tracker, clock, config_path
     config.reset_config_cache()
 
@@ -515,7 +515,7 @@ def _two_person_client() -> TestClient:
         return await call_next(request)
 
     app.include_router(consent_scan_inventory_api.router, prefix="/api/v1")
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def test_scan_now_runs_the_worker_protocol_without_exposing_lease_tokens(environment) -> None:

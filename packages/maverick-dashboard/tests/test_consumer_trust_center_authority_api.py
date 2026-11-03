@@ -396,7 +396,7 @@ def environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         api.create_consumer_trust_center_authority_router(dependencies),
         prefix="/api/v1",
     )
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     return client, database, state
 
 
@@ -1100,7 +1100,7 @@ def test_default_authority_fails_closed_without_server_resolvers(
         return await call_next(request)
 
     app.include_router(api.router, prefix="/api/v1")
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     response = client.get(f"{API}/contexts/{CONTEXT}")
     assert response.status_code == 503
     assert response.json() == {"detail": "Trust Center authority is unavailable"}

@@ -19,7 +19,7 @@ def client(monkeypatch, tmp_path):
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     import maverick_dashboard.api as api
     monkeypatch.setattr(api, "_PERF_SLA_CACHE", None)
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def test_perf_api_shape(client, monkeypatch, tmp_path):

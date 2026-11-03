@@ -5,14 +5,14 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-_ORIGIN = {"origin": "http://testserver"}
+_ORIGIN = {"origin": "http://127.0.0.1"}
 _SONNET = "claude-sonnet-4-6"
 _OPUS = "claude-opus-4-8"
 
 
 def _client():
     from maverick_dashboard.app import app
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def _iso(monkeypatch, tmp_path):

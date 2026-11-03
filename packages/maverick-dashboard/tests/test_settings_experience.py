@@ -18,7 +18,7 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     config.reset_config_cache()
     app._world_cache.clear()
-    yield TestClient(app.app, headers={"Origin": "http://testserver"})
+    yield TestClient(app.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     config.reset_config_cache()
 
 

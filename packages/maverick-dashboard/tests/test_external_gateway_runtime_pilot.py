@@ -178,7 +178,7 @@ def pilot_estate(tmp_path, monkeypatch):
             "risk_context": {},
         },
     )
-    admin = TestClient(app, headers={"Origin": "http://testserver"})
+    admin = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     enrolled = admin.post(
         "/api/v1/external-agents",
         json={
@@ -260,7 +260,7 @@ def test_real_gateway_pilot_exercises_retry_ambiguity_idempotency_and_rollback(
 ):
     admin, connector, token, _ = pilot_estate
     transport = FaultInjectingPilotTransport(
-        _ASGITransport(TestClient(app)),
+        _ASGITransport(TestClient(app, base_url="http://127.0.0.1")),
         (
             PilotFaultRule(
                 name="evaluate-outage",
@@ -332,7 +332,7 @@ def test_connector_outage_after_effect_stays_indeterminate_and_is_not_retried(
     client = ExternalGatewayPilotClient(
         origin="http://localhost",
         bearer_token=token,
-        transport=_ASGITransport(TestClient(app)),
+        transport=_ASGITransport(TestClient(app, base_url="http://127.0.0.1")),
         sleeper=lambda _seconds: None,
     )
     report = RuntimePolicyAcceptancePilot(
@@ -357,7 +357,7 @@ def test_commit_rebinds_current_runtime_policy_before_external_effect(
     monkeypatch,
 ):
     _, connector, token, _ = pilot_estate
-    bare = TestClient(app)
+    bare = TestClient(app, base_url="http://127.0.0.1")
     headers = {"Authorization": f"Bearer {token}"}
     request = {
         "connector": "pilot",
@@ -415,7 +415,7 @@ def test_commit_rebinds_current_runtime_policy_before_external_effect(
 
 def test_commit_cannot_swap_the_runtime_context_that_was_approved(pilot_estate):
     _, connector, token, _ = pilot_estate
-    bare = TestClient(app)
+    bare = TestClient(app, base_url="http://127.0.0.1")
     headers = {"Authorization": f"Bearer {token}"}
     request = {
         "connector": "pilot",
@@ -461,7 +461,7 @@ def test_pilot_stops_pending_without_impersonating_a_human_approver(pilot_estate
     client = ExternalGatewayPilotClient(
         origin="http://localhost",
         bearer_token=token,
-        transport=_ASGITransport(TestClient(app)),
+        transport=_ASGITransport(TestClient(app, base_url="http://127.0.0.1")),
         sleeper=lambda _seconds: None,
     )
     report = RuntimePolicyAcceptancePilot(client).run(

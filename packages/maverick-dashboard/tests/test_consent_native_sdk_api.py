@@ -133,7 +133,7 @@ def test_enrollment_and_signed_dispatch_are_mounted_and_private(tmp_path) -> Non
     )
     app = FastAPI()
     app.include_router(create_consent_native_sdk_router(deps))
-    hostile_client = TestClient(app, headers={"Origin": "https://attacker.invalid"})
+    hostile_client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "https://attacker.invalid"})
     material = b"play-integrity-statement"
     private = Ed25519PrivateKey.generate()
     enrollment = {
@@ -153,7 +153,7 @@ def test_enrollment_and_signed_dispatch_are_mounted_and_private(tmp_path) -> Non
     rejected = hostile_client.post("/api/v1/public/consent/native/enroll", json=enrollment)
     assert rejected.status_code == 401
     # Exact-origin Tizen/webOS JSON POSTs are admitted; ambient credentials are not.
-    native_client = TestClient(app, headers={"Origin": "http://testserver"})
+    native_client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     enrolled = native_client.post(
         "/api/v1/public/consent/native/enroll",
         json=enrollment,
@@ -196,8 +196,8 @@ def test_enrollment_and_signed_dispatch_are_mounted_and_private(tmp_path) -> Non
         .decode(),
     }
     credentialed_client = TestClient(
-        app,
-        headers={"Origin": "http://testserver", "Cookie": "session=ambient"},
+        app, base_url="http://127.0.0.1",
+        headers={"Origin": "http://127.0.0.1", "Cookie": "session=ambient"},
     )
     assert (
         credentialed_client.post(
@@ -295,7 +295,7 @@ def test_disabled_native_boundary_is_not_discoverable(tmp_path) -> None:
         )
     )
     material = b"attestation"
-    response = TestClient(app).post(
+    response = TestClient(app, base_url="http://127.0.0.1").post(
         "/api/v1/public/consent/native/enroll",
         json={
             "application_ref": authority.application_ref,
@@ -352,7 +352,7 @@ def test_gate_runs_off_the_event_loop(endpoint: str) -> None:
             where.append("event loop")
         return False
 
-    client = TestClient(_preflight_only_app(gate=gate))
+    client = TestClient(_preflight_only_app(gate=gate), base_url="http://127.0.0.1")
     assert client.post(f"{_NATIVE}/{endpoint}", json={}).status_code == 404
     assert where == ["worker thread"]
 
@@ -374,7 +374,7 @@ def _address_keys(monkeypatch, *, forwarded_allow_ips: str | None, peer: str, fo
         monkeypatch.setenv("FORWARDED_ALLOW_IPS", forwarded_allow_ips)
     config = uvicorn.Config(app)
     config.load()
-    client = TestClient(config.loaded_app, client=(peer, 4000))
+    client = TestClient(config.loaded_app, base_url="http://127.0.0.1", client=(peer, 4000))
     for address in forwarded:
         # An empty body is refused after the throttle has been charged.
         client.post(f"{_NATIVE}/dispatch", json={}, headers={"X-Forwarded-For": address})

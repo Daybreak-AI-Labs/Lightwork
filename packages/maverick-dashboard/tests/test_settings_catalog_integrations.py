@@ -16,7 +16,7 @@ from maverick_dashboard.app import app
 from test_support.channel_review import channel_review_token
 from test_support.settings_pages import every_group, save_catalog
 
-client = TestClient(app, headers={"Origin": "http://testserver"})
+client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 API = "/api/v1/settings/catalog"
 ROWS = integrations.entries(catalog.S, catalog.C, catalog.Column)
 _KEY = "ab" * 32  # a publisher key in the stored (hex) form

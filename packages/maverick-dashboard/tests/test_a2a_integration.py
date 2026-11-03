@@ -37,7 +37,7 @@ def test_dashboard_serves_a2a_agent_card_when_enabled(monkeypatch, path):
 
     from fastapi.testclient import TestClient
 
-    client = TestClient(dashboard_app.app)
+    client = TestClient(dashboard_app.app, base_url="http://127.0.0.1")
     response = client.get(path)
 
     assert response.status_code == 200
@@ -53,7 +53,7 @@ def test_dashboard_omits_a2a_agent_card_when_disabled(monkeypatch):
 
     from fastapi.testclient import TestClient
 
-    client = TestClient(dashboard_app.app)
+    client = TestClient(dashboard_app.app, base_url="http://127.0.0.1")
 
     assert client.get("/.well-known/agent-card.json").status_code == 404
 
@@ -72,7 +72,7 @@ def test_dashboard_a2a_endpoint_uses_only_its_own_bearer(monkeypatch):
 
     from fastapi.testclient import TestClient
 
-    client = TestClient(dashboard_app.app)
+    client = TestClient(dashboard_app.app, base_url="http://127.0.0.1")
     rpc = {
         "jsonrpc": "2.0",
         "id": 1,

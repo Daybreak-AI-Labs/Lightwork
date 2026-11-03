@@ -331,7 +331,7 @@ def setup_api(tmp_path: Path):
         now=NOW,
     )
     return {
-        "http": TestClient(app),
+        "http": TestClient(app, base_url="http://127.0.0.1"),
         "headers": {
             "Authorization": f"ConsentPublic {raw_client}",
             "X-Lightwork-Consent-Service-Client": "service-tv-1",

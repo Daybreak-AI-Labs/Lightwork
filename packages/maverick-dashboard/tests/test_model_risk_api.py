@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 from maverick_dashboard.app import app
 
-client = TestClient(app, headers={"Origin": "http://testserver"})
+client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 @pytest.fixture(autouse=True)
@@ -1274,7 +1274,7 @@ def test_training_receipt_route_requires_auth_and_binds_actor(monkeypatch):
 
     headers = {
         "Authorization": "Bearer training-operator-token",
-        "Origin": "http://testserver",
+        "Origin": "http://127.0.0.1",
     }
     mismatched = dict(body, actor="impersonated:operator")
     assert client.post(path, json=mismatched, headers=headers).status_code == 403

@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 from maverick_dashboard.app import app
 
-client = TestClient(app, headers={"Origin": "http://testserver"})
+client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def _world(tmp_path, monkeypatch):
@@ -25,7 +25,7 @@ def test_logo_stays_public_when_a_token_is_set(monkeypatch):
     # With a dashboard token, normal pages require auth -- but the brand image
     # must stay reachable so the (auth-exempt) public share view can load it.
     monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "secret-token-xyz")
-    noauth = TestClient(app)  # no bearer header
+    noauth = TestClient(app, base_url="http://127.0.0.1")  # no bearer header
     assert noauth.get("/goals").status_code == 401          # normal page gated
     assert noauth.get("/static/daybreak-logo.jpg").status_code == 200  # logo public
 
@@ -51,6 +51,6 @@ def test_share_page_shows_the_logo(tmp_path, monkeypatch):
     })
     assert shared.status_code == 201, shared.text
     token = shared.json()["url"].split("/share/")[1]
-    page = TestClient(app).get(f"/share/{token}").text   # anon viewer
+    page = TestClient(app, base_url="http://127.0.0.1").get(f"/share/{token}").text   # anon viewer
     assert "/static/daybreak-logo.jpg" in page
     assert "Daybreak Labs" in page

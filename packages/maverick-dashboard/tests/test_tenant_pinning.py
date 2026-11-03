@@ -13,7 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 from maverick_dashboard.app import app
 
-client = TestClient(app, headers={"Origin": "http://testserver"})
+client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 @pytest.fixture(autouse=True)
@@ -147,7 +147,7 @@ def test_websocket_uses_principal_tenant_with_colliding_same_owner_goal(
     with client.websocket_connect(
         f"/ws/v1/runs/{alice_goal}/events",
         headers={
-            "Origin": "http://testserver",
+            "Origin": "http://127.0.0.1",
             "X-Forwarded-User": "alice",
         },
     ) as websocket:
@@ -177,7 +177,7 @@ def test_websocket_wrong_tenant_same_owner_is_non_disclosing_and_resets(
     with client.websocket_connect(
         f"/ws/v1/runs/{wrong_tenant_goal}/events",
         headers={
-            "Origin": "http://testserver",
+            "Origin": "http://127.0.0.1",
             "X-Forwarded-User": "alice",
         },
     ) as websocket:
@@ -200,7 +200,7 @@ def test_websocket_wrong_owner_in_correct_tenant_is_non_disclosing(monkeypatch):
     with client.websocket_connect(
         f"/ws/v1/runs/{wrong_owner_goal}/events",
         headers={
-            "Origin": "http://testserver",
+            "Origin": "http://127.0.0.1",
             "X-Forwarded-User": "alice",
         },
     ) as websocket:

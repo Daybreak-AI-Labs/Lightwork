@@ -106,7 +106,7 @@ def _app(store: _Store):
 def test_public_adapter_has_closed_get_and_digest_only_submit_contract():
     store = _Store()
     app, public_authority = _app(store)
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1")
     configured = client.get("/api/v1/public/consent/global-opt-out/configuration")
     assert configured.status_code == 200
     assert configured.headers["cache-control"] == "no-store, private"
@@ -173,7 +173,7 @@ def test_public_adapter_returns_explicit_closed_errors(error, status, code):
     store = _Store()
     store.error = error
     app, _authority = _app(store)
-    response = TestClient(app).get(
+    response = TestClient(app, base_url="http://127.0.0.1").get(
         "/api/v1/public/consent/global-opt-out/configuration"
     )
     assert response.status_code == status
@@ -191,7 +191,7 @@ def test_public_adapter_checks_nested_gate_before_material_resolution():
     store = _Store()
     app, _authority = _app(store)
     app.state.global_opt_out_enabled_probe = lambda _tenant: False
-    response = TestClient(app).get(
+    response = TestClient(app, base_url="http://127.0.0.1").get(
         "/api/v1/public/consent/global-opt-out/configuration"
     )
     assert response.status_code == 404

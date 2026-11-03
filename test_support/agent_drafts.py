@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from maverick_dashboard.app import app as dashboard_app
 
 # Mutating /api/v1 requests carry a same-origin Origin (the CSRF contract).
-client = TestClient(dashboard_app, headers={"Origin": "http://testserver"})
+client = TestClient(dashboard_app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 DRAFTS = "/api/v1/specialist-drafts"
 PUBLISH_REASON = "Reviewed specialist change approved for this test"

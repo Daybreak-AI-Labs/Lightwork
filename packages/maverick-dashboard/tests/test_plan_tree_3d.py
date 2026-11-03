@@ -18,7 +18,7 @@ def client(tmp_path, monkeypatch):
     from maverick_dashboard import app as app_mod
     monkeypatch.setattr(app_mod, "_world", lambda: w)
     monkeypatch.setattr(api_mod, "_world", lambda: w)
-    yield TestClient(app_mod.app)
+    yield TestClient(app_mod.app, base_url="http://127.0.0.1")
     w.close()
 
 

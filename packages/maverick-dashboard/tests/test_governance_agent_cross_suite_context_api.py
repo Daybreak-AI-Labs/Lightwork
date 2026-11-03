@@ -61,7 +61,7 @@ def environment(monkeypatch: pytest.MonkeyPatch):
     }
     app.include_router(api.router, prefix="/api/v1")
     return (
-        TestClient(app, headers={"Origin": "http://testserver"}),
+        TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}),
         calls,
         app,
     )

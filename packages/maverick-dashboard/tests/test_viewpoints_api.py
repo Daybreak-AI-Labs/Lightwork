@@ -85,7 +85,7 @@ def env(tmp_path, monkeypatch):
             return await call_next(request)
 
     application.include_router(api.router)
-    with TestClient(application, headers={"Origin": "http://testserver"}) as client:
+    with TestClient(application, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}) as client:
         yield SimpleNamespace(client=client, cfg=cfg, roles=roles, audit=rows)
     config.reset_config_cache()
 
@@ -263,7 +263,7 @@ def test_chat_page_offers_two_viewpoints_plainly(monkeypatch, tmp_path):
                         "summary": "", "providers": [], "configured_count": 0, "connected_count": 0, "total": 0}
 
     monkeypatch.setattr(onboarding_state, "workspace_readiness", verdict("ready"))
-    client = TestClient(dashboard.app)
+    client = TestClient(dashboard.app, base_url="http://127.0.0.1")
     page = client.get("/chat")
     assert page.status_code == 200
     assert 'id="vp-form"' in page.text and "Get two viewpoints" in page.text

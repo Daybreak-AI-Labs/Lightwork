@@ -33,7 +33,7 @@ def client(tmp_path, monkeypatch):
     from maverick_dashboard.app import app
 
     monkeypatch.setattr(rbac, "default_role", lambda: "operator")
-    return TestClient(app, headers={"Origin": "http://testserver",
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1",
                                     "Authorization": "Bearer alice"})
 
 

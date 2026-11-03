@@ -9,7 +9,7 @@ from maverick_dashboard.app import static_url
 
 def _client():
     from maverick_dashboard.app import app
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def _prep(monkeypatch, tmp_path):
@@ -49,13 +49,13 @@ def test_admin_can_price_private_model_and_read_back_effective_route(monkeypatch
         "confirm": "on",
     }
     response = c.post("/settings/models/rate", data=data,
-                      headers={"origin": "http://testserver"}, follow_redirects=False)
+                      headers={"origin": "http://127.0.0.1"}, follow_redirects=False)
     assert response.status_code == 303
     from maverick.runtime_overrides import model_rate_overrides
 
     assert model_rate_overrides()["openai_compatible:client-model"]["source"] == "Contract R1"
     pin = c.post("/settings/models", data={"model": "__custom__", "model_custom": "openai_compatible:client-model"},
-                 headers={"origin": "http://testserver"}, follow_redirects=False)
+                 headers={"origin": "http://127.0.0.1"}, follow_redirects=False)
     assert pin.status_code == 303
     page = c.get("/settings", params={"saved": "model_rate"})
     assert page.status_code == 200
@@ -64,7 +64,7 @@ def test_admin_can_price_private_model_and_read_back_effective_route(monkeypatch
     assert "Model spending ceiling updated." in page.text
 
     removed = c.post("/settings/models/rate/remove", data={"model": "openai_compatible:client-model"},
-                     headers={"origin": "http://testserver"}, follow_redirects=False)
+                     headers={"origin": "http://127.0.0.1"}, follow_redirects=False)
     assert removed.status_code == 303
     assert "openai_compatible:client-model" not in model_rate_overrides()
     assert "Will stop before a paid request" in c.get("/settings").text
@@ -72,7 +72,7 @@ def test_admin_can_price_private_model_and_read_back_effective_route(monkeypatch
     already_tracked = c.post(
         "/settings/models/rate",
         data={**data, "rate_model": "claude-sonnet-4-6"},
-        headers={"origin": "http://testserver"}, follow_redirects=False,
+        headers={"origin": "http://127.0.0.1"}, follow_redirects=False,
     )
     assert already_tracked.status_code == 409
     assert "anthropic:claude-sonnet-4-6" not in model_rate_overrides()
@@ -196,7 +196,7 @@ def test_set_and_clear_default_model(monkeypatch, tmp_path):
     _prep(monkeypatch, tmp_path)
     monkeypatch.delenv("MAVERICK_MODEL_OVERRIDE", raising=False)
     c = _client()
-    hdr = {"origin": "http://testserver"}
+    hdr = {"origin": "http://127.0.0.1"}
     r = c.post("/settings/models", data={"model": "claude-opus-4-8"},
                headers=hdr, follow_redirects=False)
     assert r.status_code == 303
@@ -217,7 +217,7 @@ def test_set_and_clear_default_model(monkeypatch, tmp_path):
 def test_set_model_rejects_junk(monkeypatch, tmp_path):
     _prep(monkeypatch, tmp_path)
     r = _client().post("/settings/models", data={"model": "bad model!!"},
-                       headers={"origin": "http://testserver"},
+                       headers={"origin": "http://127.0.0.1"},
                        follow_redirects=False)
     assert r.status_code == 400
 

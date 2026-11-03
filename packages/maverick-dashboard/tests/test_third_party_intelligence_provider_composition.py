@@ -213,7 +213,7 @@ def test_api_exposes_side_effect_free_status_and_admin_source_check(
 
     app.state.third_party_intelligence_provider_runtime = runtime
     app.include_router(api.router, prefix="/api/v1")
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
     status = client.get("/api/v1/third-party/intelligence/provider-runtime/status")
     assert status.status_code == 200, status.text
@@ -265,7 +265,7 @@ def test_lifespan_attachment_starts_and_stops_the_feed_scheduler() -> None:
     assert app.state.third_party_intelligence_provider_runtime is runtime
     assert app.state.third_party_intelligence_feed_scheduler is scheduler
 
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         assert client.get("/openapi.json").status_code == 200
         assert scheduler.started is True
         assert scheduler.stopped is False

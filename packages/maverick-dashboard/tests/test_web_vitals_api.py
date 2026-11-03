@@ -7,7 +7,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-ORIGIN = {"Origin": "http://testserver"}
+ORIGIN = {"Origin": "http://127.0.0.1"}
 
 
 @pytest.fixture(autouse=True)
@@ -41,7 +41,7 @@ def _as(monkeypatch, principal, role="operator"):
 def _client():
     from maverick_dashboard.app import app
 
-    return TestClient(app, headers=ORIGIN, follow_redirects=False)
+    return TestClient(app, base_url="http://127.0.0.1", headers=ORIGIN, follow_redirects=False)
 
 
 def _off(tmp_path):
@@ -105,7 +105,7 @@ def test_needs_a_signed_in_same_origin_visitor(isolated, monkeypatch):
     from maverick_dashboard.app import app
 
     _as(monkeypatch, "user:kim")
-    cross = TestClient(app, headers={"Origin": "https://elsewhere.example"})
+    cross = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "https://elsewhere.example"})
     assert cross.post("/api/v1/telemetry/vitals", json={"path": "/goals", "device": "desktop", "lcp": 1}).status_code == 403
     _as(monkeypatch, "")
     assert _client().post("/api/v1/telemetry/vitals",

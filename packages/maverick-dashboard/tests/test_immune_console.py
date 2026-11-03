@@ -34,7 +34,7 @@ def client(monkeypatch, tmp_path):
     audit_writer._defaults.clear()
     dash_app._world_cache.clear()
     try:
-        yield TestClient(dash_app.app, headers={"Origin": "http://testserver"})
+        yield TestClient(dash_app.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     finally:
         config.reset_config_cache()
         audit_writer._default = None
@@ -113,7 +113,7 @@ def test_permissions_are_enforced(monkeypatch):
     monkeypatch.setattr(immune_console, "require_permission", deny)
     app = FastAPI()
     app.include_router(immune_console.create_immune_console_router(), prefix="/api/v1")
-    c = TestClient(app, headers={"Origin": "http://testserver"})
+    c = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     assert c.get("/api/v1/immune/summary").json()["detail"] == "audit"
     assert c.get("/api/v1/code/summary").json()["detail"] == "operate"
 

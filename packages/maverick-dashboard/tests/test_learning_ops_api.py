@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 
 from test_support.settings_pages import every_group
 
-ORIGIN = {"Origin": "http://testserver"}
+ORIGIN = {"Origin": "http://127.0.0.1"}
 LO = "/api/v1/learning-ops"
 TO = "/api/v1/training-ops"
 _BANNED = re.compile(
@@ -48,7 +48,7 @@ def client(monkeypatch, tmp_path):
     config.reset_config_cache()
     dash_app._world_cache.clear()
     learning_jobs.clear_for_tests()
-    yield TestClient(dash_app.app, headers=ORIGIN)
+    yield TestClient(dash_app.app, base_url="http://127.0.0.1", headers=ORIGIN)
     learning_jobs.clear_for_tests()
     config.reset_config_cache()
     dash_app._world_cache.clear()

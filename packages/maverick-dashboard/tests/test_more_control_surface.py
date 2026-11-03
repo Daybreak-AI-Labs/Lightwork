@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 
 def _client():
     from maverick_dashboard.app import app
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 # ---------- halt detail ----------
@@ -31,7 +31,7 @@ def test_halt_status_includes_reason_and_armed_at(monkeypatch, tmp_path: Path):
     r = client.post(
         "/api/v1/halt",
         json={"reason": "test arm"},
-        headers={"Origin": "http://testserver"},
+        headers={"Origin": "http://127.0.0.1"},
     )
     assert r.status_code == 204
     s = client.get("/api/v1/halt").json()
@@ -71,7 +71,7 @@ def test_cache_purge_endpoint_default_all(monkeypatch, tmp_path):
     r = client.post(
         "/api/v1/cache/purge",
         json={"scopes": ["all"]},
-        headers={"Origin": "http://testserver"},
+        headers={"Origin": "http://127.0.0.1"},
     )
     assert r.status_code == 200
     report = r.json()
@@ -91,7 +91,7 @@ def test_cache_purge_targeted_scope(monkeypatch, tmp_path):
     r = client.post(
         "/api/v1/cache/purge",
         json={"scopes": ["files"]},
-        headers={"Origin": "http://testserver"},
+        headers={"Origin": "http://127.0.0.1"},
     )
     assert r.status_code == 200
     assert read_cache_stats()["entries"] == 0
@@ -215,7 +215,7 @@ def test_resume_404_for_unknown_goal(monkeypatch, tmp_path):
     client = _client()
     r = client.post(
         "/api/v1/goals/9999/resume",
-        headers={"Origin": "http://testserver"},
+        headers={"Origin": "http://127.0.0.1"},
     )
     assert r.status_code == 404
 
@@ -233,7 +233,7 @@ def test_resume_conflicts_when_goal_not_paused(monkeypatch, tmp_path):
     client = _client()
     r = client.post(
         f"/api/v1/goals/{gid}/resume",
-        headers={"Origin": "http://testserver"},
+        headers={"Origin": "http://127.0.0.1"},
     )
     assert r.status_code == 409
     assert r.json()["detail"]["code"] == "restart_changed"
@@ -262,7 +262,7 @@ def test_resume_flips_cancelled_to_pending(monkeypatch, tmp_path):
     client = _client()
     r = client.post(
         f"/api/v1/goals/{gid}/resume",
-        headers={"Origin": "http://testserver"},
+        headers={"Origin": "http://127.0.0.1"},
     )
     assert r.status_code == 204
     # The world.db row flipped.
@@ -290,6 +290,6 @@ def test_resume_blocked_goal(monkeypatch, tmp_path):
     client = _client()
     r = client.post(
         f"/api/v1/goals/{gid}/resume",
-        headers={"Origin": "http://testserver"},
+        headers={"Origin": "http://127.0.0.1"},
     )
     assert r.status_code == 204

@@ -32,7 +32,7 @@ def test_application_mounts_native_public_admin_and_receipt_key_routes(
     # Keep this assertion so a future conflict resolution cannot drop that live mount.
     assert paths.count("/api/v1/governance/inventory/status") == 1
 
-    client = TestClient(app_module.app, headers={"Origin": "http://testserver"})
+    client = TestClient(app_module.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     page = client.get("/consent/native")
     assert page.status_code == 200
     assert 'data-copilot-page="/consent/native"' in page.text

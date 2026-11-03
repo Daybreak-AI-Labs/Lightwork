@@ -11,7 +11,7 @@ TEMPLATES = Path(__file__).resolve().parents[1] / "maverick_dashboard" / "templa
 
 def _client():
     from maverick_dashboard.app import app
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 # ---------- Content-Security-Policy ----------
@@ -279,7 +279,7 @@ def test_every_inline_script_on_a_rendered_page_carries_that_responses_nonce(mon
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     # Mutating /api/v1 calls need the same-origin header (CSRF guard); the local caller is admin.
-    client = TestClient(dash_app.app, headers={"Origin": "http://testserver"})
+    client = TestClient(dash_app.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     # Tenant-scoped pages render only with a selected workspace, as the fresh-process smoke test sets up.
     assert client.post("/api/v1/admin/tenants", json={"id": "csp-nonce-walk", "plan": "enterprise"}).status_code == 201
     assert client.put("/api/v1/workspace/active-tenant", json={"tenant_id": "csp-nonce-walk"}).status_code == 200

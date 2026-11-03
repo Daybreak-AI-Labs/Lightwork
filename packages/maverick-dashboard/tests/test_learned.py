@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 def _client():
     from maverick_dashboard.app import app
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def _isolate(monkeypatch, tmp_path):
@@ -212,7 +212,7 @@ def _enable_oidc_principal_map(monkeypatch, *, default_role: str = "viewer") -> 
 
 
 def _as(user: str) -> dict[str, str]:
-    return {"Authorization": f"Bearer {user}", "Origin": "http://testserver"}
+    return {"Authorization": f"Bearer {user}", "Origin": "http://127.0.0.1"}
 
 
 def test_pending_corpus_details_are_admin_only(monkeypatch, tmp_path):
@@ -327,7 +327,7 @@ def test_harness_corpus_review_endpoint(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "load_config", lambda *a, **k: {
         "self_harness": {"enable": True, "eval_corpus": str(cpath)}})
     client = _client()
-    ok = {"Origin": "http://testserver"}
+    ok = {"Origin": "http://127.0.0.1"}
     r = client.post("/api/v1/harness-corpus/review",
                     json={"key": "m1", "accept": [1], "reject": [2]}, headers=ok)
     assert r.status_code == 200, r.text
@@ -539,7 +539,7 @@ def test_delete_rejects_traversal(monkeypatch, tmp_path):
     for name in ("foo.txt", "x.py.bak", "..", "..%2Fsecret.py", "subdir%2Fx.py"):
         r = client.request(
             "DELETE", f"/api/v1/generated-tools/{name}",
-            headers={"Origin": "http://testserver"},
+            headers={"Origin": "http://127.0.0.1"},
         )
         assert r.status_code in (404, 409), name
     # The out-of-dir target survived every attempt.

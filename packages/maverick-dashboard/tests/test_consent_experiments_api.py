@@ -78,7 +78,7 @@ def environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         lambda **_kwargs: authority
     )
     app.include_router(consent_experiments_api.router, prefix="/api/v1")
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     return client, authority, clock, holder
 
 

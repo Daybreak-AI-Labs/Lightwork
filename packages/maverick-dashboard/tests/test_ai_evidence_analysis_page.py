@@ -37,7 +37,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     )
     templates.env.globals.update(nav_groups=[])
     app.include_router(page.create_ai_evidence_analysis_page_router(templates))
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def test_workbench_is_store_free_no_store_and_csp_closed(client: TestClient) -> None:
@@ -206,7 +206,7 @@ def test_custom_theme_css_uses_a_per_response_csp_nonce(
     templates.env.globals.update(nav_groups=[])
     app = FastAPI()
     app.include_router(page.create_ai_evidence_analysis_page_router(templates))
-    response = TestClient(app, headers={"Origin": "http://testserver"}).get(ROUTE)
+    response = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}).get(ROUTE)
 
     parser = _Markup()
     parser.feed(response.text)

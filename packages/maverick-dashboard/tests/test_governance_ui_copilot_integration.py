@@ -124,7 +124,7 @@ def dashboard_client(
     config.reset_config_cache()
     from maverick_dashboard.app import app
 
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 @pytest.mark.parametrize(("page_path", "page_assets"), GOVERNANCE_PAGES.items())

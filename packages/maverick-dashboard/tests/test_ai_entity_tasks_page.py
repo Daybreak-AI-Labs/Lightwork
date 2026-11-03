@@ -47,7 +47,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     )
     app = FastAPI()
     app.include_router(page.create_ai_entity_tasks_page_router(_templates()))
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def test_workbench_is_store_free_no_store_and_csp_closed(client: TestClient) -> None:
@@ -229,7 +229,7 @@ def test_page_supports_custom_theme_with_one_csp_nonce(
     )
     app = FastAPI()
     app.include_router(page.create_ai_entity_tasks_page_router(_templates()))
-    response = TestClient(app, headers={"Origin": "http://testserver"}).get(ROUTE)
+    response = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}).get(ROUTE)
     parser = _Markup()
     parser.feed(response.text)
     nonces = [attrs.get("nonce") for tag, attrs in parser.tags if tag == "style"]

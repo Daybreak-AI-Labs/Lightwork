@@ -24,7 +24,7 @@ def _isolate(tmp_path, monkeypatch):
 def _client() -> TestClient:
     from maverick_dashboard.app import app
 
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def _visible(html: str) -> str:
@@ -70,7 +70,7 @@ def test_admin_adds_removes_and_resets_catalogs():
 def test_catalog_changes_need_same_origin():
     from maverick_dashboard.app import app
 
-    r = TestClient(app, headers={"Origin": "https://evil.example"}).post(
+    r = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "https://evil.example"}).post(
         "/store/catalogs", data={"action": "reset"}, follow_redirects=False)
     assert r.status_code == 403
 

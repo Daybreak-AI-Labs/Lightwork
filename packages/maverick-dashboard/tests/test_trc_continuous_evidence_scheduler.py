@@ -368,7 +368,7 @@ def test_lifespan_attachment_starts_stops_and_exposes_scheduler_status():
     assert attach_trc_continuous_evidence_scheduler(app, runtime=runtime) is runtime
     assert app.state.trc_continuous_evidence_scheduler is runtime
 
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         assert client.get("/openapi.json").status_code == 200
         assert runtime.started is True
         assert runtime.stopped is False

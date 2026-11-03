@@ -24,7 +24,7 @@ def client(monkeypatch,tmp_path):
     monkeypatch.setattr(knowledge_task_context,'validate_selection',lambda *args,**kwargs:{})
     bindings=[]
     monkeypatch.setattr(knowledge_task_context,'bind',lambda *args:bindings.append(args))
-    with TestClient(dashboard.app,headers={'Origin':'http://testserver'}) as client:
+    with TestClient(dashboard.app, base_url="http://127.0.0.1",headers={'Origin':'http://127.0.0.1'}) as client:
         yield client,world,runs,bindings
     world.close()
 

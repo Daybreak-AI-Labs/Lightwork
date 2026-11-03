@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from test_support.channel_review import channel_review_token
 
-_ORIGIN = {"Origin": "http://testserver"}
+_ORIGIN = {"Origin": "http://127.0.0.1"}
 
 
 @pytest.fixture(autouse=True)
@@ -33,7 +33,7 @@ def _isolated(tmp_path, monkeypatch):
 
 def _client():
     from maverick_dashboard.app import app
-    return TestClient(app, headers=_ORIGIN)
+    return TestClient(app, base_url="http://127.0.0.1", headers=_ORIGIN)
 
 
 def _logs(monkeypatch, tmp_path):

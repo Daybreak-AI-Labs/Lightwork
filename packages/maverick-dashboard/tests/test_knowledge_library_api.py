@@ -41,7 +41,7 @@ def client(monkeypatch):
     monkeypatch.setattr(admin, "open_knowledge_base", lambda **_kw: _KB(state) if state["enabled"] else None)
     app = FastAPI()
     app.include_router(api.router, prefix="/api/v1")
-    return TestClient(app), state
+    return TestClient(app, base_url="http://127.0.0.1"), state
 
 
 def test_overview_lists_collections_and_starter_content_for_viewers(client) -> None:

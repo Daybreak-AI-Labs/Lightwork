@@ -22,7 +22,7 @@ from maverick_dashboard.app import app
 
 from test_support.settings_pages import save_catalog
 
-client = TestClient(app, headers={"Origin": "http://testserver"})
+client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 API = "/api/v1/settings/catalog"
 ROWS = runtime.entries(catalog.S, catalog.C, catalog.Column)
 _ENV = sorted({name for s in ROWS for name in s.env} | {

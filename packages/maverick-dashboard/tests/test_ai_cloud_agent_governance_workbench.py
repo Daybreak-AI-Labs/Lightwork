@@ -38,7 +38,7 @@ def environment(monkeypatch: pytest.MonkeyPatch):
         )
     )
     return (
-        TestClient(app, headers={"Origin": "http://testserver"}),
+        TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}),
         state,
         template_dir,
     )
@@ -138,7 +138,7 @@ def _page(monkeypatch, *, tenant, probe=None, app_probe=None, with_factory=True)
     app.include_router(
         workbench.create_ai_cloud_agent_governance_workbench_router(templates, enabled_probe=probe)
     )
-    response = TestClient(app, headers={"Origin": "http://testserver"}).get(
+    response = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}).get(
         "/assurance/cloud-agents"
     )
     assert response.status_code == 200
@@ -229,6 +229,6 @@ def test_dashboard_mounts_page_api_but_hides_unavailable_workbench() -> None:
 def test_cloud_agent_script_is_served() -> None:
     from maverick_dashboard.app import app
 
-    response = TestClient(app).get("/static/lightwork-ai-cloud-agent-governance.js")
+    response = TestClient(app, base_url="http://127.0.0.1").get("/static/lightwork-ai-cloud-agent-governance.js")
     assert response.status_code == 200
     assert "cag-root" in response.text

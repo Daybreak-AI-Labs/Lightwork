@@ -10,7 +10,7 @@ from maverick.oidc import VerifiedPrincipal
 from maverick_dashboard import app as app_mod
 from maverick_dashboard.app import app
 
-client = TestClient(app, headers={"Origin": "http://testserver"})
+client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 @pytest.fixture(autouse=True)
@@ -75,7 +75,7 @@ def test_firehose_token_mode_requires_bearer(monkeypatch):
     with pytest.raises(WebSocketDisconnect):
         with client.websocket_connect(f"/ws/v1/runs/{gid}/events"):
             pass
-    auth_client = TestClient(app, headers={"Authorization": "Bearer tok"})
+    auth_client = TestClient(app, base_url="http://127.0.0.1", headers={"Authorization": "Bearer tok"})
     w = app_mod._world()
     w.set_goal_status(gid, "done", result="ok")
     with auth_client.websocket_connect(f"/ws/v1/runs/{gid}/events") as ws:
@@ -90,15 +90,15 @@ def test_firehose_oidc_enforces_goal_owner(monkeypatch):
     w.set_goal_status(gid, "done", result="ok")
 
     alice = TestClient(
-        app,
-        headers={"Origin": "http://testserver", "Authorization": "Bearer alice"},
+        app, base_url="http://127.0.0.1",
+        headers={"Origin": "http://127.0.0.1", "Authorization": "Bearer alice"},
     )
     with alice.websocket_connect(f"/ws/v1/runs/{gid}/events") as ws:
         assert ws.receive_json()["content"] == "SECRET_EVENT_FOR_ALICE"
 
     mallory = TestClient(
-        app,
-        headers={"Origin": "http://testserver", "Authorization": "Bearer mallory"},
+        app, base_url="http://127.0.0.1",
+        headers={"Origin": "http://127.0.0.1", "Authorization": "Bearer mallory"},
     )
     with mallory.websocket_connect(f"/ws/v1/runs/{gid}/events") as ws:
         assert ws.receive_json() == {"error": "no such goal"}
@@ -106,7 +106,7 @@ def test_firehose_oidc_enforces_goal_owner(monkeypatch):
 
 def test_firehose_loopback_rejects_cross_site_origin():
     gid = _goal()
-    evil = TestClient(app, headers={"Origin": "https://evil.example"})
+    evil = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "https://evil.example"})
     from starlette.testclient import WebSocketDisconnect
 
     with pytest.raises(WebSocketDisconnect):

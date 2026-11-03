@@ -16,7 +16,7 @@ from test_support.navigation import assert_navigation_link
 def _client():
     # Mutating /api/v1 requests in no-token mode must pass the same-origin CSRF check.
     from maverick_dashboard.app import app
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def _isolate(monkeypatch, tmp_path):

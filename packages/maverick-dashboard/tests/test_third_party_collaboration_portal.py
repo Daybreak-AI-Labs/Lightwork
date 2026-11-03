@@ -62,7 +62,7 @@ class _Markup(HTMLParser):
 def _client() -> TestClient:
     app = FastAPI()
     app.include_router(create_third_party_collaboration_portal_router())
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def test_portal_is_a_constant_no_store_same_origin_shell() -> None:

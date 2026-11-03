@@ -40,7 +40,7 @@ def workspace(tmp_path, monkeypatch):
     dash_app._world_cache.clear()
 
     class Workspace:
-        client = TestClient(dash_app.app, headers={"Origin": "http://testserver"})
+        client = TestClient(dash_app.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
         @staticmethod
         def write(text: str) -> None:

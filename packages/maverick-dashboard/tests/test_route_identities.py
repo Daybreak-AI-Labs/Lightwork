@@ -135,7 +135,7 @@ def test_stabilizer_aligns_reverse_routing_and_request_scope_names() -> None:
                 names_by_path[path] = name
 
     assert len(set(names_by_path.values())) == 2
-    client = TestClient(test_app)
+    client = TestClient(test_app, base_url="http://127.0.0.1")
     for path, name in names_by_path.items():
         assert str(test_app.url_path_for(name)) == path
         assert client.get(path).json() == {"route_name": name}
@@ -233,7 +233,7 @@ def test_stabilizer_names_are_unique_and_agree_with_effective_contexts() -> None
         assert name.endswith("test_route_identities.status__get__" + name.rsplit("__", 1)[1]), name
         assert __name__ + ".status__get__" in name
         assert str(test_app.url_path_for(name)) == path
-    client = TestClient(test_app)
+    client = TestClient(test_app, base_url="http://127.0.0.1")
     assert client.get("/api/deep/inner/one").json() == {"where": "inner"}
 
 

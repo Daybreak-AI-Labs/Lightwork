@@ -114,7 +114,7 @@ def test_api_requires_rendered_identity_binding_and_preserves_user_isolation(iso
     monkeypatch.setattr(draft_api, "_authorization_principal", lambda request: identity[0])
     monkeypatch.setattr(draft_api, "current_tenant_id_strict", lambda: "workspace-a")
     monkeypatch.setattr(draft_api, "require_permission", lambda *args: None)
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     context = hashlib.sha256(json.dumps(["workspace-a", "principal", "user:alice"], separators=(",", ":")).encode()).hexdigest()
     path = "/api/v1/drafts/" + SLOT
     body = {"expected_revision": 0, "operation_id": "a-request-reference", "payload": {"brief": "private"}}
@@ -131,7 +131,7 @@ def test_api_requires_rendered_identity_binding_and_preserves_user_isolation(iso
 
 def test_feature_control_denies_read_and_write(isolated, monkeypatch):
     monkeypatch.setattr(draft_api.config, "get_features", lambda: {"draft_recovery": False})
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     assert client.get("/api/v1/drafts/" + SLOT).status_code == 403
     assert client.put("/api/v1/drafts/" + SLOT, json={"expected_revision": 0, "operation_id": "a-request-reference", "payload": {}}).status_code == 403
 
@@ -214,7 +214,7 @@ def test_storage_api_requires_context_and_exact_reviewed_inventory(isolated, mon
     context = hashlib.sha256(json.dumps(["workspace-a", "principal", "user:alice"], separators=(",", ":")).encode()).hexdigest()
     store = DraftStore(context)
     store.save(SLOT, None, expected_revision=0, operation_id="discarded")
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     assert client.get("/api/v1/drafts/storage").status_code == 409
     headers = {"X-Lightwork-Draft-Context": context}
     response = client.get("/api/v1/drafts/storage", headers=headers)
@@ -231,7 +231,7 @@ def test_api_refuses_a_non_ascii_context_header_like_any_other_wrong_one(isolate
     monkeypatch.setattr(draft_api, "_authorization_principal", lambda request: "user:alice")
     monkeypatch.setattr(draft_api, "current_tenant_id_strict", lambda: "workspace-a")
     monkeypatch.setattr(draft_api, "require_permission", lambda *args: None)
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     # Header text arrives decoded as latin-1, so e-acute is a non-ASCII str.
     for value in ("0" * 64, b"caf\xe9"):
         refused = client.get("/api/v1/drafts/storage", headers={"X-Lightwork-Draft-Context": value})

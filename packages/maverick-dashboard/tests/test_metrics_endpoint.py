@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 from maverick_dashboard.app import app
 
-client = TestClient(app, headers={"Origin": "http://testserver"})
+client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 @pytest.fixture(autouse=True)
@@ -41,7 +41,7 @@ def test_metrics_render_http_traffic_by_route_template():
 
 def test_metrics_respect_the_dashboard_bearer(monkeypatch):
     monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "metrics-bearer-1")
-    anon = TestClient(app)
+    anon = TestClient(app, base_url="http://127.0.0.1")
     assert anon.get("/metrics").status_code == 401
     ok = anon.get("/metrics",
                   headers={"Authorization": "Bearer metrics-bearer-1"})

@@ -30,7 +30,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_OIDC_AUDIENCE", AUDIENCE)
     monkeypatch.setenv("MAVERICK_OIDC_CLIENT_ID", "test-client")
     monkeypatch.setenv("MAVERICK_OIDC_CLIENT_SECRET", "test-client-secret")
-    monkeypatch.setenv("MAVERICK_OIDC_REDIRECT_URI", "http://testserver/auth/callback")
+    monkeypatch.setenv("MAVERICK_OIDC_REDIRECT_URI", "http://127.0.0.1/auth/callback")
     monkeypatch.setenv("MAVERICK_OIDC_SESSION_SECRET", SECRET)
     monkeypatch.setenv("MAVERICK_OIDC_AUTHORIZATION_ENDPOINT", ISSUER + "/authorize")
     monkeypatch.setenv("MAVERICK_OIDC_TOKEN_ENDPOINT", ISSUER + "/token")
@@ -41,7 +41,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     app_mod._world_cache.clear()
     config.reset_config_cache()
-    result = TestClient(app, headers={"Origin": "http://testserver"},
+    result = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"},
                         follow_redirects=False)
     yield result
     app_mod._world_cache.clear()

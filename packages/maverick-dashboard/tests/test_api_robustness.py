@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 def _client():
     from maverick_dashboard.app import app
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def _prep(monkeypatch, tmp_path):
@@ -34,7 +34,7 @@ def test_api_create_goal_rejects_empty_title(monkeypatch, tmp_path, title):
     _prep(monkeypatch, tmp_path)
     r = _client().post(
         "/api/v1/goals", json={"title": title},
-        headers={"Origin": "http://testserver"},
+        headers={"Origin": "http://127.0.0.1"},
     )
     assert r.status_code == 400
 
@@ -46,7 +46,7 @@ def test_api_answer_rejects_empty_answer(monkeypatch, tmp_path):
     r = _client().post(
         f"/api/v1/goals/{gid}/answer",
         json={"question_id": 1, "answer": "   "},
-        headers={"Origin": "http://testserver"},
+        headers={"Origin": "http://127.0.0.1"},
     )
     assert r.status_code == 400
 

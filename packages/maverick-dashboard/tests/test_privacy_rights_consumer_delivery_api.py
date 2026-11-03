@@ -97,8 +97,8 @@ def environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     app.state.privacy_rights_consumer_delivery_store_factory = store_factory
     app.include_router(api.router, prefix="/api/v1")
     client = TestClient(
-        app,
-        headers={"Origin": "http://testserver", "X-Test-Subject": "delivery-operator"},
+        app, base_url="http://127.0.0.1",
+        headers={"Origin": "http://127.0.0.1", "X-Test-Subject": "delivery-operator"},
     )
     return client, database, state
 
@@ -279,7 +279,7 @@ def test_default_store_fails_closed_without_every_trusted_runtime_resolver(
         return await call_next(request)
 
     app.include_router(api.router, prefix="/api/v1")
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     response = client.put(
         f"{API}/deliveries/delivery:one",
         json=_mint_body(),
@@ -346,7 +346,7 @@ def test_tenant_local_default_opens_only_with_all_trusted_resolvers(
         b"s" * 32
     )
     app.include_router(api.router, prefix="/api/v1")
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     response = client.put(
         f"{API}/deliveries/delivery:local",
         json=_mint_body(retained_until=current + 500),

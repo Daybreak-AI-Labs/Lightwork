@@ -1632,7 +1632,7 @@ def _websocket_loopback_request_host(websocket) -> bool:
         host = (parsed.hostname or "").rstrip(".").lower()
     except ValueError:
         return False
-    if host in {"localhost", "testserver"}:
+    if host == "localhost":
         return True
     try:
         return ipaddress.ip_address(host).is_loopback

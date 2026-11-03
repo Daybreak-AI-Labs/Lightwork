@@ -70,7 +70,7 @@ def environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     app.state.customer_sandbox_store_factory = store_factory
     app.state.customer_sandbox_capability_probe = lambda: state["enabled"] is True
     app.include_router(api.router, prefix="/api/v1")
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     return client, state, tmp_path
 
 
@@ -172,7 +172,7 @@ def test_factory_must_return_exact_core_authority(monkeypatch: pytest.MonkeyPatc
     app.state.customer_sandbox_store_factory = lambda **_kwargs: object()
     app.state.customer_sandbox_capability_probe = lambda: True
     app.include_router(api.router, prefix="/api/v1")
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     response = client.get(f"{API}/status")
     assert response.status_code == 503
     assert response.json()["detail"] == "customer sandbox authority is unavailable"
@@ -188,7 +188,7 @@ def test_disabled_probe_is_side_effect_free(
     app.state.customer_sandbox_capability_probe = lambda: False
     app.state.customer_sandbox_store_factory = lambda **_kwargs: calls.append("constructed")
     app.include_router(api.router, prefix="/api/v1")
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     status = client.get(f"{API}/status")
     assert status.status_code == 200
     assert status.json()["enabled"] is False

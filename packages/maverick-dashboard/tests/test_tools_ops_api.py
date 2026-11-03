@@ -18,7 +18,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-ORIGIN = {"Origin": "http://testserver"}
+ORIGIN = {"Origin": "http://127.0.0.1"}
 SKILL = """---
 name: weekly-status
 triggers:
@@ -60,7 +60,7 @@ def client(monkeypatch, tmp_path):
     audit_writer._defaults.clear()
     dash_app._world_cache.clear()
     try:
-        yield TestClient(dash_app.app, headers=ORIGIN)
+        yield TestClient(dash_app.app, base_url="http://127.0.0.1", headers=ORIGIN)
     finally:
         config.reset_config_cache()
         audit_writer._default = None
@@ -863,7 +863,7 @@ def test_pages_carry_the_new_controls_in_plain_words(client, monkeypatch, path, 
 
 def test_page_scripts_are_served():
     from maverick_dashboard.app import app
-    c = TestClient(app)
+    c = TestClient(app, base_url="http://127.0.0.1")
     for name in ("lightwork-tool-ops.js", "lightwork-insight-ops.js", "lightwork-code-sandbox.js"):
         r = c.get("/static/" + name)
         assert r.status_code == 200 and "javascript" in r.headers["content-type"], name

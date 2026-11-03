@@ -34,7 +34,7 @@ def support(tmp_path, monkeypatch):
     })
     audits = []
     monkeypatch.setattr("maverick.audit.record", lambda *args, **kwargs: audits.append((args, kwargs)))
-    return TestClient(app, headers={"Origin": "http://testserver", "X-Lightwork-Support-Context": identity["context"]}), identity, audits
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1", "X-Lightwork-Support-Context": identity["context"]}), identity, audits
 
 
 def test_export_requires_review_and_downloads_exact_redacted_preview(support):

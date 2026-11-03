@@ -16,7 +16,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     config.reset_config_cache()
-    yield TestClient(app, headers={"Origin": "http://testserver"})
+    yield TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     config.reset_config_cache()
 
 

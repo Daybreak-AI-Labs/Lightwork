@@ -27,7 +27,7 @@ def client(tmp_path, monkeypatch):
     config.reset_config_cache()
     from maverick_dashboard import app as dash_app
     dash_app._world_cache.clear()
-    yield TestClient(dash_app.app, headers={"Origin": "http://testserver"})
+    yield TestClient(dash_app.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     config.reset_config_cache()
 
 
@@ -50,7 +50,7 @@ def test_presets_validate_answers_and_stay_admin_only(client, monkeypatch):
     assert client.post("/mcp/add-preset", data={"preset": "files"}).status_code == 422
     assert client.post("/mcp/add-preset", data={"preset": "online", "url": "http://x"}).status_code == 422
     assert client.post("/mcp/add-preset", data={"preset": "nope"}).status_code == 400
-    assert TestClient(client.app).post("/mcp/add-preset", data={"preset": "memory"}).status_code == 403
+    assert TestClient(client.app, base_url="http://127.0.0.1").post("/mcp/add-preset", data={"preset": "memory"}).status_code == 403
     from maverick_dashboard import auth, rbac
     rbac.set_role("user:vic", "viewer")
     monkeypatch.setattr(auth, "caller_principal", lambda request: "user:vic")

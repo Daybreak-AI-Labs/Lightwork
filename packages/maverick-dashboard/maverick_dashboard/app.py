@@ -3061,7 +3061,7 @@ def _is_loopback_request_host(request: Request) -> bool:
     pair, which would otherwise satisfy Host-derived same-origin checks.
     """
     host = (request.url.hostname or "").rstrip(".").lower()
-    if host in ("localhost", "testserver"):
+    if host == "localhost":
         return True
     try:
         return ipaddress.ip_address(host).is_loopback

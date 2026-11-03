@@ -34,7 +34,7 @@ def env(tmp_path, monkeypatch):
 
     # The chat page reads the signed-in person through its own import.
     monkeypatch.setattr(app_module, "caller_principal", lambda request: ANA)
-    yield TestClient(app, headers={"Origin": "http://testserver"}), world
+    yield TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}), world
     world.close()
     api._world_cache.clear()
     config.reset_config_cache()

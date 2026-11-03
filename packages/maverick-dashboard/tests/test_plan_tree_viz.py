@@ -38,7 +38,7 @@ def client(world_with_tree, monkeypatch):
     w, *_ = world_with_tree
     monkeypatch.setattr(app_mod, "_world", lambda: w)
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
-    return TestClient(app_mod.app)
+    return TestClient(app_mod.app, base_url="http://127.0.0.1")
 
 
 def test_plan_page_renders_interactive_container_and_script(client, world_with_tree):

@@ -106,7 +106,7 @@ def stress_dashboard(n=3000):
     except Exception as e:  # noqa: BLE001
         print(f"  SKIP dashboard ({e!r})")
         return
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     paths = ["/healthz", "/livez", "/readyz"]
     codes = {}
     errors = [0]

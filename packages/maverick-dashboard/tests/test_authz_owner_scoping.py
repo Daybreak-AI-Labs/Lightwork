@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 from maverick.oidc import VerifiedPrincipal
 from maverick_dashboard.app import app
 
-client = TestClient(app)
+client = TestClient(app, base_url="http://127.0.0.1")
 
 
 # ----------------------------- fixtures / helpers -----------------------------
@@ -73,7 +73,7 @@ def _origin() -> dict:
     same-origin-gates every mutating method before the route runs; without a
     matching Origin a POST 403s regardless of ownership.
     """
-    return {"Origin": "http://testserver"}
+    return {"Origin": "http://127.0.0.1"}
 
 
 def _as(user: str, *, post: bool = False) -> dict:

@@ -13,7 +13,7 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-ORIGIN = {"Origin": "http://testserver"}
+ORIGIN = {"Origin": "http://127.0.0.1"}
 
 
 @pytest.fixture(autouse=True)
@@ -41,7 +41,7 @@ def _isolate(monkeypatch, tmp_path):
 
 def _client() -> TestClient:
     from maverick_dashboard.app import app
-    return TestClient(app, headers=ORIGIN)
+    return TestClient(app, base_url="http://127.0.0.1", headers=ORIGIN)
 
 
 def _sign_in_map(monkeypatch):
@@ -561,7 +561,7 @@ def test_key_reaches_a_remote_caller_in_no_token_mode(monkeypatch):
     key, secret = api_keys.create_key(label="remote script", scopes=["tasks:read"],
                                       owner="user:local", created_by="user:local")
     from maverick_dashboard.app import app
-    remote = TestClient(app, base_url="http://testserver", client=("203.0.113.9", 4321))
+    remote = TestClient(app, base_url="http://127.0.0.1", client=("203.0.113.9", 4321))
     assert remote.get("/api/v1/account/me").status_code == 401
     assert remote.get("/api/v1/account/me", headers=_key("lwk_" + "y" * 43)).status_code == 401
     r = remote.get("/api/v1/api-keys", headers=_key(secret))
@@ -690,7 +690,7 @@ def test_key_scope_is_chosen_from_the_route_not_the_mount_prefix(monkeypatch):
     plain = _client()
     task_key = _create(plain, "alice", scopes=["tasks:write"]).json()["secret"]
     approval_key = _create(plain, "alice", scopes=["approvals:decide"]).json()["secret"]
-    mounted = TestClient(app, headers=ORIGIN, root_path="/lw")
+    mounted = TestClient(app, base_url="http://127.0.0.1", headers=ORIGIN, root_path="/lw")
 
     # Same answers as the unprefixed paths in the scope test above.
     assert mounted.get("/lw/api/v1/approvals", headers=_key(task_key)).status_code == 403
@@ -749,7 +749,7 @@ def test_break_glass_requests_keep_failing_while_their_audit_is_refused(monkeypa
 
     monkeypatch.setattr(audit_pkg, "audit_event", audit_event)
     from maverick_dashboard.app import app
-    c = TestClient(app, headers=ORIGIN, raise_server_exceptions=False)
+    c = TestClient(app, base_url="http://127.0.0.1", headers=ORIGIN, raise_server_exceptions=False)
     tok = {"Authorization": "Bearer static-break-glass-token-for-tests"}
 
     codes = [c.get("/api/v1/account/me", headers=tok).status_code for _ in range(4)]
@@ -777,7 +777,7 @@ def test_break_glass_requests_keep_failing_while_their_audit_is_not_written(monk
 
     monkeypatch.setattr(audit_pkg, "audit_event", audit_event)
     from maverick_dashboard.app import app
-    c = TestClient(app, headers=ORIGIN, raise_server_exceptions=False)
+    c = TestClient(app, base_url="http://127.0.0.1", headers=ORIGIN, raise_server_exceptions=False)
     tok = {"Authorization": "Bearer static-break-glass-token-for-tests"}
 
     codes = [c.get("/api/v1/account/me", headers=tok).status_code for _ in range(3)]
@@ -929,7 +929,7 @@ def test_damaged_store_answers_401_for_a_key_and_503_for_the_listing(monkeypatch
     rbac.set_role("user:alice", "operator")
     api_keys.store_path().write_text(json.dumps(_damaged_store(scopes=[["tasks:read"]])))
     from maverick_dashboard.app import app
-    c = TestClient(app, headers=ORIGIN, raise_server_exceptions=False)
+    c = TestClient(app, base_url="http://127.0.0.1", headers=ORIGIN, raise_server_exceptions=False)
 
     keyed = c.get("/api/v1/account/me", headers=_key("lwk_" + "q" * 43))
     assert keyed.status_code == 401 and "unavailable" in keyed.json()["detail"]

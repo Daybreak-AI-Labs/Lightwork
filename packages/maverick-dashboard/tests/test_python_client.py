@@ -20,7 +20,7 @@ if str(_SDK) not in sys.path:
 
 from lightwork_client import Decision, Health, Lightwork, LightworkError  # noqa: E402
 
-BASE = "http://testserver"
+BASE = "http://127.0.0.1"
 SECRET = "dash-token-for-client-tests-0001"  # pragma: allowlist secret
 WRONG = "not-the-dashboard-token-0002"  # pragma: allowlist secret
 
@@ -54,7 +54,7 @@ def _in_process(*, drop_origin: bool = False, log: list | None = None):
     from fastapi.testclient import TestClient
     from maverick_dashboard.app import app
 
-    test_client = TestClient(app)
+    test_client = TestClient(app, base_url="http://127.0.0.1")
 
     def transport(method, url, headers, body, timeout):
         sent = dict(headers)

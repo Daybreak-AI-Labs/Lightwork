@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 from maverick_dashboard import i18n
 from maverick_dashboard.app import app
 
-client = TestClient(app)
+client = TestClient(app, base_url="http://127.0.0.1")
 
 
 def test_catalog_complete_for_all_languages():
@@ -78,7 +78,7 @@ def test_rtl_selection_declares_the_english_body_left_to_right():
 def test_arabic_browser_gets_a_left_to_right_english_page_on_both_shells():
     """Accept-Language alone must not flip the English UI right-to-left
     on the product shell (``/overview``) or the chat shell (``/chat``)."""
-    fresh = TestClient(app)
+    fresh = TestClient(app, base_url="http://127.0.0.1")
     for path in ("/overview", "/chat"):
         r = fresh.get(path, headers={"Accept-Language": "ar-SA,ar;q=0.9"})
         assert r.status_code == 200, path
@@ -132,7 +132,7 @@ def test_font_axis_cookie_and_body_class():
     assert "mvk_font=dyslexic" in r.headers.get("set-cookie", "")
     # Bogus values are ignored (no cookie, default class) -- fresh client so
     # the previous request's cookie doesn't mask the fallback.
-    fresh = TestClient(app)
+    fresh = TestClient(app, base_url="http://127.0.0.1")
     r2 = fresh.get("/overview", params={"font": "comic"})
     assert "mvk_font" not in r2.headers.get("set-cookie", "")
     assert 'font-default' in r2.text

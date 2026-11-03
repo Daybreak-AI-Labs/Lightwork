@@ -117,8 +117,8 @@ def environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     app.state.privacy_data_discovery_review_callback = callbacks.append
     app.include_router(privacy_data_discovery_api.router, prefix="/api/v1")
     client = TestClient(
-        app,
-        headers={"Origin": "http://testserver", "X-Test-Subject": "operator-a"},
+        app, base_url="http://127.0.0.1",
+        headers={"Origin": "http://127.0.0.1", "X-Test-Subject": "operator-a"},
     )
     yield client, database, rows, documents, callbacks, clock, config_path, app
     config.reset_config_cache()

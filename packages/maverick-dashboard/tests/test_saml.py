@@ -33,8 +33,8 @@ ENABLED_CFG = {
 def _client() -> TestClient:
     return TestClient(
         app,
-        base_url="https://testserver",
-        headers={"Origin": "https://testserver"},
+        base_url="https://127.0.0.1",
+        headers={"Origin": "https://127.0.0.1"},
     )
 
 

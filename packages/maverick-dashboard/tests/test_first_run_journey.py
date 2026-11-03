@@ -82,8 +82,8 @@ def test_headless_first_run_journey(monkeypatch, tmp_path):
     monkeypatch.setattr(world_model, "DEFAULT_DB", home / "world.db")
     dashboard._world_cache.clear()
     client = TestClient(
-        dashboard.app,
-        headers={"Origin": "http://testserver"},
+        dashboard.app, base_url="http://127.0.0.1",
+        headers={"Origin": "http://127.0.0.1"},
     )
 
     started = client.get("/start")

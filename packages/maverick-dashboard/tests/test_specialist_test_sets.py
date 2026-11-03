@@ -28,7 +28,7 @@ def client(monkeypatch, tmp_path):
     config.reset_config_cache()
     dash_app._world_cache.clear()
     learning_jobs.clear_for_tests()
-    yield TestClient(dash_app.app, headers={"Origin": "http://testserver"}), tmp_path
+    yield TestClient(dash_app.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}), tmp_path
     learning_jobs.clear_for_tests()
     config.reset_config_cache()
     dash_app._world_cache.clear()
@@ -220,7 +220,7 @@ def test_copilot_reads_creates_and_starts_only_one_reviewed_run(client, monkeypa
     monkeypatch.setattr(actions, "context_for", lambda request: "current-workspace")
     monkeypatch.setattr(auth, "require_permission", lambda request, permission: None)
     request = Request({"type": "http", "method": "POST", "path": "/workforce",
-                       "headers": [(b"host", b"testserver")]})
+                       "headers": [(b"host", b"127.0.0.1")]})
     assert {"specialists.tests.read", "specialists.tests.create", "specialists.tests.run"} <= set(ops.adapters())
     args = {"specialist": "finance_ap", "task": "Two invoices have the same amount. What should happen?",
             "must_mention": "duplicate", "must_never_say": "payment sent",

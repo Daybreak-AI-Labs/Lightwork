@@ -30,7 +30,7 @@ from maverick_dashboard.route_identity import iter_compatible_route_contexts
 report_path = Path(sys.argv[1])
 client = TestClient(
     dashboard_app.app,
-    headers={"Origin": "http://testserver"},
+    headers={"Origin": "http://127.0.0.1"},
     raise_server_exceptions=False,
 )
 failures: list[str] = []
@@ -121,7 +121,7 @@ settings_html = ""
 for path in pages:
     response = client.get(
         path,
-        headers={"Accept": "text/html", "Origin": "http://testserver"},
+        headers={"Accept": "text/html", "Origin": "http://127.0.0.1"},
         follow_redirects=False,
     )
     statuses[path] = response.status_code
