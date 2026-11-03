@@ -94,6 +94,7 @@ def approvals(request, terms, can_open_page) -> list[dict]:
     if not auth.has_permission(request, "operate") or not can_open_page("/approvals"):
         return []
     from ._shared import _world
+    from .approval_labels import action_label
     from .content_access import can_read_approval
     from .identity_format import humanize
 
@@ -102,7 +103,7 @@ def approvals(request, terms, can_open_page) -> list[dict]:
     for approval in world.pending_approvals():
         if not can_read_approval(request, approval, world):
             continue
-        title = humanize(approval.action or "") or "Reviewed action"
+        title = action_label(approval.action)
         risk = humanize(getattr(approval, "risk", "") or "")
         rank = _rank([title], f"{title} {approval.action} {risk} approval".casefold(), terms)
         if rank is not None:

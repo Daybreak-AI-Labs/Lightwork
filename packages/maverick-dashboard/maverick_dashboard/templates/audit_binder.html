@@ -82,7 +82,7 @@
       <tbody>
         {% for a in b.approvals[:60] %}
         <tr>
-          <td class="bnd-clip" title="{{ a.action }}">{{ a.action | humanize }}</td>
+          <td class="bnd-clip" title="{{ a.action }}">{{ approval_action_label(a.action) }}</td>
           <td><span class="badge {{ 'blocked' if a.risk == 'high' else 'warn' if a.risk == 'medium' else 'done' }}">{{ a.risk | humanize }}</span></td>
           <td><span class="badge {{ 'done' if a.status == 'approved' else 'blocked' if a.status == 'denied' else 'info' }}">{{ {'approved': 'Approved', 'denied': 'Rejected', 'pending': 'Waiting'}.get(a.status) or (a.status | humanize) }}</span></td>
           <td>{{ (a.requested_by | identity) if a.requested_by else '—' }}</td>
