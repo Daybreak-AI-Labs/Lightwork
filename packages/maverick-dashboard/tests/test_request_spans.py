@@ -388,3 +388,16 @@ def test_fastapi_own_server_span_is_switched_off_so_no_raw_url_is_exported(monke
     assert "GET /goals/{goal_id}" not in names
     exported = repr([dict(span.attributes) for span in exporter.get_finished_spans()])
     assert "tab=private" not in exported and "/goals/42" not in exported
+
+
+def test_inbound_trace_discards_oversized_tracestate(monkeypatch):
+    propagate = pytest.importorskip("opentelemetry.propagate")
+    seen = []
+    monkeypatch.setattr(propagate, "extract", lambda carrier: seen.append(carrier))
+    parent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+    observability._inbound_context({"traceparent": parent, "tracestate": "x" * 513})
+    assert seen[-1] == {"traceparent": parent}
+    observability._inbound_context({"traceparent": parent, "tracestate": "a" * 512})
+    assert seen[-1]["tracestate"] == "a" * 512
+    observability._inbound_context({"traceparent": parent, "tracestate": "é" * 257})
+    assert "tracestate" not in seen[-1]

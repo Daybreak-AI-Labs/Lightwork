@@ -31,8 +31,8 @@ def test_save_secret_roundtrip_and_clear():
                     follow_redirects=False)
     assert r.status_code == 200
 
-    from maverick.webhooks import inbound_secret
-    assert inbound_secret() == "s3cret-value-123"  # pragma: allowlist secret
+    from maverick.webhooks import _load_config_outbound
+    assert _load_config_outbound()[1] == "s3cret-value-123"  # pragma: allowlist secret
 
     from maverick import config
     persisted = config.dashboard_overrides_path().read_text(encoding="utf-8")
@@ -48,7 +48,7 @@ def test_save_secret_roundtrip_and_clear():
     r = client.post("/settings/webhooks", data={"secret": "", "action": "remove", "expected_generation": generation},
                     follow_redirects=False)
     assert r.status_code == 200
-    assert inbound_secret() is None or inbound_secret() == ""
+    assert not _load_config_outbound()[1]
 
 
 def test_env_secret_still_wins(monkeypatch):
@@ -57,8 +57,8 @@ def test_env_secret_still_wins(monkeypatch):
                 data={"secret": "overlay-secret", "expected_generation": generation},  # pragma: allowlist secret
                 follow_redirects=False)
     monkeypatch.setenv("MAVERICK_WEBHOOK_SECRET", "env-secret")  # pragma: allowlist secret
-    from maverick.webhooks import inbound_secret
-    assert inbound_secret() == "env-secret"  # pragma: allowlist secret
+    from maverick.webhooks import _load_config_outbound
+    assert _load_config_outbound()[1] == "env-secret"  # pragma: allowlist secret
 
 
 def test_cross_site_save_is_blocked():

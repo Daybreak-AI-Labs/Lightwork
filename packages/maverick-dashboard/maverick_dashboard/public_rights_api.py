@@ -83,8 +83,49 @@ def _limit_token_lookups(request: Request) -> None:
 
 
 def _origin_of(value: str) -> str:
-    parsed = urlparse(value)
-    return f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else ""
+    try:
+        parsed = urlparse(value)
+        scheme = parsed.scheme.lower()
+        host = parsed.hostname
+        if scheme not in {"http", "https"} or not host or parsed.username is not None or parsed.password is not None:
+            return ""
+        host = host.lower()
+        if ":" in host:
+            host = f"[{host}]"
+        port = parsed.port
+        suffix = f":{port}" if port and port != (443 if scheme == "https" else 80) else ""
+        return f"{scheme}://{host}{suffix}"
+    except ValueError:
+        return ""
+
+
+def _public_base_url() -> str:
+    """Operator-owned URL used in public verification links and origin checks."""
+    from maverick.env_setting import env_or_config
+    import ipaddress
+    from urllib.parse import urlsplit
+
+    raw = str(env_or_config("MAVERICK_PUBLIC_BASE_URL", "channels", "public_base_url", "") or "").strip().rstrip("/")
+    if not raw:
+        raw = str(env_or_config("MAVERICK_PUBLIC_URL", "dashboard", "public_url", "") or "").strip().rstrip("/")
+    try:
+        parsed = urlsplit(raw)
+        if (parsed.scheme not in {"http", "https"} or not parsed.hostname
+                or parsed.username is not None or parsed.password is not None or parsed.query or parsed.fragment or parsed.path
+                or any(ord(ch) < 33 or ch in '<>"\'\\' for ch in raw)):
+            raise ValueError("invalid public URL")
+        _ = parsed.port
+        if parsed.scheme == "http":
+            host = parsed.hostname.lower()
+            try:
+                local = ipaddress.ip_address(host).is_loopback
+            except ValueError:
+                local = host == "localhost"
+            if not local:
+                raise ValueError("public HTTP is permitted only for loopback")
+    except ValueError:
+        raise HTTPException(status_code=503, detail="public rights form URL is not configured") from None
+    return raw
 
 
 def _request_origin(request: Request) -> str:
@@ -102,10 +143,10 @@ def _allowed_origin(request: Request, prop: dict) -> str | None:
     origin = _request_origin(request)
     if not origin:
         return None
-    self_origin = f"{request.url.scheme}://{request.url.netloc}"
+    self_origin = _origin_of(_public_base_url())
     if origin == self_origin:
         return ""
-    if origin in (prop.get("allowed_origins") or []):
+    if origin in {_origin_of(item) for item in (prop.get("allowed_origins") or [])}:
         return origin
     return None
 
@@ -182,7 +223,7 @@ async def public_submit(request: Request, slug: str) -> Response:
         raise HTTPException(status_code=400, detail="invalid JSON body") from exc
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="the form must be a JSON object")
-    base_url = f"{request.url.scheme}://{request.url.netloc}"
+    base_url = _public_base_url()
     try:
         result = await run_in_threadpool(
             prf.submit, prop["slug"], payload, client_ip=_client_ip(request),

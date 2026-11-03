@@ -71,6 +71,10 @@ The dates are decision support for your privacy team, not legal advice.
 2. Make sure the platform email account is configured (`[email]` /
    `EMAIL_USER` + `EMAIL_APP_PASSWORD`, the same account invites use). Without
    it, notices are recorded on the request as *not sent* with the reason.
+   Set `MAVERICK_PUBLIC_BASE_URL` (or `[channels] public_base_url`) to the
+   externally reachable HTTPS dashboard URL (the existing `MAVERICK_PUBLIC_URL`
+   or `[dashboard] public_url` is also accepted). The form refuses submissions and
+   verification when this trusted URL is missing or invalid.
 3. On *Privacy → Rights request form*, add a property: link name, names,
    privacy contact, the laws to offer, the default law, the request types,
    and (optionally) other https origins allowed to embed the form. Copy the

@@ -35,7 +35,7 @@ def test_external_secret_cannot_report_saved_overlay_as_active(source, tmp_path,
     client = TestClient(app, headers={"Origin": "http://testserver"})
     response = client.post("/settings/webhooks", data={"secret": replacement}, follow_redirects=False)
     # Actual verifier remains controlled by the deployment secret.
-    assert webhooks.inbound_secret() == external
+    assert webhooks._load_config_outbound()[1] == external
     body = b"native-effective-setting-probe"
     assert webhooks.verify_signature(body, webhooks._sign(body, external), external)
     assert not webhooks.verify_signature(body, webhooks._sign(body, replacement), external)
@@ -67,26 +67,25 @@ def test_success_native_verifier_ciphertext_and_no_secret_echo():
     assert response.status_code == 200
     assert response.json()["result"] == "active"
     assert response.json()["source"] == "dashboard"
-    assert webhooks.inbound_secret() == value
+    assert webhooks._load_config_outbound()[1] == value
     import time
     request_body = b'{"description":"No title: never dispatch a goal"}'
     timestamp = str(int(time.time()))
     headers = {"X-Maverick-Timestamp": timestamp,
                "X-Maverick-Signature": webhooks._sign(request_body, value, timestamp=timestamp)}
-    # The actual public endpoint accepts the new signature, then rejects the
-    # intentionally incomplete business request before creating work.
-    assert http.post("/webhook/start", content=request_body, headers=headers).status_code == 400
+    # The outbound key does not authenticate the separate control endpoint.
+    assert http.post("/webhook/start", content=request_body, headers=headers).status_code == 401
     headers["X-Maverick-Signature"] = webhooks._sign(request_body, "synthetic-wrong", timestamp=timestamp)
-    assert http.post("/webhook/start", content=request_body, headers=headers).status_code == 403
+    assert http.post("/webhook/start", content=request_body, headers=headers).status_code == 401
     body = b"test body"
-    assert webhooks.verify_signature(body, webhooks._sign(body, value), webhooks.inbound_secret())
+    assert webhooks.verify_signature(body, webhooks._sign(body, value), webhooks._load_config_outbound()[1])
     assert value not in response.text + http.get("/settings").text + http.get("/settings/webhooks").text
     assert value not in config.dashboard_overrides_path().read_text()
     # Secret-derived digests are inside an authenticated encrypted review token.
     import hashlib
     assert hashlib.sha256(value.encode()).hexdigest() not in response.text
     assert save(http, "another-synthetic-key", reviewed).status_code == 409
-    assert webhooks.inbound_secret() == value
+    assert webhooks._load_config_outbound()[1] == value
 
 
 @pytest.mark.parametrize("mode", ["environment", "mounted", "operator", "tenant"])
@@ -113,7 +112,7 @@ def test_current_external_ownership_blocks_valid_review(mode, tmp_path, monkeypa
     assert reviewed["configured"] is True
     response = save(http, "synthetic-blocked-key", reviewed)
     assert response.status_code == 409
-    assert webhooks.inbound_secret() == value
+    assert webhooks._load_config_outbound()[1] == value
     assert not config.dashboard_overrides_path().exists()
     assert value not in response.text + str(reviewed)
 
@@ -132,7 +131,7 @@ def test_remove_reports_effective_fallback_instead_of_claiming_disabled(fallback
     assert response.status_code == 200
     assert response.json()["result"] == "app_copy_removed"
     assert response.json()["configured"] is bool(fallback)
-    assert webhooks.inbound_secret() == fallback
+    assert webhooks._load_config_outbound()[1] == fallback
 
 
 def test_external_change_invalidates_old_review_without_saving(monkeypatch):
@@ -159,7 +158,7 @@ def test_post_write_effective_race_rolls_back_exact_previous_bytes(monkeypatch):
     response = save(http, "synthetic-never-effective", reviewed)
     assert response.status_code == 409
     assert config.dashboard_overrides_path().read_bytes() == before
-    assert webhooks.inbound_secret() == "synthetic-raced-deployment"
+    assert webhooks._load_config_outbound()[1] == "synthetic-raced-deployment"
 
 
 def test_secret_copy_cleanup_when_deployment_owns_runtime(monkeypatch):
@@ -170,13 +169,13 @@ def test_secret_copy_cleanup_when_deployment_owns_runtime(monkeypatch):
     assert not reviewed["can_set"] and reviewed["can_remove"]
     assert reviewed["outbound_configured"] is True
     assert reviewed["remove_keeps_configured"] is True
-    assert reviewed["remove_keeps_outbound_configured"] is False
+    assert reviewed["remove_keeps_outbound_configured"] is True
     response = save(http, "", reviewed, "remove")
     assert response.status_code == 200
     assert response.json()["configured"] is True
-    assert response.json()["outbound_configured"] is False
-    assert webhooks.inbound_secret() == "synthetic-active-external"
-    assert webhooks._load_config_outbound()[1] is None
+    assert response.json()["outbound_configured"] is True
+    assert webhooks._load_config_outbound()[1] == "synthetic-active-external"
+    assert webhooks._load_config_outbound()[1] == "synthetic-active-external"
 
 
 def test_tampered_and_other_principal_reviews_refused(monkeypatch):
@@ -346,7 +345,7 @@ def test_a_refused_record_undoes_the_change(monkeypatch):
     http = client()
     response = save(http, "synthetic-unrecorded-key")
     assert response.status_code == 503
-    assert webhooks.inbound_secret() in (None, "")
+    assert webhooks._load_config_outbound()[1] in (None, "")
 
 
 @pytest.mark.parametrize("refused_phase", ["reviewed", "confirmed"])
@@ -363,7 +362,7 @@ def test_false_audit_result_never_reports_success_or_keeps_new_secret(monkeypatc
     http = client()
     response = save(http, "synthetic-unrecorded-key")
     assert response.status_code == 503
-    assert webhooks.inbound_secret() in (None, "")
+    assert webhooks._load_config_outbound()[1] in (None, "")
     assert not config.dashboard_overrides_path().exists()
     assert [row["phase"] for row in rows] == (
         ["reviewed"] if refused_phase == "reviewed" else ["reviewed", "confirmed"]

@@ -1,7 +1,7 @@
 """WebRTC data-channel tool.
 
-Speaks WebRTC via ``aiortc`` so an agent can hold a peer-to-peer DATA CHANNEL
-with a browser, another agent, or any WebRTC endpoint and exchange text:
+The data-channel interface is retained for callers, but offer, answer and send
+are disabled until ICE egress is policy-controlled:
 
   - ``offer``  — create an RTCPeerConnection + data channel, return the local
                  SDP offer (hand it to the remote peer out-of-band);
@@ -15,11 +15,8 @@ caller's job — copy the SDP blobs over any channel you already have (the
 dashboard, a webhook, a file). One connection at a time, held module-level,
 mirroring the browser tool's single persistent session.
 
-``aiortc`` is optional (``python -m pip install -e './packages/maverick-core[webrtc]'``); every
-aiortc import is lazy so the kernel — and these ops' error paths — work
-without it.
-
-Factory exported, NOT registered in the default tool set: callers opt in.
+Factory exported, NOT registered in the default tool set. Network operations
+are unavailable until ICE, STUN and TURN can enforce Lightwork's egress policy.
 """
 from __future__ import annotations
 
@@ -62,42 +59,10 @@ async def _run(args: dict[str, Any]) -> str:
         await pc.close()
         return "connection closed"
 
-    try:
-        from aiortc import RTCPeerConnection, RTCSessionDescription
-    except ImportError:
-        return ("ERROR: aiortc not installed. "
-                "Run: python -m pip install -e './packages/maverick-core[webrtc]'")
-
-    if op == "offer":
-        if _state["pc"] is not None:  # replace any previous connection
-            await _state["pc"].close()
-            _reset_state()
-        pc = RTCPeerConnection()
-        channel = pc.createDataChannel(str(args.get("label") or "maverick"))
-        offer = await pc.createOffer()
-        await pc.setLocalDescription(offer)  # aiortc gathers ICE here
-        _state["pc"], _state["channel"] = pc, channel
-        return pc.localDescription.sdp
-
-    if op == "answer":
-        pc = _state["pc"]
-        if pc is None:
-            return "ERROR: no pending offer; run op=offer first"
-        sdp = str(args.get("remote_sdp") or "")
-        if not sdp.strip():
-            return "ERROR: answer requires remote_sdp"
-        await pc.setRemoteDescription(RTCSessionDescription(sdp=sdp, type="answer"))
-        return "remote answer applied; the data channel opens once ICE connects"
-
-    if op == "send":
-        channel = _state["channel"]
-        if channel is None:
-            return "ERROR: no data channel; run op=offer (then op=answer) first"
-        message = str(args.get("message") or "")
-        channel.send(message)
-        return f"sent {len(message)} chars on channel {channel.label!r}"
-
-    return f"ERROR: unknown op {op!r}"
+    # ICE may send UDP to peer-provided or default STUN/TURN endpoints before
+    # application-level URL checks can run. Fail closed until the transport
+    # enforces the same network policy as the rest of Lightwork.
+    return "ERROR: WebRTC network operations are unavailable because ICE egress is not policy-controlled."
 
 
 def webrtc_tool() -> Tool:
@@ -105,11 +70,8 @@ def webrtc_tool() -> Tool:
     return Tool(
         name="webrtc",
         description=(
-            "Hold a WebRTC DATA CHANNEL with a remote peer: offer returns the "
-            "local SDP, answer applies the remote answer SDP, send ships a "
-            "text message, close hangs up. Data channels only — no media "
-            "tracks; exchange the SDP blobs out-of-band yourself. Requires "
-            "the 'webrtc' extra (aiortc)."
+            "WebRTC network operations are unavailable until ICE egress is "
+            "policy-controlled. Close can release an existing connection."
         ),
         input_schema=_SCHEMA,
         fn=_run,

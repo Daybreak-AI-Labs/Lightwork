@@ -45,9 +45,13 @@
   {% endmacro %}
   {% set users_lede %}
     {% if global_admin %}
-    Who can use this workspace and what each person is
-    allowed to do. A new person who signs in starts as
-    <strong>{{ default_role | role_label }}</strong> until you change it here.
+    Who can use this workspace and what each person is allowed to do.
+    {% if workspace_roles_initialized %}
+    A person needs an installation role or a workspace membership to access work.
+    {% else %}
+    A new person who signs in starts as <strong>{{ default_role | role_label }}</strong>
+    until you change it here.
+    {% endif %}
     {% else %}
     Invite colleagues and manage their roles in the workspaces you administer.
     {% endif %}
@@ -273,8 +277,9 @@
     <p class="muted">No one matches this filter. <a href="/users#people">Clear the filter</a> to see everyone.</p>
     {% endif %}
     {% else %}
-    <p class="muted">No one has a specific role yet. People who sign in start as
-      <strong>{{ default_role | role_label }}</strong>.
+    <p class="muted">No one has a specific installation role yet.
+      {% if workspace_roles_initialized %}People need an installation role or workspace membership to access work.
+      {% else %}People who sign in start as <strong>{{ default_role | role_label }}</strong>.{% endif %}
       {% if invites_on %}<a class="btn" href="#invite-email">Invite someone</a>{% endif %}</p>
     {% endif %}
 

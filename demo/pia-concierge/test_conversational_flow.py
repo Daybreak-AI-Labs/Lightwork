@@ -4,6 +4,7 @@ documents to a vendor that has already been assessed."""
 from __future__ import annotations
 
 import asyncio
+import base64
 import importlib.util
 import io
 import json
@@ -53,6 +54,9 @@ def demo_app():
 
 @pytest.fixture(autouse=True)
 def _fresh_world(tmp_path, monkeypatch, demo_app):
+    monkeypatch.setenv("PIA_BASE_URL", "http://testserver")
+    monkeypatch.setenv("PIA_OPERATOR_USER", "GT Reviewer")
+    monkeypatch.setenv("PIA_OPERATOR_TOKEN", "review-test-value")
     from maverick import config, world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
@@ -79,6 +83,7 @@ def _request(method: str = "GET", path: str = "/", body: bytes = b"") -> Request
         return {"type": "http.request", "body": body, "more_body": False}
 
     headers = [(b"content-type", b"application/json")] if body else []
+    headers.append((b"authorization", b"Basic " + base64.b64encode(b"GT Reviewer:review-test-value")))
     return Request(
         {"type": "http", "method": method, "path": path, "headers": headers,
          "query_string": b"", "scheme": "http",
@@ -89,8 +94,11 @@ def _request(method: str = "GET", path: str = "/", body: bytes = b"") -> Request
 
 def _json_request(payload: dict) -> Request:
     return Request(
-        {"type": "http", "method": "POST", "path": "/x",
-         "headers": [(b"content-type", b"application/json")]},
+        {"type": "http", "method": "POST", "path": "/x", "scheme": "http",
+         "server": ("testserver", 80), "query_string": b"",
+         "headers": [(b"content-type", b"application/json"),
+                     (b"origin", b"http://testserver"),
+                     (b"authorization", b"Basic " + base64.b64encode(b"GT Reviewer:review-test-value"))]},
         _receive_of(json.dumps(payload).encode()),
     )
 
@@ -211,7 +219,7 @@ def test_onetrust_approve_completes_everything(demo_app, monkeypatch):
     ot = _submit(demo_app, monkeypatch, case)
     resp = asyncio.run(demo_app.onetrust_decide(_json_request(
         {"assessment_id": ot.assessment_id, "decision": "approve",
-         "reviewer": "GT Reviewer"})))
+         "reviewer": "Spoofed Reviewer"})))
     assert json.loads(resp.body)["ok"] is True
     assert ot.status == "Completed" and ot.decided_by == "GT Reviewer"
     assert case.stage == "filed"
@@ -223,6 +231,57 @@ def test_onetrust_approve_completes_everything(demo_app, monkeypatch):
     record = load_saved(case.assessment_id)
     assert record["status"] == "approved"
     assert demo_app.STORE.tickets[case.ticket_number].state == "Resolved"
+
+
+def test_onetrust_review_requires_authentication_and_same_origin(demo_app, monkeypatch):
+    from starlette.testclient import TestClient
+
+    case = _mkcase(demo_app)
+    ot = _submit(demo_app, monkeypatch, case)
+    client = TestClient(demo_app.app)
+    body = {"assessment_id": ot.assessment_id, "decision": "approve"}
+    assert client.post("/onetrust/decide", json=body,
+                       headers={"Origin": "http://testserver"}).status_code == 401
+    assert client.post("/onetrust/decide", json=body,
+                       headers={"Origin": "https://attacker.example"},
+                       auth=("GT Reviewer", "review-test-value")).status_code == 403
+    assert demo_app._world().get_approval(int(case.approval_id)).status == "pending"
+    monkeypatch.delenv("PIA_OPERATOR_TOKEN")
+    assert client.post("/onetrust/decide", json=body,
+                       headers={"Origin": "http://testserver"}).status_code == 503
+
+
+def test_review_accepts_configured_public_origin_behind_tls_proxy(demo_app, monkeypatch):
+    from starlette.testclient import TestClient
+
+    case = _mkcase(demo_app)
+    ot = _submit(demo_app, monkeypatch, case)
+    monkeypatch.setenv("PIA_BASE_URL", "https://PIA.example.test:443")
+    client = TestClient(demo_app.app)
+    result = client.post("/onetrust/decide",
+                         json={"assessment_id": ot.assessment_id, "decision": "approve"},
+                         headers={"Origin": "https://pia.example.test"},
+                         auth=("GT Reviewer", "review-test-value"))
+    assert result.status_code == 200
+    assert ot.decided_by == "GT Reviewer"
+
+
+def test_onetrust_does_not_complete_a_pending_quorum(demo_app, monkeypatch):
+    from types import SimpleNamespace
+
+    case = _mkcase(demo_app)
+    ot = _submit(demo_app, monkeypatch, case)
+    world = SimpleNamespace(
+        decide_approval=lambda *args, **kwargs: True,
+        get_approval=lambda approval_id: SimpleNamespace(status="pending"),
+    )
+    monkeypatch.setattr(demo_app, "_world", lambda: world)
+    monkeypatch.setattr(demo_app, "_open_followups", lambda _case: [])
+    response = asyncio.run(demo_app.onetrust_decide(_json_request(
+        {"assessment_id": ot.assessment_id, "decision": "approve"})))
+    assert json.loads(response.body)["pending"] is True
+    assert case.stage == "in_onetrust_review"
+    assert ot.status == "Under Review"
 
 
 def test_onetrust_send_back(demo_app, monkeypatch):
@@ -254,7 +313,7 @@ def _dpa_pdf(demo_app) -> bytes:
 def test_add_document_to_existing_onetrust_record(demo_app, monkeypatch):
     case = _mkcase(demo_app)
     ot = _submit(demo_app, monkeypatch, case)
-    resp = asyncio.run(demo_app.onetrust_add_document(
+    resp = asyncio.run(demo_app._onetrust_add_document(
         ot.assessment_id, _upload("acme-dpa-v2.pdf", _dpa_pdf(demo_app))))
     payload = json.loads(resp.body)
     assert payload["ok"] is True
@@ -371,7 +430,7 @@ def test_addendum_reports_gaps_closed_since_last_review(demo_app, monkeypatch):
     case = _mkcase(demo_app)
     ot = _submit(demo_app, monkeypatch, case)
     # First document: sparse DPA -> plenty of missing clauses recorded.
-    asyncio.run(demo_app.onetrust_add_document(
+    asyncio.run(demo_app._onetrust_add_document(
         ot.assessment_id, _upload("acme-dpa-v1.pdf", _dpa_pdf(demo_app))))
     # Second document: fuller DPA -> closes some of those gaps.
     fuller = demo_app._mini_pdf(
@@ -385,7 +444,7 @@ def test_addendum_reports_gaps_closed_since_last_review(demo_app, monkeypatch):
          "Deletion or return of all personal data at contract end.",
          "Assists the controller with data subject requests.",
          "Technical and organisational security measures per Art. 32."])
-    resp = asyncio.run(demo_app.onetrust_add_document(
+    resp = asyncio.run(demo_app._onetrust_add_document(
         ot.assessment_id, _upload("acme-dpa-v2.pdf", fuller)))
     entry = json.loads(resp.body)["addendum"]
     assert entry["closed_gaps"], "the fuller DPA closes earlier gaps"

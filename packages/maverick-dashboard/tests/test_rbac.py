@@ -131,7 +131,7 @@ def test_role_for_principal(monkeypatch, tmp_path):
     assert auth.role_for_principal("user:boss") == "admin"     # bootstrap admin
     rbac.set_role("user:v", "viewer")
     assert auth.role_for_principal("user:v") == "viewer"       # stored
-    assert auth.role_for_principal("user:new") == "operator"   # default
+    assert auth.role_for_principal("user:new") == "viewer"   # default
 
 
 # ---------- HTTP enforcement ----------
@@ -609,7 +609,7 @@ def test_fresh_install_without_a_roster_keeps_the_default(monkeypatch, tmp_path)
     assert not rbac.store_path().exists()
     assert rbac.list_users() == {}
     assert rbac.missing_rosters() == []
-    assert auth.role_for_principal("user:new") == "operator"
+    assert auth.role_for_principal("user:new") == "viewer"
 
 
 def test_deleted_roster_after_assignment_denies_instead_of_promoting(monkeypatch, tmp_path):

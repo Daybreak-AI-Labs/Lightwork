@@ -28,6 +28,26 @@ _SCHEMA = {
 }
 
 
+def _safe_connector():
+    """Use a direct connector that never follows an HTTP redirect."""
+    from importlib.metadata import version
+
+    from websockets.legacy.client import Connect
+
+    try:
+        major = int(version("websockets").split(".", 1)[0])
+    except (ValueError, TypeError):
+        raise RuntimeError("installed websockets version is unsupported") from None
+    if not 12 <= major < 17 or not hasattr(Connect, "handle_redirect"):
+        raise RuntimeError("installed websockets version cannot enforce redirect policy")
+
+    class NoRedirectConnect(Connect):
+        def handle_redirect(self, uri):
+            raise ValueError("websocket redirects are not allowed")
+
+    return NoRedirectConnect
+
+
 def _check_url(url: str) -> str | None:
     """Return an error string if the URL is unsafe, else None."""
     parsed = urlparse(url)
@@ -84,10 +104,12 @@ async def _run(args: dict[str, Any]) -> str:
     if bad:
         return bad
     try:
-        import websockets
+        connect = _safe_connector()
     except ImportError:
         return ("ERROR: websockets not installed. "
                 "Run: python -m pip install -e './packages/maverick-core[websocket]'")
+    except Exception:
+        return "ERROR: installed websockets cannot enforce the connection safety policy"
     message = args.get("message")
     timeout = float(args.get("timeout") or 30)
     want_recv = args.get("recv", True)
@@ -114,7 +136,7 @@ async def _run(args: dict[str, Any]) -> str:
         # Connect to the pinned IP but validate the cert against the real name.
         connect_kwargs["server_hostname"] = parsed.hostname
     try:
-        async with websockets.connect(url, **connect_kwargs) as ws:
+        async with connect(url, **connect_kwargs) as ws:
             if message is not None:
                 await ws.send(str(message))
             if not want_recv:

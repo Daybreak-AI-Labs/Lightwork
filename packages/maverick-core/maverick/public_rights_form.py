@@ -546,7 +546,12 @@ def send_notice(
     prop = get_property(str((record.get("requester") or {}).get("property") or ""))
     template = rights_templates.get_template(
         rights_deadlines.family_for(str(record.get("jurisdiction") or "")), kind)
-    rendered = rights_templates.render(template, _context(record, prop, extras))
+    context = _context(record, prop, extras)
+    if kind == "verification":
+        # The submitter has not yet proved control of this mailbox; don't let
+        # them insert text or links into a notice sent to a third party.
+        context["requester_name"] = ""
+    rendered = rights_templates.render(template, context)
     to = str(record.get("subject_id") or "")
     sent, reason = (False, "the requester has no email address")
     if _EMAIL_RE.fullmatch(to):
@@ -616,7 +621,7 @@ def _validate_submission(payload: Mapping[str, Any], prop: Mapping[str, Any],
     message = _text(payload.get("message"), "message", int(cfg["max_message_chars"]),
                     required=False)
     return {
-        "email": email, "name": _text(payload.get("name"), "name", 200, required=False),
+        "email": email, "name": " ".join(_text(payload.get("name"), "name", 200, required=False).split()),
         "request_type": request_type, "jurisdiction": jurisdiction,
         "relationship": relationship, "message": message,
         "authorised_agent": bool(payload.get("authorised_agent")),

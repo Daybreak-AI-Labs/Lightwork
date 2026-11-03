@@ -32,24 +32,17 @@ A worked example lives in [`catalog-example/`](./catalog-example/).
 
 ## Trust model
 
-The catalog is **curated + hash-pinned**, which is what lets a consumer
-click "Install" without the `MAVERICK_ALLOW_SKILL_INSTALL` opt-in that
-free-text URL installs require:
-
-1. **Curated** — an entry only exists because the maintainers of the
-   index reviewed and accepted it. That's the same review bar as a
-   package registry.
-2. **Hash-pinned** — on install, the client fetches `source`, computes
-   the SHA-256, and refuses to write if it doesn't match the index's
-   `sha256`. A compromised mirror can't swap the bytes.
-3. **Shield-scanned** — the skill body still passes through Agent
-   Shield before it's written (same as every install path), so a
-   prompt-injection payload in a curated skill is still caught.
+Catalog skill installation requires a valid Ed25519 signature from a publisher
+whose public key is configured in `[skills].trusted_pubkeys`. No publisher key
+is bundled, so an administrator must configure one before installing catalog
+skills. The index hash checks the downloaded bytes but does not authenticate
+them when the same host controls the index and content. Shield scanning is an
+additional best-effort check, not a guarantee against malicious instructions.
 
 Free-text `POST /api/v1/skills` (arbitrary `gh:`/`https:` source) stays
 gated behind `MAVERICK_ALLOW_SKILL_INSTALL=1` — that's the RCE vector.
-`POST /api/v1/catalog/skills/install` (resolve-by-name, hash-verified)
-does not.
+`POST /api/v1/catalog/skills/install` resolves by name and requires both the
+hash and a trusted signature. MCP catalog specs have separate trust limits.
 
 ## Configuration
 

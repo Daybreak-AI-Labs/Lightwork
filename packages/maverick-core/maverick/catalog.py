@@ -113,10 +113,8 @@ class CatalogEntry:
     source: str
     sha256: str
     author: str = ""
-    # Self-asserted by the index, NOT a trust signal (the index host is
-    # unauthenticated). Real verification is reported on the installed
-    # Skill.verified after Ed25519 signature checking. Kept for schema
-    # compatibility / display only.
+    # Kept for API compatibility. An index cannot assert publisher
+    # verification; verified status is determined only after installation.
     verified: bool = False
     install_count: int = 0
     # Community rating carried by the index (display-only, like
@@ -148,7 +146,7 @@ class CatalogEntry:
             source=str(d.get("source", "")),
             sha256=str(d.get("sha256", "")),
             author=str(d.get("author", "")),
-            verified=bool(d.get("verified", False)),
+            verified=False,
             install_count=_safe_count(d.get("install_count")),
             rating=_safe_rating(d.get("rating")),
             ratings_count=_safe_count(d.get("ratings_count")),

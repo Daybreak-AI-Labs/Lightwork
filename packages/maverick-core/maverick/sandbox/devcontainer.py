@@ -41,17 +41,17 @@ Every exec runs ``docker run`` with ``--cap-drop ALL``,
 ``--security-opt no-new-privileges``, a pids limit, and the ``--memory`` cap
 above, matching the hardened DockerBackend. Network is disabled by default
 (``--network none``) exactly like the other container backends -- set
-``allow_network = true`` when a run genuinely needs egress. The container user
-follows a non-root ``remoteUser`` from the spec when one is set; otherwise it is
-pinned to the invoking uid:gid (``container_user_args``) so a ``remoteUser:
-root`` spec can't silently run the agent as root against the writable host
-mount. Set ``allow_root = true`` (or ``MAVERICK_SANDBOX_ALLOW_ROOT``) to opt
-back into root.
+``allow_network = true`` when a run genuinely needs egress. By default the
+container user is pinned to the invoking non-root uid:gid; the repository's
+``remoteUser`` is not trusted to identify an unprivileged account. Set
+``allow_root = true`` (or ``MAVERICK_SANDBOX_ALLOW_ROOT``) to opt into the
+repository's user setting, including root.
 """
 from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import subprocess
 import uuid
@@ -216,6 +216,8 @@ class DevcontainerBackend:
             ) from e
 
     def exec(self, cmd: str, timeout: float | None = None) -> ExecResult:
+        from .workspace_guard import validate_container_workspace
+        validate_container_workspace(self.project_dir)
         effective = self.timeout if timeout is None else timeout
         container_name = f"maverick-devc-{uuid.uuid4().hex}"
         args = [
@@ -237,20 +239,26 @@ class DevcontainerBackend:
             # Without it a prompt-injected agent could exhaust host memory.
             args.extend(["--memory", str(self.memory),
                          "--memory-swap", str(self.memory)])
-        if self.spec.remote_user and self.spec.remote_user != "root":
-            # A non-root remoteUser is an explicit, safe choice from the spec --
-            # honor it verbatim.
-            args.extend(["--user", self.spec.remote_user])
+        operator_allows_root = self.allow_root or os.environ.get(
+            "MAVERICK_SANDBOX_ALLOW_ROOT", ""
+        ).strip().lower() in {"1", "true", "yes", "on"}
+        if operator_allows_root:
+            if self.spec.remote_user and self.spec.remote_user != "root":
+                args.extend(["--user", self.spec.remote_user])
         else:
-            # remoteUser is root (the spec default or an explicit "root"):
-            # running as root against the writable {project_dir}:{workspace}
-            # host mount lets a prompt-injected agent write root-owned files on
-            # the host. Pin to the invoking uid:gid -- the SAME
-            # container_user_args/allow_root mechanism DockerBackend uses --
-            # unless the operator EXPLICITLY opts into root via allow_root /
-            # MAVERICK_SANDBOX_ALLOW_ROOT. Do not silently honor `remoteUser:
-            # root`.
-            args.extend(container_user_args(self.allow_root))
+            # A repo-provided username can name UID 0, or another host UID.
+            # Pin to the trusted invoking identity rather than the spec.
+            user_args = container_user_args(False)
+            try:
+                uid, gid = (int(part) for part in user_args[1].split(":"))
+            except (IndexError, TypeError, ValueError):
+                uid, gid = 0, 0
+            if uid <= 0 or gid <= 0:
+                raise RuntimeError(
+                    "devcontainer requires a non-root invoking user unless "
+                    "the operator enables sandbox allow_root"
+                )
+            args.extend(user_args)
         for k, v in self.spec.container_env.items():
             # containerEnv is repo-supplied: reject names that aren't plain
             # shell identifiers, and skip secret-shaped names so a malicious

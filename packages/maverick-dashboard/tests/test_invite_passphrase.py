@@ -115,7 +115,7 @@ def test_accept_set_passphrase_sign_out_and_sign_back_in_from_another_computer(w
     assert private_path_is_restricted(store)
     assert colleague.get("/api/v1/features/modules").status_code == 200
     # Sign out, then come back the next day.
-    assert colleague.get("/auth/logout").status_code == 303
+    assert colleague.post("/auth/logout", follow_redirects=False).status_code == 303
     assert "mvk_session" not in colleague.cookies
     denied = colleague.get("/goals", headers={"Accept": "text/html"})
     assert denied.status_code in {302, 303} and denied.headers["location"].startswith("/auth/local-login")

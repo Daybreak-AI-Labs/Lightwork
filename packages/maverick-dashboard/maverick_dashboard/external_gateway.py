@@ -440,6 +440,23 @@ async def _cache_limited_discovery_sensor_body(request: Request) -> bytes:
     return request._body  # noqa: SLF001 - exact cached signature authority
 
 
+def _require_registered_external_tenant(tenant: str, *, detail: str = "invalid credentials") -> None:
+    """Reject unknown tenants before any tenant-scoped storage is opened."""
+    from maverick.paths import implicit_tenant_id
+    from maverick.tenant.registry import _registry_path, assert_tenant_active, get_tenant
+
+    try:
+        record = get_tenant(tenant)
+        legacy_default = (record is None and not _registry_path().exists()
+                          and implicit_tenant_id() == tenant)
+        if (record is None and not legacy_default) or (record is not None and not record.active):
+            raise ValueError("unknown or inactive tenant")
+        assert_tenant_active(tenant)
+    except Exception as exc:
+        log.info("external gateway: tenant admission refused (%s)", type(exc).__name__)
+        raise HTTPException(status_code=401, detail=detail) from None
+
+
 async def _require_discovery_sensor(
     request: Request,
 ) -> AsyncIterator[tuple[str, str]]:
@@ -466,14 +483,16 @@ async def _require_discovery_sensor(
     except (TypeError, UnicodeError, ValueError):
         raise HTTPException(status_code=401, detail="invalid credentials") from None
 
+    _require_registered_external_tenant(tenant)
     tenant_token = set_tenant(tenant)
     try:
         from maverick import external_identity
         from maverick.agent_trust import AgentTrustError, load_trust_state
+        from maverick.paths import TenantNamespaceCollision, TenantPolicyError
 
         try:
             _, registry = load_trust_state()
-        except AgentTrustError as exc:
+        except (AgentTrustError, TenantNamespaceCollision, TenantPolicyError) as exc:
             log.warning(
                 "discovery sensor ingress: tenant trust state unreadable"
             )
@@ -552,6 +571,7 @@ async def _require_vendor_portal(
         tenant = canonical_tenant_id(tenant_value)
     except (TypeError, ValueError):
         raise HTTPException(status_code=401, detail="invalid invitation") from None
+    _require_registered_external_tenant(tenant, detail="invalid invitation")
     client = request.client.host if request.client else "unknown"
     throttle_key = hashlib.sha256(
         f"{client}\0{tenant}".encode()
@@ -560,6 +580,7 @@ async def _require_vendor_portal(
     await _cache_limited_vendor_portal_body(request)
     tenant_token = set_tenant(tenant)
     try:
+        from maverick.paths import TenantNamespaceCollision, TenantPolicyError
         if not portal.enabled():
             raise HTTPException(status_code=404, detail="not found")
         try:
@@ -577,6 +598,8 @@ async def _require_vendor_portal(
                 status_code=503,
                 detail="vendor response authority is unavailable",
             ) from exc
+        except (TenantNamespaceCollision, TenantPolicyError):
+            raise HTTPException(status_code=401, detail="invalid invitation") from None
         yield token, questionnaire
     finally:
         reset_tenant(tenant_token)

@@ -61,3 +61,14 @@ def test_the_card_says_why_the_approver_gets_it_and_opens_the_exact_card():
     # Without a known dashboard address the card still decides in place.
     assert not [a for a in approval_card({"id": 7, "action": "shell", "risk": "high"}, card).get("actions", [])
                 if a.get("type") == "Action.OpenUrl"]
+
+
+def test_untrusted_approval_text_cannot_create_markdown_links():
+    from maverick_channels.teams_cards import approval_card
+
+    result = approval_card(
+        {"id": 7, "action": "shell", "risk": "high", "detail": "[Open](https://attacker.example)"},
+        None,
+    )
+    values = [block.get("text", "") for block in result["body"]]
+    assert r"\[Open\]\(https://attacker.example\)" in values

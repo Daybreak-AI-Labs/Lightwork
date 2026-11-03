@@ -25,9 +25,9 @@ import time
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from starlette.concurrency import run_in_threadpool
 
 from . import learning_jobs as jobs
@@ -1067,9 +1067,35 @@ async def factory_restore_options(request: Request):
     return await run_in_threadpool(guided.restore_options, request)
 
 
-@router.post("/factory/review")
-async def factory_review(request: Request, body: FactoryReviewIn):
+def _factory_review_authority(request: Request) -> None:
     from . import factory_guidance as guided
+
+    guided.authority(request)
+
+
+@router.post(
+    "/factory/review", dependencies=[Depends(_factory_review_authority)],
+    openapi_extra={"requestBody": {"required": True, "content": {
+        "application/json": {"schema": FactoryReviewIn.model_json_schema()},
+    }}},
+    responses={422: {"description": "Invalid guidance decision details"}},
+)
+async def factory_review(request: Request):
+    from .app import _read_limited_request_body
+    from . import factory_guidance as guided
+
+    content_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    if content_type and not (content_type == "application/json" or (
+        content_type.startswith("application/") and content_type.endswith("+json")
+    )):
+        raise HTTPException(422, "Check the guidance decision details and try again.")
+    raw = await _read_limited_request_body(
+        request, max_bytes=256 * 1024, too_large_detail="guidance review request too large",
+    )
+    try:
+        body = FactoryReviewIn.model_validate_json(raw)
+    except ValidationError as exc:
+        raise HTTPException(422, "Check the guidance decision details and try again.") from exc
     return await run_in_threadpool(guided.review, request, body.action, body.values)
 
 

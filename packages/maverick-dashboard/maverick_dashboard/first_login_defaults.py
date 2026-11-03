@@ -18,7 +18,7 @@ def preview():
     section = cfg.get("dashboard") or {}
     if not isinstance(section, dict):
         raise HTTPException(503, "First-login policy is invalid. Restore configuration before changing it.")
-    role = section.get("default_role", "operator")
+    role = section.get("default_role", "viewer")
     suites = section.get("default_suites")
     if not isinstance(role, str) or not rbac.is_known_role(role) or (suites is not None and (not isinstance(suites, list) or any(not isinstance(s, str) for s in suites))):
         raise HTTPException(503, "First-login policy is invalid. Restore configuration before changing it.")

@@ -501,30 +501,22 @@ def _verify_registry_template_signature(
 ) -> bool:
     """Enforce trusted-publisher signatures for catalog template installs.
 
-    Reuses the same operator trust anchors as catalog skills: when
-    ``[skills].trusted_pubkeys`` is configured, or require_signed_catalog is
-    enabled, remote templates must carry an Ed25519 signature from a trusted
-    publisher. With no trust policy configured, unsigned installs remain
-    allowed for backward compatibility.
-
-    Template policy (stricter than free-text skills): a configured
-    ``trusted_pubkeys`` anchor by itself forces a signature, so ``must_verify``
-    and the no-anchor guard share the same condition.
+    Reuses the same operator trust anchors as catalog skills. Remote templates
+    require an Ed25519 signature from a configured trusted publisher.
     """
     from . import config as _config
     from .catalog_trust import verify_signed_catalog_item
 
     cfg = _config.get_skills()
     trusted = cfg["trusted_pubkeys"]
-    must_verify = bool(cfg["require_signed_catalog"] or trusted or require_signature)
     return verify_signed_catalog_item(
         item="template",
         sig=template.sig,
         pubkey=template.pubkey,
         canonical_bytes_fn=lambda: _canonical_template_signed_bytes(template),
         trusted=trusted,
-        must_verify=must_verify,
-        require_anchor=must_verify,
+        must_verify=True,
+        require_anchor=True,
         fields="title/params/body",
     )
 

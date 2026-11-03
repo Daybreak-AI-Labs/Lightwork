@@ -404,11 +404,6 @@ SETTINGS: tuple[Setting, ...] = (
       "Refuse saved procedures that are not signed by a trusted publisher.",
       "toggle", "Safety", False, "maverick.config", weaker=False,
       warning="Unsigned skills from unknown publishers will be accepted again."),
-    S("skills", "require_signed_catalog", "Require a signature for catalog installs",
-      "Installing a skill from a catalog needs a verified signature from a trusted publisher.",
-      "toggle", "Safety", False, "maverick.config", weaker=False,
-      env=("MAVERICK_REQUIRE_SIGNED_CATALOG",),
-      warning="Skills from catalogs will install without a verified signature."),
     S("skills", "builtin", "Use the built-in skills library",
       "Let agents recall Lightwork's own library of proven procedures.",
       "toggle", "Safety", True, "maverick.config"),
@@ -2181,12 +2176,13 @@ _POLICY: tuple[Setting, ...] = (
       "that shows any later change.", "toggle", "Safety", False, "maverick.governed_actions",
       subgroup="Approvals", env=("MAVERICK_GOVERNED_ACTIONS",), weaker=False,
       warning="Consequential actions will no longer be recorded with what led to them."),
-    S("approval", "delegation", "Who reviews which approvals",
-      "Send approvals that match a rule to the person chosen. Rules are checked from the "
-      "top and the first match wins; approvals that match no rule stay in the shared queue.",
+    S("approval", "delegation", "Suggest reviewers for approvals",
+      "Add a suggested reviewer to matching approvals. Rules are checked from the top "
+      "and the first match wins. Other authorized reviewers can still decide; this "
+      "setting does not restrict decision authority.",
       "rules", "Safety", [], "maverick.approval_delegation", subgroup="Approvals",
       columns=(
-          C("delegate_to", "Send to", "select", choices_from="people_only", required=True),
+          C("delegate_to", "Suggested reviewer", "select", choices_from="people_only", required=True),
           C("min_risk", "For risk", "select", default="",
             choices=(("", "Any risk"), ("low", "Low and above"), ("medium", "Medium and above"),
                      ("high", "High and above"), ("critical", "Critical only"))),

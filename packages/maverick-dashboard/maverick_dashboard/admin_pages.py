@@ -1036,7 +1036,7 @@ def _users_context(request: Request) -> dict:
             "workspace_roles": workspace_role_options.get(wm_tenant, []),
             "workspace_member_count": len(member_rosters.get(wm_tenant, {})),
             "role_descriptions": role_descriptions(),
-            "bootstrap_admins": [], "auth_on": True, "default_role": rbac.default_role(),
+            "bootstrap_admins": [], "auth_on": True, "default_role": rbac.default_role(), "workspace_roles_initialized": rbac.tenant_role_scope_initialized(),
             "you": auth.caller_principal(request),
             "saved": ("Workspace invitation revoked."
                       if request.query_params.get("saved") == "workspace_invite_revoked" else ""),
@@ -1131,7 +1131,7 @@ def _users_context(request: Request) -> dict:
         "custom_roles": custom_roles,
         "permission_atoms": rbac.PERMISSION_ATOMS,
         "bootstrap_admins": sorted(bootstrap),
-        "default_role": rbac.default_role(),
+        "default_role": rbac.default_role(), "workspace_roles_initialized": rbac.tenant_role_scope_initialized(),
         "auth_on": auth_on,
         "you": auth.caller_principal(request),
         "saved": saved,
@@ -1766,11 +1766,20 @@ def spending_limits_page(request: Request, saved: str = "", error: str = "",
     nothing is saved until the administrator presses Save."""
     auth.require_permission(request, "admin")
     from maverick import spending_limits
-    from maverick.paths import current_tenant_id
+    from maverick.paths import current_tenant_id, current_tenant_id_strict
     from maverick.quotas import UsageLedger
 
     from . import rbac
-    people = set(rbac.list_users())
+    if auth.has_global_permission(request, "admin"):
+        people = set(rbac.list_users())
+    else:
+        try:
+            tenant = current_tenant_id_strict()
+            if not tenant:
+                raise ValueError("workspace is unavailable")
+            people = set(rbac.list_tenant_roles(tenant))
+        except Exception as exc:
+            raise HTTPException(503, "Workspace membership is unavailable.") from exc
     try:
         people |= set(UsageLedger()._load())
     except Exception:  # noqa: BLE001 -- spend history is a convenience here

@@ -32,6 +32,27 @@ def _connection(websocket=False):
     return WebSocket(scope, receive=None, send=None) if websocket else Request(scope)
 
 
+@pytest.mark.parametrize("path", ["/openapi.json", "/redoc", "/docs", "/docs/oauth2-redirect",
+                                  "/static/swagger-ui-5.33.1.css"])
+def test_oidc_docs_routes_require_identity(identity, path):
+    from fastapi.testclient import TestClient
+    from maverick_dashboard.app import app
+
+    client = TestClient(app, client=("198.51.100.12", 1234))
+    assert client.get(path, follow_redirects=False).status_code in (401, 403, 307)
+    assert client.get(path, headers={"Authorization": "Bearer synthetic"}).status_code == 200
+
+
+def test_authenticated_schema_preserves_mount_root(identity):
+    from fastapi.testclient import TestClient
+    from maverick_dashboard.app import app
+
+    client = TestClient(app, root_path="/lightwork")
+    response = client.get("/openapi.json", headers={"Authorization": "Bearer synthetic"})
+    assert response.status_code == 200
+    assert {server["url"] for server in response.json()["servers"]} >= {"/lightwork"}
+
+
 def test_blocked_verification_does_not_block_actual_asgi_probe_and_preserves_child_tenant(identity, monkeypatch):
     from maverick_dashboard import api
     from maverick_dashboard.app import app

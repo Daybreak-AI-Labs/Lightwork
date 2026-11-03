@@ -48,7 +48,7 @@ class OneTrustClient:
                      else os.environ.get("ONETRUST_HOSTNAME",
                                          "http://127.0.0.1:8890/ot-api"))
         self.base = self.base.rstrip("/")
-        token = token or os.environ.get("ONETRUST_TOKEN", "demo-bearer-token")
+        token = token or os.environ.get("ONETRUST_TOKEN", "")
         self._headers = {"Authorization": f"Bearer {token}"}
         if http is None:
             import httpx

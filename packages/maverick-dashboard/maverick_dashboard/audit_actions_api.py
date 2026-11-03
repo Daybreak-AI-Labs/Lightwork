@@ -298,9 +298,14 @@ async def check_log(request: Request, body: CheckIn) -> dict:
                 "split this range into separate checks."))
         problems: list[str] = []
         unsigned = 0
+        try:
+            from maverick.soc2 import _audit_signing_expected
+            signing_expected = _audit_signing_expected()
+        except Exception:
+            signing_expected = True
         for path in paths[-400:]:
             breaks = verify_chain(path, max_breaks=20)
-            if breaks and all(b.reason == "unsigned" for b in breaks):
+            if breaks and all(b.reason == "unsigned" for b in breaks) and not signing_expected:
                 unsigned += 1
             elif breaks:
                 problems.append(f"{path.stem}: {len(breaks)} "

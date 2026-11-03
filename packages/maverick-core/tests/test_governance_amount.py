@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from maverick.governance import Decision, Policy, _amount_table, evaluate
+import pytest
 
 
 def test_require_human_above_threshold():
@@ -84,3 +85,47 @@ def test_threshold_composes_with_capability_deny():
     # capability deny wins over the (lower-precedence) amount gate
     v = evaluate("release_payment", amount=10, capability=cap, policy=pol)
     assert v.decision is Decision.DENY and v.rule == "capability"
+
+
+@pytest.mark.parametrize("args", [
+    {}, {"amount": None}, {"amount": -1}, {"amount": "nan"},
+    {"amount": "inf"}, {"amount": True}, {"amount": 50, "currency": "EUR"},
+])
+def test_unverifiable_finance_amount_fails_closed(args):
+    from maverick.governance import transaction_value
+
+    for table, decision in [("deny_above", Decision.DENY),
+                            ("require_human_above", Decision.REQUIRE_HUMAN)]:
+        policy = Policy(**{table: {"*": 100}})
+        amount, currency, unavailable = transaction_value("wire_transfer", args, policy)
+        assert unavailable
+        assert evaluate("wire_transfer", policy=policy, amount=amount,
+                        currency=currency, amount_unavailable=unavailable).decision is decision
+
+
+def test_refund_value_and_unknown_currency():
+    from maverick.governance import transaction_value
+
+    policy = Policy(deny_above={"*": 100})
+    assert transaction_value("shopify", {"op": "refund_create", "amount_cents": 12500}, policy) == (125, "", False)
+    for args in ({"op": "refund_create"}, {"op": "refund_create", "amount_cents": 0},
+                 {"op": "refund_create", "amount_cents": 100, "currency": "JPY"}):
+        assert transaction_value("shopify", args, policy)[2]
+    assert transaction_value("stripe", {"op": "refund_create", "amount_cents": 1, "currency": "USD"}, policy)[2]
+    assert transaction_value("stripe", {"op": "charges"}, policy)[2] is False
+    assert transaction_value("shopify", {"op": "refund_create", "amount_cents": 2**53 + 1}, policy)[2]
+
+
+def test_generic_connector_cannot_prove_value_with_a_decoy():
+    from maverick.governance import transaction_value
+    policy = Policy(deny_above={"*": 100})
+    amount, currency, unavailable = transaction_value(
+        "openapi_runner", {"amount": 1, "body": {"amount": 1000000}}, policy)
+    assert evaluate("openapi_runner", policy=policy, amount=amount,
+                    currency=currency, amount_unavailable=unavailable).decision is Decision.DENY
+
+
+@pytest.mark.parametrize("amount", [float("nan"), float("inf"), -1, True])
+def test_direct_evaluate_rejects_invalid_amounts(amount):
+    assert evaluate("wire_transfer", amount=amount,
+                    policy=Policy(deny_above={"*": 100})).decision is Decision.DENY

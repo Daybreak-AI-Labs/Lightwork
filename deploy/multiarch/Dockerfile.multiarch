@@ -18,6 +18,7 @@ FROM ${BASE_IMAGE}
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    PYTHONNOUSERSITE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
@@ -53,6 +54,12 @@ RUN if [ "${INSTALL_DASHBOARD}" = "1" ]; then \
           --only maverick-agent maverick-shield; \
     fi
 
+RUN groupadd --gid 1000 maverick \
+    && useradd --uid 1000 --gid 1000 --create-home --shell /usr/sbin/nologin maverick \
+    && mkdir -p /workspace /home/maverick/.maverick \
+    && chown -R maverick:maverick /workspace /home/maverick
+ENV HOME=/home/maverick
+USER maverick
 WORKDIR /workspace
 ENTRYPOINT ["maverick"]
 CMD ["--help"]

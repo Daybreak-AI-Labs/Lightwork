@@ -9,7 +9,7 @@ from maverick.flow import approvals
 
 @pytest.fixture(autouse=True)
 def _secret(monkeypatch):
-    monkeypatch.setenv("MAVERICK_WEBHOOK_SECRET", "test-signing-secret")  # pragma: allowlist secret
+    monkeypatch.setenv("MAVERICK_FLOW_APPROVAL_SECRET", "test-signing-secret")  # pragma: allowlist secret
 
 
 def test_mint_verify_roundtrip():
@@ -76,10 +76,15 @@ def test_invalid_decision_mints_nothing():
 
 
 def test_no_secret_fails_closed(monkeypatch):
-    monkeypatch.delenv("MAVERICK_WEBHOOK_SECRET", raising=False)
+    monkeypatch.delenv("MAVERICK_FLOW_APPROVAL_SECRET", raising=False)
     # no [webhooks] secret either -> mint + verify both fail closed
     assert approvals.mint_token("run-1", "approved", cursor="a", prompt="ok?", updated=123.0) is None
     assert approvals.verify_token("anything.deadbeef") is None
+
+
+def test_approval_secret_must_not_equal_an_external_webhook_secret(monkeypatch):
+    monkeypatch.setenv("MAVERICK_LINEAR_WEBHOOK_SECRET", "test-signing-secret")
+    assert approvals.mint_token("run-1", "approved", cursor="a", updated=123.0) is None
 
 
 def test_approval_links_build_both_urls():

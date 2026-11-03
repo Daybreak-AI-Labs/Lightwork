@@ -4,14 +4,23 @@ Complements ``pandas_query`` (which *analyzes* tabular data read-only) with a
 *write*-capable tool: create sheets, write rows, set individual cells. CSV uses
 the stdlib; XLSX uses openpyxl (an optional extra — ops on .xlsx fail with an
 actionable "install" message when it's absent, mirroring the other optional-dep
-tools). ops: info, read, write, set_cell.
+tools). Existing XLSX/XLSM files are bounded to 64 MiB compressed and expanded,
+16 MiB per part, and 2,000 parts; external workbook link parts are unsupported.
+ZIP64, UTF-16/32 XML and archives with noncanonical directory offsets are also
+unsupported. Merged ranges are limited to 2,000 ranges and 100,000 cells per
+workbook. These limits do not replace operating-system CPU and memory isolation.
+ops: info,
+read, write, set_cell.
 """
 from __future__ import annotations
 
 import csv as _csv
+import io
 import os
 import stat
+import struct
 import tempfile
+import zipfile
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Any
@@ -58,6 +67,9 @@ def _safe_path(sandbox, user_path: str) -> Path:
     """
     if sandbox is None:
         return Path(user_path).expanduser()
+    from ..sandbox.ssh import SSHBackend
+    if isinstance(sandbox, SSHBackend):
+        raise ValueError("host filesystem tools cannot access an SSH workspace")
     workdir = Path(sandbox.workdir).resolve()
     candidate = Path(user_path)
     candidate = (
@@ -139,6 +151,100 @@ def _csv_write(path: Path, rows: list[list]) -> None:
 
 # ---- XLSX -------------------------------------------------------------------
 
+def _validate_xlsx(content: bytes) -> None:
+    """Bound ZIP structure and known parser-amplifying spreadsheet features."""
+    part_limit = 16 * 1024 * 1024
+    expanded_limit = 64 * 1024 * 1024
+    # ZipFile eagerly constructs one object per central-directory entry. Check
+    # the bounded end record before constructing it, including ZIP64 sentinels.
+    offset = content.rfind(b"PK\x05\x06", max(0, len(content) - 65557))
+    if offset < 0 or offset + 22 > len(content):
+        raise ValueError("Workbook ZIP directory is invalid")
+    _, disk, start_disk, disk_entries, total_entries, directory_size, directory_offset, comment_size = struct.unpack_from(
+        "<4s4H2LH", content, offset)
+    if (disk or start_disk or disk_entries != total_entries or total_entries > 2000
+            or total_entries == 0xffff or directory_size > 4 * 1024 * 1024
+            or directory_offset + directory_size != offset or offset + 22 + comment_size != len(content)):
+        raise ValueError("Workbook ZIP directory exceeds limits or is unsupported")
+    cursor = directory_offset
+    end = directory_offset + directory_size
+    count = 0
+    while cursor < end:
+        if cursor + 46 > end or content[cursor:cursor + 4] != b"PK\x01\x02":
+            raise ValueError("Workbook ZIP directory is invalid")
+        name_size, extra_size, comment_size = struct.unpack_from("<3H", content, cursor + 28)
+        cursor += 46 + name_size + extra_size + comment_size
+        count += 1
+        if cursor > end or count > 2000:
+            raise ValueError("Workbook ZIP directory exceeds limits")
+    if cursor != end or count != total_entries:
+        raise ValueError("Workbook ZIP directory count is invalid")
+    with zipfile.ZipFile(io.BytesIO(content)) as archive:
+        entries = archive.infolist()
+        if len(entries) != total_entries or sum(item.file_size for item in entries) > expanded_limit:
+            raise ValueError("Workbook expanded size or part count exceeds limits")
+        seen = set()
+        merged_count = merged_area = 0
+        for item in entries:
+            name = item.filename
+            if (name.casefold() in seen or name.startswith("/") or "\\" in name or ":" in name
+                    or any(part in {"", ".", ".."} for part in name.rstrip("/").split("/"))
+                    or item.flag_bits & 1 or item.file_size > part_limit):
+                raise ValueError("Workbook contains ambiguous, encrypted or oversized parts")
+            if name.casefold().startswith("xl/externallinks/"):
+                raise ValueError("Workbooks with external links are unsupported")
+            seen.add(name.casefold())
+            if item.is_dir():
+                continue
+            # OPC relationships can point to XML under arbitrary part names.
+            # Inspect every part for parser-amplifying XML rather than trusting
+            # its extension or location. Strip NULs for detection so UTF-16/32
+            # cannot hide declarations or merge tags in an oddly named part.
+            data = archive.read(item)
+            probe = data.replace(b"\x00", b"").upper()
+            xml_named = name.lower().endswith((".xml", ".rels"))
+            has_merges = b"MERGECELL" in probe
+            if b"<!DOCTYPE" in probe or (b"\x00" in data and (xml_named or has_merges)):
+                raise ValueError("Workbook XML declarations/entities are unsupported")
+            if has_merges:
+                merged_count, merged_area = _validate_merged_cells(data, merged_count, merged_area)
+
+
+def _validate_merged_cells(data: bytes, count: int = 0, area: int = 0) -> tuple[int, int]:
+    from lxml import etree
+    from openpyxl.utils.cell import range_boundaries
+
+    namespace = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}mergeCell"
+    for _event, node in etree.iterparse(io.BytesIO(data), events=("end",),
+                                        resolve_entities=False, load_dtd=False,
+                                        no_network=True, huge_tree=False):
+        if node.tag == namespace:
+            left, top, right, bottom = range_boundaries(node.get("ref") or "")
+            if (None in (left, top, right, bottom) or left < 1 or top < 1
+                    or right > 16384 or bottom > 1048576 or right < left or bottom < top):
+                raise ValueError("Workbook contains an invalid merged range")
+            count += 1
+            area += (right - left + 1) * (bottom - top + 1)
+            if count > 2000 or area > 100000:
+                raise ValueError("Workbook merged cells exceed safe limits")
+        node.clear()
+    return count, area
+
+
+def _xlsx_snapshot(path: Path) -> bytes:
+    """Snapshot and bound an XLSX archive before handing it to openpyxl."""
+    input_limit = 64 * 1024 * 1024
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0))
+    with os.fdopen(fd, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_size > input_limit:
+            raise ValueError("Workbook must be a regular file within the 64 MiB input limit")
+        content = stream.read(input_limit + 1)
+    if len(content) > input_limit:
+        raise ValueError("Workbook exceeds the 64 MiB input limit")
+    _validate_xlsx(content)
+    return content
+
 def _xlsx_read_bounds(worksheet, limit: int) -> tuple[int, int]:
     """Inspect actual sparse coordinates before openpyxl expands any rows.
 
@@ -181,14 +287,15 @@ def _xlsx_read_bounds(worksheet, limit: int) -> tuple[int, int]:
 
 
 def _xlsx_read(path: Path, sheet: str | None, limit: int) -> list[list]:
+    content = _xlsx_snapshot(path)
     with ExitStack() as cleanup:
-        wb = _openpyxl().load_workbook(path, read_only=True, data_only=False)
+        wb = _openpyxl().load_workbook(io.BytesIO(content), read_only=True, data_only=False, keep_links=False)
         cleanup.callback(wb.close)
         ws = wb[sheet] if sheet else wb.active
         height, width = _xlsx_read_bounds(ws, limit)
         if not height or not width:
             return []
-        cached = _openpyxl().load_workbook(path, read_only=True, data_only=True)
+        cached = _openpyxl().load_workbook(io.BytesIO(content), read_only=True, data_only=True, keep_links=False)
         cleanup.callback(cached.close)
         values = cached[ws.title]
         rows = []
@@ -225,7 +332,7 @@ def _xlsx_write(path: Path, rows: list[list], sheet: str | None) -> None:
 def _xlsx_set_cell(path: Path, cell: str, value: Any, sheet: str | None) -> None:
     op = _openpyxl()
     existing = path.exists()
-    wb = op.load_workbook(path) if existing else op.Workbook()
+    wb = op.load_workbook(io.BytesIO(_xlsx_snapshot(path)), keep_links=False) if existing else op.Workbook()
     try:
         if sheet and sheet in wb.sheetnames:
             ws = wb[sheet]
@@ -272,7 +379,7 @@ def _set_cell_operation(path, args, sheet):
     with cross_process_lock(path, strict=True):
         if path.suffix.lower() == ".xlsm":
             from .office_package import WorkbookPackage
-            package = WorkbookPackage(path)
+            package = WorkbookPackage(_xlsx_snapshot(path))
             package.set_cell(cell, _neutralize_formula(args.get("value")), sheet)
             with _atomic_destination(path) as temporary:
                 package.write(temporary)
@@ -304,7 +411,7 @@ def _run(args: dict[str, Any], sandbox=None) -> str:
             if not path.exists():
                 return f"ERROR: no such file {path}"
             if _is_xlsx(path):
-                wb = _openpyxl().load_workbook(path, read_only=True)
+                wb = _openpyxl().load_workbook(io.BytesIO(_xlsx_snapshot(path)), read_only=True, keep_links=False)
                 try:
                     dims = {s: (wb[s].max_row, wb[s].max_column) for s in wb.sheetnames}
                     return f"xlsx sheets {dims}"

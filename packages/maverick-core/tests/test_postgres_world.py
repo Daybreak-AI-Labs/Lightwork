@@ -1478,6 +1478,36 @@ def test_goal_status_counts_and_ping(world):
     assert world.ping() is True
 
 
+def test_goal_status_counts_scope_same_owner_to_workspace_and_legacy_root(world, monkeypatch):
+    from maverick.paths import tenant_scope
+
+    monkeypatch.setenv("MAVERICK_STRICT_TENANT_ISOLATION", "1")
+    marker = "status-" + uuid.uuid4().hex[:12]
+    other = marker + "-other"
+    owner = "user:" + marker
+    try:
+        before_root = sum(world.goal_status_counts().values())
+        world.create_goal("legacy root", owner=owner)
+        with tenant_scope(tenant=marker):
+            world.create_goal("one", owner=owner)
+        with tenant_scope(tenant=other):
+            world.create_goal("two", owner=owner)
+            world.create_goal("three", owner=owner)
+        assert sum(world.goal_status_counts(owner=owner).values()) == 1
+        assert sum(world.goal_status_counts().values()) == before_root + 1
+        with tenant_scope(tenant=marker):
+            assert sum(world.goal_status_counts(owner=owner).values()) == 1
+        with tenant_scope(tenant=other):
+            assert sum(world.goal_status_counts(owner=owner).values()) == 2
+        monkeypatch.setenv("MAVERICK_STRICT_TENANT_ISOLATION", "0")
+        with tenant_scope(tenant=marker):
+            assert sum(world.goal_status_counts(owner=owner).values()) == 2
+    finally:
+        with world._tx() as cursor:
+            cursor.execute("DELETE FROM goals WHERE tenant_id IN (%s, %s)", (marker, other))
+            cursor.execute("DELETE FROM goals WHERE tenant_id IS NULL AND owner=%s", (owner,))
+
+
 def test_rate_events_window_count(world):
     import time
     now = time.time()
@@ -1731,6 +1761,39 @@ def test_history_limit_applies_after_effective_precedence_projection(
     finally:
         world.delete_facts_matching(subject)
         reset_tenant(tok)
+
+
+def test_unbound_fact_reads_exclude_named_tenants(world, monkeypatch):
+    from maverick.paths import tenant_scope
+
+    monkeypatch.setenv("MAVERICK_STRICT_TENANT_ISOLATION", "0")
+    unique = uuid.uuid4().hex
+    key_a = f"tenant-a:{unique}"
+    key_b = f"tenant-b:{unique}"
+    key_root = f"legacy:{unique}"
+    try:
+        with tenant_scope(tenant="acme"):
+            world.upsert_fact(key_a, "workspace-a-private")
+        with tenant_scope(tenant="globex"):
+            world.upsert_fact(key_b, "workspace-b-private")
+        world.upsert_fact(key_root, "legacy-visible")
+        assert world.get_fact(key_a) is None
+        assert world.get_fact(key_b) is None
+        facts = world.get_facts()
+        assert key_a not in facts and key_b not in facts
+        assert facts[key_root] == "legacy-visible"
+        with tenant_scope(tenant="acme"):
+            assert world.get_fact(key_a) == "workspace-a-private"
+            assert world.get_fact(key_b) is None
+        with tenant_scope(tenant="globex"):
+            assert world.get_fact(key_b) == "workspace-b-private"
+            assert world.get_fact(key_a) is None
+    finally:
+        with tenant_scope(tenant="acme"):
+            world.delete_fact(key_a)
+        with tenant_scope(tenant="globex"):
+            world.delete_fact(key_b)
+        world.delete_fact(key_root)
 
 
 def test_unbound_fact_delete_mutates_only_legacy_null_row(world, monkeypatch):

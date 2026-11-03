@@ -959,15 +959,16 @@ class _PgRow(tuple):
 def _tenant_scope(column: str = "tenant_id") -> tuple[str, list]:
     """Read predicate scoping rows to the active tenant.
 
-    Returns ``(sql_fragment, params)``. With **no** active tenant the fragment is
-    empty -- the default single-tenant install is unchanged. With a tenant set,
+    Returns ``(sql_fragment, params)``. With **no** active tenant, only legacy
+    unbound rows are visible, preserving single-tenant data without exposing
+    named workspaces. With a tenant set,
     the default (NULL-tolerant) predicate matches that tenant's rows **plus**
     legacy ``NULL`` rows; strict mode (``[world_model] strict_tenant_isolation``)
     matches **only** that tenant's rows, the RLS-equivalent hard boundary.
     """
     t = _active_tenant()
     if t is None:
-        return "", []
+        return f"{column} IS NULL", []
     if _strict_tenant_isolation():
         return f"{column} = %s", [t]
     return f"({column} = %s OR {column} IS NULL)", [t]
@@ -990,9 +991,8 @@ def _approval_outbox_scope(column: str = "tenant_id") -> tuple[str, list]:
 def _mutation_tenant_scope(column: str = "tenant_id") -> tuple[str, list]:
     """Exact tenant predicate for ordinary writes and deletes.
 
-    ``_tenant_scope`` deliberately exposes legacy NULL rows to compatibility
-    reads and exposes every tenant to the unbound administrative read view.
-    Neither behavior grants mutation authority: unbound callers may change
+    ``_tenant_scope`` may expose legacy NULL rows to compatibility reads.
+    That behavior does not grant mutation authority: unbound callers may change
     only legacy NULL rows, and bound callers may change only their exact
     tenant. Legacy ownership must be assigned explicitly before mutation.
     """
@@ -1092,9 +1092,8 @@ def _effective_fact_history_rows(rows: list[tuple], tenant: str | None) -> list[
 def _erasure_tenant_scope(column: str = "tenant_id") -> tuple[str, list]:
     """Tenant boundary for destructive erasure and its receipt proof.
 
-    An unbound Postgres connection is an administrator read view, not authority
-    to erase every named tenant. It may erase only legacy single-tenant NULL
-    rows. A bound tenant follows the normal compatibility policy (its own rows
+    An unbound Postgres connection may erase only legacy single-tenant NULL
+    rows, never rows belonging to named tenants. A bound tenant follows the normal compatibility policy (its own rows
     plus legacy NULL rows until strict isolation/backfill is enabled).
     """
     tenant = _active_tenant()
@@ -2290,13 +2289,16 @@ class PostgresWorldModel:
             rows = cur.fetchall()
         return {r[0]: int(r[1]) for r in rows}
 
-    def goal_status_counts(self) -> dict[str, int]:
+    def goal_status_counts(self, *, owner: str | None = None) -> dict[str, int]:
         """All goals keyed by status (tenant-scoped) -- the backend-agnostic
         source for the ``/metrics`` ``maverick_goals_total`` gauge."""
         sql = "SELECT status, COUNT(*) FROM goals"
         frag, params = _tenant_scope()
         if frag:
             sql += " WHERE " + frag
+        if owner is not None:
+            sql += " AND owner = %s" if frag else " WHERE owner = %s"
+            params.append(owner)
         sql += " GROUP BY status"
         with self._tx() as cur:
             cur.execute(sql, tuple(params))
@@ -2766,6 +2768,7 @@ class PostgresWorldModel:
         offset: int = 0,
         order: str = "asc",
         before_id: int | None = None,
+        strict_tenant: bool = False,
     ) -> list[PGGoal]:
         """List goals, optionally filtered by status + paginated (mirrors SQLite).
 
@@ -2777,6 +2780,8 @@ class PostgresWorldModel:
         ``before_id`` is an exclusive immutable ID bound, combined with all
         current tenant/owner filters without reading its anchor. Descending
         order provides continuation; ascending order only applies the bound.
+        ``strict_tenant`` excludes legacy unbound rows for named workspaces,
+        regardless of the deployment's compatibility setting.
         """
         if before_id is not None and not 0 < int(before_id) <= 2**63 - 1:
             raise ValueError("before_id must be a positive signed 64-bit goal ID")
@@ -2804,7 +2809,11 @@ class PostgresWorldModel:
         if before_id is not None:
             conds.append("id < %s")
             params.append(int(before_id))
-        frag, fparams = _tenant_scope()
+        if strict_tenant:
+            tenant = _active_tenant()
+            frag, fparams = ("tenant_id = %s", [tenant]) if tenant is not None else ("tenant_id IS NULL", [])
+        else:
+            frag, fparams = _tenant_scope()
         if frag:
             conds.append(frag)
             params += fparams
@@ -3643,8 +3652,8 @@ class PostgresWorldModel:
         if not prefix:
             return []
         # A bound compatibility tenant can read legacy NULL rows, so an Art.17
-        # erase must purge those rows too. The unbound administrative view still
-        # receives authority over legacy NULL rows only.
+        # erase must purge those rows too. The unbound view has authority over
+        # legacy NULL rows only.
         frag, fparams = _erasure_tenant_scope()
         escaped = self._like_escape(prefix) + "%"
         with self._tx() as cur:
@@ -3825,8 +3834,8 @@ class PostgresWorldModel:
             )
             p += [compatibility_tenant, row_limit]
         else:
-            # Strict and unbound administrative views retain the prior global
-            # database-side bound and do not receive compatibility projection.
+            # Strict and unbound views use the normal database-side limit and
+            # do not receive compatibility projection.
             sql = f"SELECT {columns} FROM fact_history WHERE key = %s"
             p = [key]
             if frag:
@@ -4148,8 +4157,12 @@ class PostgresWorldModel:
 
         WorldModel._emit_approval_event(self, event, approval_id, payload)
 
-    def get_approval(self, approval_id: int):
-        frag, params = _tenant_scope()
+    def get_approval(self, approval_id: int, *, strict_tenant: bool = False):
+        if strict_tenant:
+            tenant = _active_tenant()
+            frag, params = ("tenant_id = %s", [tenant]) if tenant is not None else ("tenant_id IS NULL", [])
+        else:
+            frag, params = _tenant_scope()
         sql = (
             "SELECT id, action, risk, scope, detail, provenance, status, "
             "requested_at, decided_at, claimed_by, claimed_at, decided_by, "
@@ -4164,6 +4177,32 @@ class PostgresWorldModel:
             cur.execute(sql, tuple(p))
             row = cur.fetchone()
         return _dec_approval_row(row) if row else None
+
+    def pending_unattached_approval_ids(self, owner: str, *, limit: int) -> list[int]:
+        tenant = _active_tenant()
+        scope, params = ("tenant_id = %s", [tenant]) if tenant is not None else ("tenant_id IS NULL", [])
+        with self._tx() as cur:
+            cur.execute(
+                "SELECT id FROM approvals WHERE status='pending' AND goal_id IS NULL "
+                f"AND requested_by=%s AND {scope} ORDER BY id DESC LIMIT %s",
+                tuple([owner, *params, max(1, int(limit))]),
+            )
+            rows = cur.fetchall()
+        return [int(row[0]) for row in rows]
+
+    def pending_goal_approval_ids(self, goal_ids: list[int], *, limit: int) -> list[int]:
+        if not goal_ids:
+            return []
+        tenant = _active_tenant()
+        scope, params = ("tenant_id = %s", [tenant]) if tenant is not None else ("tenant_id IS NULL", [])
+        with self._tx() as cur:
+            cur.execute(
+                "SELECT id FROM approvals WHERE status='pending' AND goal_id = ANY(%s) "
+                f"AND {scope} ORDER BY id DESC LIMIT %s",
+                tuple([goal_ids, *params, max(1, int(limit))]),
+            )
+            rows = cur.fetchall()
+        return [int(row[0]) for row in rows]
 
     def pending_approvals(self) -> list:
         frag, params = _tenant_scope()

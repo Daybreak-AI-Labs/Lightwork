@@ -2543,6 +2543,14 @@ Settings and the installation wizard.
   data when the trigger polls. Its per-token queue is capped at
   5,000 submissions / 32 MiB; a full queue refuses new submissions with 507
   rather than accepting data that cannot be retained.
+
+  OAuth event triggers refresh only through registered provider presets and
+  send vaulted tokens only to approved API origins for that provider. Existing
+  triggers with custom token endpoints, credential environment names, or
+  unsupported resource origins must be reconfigured before polling resumes.
+  Salesforce and custom provider domains are not currently in the approved
+  origin list. Remove saved credential overrides and configure the preset's
+  environment credentials for supported providers.
   An owner can replace a form link in Automations after every accepted
   submission has been checked. The old link stops accepting submissions, the
   new link starts with an empty queue, and the old submission file is retained.
@@ -2861,16 +2869,13 @@ Built-in tool modules. Highlights by group (all under `tools/`):
   any S3-compatible bucket + `s3_fetch` pulls it down on another worker host;
   local disk stays the source tools read, mirror is fail-open), `license_scan`
   (classify deps + flag copyleft), `self_capability` (report the run's capability
-  grant), `oidc` (OIDC authorization-code client), `oauth_helper` (generic OAuth2 for
-  any provider — PKCE authorize URL / code exchange / refresh; token responses
-  summarised with a sha fingerprint and never echoed into context; full tokens
-  seal into the per-tenant OAuth vault — `oauth_vault.py`, AES-256-GCM under the
-  tenant DEK, refresh-aware via a caller-supplied refresher — when `[oauth] vault`
-  is on, else a 0600 MAVERICK_OAUTH_OUT file; the Automations page's **Connected
+  grant), `oidc` (OIDC authorization-code client), `oauth_helper` (builds a PKCE authorization URL; token exchange and refresh
+  are handled through the operator-facing connection flow rather than agent
+  tool calls); the Automations page's **Connected
   accounts** panel lists each provider's token-free health (expiry, granted
   scope, auto-refresh) and a **Test** action that forces a live refresh through
   the preset's token endpoint so a stale connection surfaces before a flow hits
-  it — `oauth_vault.status()` and `POST /oauth/{provider}/test`), `cost_curve` (per-provider cost
+  it — `oauth_vault.status()` and `POST /oauth/{provider}/test`; `cost_curve` (per-provider cost
   model), `bench_track` (record benchmark scores + flag regressions), `teams`
   (Microsoft Teams webhook), `knowledge_graph` (extract/query/render
   subject-relation-object triples; no external graph DB), `cross_repo_deps`
@@ -3473,7 +3478,8 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   `decide_inbound` / `decide_outbound` / `decide_memory_access` are the gate
   every transport consults: **default-deny at the company boundary** when
   engaged (an unregistered agent is refused even with a valid shared token), a
-  strict **no-op when disengaged** (kernel rule 1 preserved). Entries carry a
+  no default-deny admission when disengaged. Per-agent credentials still enforce
+  their registered memory scopes. Entries carry a
   **key lifecycle** (`not_before` / `expires_at` / `revoked`, propagated onto
   the issued capability). Wired into federation (inbound + outbound + `hello` /
   `status`, registry ceiling intersected into capability boot, **wall-clock AND
@@ -4227,7 +4233,8 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   another process reaches agents already mid-run; `revoke_subtree` walks the
   delegation graph to revoke a principal and every descendant it spawned
   (fail-open, like the opt-in capability layer), **approval delegation rules**
-  (risk/scope-based routing, `approval_delegation.py`), per-tool network egress
+  (risk/scope-based suggested reviewers, not enforced decision authority,
+  `approval_delegation.py`), per-tool network egress
   policy (`sandbox/network_policy.py`), `maverick whoami`.
 - **Out-of-process model proxy** — `model_proxy.py` (`python -m
   maverick.model_proxy`, `[model_proxy] upstream/auth_style/client_token`): a
@@ -5343,13 +5350,9 @@ tested without spawning py-spy.
   browser tool): drive the page via the accessibility tree — `snapshot`
   (stable node ids), `find` (role+name), `activate` (click/focus by node) —
   the live counterpart to the static `a11y_tree` extractor.
-- **WebRTC tool** (`tools/webrtc_tool.py`, `[webrtc]` extra): data-channel
-  offer/answer/send/close over lazily-imported aiortc (signalling is the
-  caller's; media tracks out of scope, stated honestly). **Built but not
-  registered by default** — nothing in production imports it; a caller opts in
-  by registering the factory. It holds a bidirectional channel to an arbitrary
-  peer, so it is tiered `high` risk and containment-denied alongside
-  `websocket`.
+- **WebRTC tool** (`tools/webrtc_tool.py`): the factory is not registered by
+  default. Offer, answer and send are disabled until ICE traffic can enforce
+  network policy; close remains available to release an existing connection.
 - **Audio understanding** (`tools/audio_understanding.py`, `[clap]` extra):
   zero-shot NON-SPEECH classification — a CLAP model embeds the clip and
   free-text labels ("glass breaking", "dog barking", "fire alarm") into one

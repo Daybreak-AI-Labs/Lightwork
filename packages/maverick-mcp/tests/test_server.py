@@ -39,18 +39,34 @@ def test_tool_reads_use_canonical_world_and_ownership_close(monkeypatch):
     assert closed == [world]
 
 
-def test_mcp_task_limits_are_optional_but_operator_authority_still_binds(monkeypatch):
+def test_mcp_task_limits_have_defaults_and_operator_authority_binds(monkeypatch):
     from maverick_mcp.server import _task_budget
 
     monkeypatch.delenv("MAVERICK_MCP_MAX_DOLLARS", raising=False)
     monkeypatch.delenv("MAVERICK_MCP_MAX_WALL_SECONDS", raising=False)
     monkeypatch.setattr("maverick.config.get_budget_overrides", dict)
-    uncapped = _task_budget({})
-    assert uncapped.max_dollars is None and uncapped.max_wall_seconds is None
+    monkeypatch.setattr("maverick.runner._operator_default_dollars", None)
+    monkeypatch.setattr("maverick.runner._operator_default_wall_seconds", None)
+    from maverick.runner import DEFAULT_MAX_DOLLARS, DEFAULT_MAX_WALL_SECONDS
+
+    bounded = _task_budget({})
+    assert bounded.max_dollars == DEFAULT_MAX_DOLLARS
+    assert bounded.max_wall_seconds == DEFAULT_MAX_WALL_SECONDS
+    assert _task_budget({"max_dollars": 10000}).max_dollars == DEFAULT_MAX_DOLLARS
+    assert _task_budget({"max_wall_seconds": 100000}).max_wall_seconds == DEFAULT_MAX_WALL_SECONDS
+    assert _task_budget({"max_dollars": 0}).max_dollars == 0
+    monkeypatch.setenv("MAVERICK_MCP_MAX_DOLLARS", "20")
+    assert _task_budget({"max_dollars": 15}).max_dollars == 15
+    monkeypatch.setattr("maverick.runner._operator_default_dollars", 0.1)
+    assert _task_budget({"max_dollars": 15}).max_dollars == 0.1
+    monkeypatch.setattr("maverick.runner._operator_default_dollars", 30)
+    assert _task_budget({"max_dollars": 15}).max_dollars == 15
+    monkeypatch.setattr("maverick.runner._operator_default_dollars", None)
     monkeypatch.setenv("MAVERICK_MCP_MAX_DOLLARS", "12")
     monkeypatch.setattr("maverick.config.get_budget_overrides", lambda: {"max_dollars": 10})
     assert _task_budget({"max_dollars": 20}).max_dollars == 10
     assert _task_budget({"max_dollars": 3}).max_dollars == 3
+
 
 
 class TestTools:
@@ -605,6 +621,21 @@ class TestStructuredOutput:
             "reason": "matched",
         }
 
+    def test_external_principal_cannot_access_tenant_wide_facts(self, isolated_wm):
+        from maverick.connections import bind_principal
+
+        isolated_wm.WorldModel().upsert_fact("private", "operator-secret")
+        server = MCPServer()
+        with bind_principal("agent:vendor"):
+            with pytest.raises(PermissionError):
+                server._tool_facts_get()
+            with pytest.raises(PermissionError):
+                server._tool_fact_set({"key": "private", "value": "replacement"})
+            with pytest.raises(PermissionError):
+                server._structured_result("maverick_facts_get")
+        assert isolated_wm.WorldModel().get_facts()["private"] == "operator-secret"
+
+
     def test_fact_set_stamps_tool_provenance(self, isolated_wm):
         # An MCP client is an untrusted author, so its fact is tiered TOOL (1),
         # not the upsert default of first-party (3) -- the Memory Guard tiers on
@@ -641,6 +672,7 @@ class TestStructuredOutput:
         assert not isolated_wm.WorldModel().open_questions()
 
     def test_skill_install_returns_structured_content(self, monkeypatch):
+        monkeypatch.setenv("MAVERICK_ALLOW_SKILL_INSTALL", "1")
         # install_skill is imported inside the handler; patch it at the source.
         import maverick.skills
         monkeypatch.setattr(
@@ -654,6 +686,18 @@ class TestStructuredOutput:
         # path is str()'d so a PosixPath source still serializes cleanly.
         assert out["structuredContent"] == {
             "name": "myskill", "path": "/tmp/myskill"}
+
+    @pytest.mark.parametrize("source", ["https://example.com/skill", "gh:org/repo", "/tmp/skill"])
+    def test_skill_install_requires_operator_opt_in(self, monkeypatch, source):
+        import maverick.skills
+
+        monkeypatch.setenv("MAVERICK_ALLOW_SKILL_INSTALL", "0")
+        calls = []
+        monkeypatch.setattr(maverick.skills, "install_skill", lambda *args, **kwargs: calls.append(args))
+        out = MCPServer().handle_tools_call(
+            {"name": "maverick_skill_install", "arguments": {"source": source}})
+        assert out["isError"] is True
+        assert calls == []
 
     def test_start_and_resume_declare_goal_id_schema(self):
         by_name = {t["name"]: t for t in TOOLS}

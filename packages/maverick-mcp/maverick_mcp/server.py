@@ -153,14 +153,22 @@ def _bounded_int(value: Any, *, default: int, ceiling: float) -> int:
 def _task_budget(args: dict):
     """Optional caller limits, constrained by current operator authority."""
     from maverick.budget import budget_from_config, resolve_budget_caps
-    from maverick.runner import clamp_task_limit
+    from maverick.runner import (
+        DEFAULT_MAX_DOLLARS,
+        DEFAULT_MAX_WALL_SECONDS,
+        clamp_task_limit,
+        configured_goal_ceiling_dollars,
+        configured_goal_ceiling_wall_seconds,
+    )
 
     configured = resolve_budget_caps()
     overrides = {}
     # MAVERICK_MCP_MAX_DOLLARS / MAVERICK_MCP_MAX_WALL_SECONDS, else [mcp].
     for key in ("max_dollars", "max_wall_seconds"):
         limits = []
-        for raw in (args.get(key), mcp_setting(key), configured.get(key)):
+        runner_limit = (configured_goal_ceiling_dollars() if key == "max_dollars"
+                        else configured_goal_ceiling_wall_seconds())
+        for raw in (args.get(key), mcp_setting(key), configured.get(key), runner_limit):
             if raw is None:
                 limits.append(None)
                 continue
@@ -171,7 +179,10 @@ def _task_budget(args: dict):
             except (TypeError, ValueError, OverflowError):
                 raise ValueError(f"{key} must be a finite non-negative limit") from None
             limits.append(value)
-        overrides[key] = clamp_task_limit(limits[0], clamp_task_limit(limits[1], limits[2]))
+        ceiling = clamp_task_limit(clamp_task_limit(limits[1], limits[2]), limits[3])
+        if ceiling is None:
+            ceiling = DEFAULT_MAX_DOLLARS if key == "max_dollars" else DEFAULT_MAX_WALL_SECONDS
+        overrides[key] = clamp_task_limit(limits[0], ceiling)
     return budget_from_config(**overrides)
 
 
@@ -1551,6 +1562,8 @@ class MCPServer:
                 ],
             }
         if name == "maverick_facts_get":
+            if (self._current_object_principal() or "").startswith("agent:"):
+                raise PermissionError("tenant-wide facts require an operator")
             with _canonical_world() as w:
                 return {"facts": dict(w.get_facts())}
         return None
@@ -1586,9 +1599,9 @@ class MCPServer:
         # Clamp client-supplied limits to operator ceilings. Over the HTTP
         # transport the budget is 100% client-controlled, so without a cap
         # any authenticated caller could pass max_dollars=10000 and burn the
-        # operator's provider spend. Ceilings come from env and default to
-        # the schema defaults (so the common case is unchanged); raise them
-        # with MAVERICK_MCP_MAX_DOLLARS / _MAX_WALL_SECONDS / _MAX_DEPTH.
+        # operator's provider spend. When neither MCP nor budget settings set
+        # a ceiling, conservative per-attempt defaults apply. Operators can
+        # set MCP-specific limits; a stricter budget ceiling still wins.
         budget = _task_budget(args)
         max_depth = _bounded_int(
             args.get("max_depth", 3),
@@ -1701,7 +1714,10 @@ class MCPServer:
         return f"answered #{qid}"
 
     def _tool_skill_install(self, args: dict) -> str:
-        from maverick.skills import install_skill
+        from maverick.skills import install_skill, url_install_allowed
+
+        if not url_install_allowed():
+            raise PermissionError("Skill installation is disabled by the server administrator")
         # MCP clients are external by definition, and the HTTP transport is
         # network-reachable behind only a shared bearer token. trusted_local
         # must be False so a bare local-path source (e.g. "/etc/passwd") is
@@ -1723,6 +1739,8 @@ class MCPServer:
         return "\n".join(lines)
 
     def _tool_fact_set(self, args: dict) -> str:
+        if (self._current_object_principal() or "").startswith("agent:"):
+            raise PermissionError("tenant-wide facts require an operator")
         # Facts are concatenated into the orchestrator's system brief on every
         # future run, so a malicious fact set over MCP is a persistent prompt
         # injection. Scan the value before storing (the orchestrator also
@@ -1751,6 +1769,8 @@ class MCPServer:
         return f"set {args['key']}"
 
     def _tool_facts_get(self) -> str:
+        if (self._current_object_principal() or "").startswith("agent:"):
+            raise PermissionError("tenant-wide facts require an operator")
         with _canonical_world() as w:
             facts = w.get_facts()
         if not facts:

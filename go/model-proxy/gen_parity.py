@@ -84,6 +84,7 @@ _ROUTE_CASES = [
     (_cfg(), "POST", "/v1/messages"),
     (_cfg(), "post", "/v1/messages"),
     (_cfg(), "POST", "/v1/messages?beta=true"),
+    (_cfg(), "POST", "/v1/messages?url=https%3A%2F%2Fexample.com"),
     (_cfg(), "GET", "/v1/messages"),
     (_cfg(), "POST", "/v1/unknown"),
     (_cfg(), "POST", "v1/messages"),
@@ -95,6 +96,12 @@ _ROUTE_CASES = [
     # urlparse(path).path never decodes, so "/%76%31/messages" stays literal
     # and is rejected. Pins the Go port to EscapedPath() (not the decoded
     # u.Path), closing an allow-list divergence.
+    (_cfg(), "POST", "//attacker/v1/messages"),
+    (_cfg(), "POST", "//../v1/messages"),
+    (_cfg(), "POST", "/v1/../v1/messages"),
+    (_cfg(), "POST", "/v1/%2e%2e/v1/messages"),
+    (_cfg(), "POST", "/v1%2fmessages"),
+    (_cfg(), "POST", "/v1\\messages"),
     (_cfg(), "POST", "/%76%31/messages"),
 ]
 

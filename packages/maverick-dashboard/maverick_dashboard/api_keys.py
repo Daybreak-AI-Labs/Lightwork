@@ -731,7 +731,38 @@ def verify(secret: str, *, client_ip: str = "", now: float | None = None) -> tup
         account = data["service_accounts"].get(slug)
         if account is None or account["disabled_at"] is not None:
             return None, "The service account that owns this key is disabled."
-    permissions = effective_permissions(key.scopes, key.owner)
+    # Authentication runs before principal-scoped tenant pinning. Resolve the
+    # same workspace selection that the request will use, while retaining a
+    # process/client tenant floor and checking every membership at use time.
+    from maverick.paths import current_tenant_id, tenant_by_user_enabled, tenant_scope
+    from maverick.tenant.registry import is_active
+
+    from . import workspace_tenants
+
+    try:
+        active = current_tenant_id()
+        if active:
+            if key.workspace and key.workspace != active:
+                return None, "This API key is bound to a different workspace."
+            if key.workspace and (not is_active(active) or not workspace_tenants.principal_can_select(key.owner, active)):
+                return None, "This API key's workspace is unavailable or its membership was revoked."
+            permissions = effective_permissions(key.scopes, key.owner)
+        elif tenant_by_user_enabled():
+            if key.workspace:
+                return None, "Workspace-bound API keys are unavailable in per-user isolation mode."
+            with tenant_scope(tenant=f"api:{key.owner}"):
+                permissions = effective_permissions(key.scopes, key.owner)
+        else:
+            selected = key.workspace or workspace_tenants.get_selection(key.owner)
+            if selected:
+                if not is_active(selected) or not workspace_tenants.principal_can_select(key.owner, selected):
+                    return None, "This API key's workspace is unavailable or its membership was revoked."
+                with tenant_scope(tenant=selected):
+                    permissions = effective_permissions(key.scopes, key.owner)
+            else:
+                permissions = effective_permissions(key.scopes, key.owner)
+    except Exception:
+        return None, "This API key's workspace authority is unavailable."
     if not permissions:
         return None, "This API key's owner no longer holds any of its scopes."
     _touch(key.id, client_ip, now)

@@ -13,6 +13,7 @@ def _enable_proxy_identity(monkeypatch):
 
 
 def _isolated_app(monkeypatch, tmp_path):
+    from maverick import config
     from maverick import world_model
     from maverick_dashboard import api as api_mod
     from maverick_dashboard import app as app_mod
@@ -21,6 +22,9 @@ def _isolated_app(monkeypatch, tmp_path):
     app_mod._world_cache.clear()
     api_mod._world_cache.clear()
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    config.reset_config_cache()
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     return app_mod.app
 
@@ -28,6 +32,8 @@ def _isolated_app(monkeypatch, tmp_path):
 def test_api_goal_creation_passes_proxy_user_to_runner(monkeypatch, tmp_path):
     _enable_proxy_identity(monkeypatch)
     app = _isolated_app(monkeypatch, tmp_path)
+    from maverick_dashboard import rbac
+    rbac.set_role("user:alice", "operator")
 
     from maverick import runner
 
@@ -49,6 +55,8 @@ def test_api_goal_creation_passes_proxy_user_to_runner(monkeypatch, tmp_path):
 def test_chat_goal_creation_passes_proxy_user_to_runner(monkeypatch, tmp_path):
     _enable_proxy_identity(monkeypatch)
     app = _isolated_app(monkeypatch, tmp_path)
+    from maverick_dashboard import rbac
+    rbac.set_role("user:bob", "operator")
 
     from maverick import runner
 
@@ -66,6 +74,15 @@ def test_chat_goal_creation_passes_proxy_user_to_runner(monkeypatch, tmp_path):
     assert calls
     assert calls[0][1]["channel"] == "dashboard"
     assert calls[0][1]["user_id"] == "bob"
+
+
+def test_unassigned_proxy_user_can_view_but_cannot_operate(monkeypatch, tmp_path):
+    _enable_proxy_identity(monkeypatch)
+    app = _isolated_app(monkeypatch, tmp_path)
+    client = TestClient(app, headers={"Origin": "http://testserver", "X-Forwarded-User": "alice"})
+    assert client.get("/providers").status_code == 200
+    assert client.post("/api/v1/goals", json={"title": "work"}).status_code == 403
+    assert client.post("/api/v1/approvals/1/approve").status_code == 403
 
 
 def test_proxy_mode_without_require_auth_never_falls_back_to_local_admin(

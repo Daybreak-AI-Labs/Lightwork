@@ -20,7 +20,9 @@ see `/about` in the running app):
   baselines) for a fleet console to roll up.
 * **License key (optional)** — `LIGHTWORK_LICENSE` (+ `LIGHTWORK_LICENSE_PUBKEY`)
   verified via Ed25519. Without a key the app runs in evaluation mode: fully
-  functional, with a cap of 5 open requests.
+  functional, with a cap of 5 open requests. The deployment owner selects the
+  trusted public key; this is not a vendor-enforced restriction on a
+  self-hosted open-source deployment.
 
 **With Lightwork** the same agent additionally mirrors every request into
 the governed privacy workspace registers, lands every step on the signed
@@ -38,7 +40,12 @@ DSAR_OPERATOR_TOKEN=$(openssl rand -hex 24) bash run_standalone.sh
 
 Container + cloud installs: `Dockerfile.standalone` here, and the per-cloud
 guides in [`../pia-concierge/DEPLOYMENT.md`](../pia-concierge/DEPLOYMENT.md)
-apply to this app with the env names below.
+apply to this app with the env names below. For remote access, place the
+loopback-bound container behind an HTTPS proxy: HTTP Basic credentials need
+TLS in transit. Set `DSAR_BASE_URL` to that proxy's public HTTPS URL.
+Operator changes require an Origin or Referer matching the public scheme, host
+and port in `DSAR_BASE_URL`. Configure that URL for the HTTPS proxy's external
+address; API clients performing changes must send the same trusted origin.
 
 ## Environment
 

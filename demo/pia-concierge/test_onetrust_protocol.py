@@ -95,6 +95,44 @@ def test_mock_sensitive_endpoints_require_bearer(demo, client):
                    json=[]).status_code == 401
     assert tc.post("/ot-api/api/assessment/v2/assessments/assessment-links",
                    json={"fromId": aid, "toIds": []}).status_code == 401
+    assert tc.get(f"/ot-api/api/assessment/v2/assessments/{aid}/export",
+                  headers={"Authorization": "Bearer attacker"}).status_code == 401
+    assert tc.get("/ot-api/api/inventory/v2/inventories/vendors").status_code == 401
+    assert tc.post("/ot-api/api/inventory/v2/inventories/vendors",
+                   headers={"Authorization": "Bearer attacker"}, json={"name": "forged"}).status_code == 401
+
+
+def test_mock_upload_is_bounded_before_retention(demo, client, monkeypatch):
+    mock = demo["ot_mock"]
+    monkeypatch.setattr(mock, "MAX_ATTACHMENT_BYTES", 32)
+    before = len(mock.ATTACHMENTS)
+    response = client._http.post(
+        "/ot-api/api/document/v2/attachments",
+        headers={"Authorization": "Bearer demo-bearer-token"},
+        files={"file": ("x.txt", b"x" * 33, "text/plain")},
+        data={"attachment": '{"FileName":"x.txt"}'},
+    )
+    assert response.status_code == 400
+    assert len(mock.ATTACHMENTS) == before
+    response = client._http.post(
+        "/ot-api/api/document/v2/attachments",
+        headers={"Authorization": "Bearer demo-bearer-token", "Content-Length": "99999999"},
+        content=b"",
+    )
+    assert response.status_code == 413
+
+
+def test_mock_router_is_not_mounted_without_opt_in():
+    import os
+    import subprocess
+
+    env = os.environ.copy()
+    env.pop("PIA_ENABLE_ONETRUST_MOCK", None)
+    result = subprocess.run(
+        [sys.executable, "-c", "import app; assert not any(r.path.startswith('/ot-api') for r in app.app.routes)"],
+        cwd=HERE, env=env, capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_plain_read_403s_but_export_works(demo, client):

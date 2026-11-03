@@ -112,6 +112,18 @@ def test_governance_deny_is_enforced(monkeypatch) -> None:
     assert denial and "DENIED by org policy" in denial
 
 
+def test_flow_dispatch_enforces_transaction_thresholds(monkeypatch) -> None:
+    from maverick import governance
+
+    monkeypatch.setattr("maverick.flow.ir.action_tool_policy_error", lambda t: "")
+    monkeypatch.setattr(governance.Policy, "from_config", classmethod(
+        lambda cls: cls(deny_above={"*": 100})))
+    _records(monkeypatch)
+    assert tool_authz.authorize("shopify", {"op": "refund_create", "amount_cents": 10100}, origin="flow")
+    assert tool_authz.authorize("shopify", {"op": "refund_create"}, origin="flow")
+    assert tool_authz.authorize("shopify", {"op": "refund_create", "amount_cents": 5000}, origin="flow") is None
+
+
 def test_require_human_is_refused_not_silently_downgraded(monkeypatch) -> None:
     """A flow node runs unattended; there is nobody to ask.
 

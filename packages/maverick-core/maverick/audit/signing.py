@@ -28,11 +28,9 @@ can be custodied in a KMS / HSM / secrets manager and injected at deploy time
 instead of generated-and-left on the host. Lightwork consumes and removes this
 environment entry the first time audit signing loads, then caches only decoded
 key material in memory; inherited startup environments are not an HSM/KMS
-security boundary. Only the public half (plus an ``.injected`` marker) is
-persisted, so local ``verify_chain`` still trusts the chain. An injected key
-takes precedence over any on-disk key; rotate it in your secret manager (the
-``key_id`` is derived from the public key, so a new key chains additively
-exactly like ``rotate_audit_keypair``).
+security boundary. The active public key is a verifier trust root; the writable
+on-disk marker is not. When rotating external keys, pin retired public keys in
+``MAVERICK_AUDIT_TRUSTED_PUBLIC_KEYS`` so old history remains verifiable.
 
 Optional [audit-signing] extra (cryptography>=44.0.1).
 """
@@ -141,6 +139,8 @@ def _key_paths_for_id(key_id: str) -> tuple[Path, Path] | tuple[None, None]:
 # ``_injected_keypair`` and the module docstring (H29 / enterprise key custody).
 _SIGNING_KEY_ENV = "MAVERICK_AUDIT_SIGNING_KEY"
 _INJECTED_KEYPAIR_UNREAD = object()
+_INJECTED_KEYPAIR_INVALID = object()
+_INJECTED_KEYPAIR_LOCK = threading.RLock()
 _INJECTED_KEYPAIR_CACHE: tuple[bytes, bytes, str] | None | object = (
     _INJECTED_KEYPAIR_UNREAD
 )
@@ -149,12 +149,7 @@ _INJECTED_KEYPAIR_CACHE: tuple[bytes, bytes, str] | None | object = (
 def _injected_marker_for_id(key_id: str) -> Path | None:
     """Path of the ``.injected`` marker for ``key_id`` (or None if invalid).
 
-    The marker is a non-secret, empty file written next to the public key when
-    an env-injected key is provisioned. It lets local ``verify_chain`` trust the
-    lone ``<id>.pub`` (whose private ``.key`` is deliberately absent), exactly as
-    a real ``.key`` sibling would -- both rest on the same assumption that the
-    key dir is access-controlled (for third-party tamper-evidence, pass the
-    trusted ``pubkey_hex`` explicitly regardless).
+    This non-secret legacy marker is inventory only and is not a trust root.
     """
     if not _is_valid_key_id(key_id):
         return None
@@ -164,9 +159,8 @@ def _injected_marker_for_id(key_id: str) -> Path | None:
 def _decode_injected_key(raw: str) -> bytes | None:
     """Decode a raw 32-byte Ed25519 private key from hex or base64.
 
-    Returns the 32 key bytes, or None if the value isn't a valid encoding of a
-    32-byte key (so a malformed env value falls back to the on-disk key path
-    rather than crashing the audit writer).
+    Returns the 32 key bytes, or None if the encoding is invalid. A configured
+    malformed value is rejected by the caller without falling back to disk.
     """
     import base64
     import binascii
@@ -192,6 +186,12 @@ def _decode_injected_key(raw: str) -> bytes | None:
 
 
 def _injected_keypair() -> tuple[bytes, bytes, str] | None:
+    """Resolve the injected key atomically across concurrent callers."""
+    with _INJECTED_KEYPAIR_LOCK:
+        return _injected_keypair_unlocked()
+
+
+def _injected_keypair_unlocked() -> tuple[bytes, bytes, str] | None:
     """Return (priv, pub, key_id) for an env-injected signing key, or None.
 
     Consumes :data:`_SIGNING_KEY_ENV` once, removes it from ``os.environ`` as
@@ -199,9 +199,8 @@ def _injected_keypair() -> tuple[bytes, bytes, str] | None:
     shell tools from recovering the secret from the parent process environment
     via same-user ``/proc`` reads; inherited startup environments are not an
     HSM/KMS boundary. The caller writes just the public key (+ an ``.injected``
-    marker) so verification still trusts the chain without the secret ever
-    touching local disk. A malformed value logs a warning and returns None
-    (fall back to disk keys).
+    marker) for inventory; verification trusts the active in-memory public key.
+    A malformed or unavailable configured key fails closed.
     """
     global _INJECTED_KEYPAIR_CACHE
     if _INJECTED_KEYPAIR_CACHE is not _INJECTED_KEYPAIR_UNREAD:
@@ -209,24 +208,23 @@ def _injected_keypair() -> tuple[bytes, bytes, str] | None:
         # process signer, but it must still be scrubbed immediately. Leaving a
         # raw private key behind would expose it through same-user /proc reads.
         os.environ.pop(_SIGNING_KEY_ENV, None)
+        if _INJECTED_KEYPAIR_CACHE is _INJECTED_KEYPAIR_INVALID:
+            raise ValueError("configured audit signing key is invalid or unavailable")
         return _INJECTED_KEYPAIR_CACHE
 
     raw = os.environ.pop(_SIGNING_KEY_ENV, None)
     if not raw:
         _INJECTED_KEYPAIR_CACHE = None
         return None
+    # The environment value has been consumed; any error from this point must
+    # leave a persistent failure, never appear as an absent configuration.
+    _INJECTED_KEYPAIR_CACHE = _INJECTED_KEYPAIR_INVALID
     if not _have_crypto():
-        _INJECTED_KEYPAIR_CACHE = None
-        return None
+        raise ValueError("configured audit signing key is unavailable")
     priv_bytes = _decode_injected_key(raw)
     if priv_bytes is None:
-        log.warning(
-            "%s is set but is not a valid hex/base64 32-byte Ed25519 key; "
-            "falling back to the on-disk audit signing key",
-            _SIGNING_KEY_ENV,
-        )
-        _INJECTED_KEYPAIR_CACHE = None
-        return None
+        _INJECTED_KEYPAIR_CACHE = _INJECTED_KEYPAIR_INVALID
+        raise ValueError("configured audit signing key is invalid")
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric import ed25519
 
@@ -251,18 +249,17 @@ def _reset_injected_keypair_cache() -> None:
     set the key. The conftest cache-reset fixture calls this so each test reads
     the key fresh (mirrors client/config/tenant cache resets)."""
     global _INJECTED_KEYPAIR_CACHE
-    _INJECTED_KEYPAIR_CACHE = _INJECTED_KEYPAIR_UNREAD
+    with _INJECTED_KEYPAIR_LOCK:
+        _INJECTED_KEYPAIR_CACHE = _INJECTED_KEYPAIR_UNREAD
 
 
 def _provision_injected_pubkey(pub: bytes, key_id: str) -> None:
     """Persist the PUBLIC half (+ ``.injected`` marker) of an injected key.
 
-    Writes ``<key_id>.pub`` (world-readable) and an empty ``<key_id>.injected``
-    marker so local ``verify_chain`` trusts rows signed by the injected key,
-    while the private key stays out of the filesystem entirely. Best-effort and
+    Writes ``<key_id>.pub`` and an empty ``<key_id>.injected`` marker for
+    inventory; neither file establishes trust. Best-effort and
     idempotent: a read-only key dir (e.g. a locked-down container) is tolerated
-    -- signing still works from the in-memory key; only same-host local-trust
-    verification needs the on-disk pub.
+    -- signing and verification use the active in-memory key.
     """
     try:
         key_dir = ensure_private_directory(_key_dir())
@@ -469,6 +466,11 @@ def rotate_audit_keypair() -> str:
     instances (next day-file / process restart); a long-running signer keeps its
     in-memory key until restarted.
     """
+    if (_injected_keypair() is not None or os.environ.get(_KMS_WRAPPED_KEY_ENV)
+            or require_offhost_signing()):
+        raise OffHostSigningRequiredError(
+            "Rotate the external signing key in its secret manager and pin the previous public key first"
+        )
     key_dir = ensure_private_directory(_key_dir())
     with cross_process_lock(key_dir / _ACTIVE_POINTER):
         priv, pub, key_id = _generate_keypair()
@@ -640,7 +642,7 @@ def _load_or_create_keypair_unlocked() -> tuple[bytes, bytes, str]:
         _provision_injected_pubkey(pub, key_id)
         return priv, pub, key_id
 
-    if require_offhost_signing():
+    if require_offhost_signing() or os.environ.get(_KMS_WRAPPED_KEY_ENV):
         raise OffHostSigningRequiredError(
             "off-host audit signing is required (enterprise mode / [audit] "
             "require_offhost_key) but no off-host key is configured. Set "
@@ -713,7 +715,7 @@ def _load_or_create_keypair() -> tuple[bytes, bytes, str]:
         _provision_injected_pubkey(pub, key_id)
         return priv, pub, key_id
 
-    if require_offhost_signing():
+    if require_offhost_signing() or os.environ.get(_KMS_WRAPPED_KEY_ENV):
         raise OffHostSigningRequiredError(
             "off-host audit signing is required (enterprise mode / [audit] "
             "require_offhost_key) but no off-host key is configured. Set "
@@ -985,8 +987,8 @@ def verify_chain(  # noqa: C901 - linear forensic checks stay auditable together
 ) -> list[ChainBreak]:
     """Walk every line; verify chain links + signatures.
 
-    If ``pubkey_hex`` is None, the verifier looks up each row's
-    ``key_id`` against ~/.maverick/audit/keys/<keyid>.pub.
+    If ``pubkey_hex`` is None, resolve each row's ``key_id`` from the active
+    external key and operator pins, or the local key registry in local mode.
 
     Returns a list of breaks. Empty list = chain intact. Proof-producing
     callers that already opened a sealed segment may pass its authenticated
@@ -999,6 +1001,12 @@ def verify_chain(  # noqa: C901 - linear forensic checks stay auditable together
         raise ValueError("max_breaks must be an integer from 1 to 1000")
     if not _have_crypto():
         return [ChainBreak(0, "no_crypto", "cryptography not installed")]
+    if pubkey_hex is not None:
+        try:
+            if not isinstance(pubkey_hex, str) or len(bytes.fromhex(pubkey_hex)) != 32:
+                raise ValueError("invalid public key")
+        except ValueError:
+            return [ChainBreak(0, "no_pubkey", "explicit public key is invalid")]
     from cryptography.exceptions import InvalidSignature
     from cryptography.hazmat.primitives.asymmetric import ed25519
 
@@ -1007,32 +1015,22 @@ def verify_chain(  # noqa: C901 - linear forensic checks stay auditable together
         return [ChainBreak(0, "missing_file", str(path))]
     prev = ""
     pubkey_cache: dict[str, ed25519.Ed25519PublicKey] = {}
+    registry: dict[str, str] | None = None
 
     def _load_pubkey(key_id: str):
+        nonlocal registry
         if key_id in pubkey_cache:
             return pubkey_cache[key_id]
         try:
-            if pubkey_hex:
+            if pubkey_hex is not None:
                 raw_pub = bytes.fromhex(pubkey_hex)
             else:
-                key_dir = _key_dir()
-                if not key_dir.exists():
+                if registry is None:
+                    registry = trusted_audit_public_keys()
+                public = registry.get(key_id)
+                if public is None:
                     return None
-                ensure_private_directory(key_dir)
-                pub_path, priv_path = _key_paths_for_id(key_id)
-                if pub_path is None or priv_path is None or not pub_path.exists():
-                    return None
-                marker = _injected_marker_for_id(key_id)
-                if priv_path.exists():
-                    ensure_private_file(priv_path, 0o600)
-                elif marker is not None and marker.exists():
-                    ensure_private_file(marker, 0o600)
-                else:
-                    return None
-                ensure_private_file(pub_path, 0o644)
-                raw_pub = atomic_read_bytes(pub_path)
-                if hashlib.sha256(raw_pub).hexdigest()[:16] != key_id:
-                    return None
+                raw_pub = bytes.fromhex(public)
             if len(raw_pub) != 32:
                 return None
             obj = ed25519.Ed25519PublicKey.from_public_bytes(raw_pub)
@@ -1073,7 +1071,7 @@ def verify_chain(  # noqa: C901 - linear forensic checks stay auditable together
             row_prev = data.get("prev_hash", "")
             key_id = data.get("key_id", "")
             if not row_hash and not sig and not key_id:
-                if pubkey_hex or row_prev:
+                if pubkey_hex is not None or row_prev:
                     # A trusted pubkey means the caller expected signed rows;
                     # an orphaned prev_hash means signing-only chain context is
                     # still present. In either case, all signature fields being
@@ -1144,19 +1142,39 @@ def verify_chain(  # noqa: C901 - linear forensic checks stay auditable together
 
 
 def trusted_audit_public_keys() -> dict[str, str]:
-    """Return the protected local audit-key registry as ``key_id -> hex``.
+    """Return independently configured or locally held audit public keys.
 
-    Merely dropping a ``*.pub`` file into the key directory is not enough to
-    create trust. Each key needs either its protected private-key sibling or
-    the marker written when an externally managed signing key was injected.
-    Any malformed registry entry fails the whole snapshot so a privileged
-    verifier never operates on a silently partial trust set.
+    When an injected/KMS key is in use, the active key and public keys pinned
+    by the operator are the trust roots. Writable on-disk marker files cannot
+    add a trusted key. Locally held keys remain supported in local-key mode,
+    whose same-uid integrity limitation is documented.
     """
+    registry: dict[str, str] = {}
+    from .. import _STARTUP_AUDIT_TRUSTED_PUBLIC_KEYS
+    for item in _STARTUP_AUDIT_TRUSTED_PUBLIC_KEYS.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        try:
+            raw = bytes.fromhex(item)
+        except ValueError as exc:
+            raise ValueError("configured audit public key is invalid") from exc
+        if len(raw) != 32:
+            raise ValueError("configured audit public key must be 32 bytes")
+        registry[hashlib.sha256(raw).hexdigest()[:16]] = raw.hex()
+
+    active = _injected_keypair() or _kms_wrapped_keypair()
+    if active is not None:
+        _private, public, key_id = active
+        registry[key_id] = public.hex()
+        return registry
+    if registry or require_offhost_signing() or os.environ.get(_KMS_WRAPPED_KEY_ENV):
+        return registry
+
     key_dir = _key_dir()
     if not key_dir.exists():
-        return {}
+        return registry
     ensure_private_directory(key_dir)
-    registry: dict[str, str] = {}
     try:
         entries = sorted(key_dir.glob("*.pub"))
     except OSError as exc:
@@ -1176,9 +1194,9 @@ def trusted_audit_public_keys() -> dict[str, str]:
                     "audit public-key registry contains a mismatched keypair",
                 )
         elif marker is not None and marker.exists():
-            ensure_private_file(marker, 0o600)
-            ensure_private_file(public_path_checked, 0o644)
-            raw = atomic_read_bytes(public_path_checked)
+            # Historical injected-key markers are not independently trusted.
+            # An operator can pin a retired public key explicitly for rotation.
+            continue
         else:
             raise ValueError(
                 "audit public-key registry contains an unprovisioned public key",

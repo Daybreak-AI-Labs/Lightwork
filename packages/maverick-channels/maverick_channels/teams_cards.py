@@ -29,7 +29,13 @@ _MENTION = re.compile(r"<at>(.*?)</at>", re.DOTALL)
 
 def _text(value: object, *, limit: int = MAX_TEXT) -> str:
     text = " ".join(str(value or "").split())
-    return text[:limit]
+    return _escape_markdown(text[:limit])
+
+
+def _escape_markdown(text: str) -> str:
+    # Adaptive Cards TextBlocks render Markdown. Escape formatting and link
+    # delimiters in values originating in requests or tool output.
+    return re.sub(r"([\\`*_\[\]()<>#!])", r"\\\1", text)
 
 
 def _block(text: str, *, weight: str = "default", size: str = "default",
@@ -121,7 +127,7 @@ def text_card(text: str, *, title: str = "") -> dict:
         body.append(_block(_text(title, limit=200), weight="bolder", size="medium"))
     lines = _lines(text)
     for line, after_blank in lines:
-        body.append(_block(line, spacing="medium" if after_blank else "default"))
+        body.append(_block(_escape_markdown(line), spacing="medium" if after_blank else "default"))
     if not lines:
         body.append(_block(""))
     return _card(body)
@@ -157,7 +163,7 @@ def approval_card(approval: dict, card: dict | None, *, source_label: str | None
         _block("Approval needed" if not decided else "Approval decided",
                weight="bolder", size="large"),
         _block(_text(action, limit=300), weight="bolder", size="medium"),
-        _block(f"Risk: {humanize(risk)}", weight="bolder",
+        _block(f"Risk: {_text(humanize(risk))}", weight="bolder",
                color="attention" if risk in ("high", "critical") else "default"),
         _block("You get this because you are linked to Lightwork as an approver."),
     ]
@@ -208,7 +214,7 @@ def approval_card(approval: dict, card: dict | None, *, source_label: str | None
         if outcome == "pending":
             label = (f"Approval recorded ({decided.get('approved_count', 0)} of "
                      f"{decided.get('approvals_required', 1)}); more approvers are needed")
-        body.append(_block(f"{label} by {decided.get('decided_by', '')}", weight="bolder",
+        body.append(_block(f"{_text(label)} by {_text(decided.get('decided_by', ''))}", weight="bolder",
                            spacing="medium",
                            color="good" if outcome == "approved" else "attention"))
         if decided.get("audit") == "pending":
@@ -249,7 +255,7 @@ def confirm_card(approval: dict, *, binding: str) -> dict:
     data = {"approval_id": int(approval["id"]), "binding": binding, "risk": risk}
     body = [
         _block("Please confirm", weight="bolder", size="large"),
-        _block(f"This is a {risk} risk action: "
+        _block(f"This is a {_text(risk)} risk action: "
                f"{_text(humanize(approval.get('action')), limit=300)}.", color="attention"),
         _block("Approving it lets the agent carry out exactly what the card describes. "
                "Nothing happens until you confirm."),
@@ -260,7 +266,7 @@ def confirm_card(approval: dict, *, binding: str) -> dict:
         body.append(_block("Type APPROVE to confirm this critical action.", weight="bolder"))
         body.append({"type": "Input.Text", "id": "confirmation", "placeholder": "APPROVE"})
     return _card(body, [
-        {"type": "Action.Execute", "title": f"Yes, approve this {risk} risk action",
+        {"type": "Action.Execute", "title": f"Yes, approve this {_text(risk)} risk action",
          "verb": "approve_confirm", "style": "destructive", "data": data},
         {"type": "Action.Execute", "title": "No, go back", "verb": "cancel", "data": data},
     ])

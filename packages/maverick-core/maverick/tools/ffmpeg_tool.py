@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shutil
 from pathlib import Path
 from typing import Any
@@ -60,8 +61,7 @@ def _safe_path(sandbox, user_path: str) -> str:
     if user_path.startswith("-"):
         raise ValueError(f"path {user_path!r} may not begin with '-'")
     if sandbox is None:
-        # No workspace to confine to; the leading-dash check above still applies.
-        return user_path
+        raise ValueError("media processing requires a workspace")
     workdir = Path(sandbox.workdir).resolve()
     candidate = (workdir / user_path).resolve()
     try:
@@ -69,6 +69,51 @@ def _safe_path(sandbox, user_path: str) -> str:
     except ValueError as e:
         raise ValueError(f"path {user_path!r} escapes the workspace") from e
     return str(candidate)
+
+
+def _safe_output_path(sandbox, user_path: str) -> str:
+    target = _safe_path(sandbox, user_path)
+    lexical = user_path.replace("\\", "/").split("/")
+    if any(part.rstrip(" .").casefold() == ".git" for part in (*lexical, *Path(target).parts)):
+        raise ValueError("refusing to write under .git/")
+    return target
+
+
+def _safe_convert_args(raw: Any) -> list[str]:
+    if raw is None:
+        return []
+    if not isinstance(raw, list) or len(raw) > 20 or any(not isinstance(item, str) for item in raw):
+        raise ValueError("invalid media options")
+    codecs = {"copy", "libx264", "libx265", "libvpx-vp9", "libaom-av1", "aac", "libmp3lame", "flac", "opus", "pcm_s16le"}
+    result, seen = [], set()
+    i = 0
+    while i < len(raw):
+        flag = raw[i]
+        if flag in seen:
+            raise ValueError("duplicate media option")
+        seen.add(flag)
+        if flag in {"-an", "-vn"}:
+            result.append(flag)
+            i += 1
+            continue
+        if flag not in {"-c:v", "-c:a", "-b:v", "-b:a", "-crf", "-frames:v", "-frames:a"} or i + 1 >= len(raw):
+            raise ValueError("unsupported media option")
+        value = raw[i + 1]
+        if flag in {"-c:v", "-c:a"}:
+            valid = value in codecs
+        elif flag in {"-b:v", "-b:a"}:
+            match = re.fullmatch(r"([1-9][0-9]{0,5})([kKmM]?)", value)
+            multiplier = {"": 1, "k": 1000, "m": 1000000}
+            valid = bool(match and int(match.group(1)) * multiplier[match.group(2).lower()] <= 100000000)
+        else:
+            valid = len(value) <= 7 and value.isascii() and value.isdigit()
+            number = int(value) if valid else -1
+            valid = 0 <= number <= 63 if flag == "-crf" else 1 <= number <= 1000000
+        if not valid:
+            raise ValueError("invalid media option value")
+        result.extend((flag, value))
+        i += 2
+    return result
 
 
 def _op_convert(args: dict, sandbox) -> str:
@@ -81,12 +126,11 @@ def _op_convert(args: dict, sandbox) -> str:
         return "ERROR: convert requires input_path and output_path"
     try:
         src = _safe_path(sandbox, src)
-        dst = _safe_path(sandbox, dst)
+        dst = _safe_output_path(sandbox, dst)
     except ValueError as e:
         return f"ERROR: {e}"
-    from . import safe_media_args
-    extra = safe_media_args(args.get("args"))
-    cmd = ["ffmpeg", "-y", "-i", src, *extra, dst]
+    extra = _safe_convert_args(args.get("args"))
+    cmd = ["ffmpeg", "-y", "-protocol_whitelist", "file,crypto,data", "-i", src, *extra, dst]
     code, _out, stderr = _run_cmd(sandbox, cmd, timeout=600)
     if code != 0:
         return f"ERROR: ffmpeg ({code}): {stderr.strip()[-500:]}"
@@ -103,19 +147,19 @@ def _op_extract_audio(args: dict, sandbox) -> str:
         return "ERROR: extract_audio requires input_path and output_path"
     try:
         src = _safe_path(sandbox, src)
-        dst = _safe_path(sandbox, dst)
+        dst = _safe_output_path(sandbox, dst)
     except ValueError as e:
         return f"ERROR: {e}"
     code, _out, stderr = _run_cmd(
         sandbox,
-        ["ffmpeg", "-y", "-i", src, "-vn", "-acodec", "copy", dst],
+        ["ffmpeg", "-y", "-protocol_whitelist", "file,crypto,data", "-i", src, "-vn", "-acodec", "copy", dst],
         timeout=600,
     )
     if code != 0:
         # Fallback: re-encode to mp3 if -acodec copy fails (mismatched container).
         code2, _out, stderr2 = _run_cmd(
             sandbox,
-            ["ffmpeg", "-y", "-i", src, "-vn", "-b:a", "192k", dst],
+            ["ffmpeg", "-y", "-protocol_whitelist", "file,crypto,data", "-i", src, "-vn", "-b:a", "192k", dst],
             timeout=600,
         )
         if code2 != 0:
@@ -133,13 +177,17 @@ def _op_thumbnail(args: dict, sandbox) -> str:
         return "ERROR: thumbnail requires input_path and output_path"
     try:
         src = _safe_path(sandbox, src)
-        dst = _safe_path(sandbox, dst)
+        dst = _safe_output_path(sandbox, dst)
     except ValueError as e:
         return f"ERROR: {e}"
     t = (args.get("time") or "00:00:01").strip()
     width = int(args.get("width") or 640)
+    if not re.fullmatch(r"(?:[0-9]{1,6}(?:\.[0-9]{1,6})?|[0-9]{1,3}:[0-5][0-9]:[0-5][0-9](?:\.[0-9]{1,6})?)", t):
+        return "ERROR: invalid thumbnail time"
+    if not 1 <= width <= 8192:
+        return "ERROR: thumbnail width must be between 1 and 8192"
     cmd = [
-        "ffmpeg", "-y", "-ss", t, "-i", src,
+        "ffmpeg", "-y", "-ss", t, "-protocol_whitelist", "file,crypto,data", "-i", src,
         "-frames:v", "1", "-vf", f"scale={width}:-1", dst,
     ]
     code, _out, stderr = _run_cmd(sandbox, cmd, timeout=120)
@@ -162,7 +210,7 @@ def _op_info(args: dict, sandbox) -> str:
     code, out, stderr = _run_cmd(
         sandbox,
         ["ffprobe", "-v", "error", "-print_format", "json",
-         "-show_format", "-show_streams", src],
+         "-show_format", "-show_streams", "-protocol_whitelist", "file,crypto,data", src],
         timeout=30,
     )
     if code != 0:
@@ -212,7 +260,7 @@ def ffmpeg_tool(sandbox=None) -> Tool:
         name="ffmpeg",
         description=(
             "Media operations via local ffmpeg + ffprobe. ops: "
-            "convert (raw -i/-args wrapper), extract_audio, "
+            "convert (basic bounded options), extract_audio, "
             "thumbnail (time + width), info (ffprobe JSON summary). "
             "Requires the ffmpeg binary on PATH."
         ),

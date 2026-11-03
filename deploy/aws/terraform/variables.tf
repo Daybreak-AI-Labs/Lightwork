@@ -37,7 +37,6 @@ variable "container_port" {
 variable "domain_name" {
   description = "Custom domain served over HTTPS (ACM cert + ALB 443 listener). Empty disables the cert/listener and leaves the stack HTTP-only on the ALB DNS name. DNS for this name is managed in Cloudflare, not Route 53."
   type        = string
-  default     = "lightwork.daybreakailabs.com"
 }
 
 variable "health_check_path" {
@@ -77,7 +76,7 @@ variable "email_enabled" {
 variable "email_from" {
   description = "From address for platform emails (must be a verified SES identity, e.g. on the verified domain)."
   type        = string
-  default     = "noreply@daybreakailabs.com"
+  default     = ""
 }
 
 variable "dashboard_invites" {
@@ -200,4 +199,13 @@ variable "db_username" {
   description = "Postgres master username."
   type        = string
   default     = "maverick"
+}
+
+variable "encryption_key_digest" {
+  description = "SHA-256 identity of the shared at-rest key, supplied by the deployment operator."
+  type      = string
+  validation {
+    condition     = can(regex("^sha256:[0-9a-f]{64}$", var.encryption_key_digest))
+    error_message = "encryption_key_digest must be sha256: followed by the lowercase digest of the decoded at-rest key."
+  }
 }

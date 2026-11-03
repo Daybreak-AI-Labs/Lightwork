@@ -149,7 +149,7 @@ The catalogue of shipped features is in [docs/FEATURES.md](docs/FEATURES.md).
 | `lightwork doctor` | Diagnose the installation and configuration, with remediation hints |
 | `lightwork preflight` | Offline install-readiness check; exits non-zero on a blocker |
 | `lightwork version` | Installed package versions, schema, shield backend and registered providers |
-| `lightwork dashboard [--host --port --token]` | Local web dashboard and REST API (default `127.0.0.1:8765`; a non-loopback host requires a token) |
+| `lightwork dashboard [--host --port]` | Local web dashboard and REST API (default `127.0.0.1:8765`; a non-loopback host requires `MAVERICK_DASHBOARD_TOKEN` in the server environment) |
 | `lightwork start "GOAL" [--max-dollars --max-wall-seconds --sandbox --template]` | Run a goal once |
 | `lightwork chat` | Interactive REPL; each turn becomes a goal |
 | `lightwork status` / `logs` / `answer` / `resume` | Inspect recent goals, read recent audit entries, answer an agent's question, resume a blocked goal |

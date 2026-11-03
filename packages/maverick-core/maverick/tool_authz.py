@@ -122,9 +122,12 @@ def authorize(
     #    non-enterprise installs, exactly as on the agent path.
     compliance_profiles: tuple[str, ...] | None = None
     try:
-        from .governance import Decision, evaluate
+        from .governance import Decision, Policy, evaluate, transaction_value
 
-        verdict = evaluate(tool, risk=risk)
+        policy = Policy.from_config()
+        amount, currency, unavailable = transaction_value(tool, params, policy)
+        verdict = evaluate(tool, risk=risk, policy=policy, amount=amount,
+                           currency=currency, amount_unavailable=unavailable)
     except Exception:
         log.warning(
             "governance enforcement unavailable for non-agent dispatch %r",

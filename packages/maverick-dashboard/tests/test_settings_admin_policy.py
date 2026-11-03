@@ -102,7 +102,7 @@ def test_page_shows_the_new_controls_in_plain_language(monkeypatch):
     _installer('[channels.slack]\nenabled = true\n')
     page = every_group(client)
     for text in ("Tools allowed in each chat app", "Most to spend with each AI service",
-                 "Pause for a review after spending", "Who reviews which approvals",
+                 "Pause for a review after spending", "Suggest reviewers for approvals",
                  "Apps Ekko may notice", "Use the careful improvement profile",
                  "People who decide serious AI incident reports", "Backup AI models",
                  "How Lightwork signs in to Amazon Bedrock", "Departments turned off",

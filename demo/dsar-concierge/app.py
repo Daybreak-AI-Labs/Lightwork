@@ -78,7 +78,23 @@ def _basic_credentials(authorization: str) -> tuple[str, str] | None:
     return username, password
 
 
-def require_operator(authorization: str = Header("")) -> None:
+def _origin(value: str, *, origin_header: bool = False) -> tuple[str, str, int] | None:
+    from urllib.parse import urlsplit
+
+    try:
+        url = urlsplit(value)
+        if (url.scheme.lower() not in {"http", "https"} or not url.hostname
+                or url.username is not None or url.password is not None
+                or (origin_header and (url.path or url.query or url.fragment))):
+            return None
+        port = url.port
+        return (url.scheme.lower(), url.hostname.lower(),
+                port if port is not None else (443 if url.scheme.lower() == "https" else 80))
+    except ValueError:
+        return None
+
+
+def require_operator(request: Request, authorization: str = Header("")) -> None:
     """Protect DSAR operator-only screens and state-changing actions."""
     if not OPERATOR_TOKEN:
         raise _auth_error(
@@ -93,6 +109,13 @@ def require_operator(authorization: str = Header("")) -> None:
             and secrets.compare_digest(password.encode("utf-8", "surrogatepass"),
                                        OPERATOR_TOKEN.encode("utf-8", "surrogatepass"))):
         raise _auth_error(401, "Operator authentication required.")
+    if request.method not in {"GET", "HEAD", "OPTIONS"}:
+        origin_header = request.headers.get("origin")
+        origin = origin_header or request.headers.get("referer") or ""
+        expected = _origin(BASE_URL)
+        if (not expected or _origin(origin, origin_header=origin_header is not None) != expected
+                or request.headers.get("sec-fetch-site", "").lower() == "cross-site"):
+            raise HTTPException(status_code=403, detail="Same-origin operator request required.")
 
 
 def _license_gate() -> str | None:

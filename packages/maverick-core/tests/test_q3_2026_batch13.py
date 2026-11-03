@@ -429,42 +429,38 @@ def test_ffmpeg_missing(monkeypatch):
     assert "ffmpeg" in out and "PATH" in out
 
 
-def test_ffmpeg_convert_calls_binary(monkeypatch):
+def test_ffmpeg_convert_calls_binary(monkeypatch, tmp_path):
     monkeypatch.setattr("shutil.which", lambda b: "/usr/bin/" + b)
     captured = {"cmd": None}
 
-    def _run(cmd, *a, **k):
+    def _run(sandbox, cmd, *a, **k):
         captured["cmd"] = cmd
-        return MagicMock(returncode=0, stdout="", stderr="")
+        return 0, "", ""
 
-    monkeypatch.setattr("subprocess.run", _run)
-    from maverick.tools.ffmpeg_tool import ffmpeg_tool
-    out = ffmpeg_tool().fn({
-        "op": "convert", "input_path": "/tmp/a.mp4",
-        "output_path": "/tmp/b.mp4",
+    from types import SimpleNamespace
+    import importlib
+    module = importlib.import_module("maverick.tools.ffmpeg_tool")
+    monkeypatch.setattr(module, "_run_cmd", _run)
+    out = module.ffmpeg_tool(SimpleNamespace(workdir=tmp_path)).fn({
+        "op": "convert", "input_path": "a.mp4",
+        "output_path": "b.mp4",
     })
-    assert "wrote /tmp/b.mp4" in out
-    # Sandbox-less path runs a shell string through subprocess.run(shell=True).
+    assert "wrote " in out and "b.mp4" in out
     assert "ffmpeg" in captured["cmd"]
 
 
-def test_ffmpeg_info_parses_ffprobe(monkeypatch):
+def test_ffmpeg_info_parses_ffprobe(monkeypatch, tmp_path):
     monkeypatch.setattr("shutil.which", lambda b: "/usr/bin/" + b)
     import json
-    monkeypatch.setattr(
-        "subprocess.run",
-        lambda *a, **k: MagicMock(
-            returncode=0,
-            stdout=json.dumps({
-                "format": {"format_name": "mov,mp4", "duration": "10.0", "bit_rate": "1000"},
-                "streams": [{"codec_type": "video", "codec_name": "h264",
-                              "width": 1920, "height": 1080}],
-            }),
-            stderr="",
-        ),
-    )
-    from maverick.tools.ffmpeg_tool import ffmpeg_tool
-    out = ffmpeg_tool().fn({"op": "info", "input_path": "/tmp/a.mp4"})
+    from types import SimpleNamespace
+    import importlib
+    module = importlib.import_module("maverick.tools.ffmpeg_tool")
+    output = json.dumps({
+        "format": {"format_name": "mov,mp4", "duration": "10.0", "bit_rate": "1000"},
+        "streams": [{"codec_type": "video", "codec_name": "h264", "width": 1920, "height": 1080}],
+    })
+    monkeypatch.setattr(module, "_run_cmd", lambda *a, **kw: (0, output, ""))
+    out = module.ffmpeg_tool(SimpleNamespace(workdir=tmp_path)).fn({"op": "info", "input_path": "a.mp4"})
     assert "mov,mp4" in out and "1920x1080" in out
 
 
@@ -512,32 +508,28 @@ def test_imagemagick_missing(monkeypatch):
     assert "ImageMagick" in out
 
 
-def test_imagemagick_resize(monkeypatch):
+def test_imagemagick_resize(monkeypatch, tmp_path):
     monkeypatch.setattr("shutil.which",
                         lambda b: "/usr/bin/magick" if b == "magick" else None)
-    monkeypatch.setattr(
-        "subprocess.run",
-        lambda *a, **k: MagicMock(returncode=0, stdout="", stderr=""),
-    )
-    from maverick.tools.imagemagick_tool import imagemagick_tool
-    out = imagemagick_tool().fn({
-        "op": "resize", "input_path": "/tmp/a.png",
-        "output_path": "/tmp/b.png", "width": 800,
+    from types import SimpleNamespace
+    import importlib
+    module = importlib.import_module("maverick.tools.imagemagick_tool")
+    monkeypatch.setattr(module, "_run_cmd", lambda *a, **kw: (0, "", ""))
+    out = module.imagemagick_tool(SimpleNamespace(workdir=tmp_path)).fn({
+        "op": "resize", "input_path": "a.png",
+        "output_path": "b.png", "width": 800,
     })
-    assert "wrote /tmp/b.png" in out and "800" in out
+    assert "wrote " in out and "b.png" in out and "800" in out
 
 
-def test_imagemagick_identify_parses(monkeypatch):
+def test_imagemagick_identify_parses(monkeypatch, tmp_path):
     monkeypatch.setattr("shutil.which",
                         lambda b: "/usr/bin/magick" if b == "magick" else None)
-    monkeypatch.setattr(
-        "subprocess.run",
-        lambda *a, **k: MagicMock(
-            returncode=0, stdout="1024 768 PNG 200KB image.png\n", stderr="",
-        ),
-    )
-    from maverick.tools.imagemagick_tool import imagemagick_tool
-    out = imagemagick_tool().fn({"op": "identify", "input_path": "/tmp/a.png"})
+    from types import SimpleNamespace
+    import importlib
+    module = importlib.import_module("maverick.tools.imagemagick_tool")
+    monkeypatch.setattr(module, "_run_cmd", lambda *a, **kw: (0, "1024 768 PNG 200KB image.png\n", ""))
+    out = module.imagemagick_tool(SimpleNamespace(workdir=tmp_path)).fn({"op": "identify", "input_path": "a.png"})
     assert "1024x768" in out and "PNG" in out
 
 

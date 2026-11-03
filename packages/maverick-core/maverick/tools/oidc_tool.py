@@ -1,12 +1,12 @@
-"""Generic OIDC tool: build an authorization URL + exchange a code for tokens.
+"""Generic OIDC authorization URL tool and trusted code-exchange helper.
 
 A thin OpenID Connect / OAuth 2.1 *authorization-code* client (the user-redirect
 flow, complementing ``mcp_oauth``'s machine-to-machine client_credentials):
 
   - ``authorize``: construct the authorization-endpoint redirect URL (client_id,
     redirect_uri, scope, state). Pure — no network.
-  - ``exchange``: POST the authorization code to the token endpoint and return
-    the token response.
+The model-facing tool cannot exchange codes. The Python ``exchange_code``
+helper is for trusted operator-controlled callers.
 
 The token POST is injectable (``fetch=``) so ``exchange_code`` unit-tests against
 a mock token endpoint with no network (same pattern as ``mcp_oauth``). Token URLs
@@ -22,15 +22,12 @@ from . import Tool
 _SCHEMA = {
     "type": "object",
     "properties": {
-        "op": {"type": "string", "enum": ["authorize", "exchange"]},
+        "op": {"type": "string", "enum": ["authorize"]},
         "authorize_url": {"type": "string"},
-        "token_url": {"type": "string"},
         "client_id": {"type": "string"},
-        "client_secret": {"type": "string"},
         "redirect_uri": {"type": "string"},
         "scope": {"type": "string", "description": "default 'openid profile email'"},
         "state": {"type": "string"},
-        "code": {"type": "string", "description": "authorization code (exchange op)"},
     },
     "required": ["op"],
 }
@@ -124,11 +121,7 @@ def _run(args: dict) -> str:
                 scope=args.get("scope") or "openid profile email",
                 state=args.get("state") or "")
         if op == "exchange":
-            resp = exchange_code(
-                args.get("token_url") or "", args.get("client_id") or "",
-                args.get("code") or "", args.get("redirect_uri") or "",
-                client_secret=args.get("client_secret") or "")
-            return _summarise_tokens(resp)
+            return "ERROR: connect accounts through the operator-facing Connected accounts flow"
     except ValueError as e:
         return f"ERROR: {e}"
     except Exception as e:
@@ -142,8 +135,7 @@ def oidc_tool() -> Tool:
         description=(
             "Generic OIDC / OAuth2 authorization-code client. ops: authorize "
             "(build the redirect URL from authorize_url, client_id, redirect_uri, "
-            "scope, state), exchange (swap a code for tokens at token_url). Token "
-            "URL must be https."
+            "scope, state). Connect accounts through the operator-facing flow."
         ),
         input_schema=_SCHEMA,
         fn=_run,

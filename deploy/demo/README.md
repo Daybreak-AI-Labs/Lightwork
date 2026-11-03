@@ -19,8 +19,9 @@ fallback if one platform is down.
 
 ## Model 1 — Local one-command (laptop demos)
 
-Zero hosting cost, no public attack surface. Best for a live demo on your own
-machine or a screen-share.
+Zero hosting cost. The published port binds to host loopback. Use a current
+Docker release and an appropriate host firewall; best for a live demo on your
+own machine or a screen-share.
 
 ```bash
 cd deploy/demo

@@ -44,17 +44,25 @@ def _max_json_bytes() -> int:
 def _safe_path(sandbox, user_path: str) -> Path:
     """Resolve ``user_path`` confined to the sandbox workspace.
 
-    Without a sandbox the tool ran ``Path(expanduser(src))`` on any host path,
-    so the model could read ``/etc/passwd`` or ``~/.ssh/id_rsa``. When a
-    sandbox is wired in, resolve under ``sandbox.workdir`` and refuse anything
-    that escapes it.
+    A local sandbox is required. Resolve under its workspace and reject
+    Lightwork's internal data directory even when the workspace contains it.
     """
+    from ..paths import maverick_home
     if sandbox is None:
-        return Path(os.path.expanduser(user_path))
+        raise ValueError("a sandbox workspace is required to query a file")
+    from ..sandbox.ssh import SSHBackend
+    if isinstance(sandbox, SSHBackend):
+        raise ValueError("host dataframe tools cannot access an SSH workspace")
     workdir = Path(sandbox.workdir).resolve()
     candidate = Path(user_path)
     candidate = (workdir / candidate).resolve() if not candidate.is_absolute() else candidate.resolve()
-    candidate.relative_to(workdir)  # raises ValueError if it escapes
+    try:
+        candidate.relative_to(workdir)
+    except ValueError as exc:
+        raise ValueError("path escapes the workspace") from exc
+    state = maverick_home().resolve()
+    if candidate.is_relative_to(state) and not candidate.is_relative_to(state / "workspace"):
+        raise ValueError("Lightwork's internal data directory cannot be queried")
     return candidate
 
 
@@ -203,8 +211,8 @@ def _run(args: dict[str, Any], sandbox) -> str:
         return "ERROR: source is required"
     try:
         path = _safe_path(sandbox, src)
-    except ValueError:
-        return f"ERROR: path escapes the workspace: {src!r}"
+    except ValueError as exc:
+        return f"ERROR: {exc}"
     if not path.exists() or not path.is_file():
         return f"ERROR: file not found: {src!r}"
 

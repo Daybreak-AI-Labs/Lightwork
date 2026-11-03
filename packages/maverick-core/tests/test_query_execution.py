@@ -38,7 +38,7 @@ def sqlite_call(request, monkeypatch, tmp_path):
         connection.execute("CREATE TABLE items(value INTEGER)")
     monkeypatch.setenv("DATABASE_URL", "sqlite:///" + str(path))
     if request.param == "sqlite":
-        tool = sql_query()
+        tool = sql_query(SimpleNamespace(workdir=tmp_path))
         args = {"database": str(path), "query": LONG_SQL, "read_only": True}
         module = sqlite_module
     else:
@@ -169,7 +169,7 @@ def test_sqlite_admission_deadline_returns_public_error_without_dispatch(tmp_pat
 
     monkeypatch.setattr(sqlite_module, "QueryExecution", expired_execution)
     monkeypatch.setattr(sqlite3, "connect", observe_connect)
-    result = sql_query().fn({"database": str(path), "read_only": read_only,
+    result = sql_query(SimpleNamespace(workdir=tmp_path)).fn({"database": str(path), "read_only": read_only,
                              "query": "SELECT 1" if read_only else "INSERT INTO items VALUES (1)"})
     assert result == ("ERROR: database query failed (QueryDeadlineExceeded); "
                       "transaction_status=not_started; no complete result was admitted")
@@ -204,7 +204,7 @@ def test_sqlite_admission_preserves_control_stop(tmp_path, monkeypatch, control)
     monkeypatch.setattr(sqlite_module, "QueryExecution", stopped_execution)
     monkeypatch.setattr(sqlite3, "connect", observe_connect)
     with pytest.raises(type(error)) as raised:
-        sql_query().fn({"database": str(path), "query": "SELECT 1"})
+        sql_query(SimpleNamespace(workdir=tmp_path)).fn({"database": str(path), "query": "SELECT 1"})
     assert raised.value is error
     assert not connections
 
@@ -360,7 +360,7 @@ def test_deadline_during_insert_select_rolls_back_all_sqlite_changes(tmp_path, m
         connection.execute("CREATE TABLE items(value INTEGER)")
     monkeypatch.setattr(query_execution, "query_timeout_seconds", lambda: 0.05)
     query = LONG_SQL.replace("SELECT sum(n) FROM numbers", "INSERT INTO items SELECT n FROM numbers")
-    result = sql_query().fn({"database": str(path), "query": query, "read_only": False})
+    result = sql_query(SimpleNamespace(workdir=tmp_path)).fn({"database": str(path), "query": query, "read_only": False})
     assert result.startswith("ERROR:") and "rolled_back" in result
     with closing(sqlite3.connect(path)) as connection:
         assert connection.execute("SELECT count(*) FROM items").fetchone()[0] == 0

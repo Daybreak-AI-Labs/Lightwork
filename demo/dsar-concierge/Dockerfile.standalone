@@ -2,11 +2,12 @@
 #
 # One container = one agent tenant. Persistent state (the request store)
 # lives under /data — mount a volume there. TLS/auth guidance, per-cloud run
-# commands, and the environment reference are in DEPLOYMENT.md (standalone
+# commands, and the environment reference are in README.md (standalone
 # mode follows the PIA Concierge deployment kit).
 #
 #   docker build -f Dockerfile.standalone -t dsar-concierge:latest .
-#   docker run -d -p 8891:8891 -v dsar-data:/data \
+#   # Put an HTTPS proxy in front of the loopback port for remote access.
+#   docker run -d -p 127.0.0.1:8891:8891 -v dsar-data:/data \
 #     -e DSAR_BASE_URL=https://dsar.example.com \
 #     -e DSAR_OPERATOR_TOKEN=<long-random-secret>  dsar-concierge:latest
 FROM python:3.12-slim

@@ -775,7 +775,7 @@ def _provider_authority_fingerprint(name: str) -> str:
 
     authority: list[dict] = []
     for source, path in sources:
-        loaded = config._load_config_file(path)
+        loaded = config._load_config_file(path, interpolate=source != "tenant")
         providers = loaded.get("providers") if isinstance(loaded, dict) else None
         if providers is not None and not isinstance(providers, dict):
             raise ProviderConfigurationUnavailable(
@@ -911,7 +911,7 @@ def _provider_detail_blocker(name: str, field: str) -> str | None:
     ):
         if not path:
             continue
-        loaded = config._load_config_file(Path(path).expanduser())
+        loaded = config._load_config_file(Path(path).expanduser(), interpolate=label != "workspace settings")
         table = (loaded.get("providers") or {}).get(name) if isinstance(loaded, dict) else None
         if isinstance(table, dict) and str(table.get(field) or "").strip():
             return label
@@ -1797,12 +1797,12 @@ def enable_container_file_work() -> None:
         higher_paths = []
         operator_path = os.environ.get(config.CONFIG_OVERLAY_ENV, "").strip()
         if operator_path:
-            higher_paths.append(Path(operator_path).expanduser())
+            higher_paths.append((Path(operator_path).expanduser(), True))
         tenant_path = config.tenant_config_path()
         if tenant_path is not None:
-            higher_paths.append(tenant_path)
-        for path in higher_paths:
-            layer = config._load_config_file(path)
+            higher_paths.append((tenant_path, False))
+        for path, interpolate in higher_paths:
+            layer = config._load_config_file(path, interpolate=interpolate)
             policy = (layer.get("security") or {}).get("denied_tools") or []
             if any(name in policy for name in CONTAINER_FILE_TOOLS):
                 raise ValueError(

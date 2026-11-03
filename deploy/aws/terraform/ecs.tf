@@ -59,7 +59,7 @@ resource "aws_ecs_task_definition" "app" {
           # key identity is unavailable"), so the outcome-pilot admission gate
           # blocks every goal. Re-derive with `maverick shared-key-digest` if the
           # at-rest key ever rotates. The value is a one-way hash, not the key.
-          { name = "MAVERICK_ENCRYPTION_KEY_DIGEST", value = "sha256:08e3a482c52e752bb7a1765bcc622508e8decafca4c1a8d5a01c2d5d0630b156" },
+          { name = "MAVERICK_ENCRYPTION_KEY_DIGEST", value = var.encryption_key_digest },
         ],
         # Browser login via Auth0 (OIDC). Added only when an issuer is set, so
         # an unconfigured stack stays on static-token auth. redirect_uri and

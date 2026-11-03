@@ -8,7 +8,7 @@ import json
 def role(principal, *, installation=False, without_explicit=False):
     from maverick.paths import current_tenant_id
 
-    from . import auth, rbac, scim_groups
+    from . import auth, rbac, scim_groups, strict_reads
 
     if not principal:
         return {"role": None, "source": "Local installation authority", "owner": "Installation administrator"}
@@ -24,9 +24,21 @@ def role(principal, *, installation=False, without_explicit=False):
     explicit = rbac.get_stored_role(principal) if not without_explicit else None
     if explicit:
         return {"role": explicit, "source": "Explicit installation role", "owner": "Installation administrator"}
-    group = scim_groups.role_for_principal(principal)
+    try:
+        with strict_reads.strict():
+            group = scim_groups.role_for_principal(principal)
+    except Exception:
+        if strict_reads.active():
+            raise
+        return {"role": None, "source": "Sign-in group policy unavailable", "owner": "Identity or installation administrator"}
     if group:
         return {"role": group, "source": "Verified sign-in group mapping", "owner": "Identity or installation administrator"}
+    if rbac.tenant_role_scope_initialized():
+        from maverick.paths import tenant_by_user_enabled
+
+        if not installation and tenant_by_user_enabled() and tenant == f"api:{principal}":
+            return {"role": rbac.default_role(), "source": "Per-user workspace default", "owner": "Installation administrator"}
+        return {"role": None, "source": "No installation role or selected workspace membership", "owner": "Installation administrator"}
     return {"role": rbac.default_role(), "source": "Configured first-login default", "owner": "Installation administrator"}
 
 

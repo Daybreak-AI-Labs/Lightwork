@@ -135,6 +135,20 @@ func ParseAllowedRoutes(value string) map[string]struct{} {
 // RouteAllowed mirrors model_proxy.route_allowed: the request's METHOD + clean
 // path (query stripped, leading slash ensured) must be in the allow-set.
 func RouteAllowed(c *Config, method, path string) bool {
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	routePath := strings.SplitN(path, "?", 2)[0]
+	lowered := strings.ToLower(routePath)
+	if strings.HasPrefix(routePath, "//") || strings.Contains(routePath, "\\") ||
+		strings.Contains(lowered, "%2e") || strings.Contains(lowered, "%2f") || strings.Contains(lowered, "%5c") {
+		return false
+	}
+	for _, segment := range strings.Split(routePath, "/") {
+		if segment == "." || segment == ".." {
+			return false
+		}
+	}
 	clean := pathOnly(path)
 	if clean == "" {
 		clean = "/"

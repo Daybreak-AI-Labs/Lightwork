@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import copy
 import hashlib
 import inspect
 import itertools
@@ -415,6 +416,24 @@ def _rule(
 
 _FILE_TOOL_POLICIES: dict[str, _FileToolPolicy] = {
     "read_file": _FileToolPolicy((_rule("path"),)),
+    "read_pdf": _FileToolPolicy((_rule("source", skip_remote_references=True),)),
+    "pandas_query": _FileToolPolicy((_rule("source"),)),
+    "view_video": _FileToolPolicy((_rule("source"),)),
+    "view_image": _FileToolPolicy((_rule("source", skip_remote_references=True),)),
+    "pandoc": _FileToolPolicy((
+        _rule("input_path", operations={"convert"}),
+        _rule("output_path", operations={"convert"}, mutates=True),
+    ), operation_argument="op", known_operations=frozenset({"convert", "formats", "markdown_to_html", "html_to_markdown"})),
+    "imagemagick": _FileToolPolicy((
+        _rule("input_path", operations={"resize", "convert", "identify"}),
+        _rule("base_path", operations={"composite"}),
+        _rule("overlay_path", operations={"composite"}),
+        _rule("output_path", operations={"resize", "convert", "composite"}, mutates=True),
+    ), operation_argument="op", known_operations=frozenset({"resize", "convert", "identify", "composite"})),
+    "ffmpeg": _FileToolPolicy((
+        _rule("input_path", operations={"convert", "extract_audio", "thumbnail", "info"}),
+        _rule("output_path", operations={"convert", "extract_audio", "thumbnail"}, mutates=True),
+    ), operation_argument="op", known_operations=frozenset({"convert", "extract_audio", "thumbnail", "info"})),
     "spreadsheet_read": _FileToolPolicy((_rule("path"),)),
     "sql_query_read": _FileToolPolicy((_rule("database"),)),
     "write_file": _FileToolPolicy((_rule("path", mutates=True),)),
@@ -667,11 +686,47 @@ _IN_PROCESS_WORKSPACE_WRITERS = frozenset(
 # allow-all" convention), so this is a no-op unless capability enforcement was
 # opted in AND the active grant restricts hosts.
 _NET_TOOL_URL_ARGS: dict[str, str] = {
+    "view_image": "source",
+    "websocket": "url",
     "http_fetch": "url",
     "browser": "url",
     "oidc": "token_url",
     "oauth_helper": "token_url",
 }
+
+# These tools can select additional destinations internally (from a spec,
+# configuration, remote redirect, or a service response). Until those paths
+# enforce the complete grant, a host-restricted capability must fail closed.
+_UNSCOPED_NETWORK_TOOLS = frozenset({
+    "openapi_runner", "teams", "web_archive", "ocr", "huggingface", "learn_capability", "browser",
+    "view_image", "view_video", "transcribe_audio", "image_edit", "speak", "oauth_helper", "read_pdf",
+    "web_search", "wikipedia", "arxiv", "semantic_scholar", "hackernews", "currency",
+    "geocode", "translate", "linear", "notion", "jira", "gitlab", "gitlab_issues",
+    "github_search", "github_actions", "github_issues", "github_repo_search", "slack_bot",
+    "discord_bot", "stripe", "anki", "airtable", "asana", "clickup", "vercel", "gdrive", "youtube",
+})
+
+# Only locally bounded tools with no network side effects are admitted without
+# an explicit host check. Unclassified tools fail closed for restricted grants;
+# new tools must be reviewed before being added here or to the URL policies.
+_HOST_SCOPED_LOCAL_TOOLS = frozenset({
+    "read_file", "write_file", "list_dir", "str_replace_editor",
+    "spreadsheet", "spreadsheet_read", "pandas_query", "sql_query", "sql_query_read",
+    "capability_query", "ask_user", "compute", "ast_edit",
+})
+
+_UNSCOPED_WORKSPACE_TOOLS = frozenset({
+    "repo_map", "dep_graph", "file_watcher", "semantic_code_search", "cross_repo_deps",
+    "preview_diff", "test_impact", "lsp_bridge", "shell", "git_advanced",
+    "notebook_exec", "container_build", "wasm_run", "model3d_inspect",
+    "openapi_runner", "repl_exec", "audio_understanding", "office_convert", "a11y", "embedded_device",
+    "browser", "computer", "aria_navigate", "android", "ios_sim", "oauth_helper",
+    "workspace_snapshot", "html_to_app", "list_dir", "str_replace_editor", "obsidian", "ocr", "memory", "apply_patch",
+})
+
+_PATH_SCOPED_NONFILE_TOOLS = frozenset({
+    "ask_user", "compute", "capability_query", "http_fetch", "websocket", "oidc",
+})
 
 
 def _workspace_relative_path(sandbox: Any, raw_path: str) -> str:
@@ -711,14 +766,28 @@ def _normalize_file_tool_args(
     args: dict[str, Any],
     sandbox: Any,
 ) -> dict[str, Any]:
-    """Freeze dynamic path defaults once for policy, audit, hooks, and dispatch.
+    """Normalize paths and freeze defaults for policy, audit and dispatch.
 
     ``speak`` historically searched for the next free ``speech-N.mp3`` both in
     the path gate and again inside the tool. A file appearing between those two
     searches could shift the actual destination onto a protected next name.
     Supplying the admitted name explicitly makes the checked and written path
-    identical.
+    identical. Media tools strip surrounding whitespace before opening paths;
+    the authorization gate must inspect those same strings.
     """
+    stripped_paths = {
+        "view_image": ("source",),
+        "websocket": ("url",),
+        "pandoc": ("input_path", "output_path"),
+        "imagemagick": ("input_path", "output_path", "base_path", "overlay_path"),
+        "ffmpeg": ("input_path", "output_path"),
+    }
+    if name in stripped_paths:
+        normalized = dict(args)
+        for key in stripped_paths[name]:
+            if isinstance(normalized.get(key), str):
+                normalized[key] = normalized[key].strip()
+        return normalized
     if name != "speak" or args.get("output"):
         return args
     normalized = dict(args)
@@ -834,6 +903,9 @@ def _sql_query_path_accesses(
     """Mirror sql_query's coercion and include SQLite's writable sidecars."""
     raw = args.get("database")
     if not isinstance(raw, str) or not raw:
+        return None
+    raw = raw.strip()
+    if not raw:
         return None
     read_only_arg = args.get("read_only")
     read_only = True if read_only_arg is None else bool(read_only_arg)
@@ -981,10 +1053,22 @@ def _workspace_path_accesses_for_tool(
         for value in values:
             if not isinstance(value, str) or not value:
                 continue
-            if rule.skip_remote_references:
-                scheme = urlsplit(value).scheme.lower()
-                if scheme in {"http", "https", "data"}:
+            if name in {"read_pdf", "pandas_query", "view_image", "view_video", "sql_query_read",
+                        "ocr", "pandoc", "imagemagick", "ffmpeg", "transcribe_audio", "image_edit"}:
+                # These tools strip the source before opening it. Scope the
+                # exact normalized path they will use, not the supplied text.
+                value = value.strip()
+                if not value:
                     continue
+            if rule.skip_remote_references:
+                # These readers recognize only these exact URL prefixes;
+                # other scheme-shaped strings are local filenames on POSIX.
+                remote = (value.startswith(("http://", "https://", "data:")) if name == "image_edit"
+                          else value.startswith(("http://", "https://")))
+                if remote:
+                    continue
+            if name in {"read_pdf", "view_image"}:
+                value = str(Path(value).expanduser())
             accesses.append(
                 _one_workspace_access(
                     sandbox,
@@ -2876,6 +2960,23 @@ class Agent:
         # gets its schema default of ".", and ``apply_patch`` checks every
         # file referenced by the unified diff. Malformed calls whose path
         # cannot be located still fall through to tool validation.
+        if cap is not None and cap.allow_paths and name in _UNSCOPED_WORKSPACE_TOOLS:
+            from .audit import EventKind
+            self._audit_tool_event(EventKind.CAPABILITY_DENIED, tool=name,
+                                   principal=cap.principal, reason="path_scope_unavailable")
+            return (
+                f"⚠ DENIED by capability policy: {name!r} cannot enforce the "
+                "current workspace restrictions. The tool was not executed."
+            )
+        if (cap is not None and cap.allow_paths and name not in _FILE_TOOL_POLICIES
+                and name != "apply_patch" and name not in _PATH_SCOPED_NONFILE_TOOLS):
+            from .audit import EventKind
+            self._audit_tool_event(EventKind.CAPABILITY_DENIED, tool=name,
+                                   principal=cap.principal, reason="path_scope_unclassified")
+            return (
+                f"⚠ DENIED by capability policy: {name!r} has no verified workspace "
+                "scope. The tool was not executed."
+            )
         if (
             cap is None
             or not cap.allow_paths
@@ -2977,6 +3078,23 @@ class Agent:
         # soft: if the URL arg is missing/unparseable (no host) we skip the
         # check rather than error -- we never deny something we can't
         # confidently locate the host for.
+        if cap is not None and cap.allow_hosts and name in _UNSCOPED_NETWORK_TOOLS:
+            from .audit import EventKind
+            self._audit_tool_event(EventKind.CAPABILITY_DENIED, tool=name,
+                                   principal=cap.principal, reason="host_scope_unavailable")
+            return (
+                f"⚠ DENIED by capability policy: {name!r} cannot enforce the "
+                "current host restrictions. The tool was not executed."
+            )
+        if (cap is not None and cap.allow_hosts and name not in _NET_TOOL_URL_ARGS
+                and name not in _HOST_SCOPED_LOCAL_TOOLS):
+            from .audit import EventKind
+            self._audit_tool_event(EventKind.CAPABILITY_DENIED, tool=name,
+                                   principal=cap.principal, reason="host_scope_unclassified")
+            return (
+                f"⚠ DENIED by capability policy: {name!r} has no verified host "
+                "scope. The tool was not executed."
+            )
         url_arg = _NET_TOOL_URL_ARGS.get(name)
         if cap is None or url_arg is None:
             return None
@@ -3014,10 +3132,14 @@ class Agent:
         escalation). The ``browser`` path already did this; every other tool
         must too.
         """
-        if cap is None or not cap.allow_hosts or not isinstance(args, dict):
+        if not isinstance(args, dict):
             return args
-        scoped = dict(args)
-        scoped["_capability_allow_hosts"] = tuple(cap.allow_hosts)
+        # Reserved metadata is never model authority, even when there is no
+        # host restriction to inject. Always start with a fresh sanitized dict.
+        scoped = {key: value for key, value in args.items()
+                  if not (isinstance(key, str) and key.startswith("_capability_"))}
+        if cap is not None and cap.allow_hosts:
+            scoped["_capability_allow_hosts"] = tuple(cap.allow_hosts)
         return scoped
 
     def _autonomy_denial(self, name: str, cap) -> str | None:
@@ -3142,32 +3264,36 @@ class Agent:
         _twin.record_gate(self.ctx.goal_id, name, args, granted=granted)
         return granted, False
 
-    def _approval_granted(self, name: str, reason: str, *, fresh: bool) -> bool:
+    def _approval_granted(self, name: str, reason: str, args: dict, *, fresh: bool):
         """One human decision for a REQUIRE_HUMAN verdict (EU AI Act Art 14).
 
-        ``allow_auto_approve=False``: a silent auto-approve mode counts as a
-        denial. A finance action under ``[finance.approvals] timeout =
-        "fail_closed"`` is decided by a person (``require_person``): never the
-        automatic consent mode or an earlier "remember this" grant, and a
-        request nobody answers in time is refused and withdrawn.
+        A standing grant or silent automatic mode cannot satisfy a policy
+        requiring a human decision. ``fresh`` is retained for callers that
+        pass the older policy setting; this boundary always requires a person.
         """
-        from .safety.consent import require_consent, require_person
+        from .safety.consent import require_operation_consent
         from .safety.tool_risk import tool_risk
         try:
-            from .finance.profile import approval_fail_closed
-
-            fail_closed = approval_fail_closed(name)
+            from .governed_tools import _approval_request_parts
+            # Show the request with sensitive values redacted while binding the
+            # decision to the complete live arguments, including those values.
+            summary = _approval_request_parts(args)
+            permit = require_operation_consent(
+                name, risk=tool_risk(name), scope=f"Task {self.ctx.goal_id}: {name}",
+                detail=reason, provenance="governance", target={"tool": name},
+                parameters=copy.deepcopy(args), parameter_summary=summary,
+                known_effects=["The reviewed operation may run once if the remaining checks allow it."],
+                unresolved_assumptions=["The action may have effects outside Lightwork."],
+                before="The proposed operation has not run.",
+                after="The reviewed operation is eligible for the remaining checks.",
+                irreversible=True, target_provider=lambda: {"tool": name},
+                parameters_provider=lambda: args, require_fresh_person=True,
+            )
+            return permit
         except Exception:
-            log.warning("finance: approval posture unavailable for %r; asking a "
-                        "person, fail closed", name, exc_info=True)
-            fail_closed = True
-        if fail_closed:
-            return bool(require_person(name, risk=tool_risk(name), detail=reason,
-                                       provenance="governance").granted)
-        return bool(require_consent(
-            name, risk=tool_risk(name), detail=reason, provenance="governance",
-            allow_auto_approve=False, consult_ledger=not fresh,
-        ).granted)
+            log.warning("governance: exact operation approval unavailable for %r", name,
+                        exc_info=True)
+            return False
 
     def _finance_sod_verdict(self, name: str, cap, gov, profile_keys):
         """Compose the action-time finance separation-of-duties check.
@@ -3215,6 +3341,7 @@ class Agent:
         name: str,
         args: dict,
         cap,
+        approval_holder: dict | None = None,
     ) -> tuple[str | None, tuple[str, ...] | None]:
         # Org oversight control plane (enterprise): on top of the per-principal
         # capability above, an org-level policy can DENY an action outright or
@@ -3278,11 +3405,11 @@ class Agent:
                 # dollar-tier gates (deny_above / require_human_above) actually
                 # fire -- without this the finance delegation-of-authority
                 # thresholds are dead at the chokepoint.
-                _gov_currency = args.get("currency") if isinstance(args, dict) else None
+                from .governance import transaction_value
+                _amount, _currency, _unavailable = transaction_value(name, args, _gov_policy)
                 _gov = _gov_evaluate(
                     name, policy=_gov_policy,
-                    amount=_governance_amount(args),
-                    currency=_gov_currency if isinstance(_gov_currency, str) else "",
+                    amount=_amount, currency=_currency, amount_unavailable=_unavailable,
                 )
             except Exception:
                 log.warning("governance: evaluation failed for %r; failing closed",
@@ -3417,15 +3544,13 @@ class Agent:
         # (Art 14). allow_auto_approve=False means a silent auto-approve mode
         # counts as a denial -- no human in the loop, no run.
         def _ask() -> bool:
-            return self._approval_granted(
-                name, _gov.reason,
-                # When the operator opts into per-action oversight, a prior
-                # persistent ledger grant must NOT silently satisfy the
-                # Art-14 gate -- demand a fresh human decision each time. The
-                # autonomy dial can drive REQUIRE_HUMAN with no [governance]
-                # policy set (_gov_policy None), so guard the attribute read.
+            permit = self._approval_granted(
+                name, _gov.reason, args,
                 fresh=bool(getattr(_gov_policy, "require_fresh_human_approval", False)),
             )
+            if permit and approval_holder is not None:
+                approval_holder["permit"] = permit
+            return bool(permit)
         granted, replayed = await self._human_decision(name, args, _ask)
         if granted:
             return None, _gov.compliance_profiles
@@ -3587,7 +3712,10 @@ class Agent:
             # until it happened to return.
             from .connector_attempts import bind_tool_budget
             from .immune import twin
-            with bind_tool_budget(self.ctx.budget):
+            from .tools import bind_tool_host_scope
+
+            hosts = args.get("_capability_allow_hosts") if isinstance(args, dict) else None
+            with bind_tool_budget(self.ctx.budget), bind_tool_host_scope(hosts):
                 output = await self._await_wall_clock_guarded(
                     lambda: twin.dispatch(self.ctx.goal_id, name, args,
                                            lambda: self.tools.run(name, args)),
@@ -3843,6 +3971,7 @@ class Agent:
                     f"⚠ Agent sealed by compartment quarantine "
                     f"({q.reason(self.name)}). No further tools will run."
                 )
+        args = self._with_capability_host_scope(name, args, None)
         args = _normalize_file_tool_args(name, args, self.ctx.sandbox)
         # Loop-guard suppression tier: an exact call that has already returned
         # the byte-identical result _LOOP_GUARD_BLOCK times is refused before
@@ -3916,10 +4045,12 @@ class Agent:
 
         # Org oversight control plane (enterprise): policy DENY or REQUIRE_HUMAN
         # sign-off (EU AI Act Art 14). Default-open for non-enterprise installs.
+        _governance_approval: dict = {}
         _governance_refusal, _compliance_profiles = await self._governance_denial(
             name,
             args,
             cap,
+            _governance_approval,
         )
         if _governance_refusal is not None:
             return _NotExecutedToolResult(_governance_refusal)
@@ -3937,7 +4068,9 @@ class Agent:
         from .hooks import dispatch as _dispatch_hooks
         pre_ctx = HookContext(
             event=HookEvent.PRE_TOOL_USE,
-            tool_name=name, tool_args=args,
+            # Hooks may inspect a call but cannot mutate arguments after the
+            # authorization, approval and host checks have run.
+            tool_name=name, tool_args=copy.deepcopy(args),
             goal_id=self.ctx.goal_id, agent_role=self.role,
         )
         if not await _dispatch_hooks(pre_ctx):
@@ -4001,6 +4134,17 @@ class Agent:
             _recent = self._recent_tool_calls = []
         _recent.append((name, dict(args) if isinstance(args, dict) else {}))
         del _recent[:-_SPECULATION_HISTORY]
+        if permit := _governance_approval.get("permit"):
+            from .safety.consent import consume_operation_consent
+            try:
+                with consume_operation_consent(permit):
+                    pass
+            except AuditRefused:
+                raise
+            except Exception:
+                return _NotExecutedToolResult(
+                    "The governance approval changed or expired before dispatch; the tool did not run."
+                )
         return await self._run_dispatched_tool(
             name,
             args,
@@ -4023,6 +4167,12 @@ class Agent:
             from .cache import tool as tool_cache
 
             if not (speculative_tools.enabled() and tool_cache.enabled()):
+                return
+            # Speculation executes tools outside the governed agent dispatch.
+            # Never pre-run it under an explicit or handoff capability: a prior
+            # unrestricted prediction may no longer satisfy the current grant.
+            if (getattr(self, "capability", None) is not None
+                    or getattr(self, "_handoff_capability", None) is not None):
                 return
             predictions = speculative_tools.predict_from_history(
                 list(getattr(self, "_recent_tool_calls", None) or ()))

@@ -38,7 +38,7 @@ def _isolate(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_CONFIG", raising=False)
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
-    monkeypatch.delenv("MAVERICK_WEBHOOK_SECRET", raising=False)
+    monkeypatch.delenv("MAVERICK_INBOUND_WEBHOOK_SECRET", raising=False)
     from maverick import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     import maverick.templates as tpl
@@ -65,7 +65,7 @@ def _no_real_run(monkeypatch):
 
 
 def _configured(monkeypatch):
-    monkeypatch.setenv("MAVERICK_WEBHOOK_SECRET", SECRET)
+    monkeypatch.setenv("MAVERICK_INBOUND_WEBHOOK_SECRET", SECRET)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")  # pragma: allowlist secret
 
 

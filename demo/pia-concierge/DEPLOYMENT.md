@@ -38,9 +38,11 @@ instances over one data directory).
 | `WORLD_PORT` | `8890` | HTTP port. |
 | `PIA_DATA_DIR` | `./.pia-standalone` | Persistent state (assessment records). Back this up. |
 | `PIA_BASE_URL` | `http://127.0.0.1:8890` | The public URL the agent puts in intake emails/links. Set to the real HTTPS URL in production. |
-| `ONETRUST_HOSTNAME` | built-in mock | The organization's OneTrust API base (e.g. `https://example.my.onetrust.com`). Leave default to pilot against the built-in mock tenant. |
-| `ONETRUST_TOKEN` | demo token | OAuth/bearer token for OneTrust. Store in a secret manager, never in shell history or unit files readable by all. |
+| `ONETRUST_HOSTNAME` | local mock URL | The organization's OneTrust API base (e.g. `https://example.my.onetrust.com`). |
+| `PIA_ENABLE_ONETRUST_MOCK` | off | Set to `1` only when deliberately running the in-process demo tenant. |
+| `ONETRUST_TOKEN` | unset | OAuth/bearer token for OneTrust or the explicitly enabled mock. Store in a secret manager, never in shell history or unit files readable by all. |
 | `EMAIL_USER` / `EMAIL_SMTP_HOST` / `EMAIL_SMTP_PORT` | in-process inbox | Standalone delivers intake mail to the built-in inbox page by default; point at your SMTP relay to send real mail. |
+| `PIA_OPERATOR_USER` / `PIA_OPERATOR_TOKEN` | `reviewer` / unset | Set a unique reviewer name and a strong token before making OneTrust review decisions. The reviewer endpoint requires HTTP Basic authentication and a same-origin browser request. Store the token in a secret manager. |
 | `PIA_SEED_TENANT` | `0` | `1` seeds a year of demo history (demos only — never for a production tenant). |
 | `PIA_MANUAL_BASELINE_HOURS` | `6` | The stated manual-PIA baseline used by the speed metrics. |
 

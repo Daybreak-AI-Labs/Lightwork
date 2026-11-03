@@ -148,13 +148,13 @@ class ThreadsChannel(Channel):
     def _input(self, reply):
         reply_id, text = str(reply.get("id") or ""), str(reply.get("text") or "")
         sender = reply.get("from") or {}
-        username = str(reply.get("username") or sender.get("username") or "")
-        if not text or str(sender.get("id") or "") == str(self.user_id) or not is_allowed(username, self.allowed_user_ids):
+        sender_id = str(sender.get("id") or "")
+        if not text or not sender_id or sender_id == str(self.user_id) or not is_allowed(sender_id, self.allowed_user_ids):
             return None
         if not reply_id:
             raise ValueError("Threads reply requires a stable provider identity")
         return IncomingMessage(user_id=reply_id, text=text, channel=self.name,
-                               message_id=reply_id, sender_id=username)
+                               message_id=reply_id, sender_id=sender_id)
 
     async def _admit(self, reply):
         incoming = self._input(reply)

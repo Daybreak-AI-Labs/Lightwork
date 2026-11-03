@@ -148,7 +148,7 @@ def test_policy_turned_on_later_refuses_an_existing_session(client, monkeypatch)
     page = client.get("/users", headers={"Accept": "text/html"})
     assert page.status_code == 403 and "Sign in again" in page.text
     # Signing out still works so the person can start over.
-    assert client.get("/auth/logout", follow_redirects=False).status_code == 303
+    assert client.post("/auth/logout", follow_redirects=False).status_code == 303
 
 
 # ---- step-up ------------------------------------------------------------------

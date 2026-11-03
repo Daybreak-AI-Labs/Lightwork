@@ -31,7 +31,7 @@
 
   function safeHref(url) {
     url = String(url || '').trim();
-    if (!url || /[\x00-\x1f\s]/.test(url)) return null;
+    if (!url || /[\x00-\x1f\s\\]/.test(url)) return null;
     return SAFE_HREF.test(url) ? url : null;
   }
 

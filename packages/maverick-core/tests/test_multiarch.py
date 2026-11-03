@@ -15,7 +15,7 @@ _MA = _REPO_ROOT / "deploy" / "multiarch"
 _DOCKERFILE = _MA / "Dockerfile.multiarch"
 
 _KNOWN_INSTRUCTIONS = {
-    "FROM", "ARG", "ENV", "RUN", "COPY", "WORKDIR", "ENTRYPOINT", "CMD",
+    "FROM", "ARG", "ENV", "RUN", "COPY", "WORKDIR", "ENTRYPOINT", "CMD", "USER",
 }
 
 
@@ -74,6 +74,16 @@ def test_image_uses_the_manifest_driven_reduced_cohort():
     assert "release-cohort.toml" in text
     assert "requirements/ci.txt" in text
     assert 'ENTRYPOINT ["maverick"]' in text
+
+
+def test_runtime_is_unprivileged_and_ignores_user_site_packages():
+    text = _DOCKERFILE.read_text(encoding="utf-8")
+    instructions = _instructions()
+    assert "PYTHONNOUSERSITE=1" in text
+    assert "ENV HOME=/home/maverick" in instructions
+    assert [line for line in instructions if line.startswith("USER ")][-1] == "USER maverick"
+    assert "chown -R maverick:maverick /workspace /home/maverick" in text
+    assert "chown -R maverick:maverick /opt/maverick" not in text
 
 
 def test_build_script_targets_multiple_platforms_via_buildx():

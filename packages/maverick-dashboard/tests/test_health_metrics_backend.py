@@ -10,6 +10,12 @@ from maverick_dashboard.app import app
 client = TestClient(app, headers={"Origin": "http://testserver"})
 
 
+def _probe_details(monkeypatch):
+    monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "diagnostic-test-token")
+    return client.get("/api/v1/admin/system/probe-details",
+                      headers={"Authorization": "Bearer diagnostic-test-token"})
+
+
 def test_unreadable_auth_posture_keeps_probe_details_redacted(monkeypatch):
     from maverick import oidc
     from maverick_dashboard.health_routes import health_should_redact
@@ -21,6 +27,27 @@ def test_unreadable_auth_posture_keeps_probe_details_redacted(monkeypatch):
 
     monkeypatch.setattr(oidc, "oidc_enabled", unavailable)
     assert health_should_redact() is True
+
+
+def test_probe_details_require_authentication_even_when_auth_is_off(monkeypatch):
+    monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
+    assert client.get("/api/v1/admin/system/probe-details").status_code == 401
+
+
+def test_public_probes_do_not_disclose_db_exception(monkeypatch):
+    from maverick_dashboard import app as dash_app
+
+    class Broken:
+        def ping(self):
+            raise RuntimeError("sensitive database location")
+
+    monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
+    monkeypatch.setattr(dash_app, "_world", lambda: Broken())
+    for path in ("/healthz", "/readyz"):
+        response = client.get(path)
+        assert response.status_code == 503
+        assert set(response.json()) == {"status"}
+        assert "sensitive database location" not in response.text
 
 
 def _use_sqlite(monkeypatch, tmp_path):
@@ -57,10 +84,11 @@ def test_health_and_metrics_use_public_inflight_snapshot(monkeypatch, tmp_path):
 
     health = client.get("/healthz")
     assert health.status_code == 200
-    assert health.json()["checks"]["runner"] == (
+    assert health.json() == {"status": "ok"}
+    assert _probe_details(monkeypatch).json()["checks"]["runner"] == (
         f"in_flight=3/{runner.MAX_CONCURRENT_GOALS}"
     )
-    text = client.get("/metrics").text
+    text = client.get("/metrics", headers={"Authorization": "Bearer diagnostic-test-token"}).text
     assert "maverick_concurrent_goals 3" in text
 
 
@@ -68,8 +96,8 @@ def test_healthz_db_ok_via_ping(monkeypatch, tmp_path):
     _use_sqlite(monkeypatch, tmp_path)
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     body = client.get("/healthz").json()
-    # No token -> full checks block; the db check uses the backend ping.
-    assert body["checks"]["db"] == "ok"
+    assert "checks" not in body
+    assert _probe_details(monkeypatch).json()["checks"]["db"] == "ok"
 
 
 def test_healthz_db_fail_is_reported(monkeypatch, tmp_path):
@@ -85,7 +113,8 @@ def test_healthz_db_fail_is_reported(monkeypatch, tmp_path):
     resp = client.get("/healthz")
     body = resp.json()
     assert resp.status_code == 503
-    assert body["checks"]["db"].startswith("fail")
+    assert body == {"status": "degraded"}
+    assert _probe_details(monkeypatch).json()["checks"]["db"].startswith("fail")
 
 
 def test_metrics_omits_world_db_bytes_under_postgres(monkeypatch, tmp_path):
@@ -120,7 +149,8 @@ def test_healthz_degrades_when_the_login_bypasses_row_level_security(monkeypatch
     body = resp.json()
     assert resp.status_code == 503
     assert body["status"] == "degraded"
-    assert body["checks"]["database_role"].startswith(
+    assert "checks" not in body
+    assert _probe_details(monkeypatch).json()["checks"]["database_role"].startswith(
         "fail: the Postgres login is a superuser, which bypasses row-level security"
     )
 
@@ -131,4 +161,5 @@ def test_healthz_is_unchanged_for_a_login_without_the_bypass(monkeypatch, tmp_pa
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     resp = client.get("/healthz")
     assert resp.status_code == 200
-    assert "database_role" not in resp.json()["checks"]
+    assert "checks" not in resp.json()
+    assert "database_role" not in _probe_details(monkeypatch).json()["checks"]

@@ -131,12 +131,16 @@ async def list_rights_form_properties(request: Request) -> dict[str, Any]:
     require_permission(request, "view")
     prf = _prf()
     rows = await run_in_threadpool(prf.list_properties)
-    base = f"{request.url.scheme}://{request.url.netloc}"
+    from .public_rights_api import _public_base_url
+    try:
+        base = _public_base_url()
+    except HTTPException:
+        base = ""
     return {
         "enabled": prf.enabled(),
         "properties": [
-            {**row, "public_url": f"{base}/rights/{row['slug']}",
-             "embed_snippet": _embed_snippet(base, str(row["slug"]))}
+            {**row, "public_url": f"{base}/rights/{row['slug']}" if base else "",
+             "embed_snippet": _embed_snippet(base, str(row["slug"])) if base else ""}
             for row in rows
         ],
     }
@@ -153,12 +157,13 @@ def _embed_snippet(base: str, slug: str) -> str:
 async def upsert_rights_form_property(request: Request, slug: str, body: PropertyIn) -> dict:
     require_global_permission(request, "admin")
     prf = _module_or_403()
+    from .public_rights_api import _public_base_url
+    base = _public_base_url()
     try:
         row = await run_in_threadpool(
             prf.upsert_property, slug[:64], body.model_dump(), actor=_actor(request))
     except prf.PublicRightsFormError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    base = f"{request.url.scheme}://{request.url.netloc}"
     return {**row, "public_url": f"{base}/rights/{row['slug']}",
             "embed_snippet": _embed_snippet(base, str(row["slug"]))}
 

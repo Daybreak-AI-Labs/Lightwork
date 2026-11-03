@@ -32,6 +32,7 @@ def _entry(**over):
 def test_install_from_catalog_happy_path(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(catalog, "resolve", lambda name, kind, indexes=None: _entry())
     monkeypatch.setattr(skills, "_fetch_skill_source_bytes", lambda source: _BODY.encode())
+    monkeypatch.setattr(skills, "_verify_skill_signature", lambda parsed, **kw: kw["require_signature"])
     s = skills.install_from_catalog("summarize-url", skills_dir=tmp_path)
     assert s.name == "summarize-url"
     assert (tmp_path / "summarize-url.md").exists()
@@ -59,11 +60,20 @@ def test_install_from_catalog_accepts_non_utf8_clean_pinned_bytes(monkeypatch, t
         lambda name, kind, indexes=None: _entry(sha256=_NON_UTF8_SHA))
     monkeypatch.setattr(
         skills, "_fetch_skill_source_bytes", lambda source: _NON_UTF8_BODY_BYTES)
+    monkeypatch.setattr(skills, "_verify_skill_signature", lambda parsed, **kw: kw["require_signature"])
     # Without the fix this raised "content hash mismatch" because the pin was
     # checked against the UTF-8-replaced str rather than the raw wire bytes.
     s = skills.install_from_catalog("summarize-url", skills_dir=tmp_path)
     assert s.name == "summarize-url"
     assert (tmp_path / "summarize-url.md").exists()
+
+
+def test_unsigned_catalog_skill_is_refused_without_trusted_publisher(monkeypatch, tmp_path):
+    monkeypatch.setattr(catalog, "resolve", lambda name, kind, indexes=None: _entry())
+    monkeypatch.setattr(skills, "_fetch_skill_source_bytes", lambda source: _BODY.encode())
+    with pytest.raises(ValueError):
+        skills.install_from_catalog("summarize-url", skills_dir=tmp_path)
+    assert not list(tmp_path.glob("*.md"))
 
 
 def test_install_from_catalog_unknown_name(monkeypatch, tmp_path: Path):
@@ -210,13 +220,10 @@ def test_catalog_trusted_pubkeys_rejects_wrong_key(tmp_path, monkeypatch):
     assert not list((tmp_path / "skills").glob("*.md"))
 
 
-def test_catalog_no_trust_tofu_reports_verified_false(tmp_path, monkeypatch):
-    # No trusted_pubkeys: TOFU still installs the unsigned skill (non-breaking),
-    # but the REAL verified status is False even though the index says verified=true.
+def test_catalog_without_trust_rejects_unsigned_content(tmp_path, monkeypatch):
     _write_config(tmp_path, monkeypatch, "")
-    s = _install_content(monkeypatch, tmp_path, _BODY)
-    assert s.name == "summarize-url"
-    assert s.verified is False
+    with pytest.raises(ValueError, match="sig|trusted_pubkeys"):
+        _install_content(monkeypatch, tmp_path, _BODY)
 
 
 def test_caller_can_force_signature_when_manual_tofu_is_enabled(tmp_path, monkeypatch):

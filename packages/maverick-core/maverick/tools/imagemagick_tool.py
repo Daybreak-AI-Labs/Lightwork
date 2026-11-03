@@ -12,6 +12,8 @@ ops:
 from __future__ import annotations
 
 import logging
+import math
+import re
 import shutil
 from pathlib import Path
 from typing import Any
@@ -63,13 +65,10 @@ def _run_cmd(sandbox, cmd: list[str], *, timeout: float = 120.0) -> tuple[int, s
 
 
 def _safe_path(sandbox, user_path: str) -> str:
+    if user_path.startswith("-"):
+        raise ValueError("paths may not begin with '-'")
     if sandbox is None:
-        # No workspace to confine to, but still neutralize option-injection:
-        # a path like "-i" / "-write ..." would otherwise be parsed as a flag
-        # by the media binary. Reject leading-dash paths.
-        if user_path.startswith("-"):
-            raise ValueError(f"path {user_path!r} may not begin with '-'")
-        return user_path
+        raise ValueError("image processing requires a workspace")
     workdir = Path(sandbox.workdir).resolve()
     candidate = (workdir / user_path).resolve()
     try:
@@ -77,6 +76,53 @@ def _safe_path(sandbox, user_path: str) -> str:
     except ValueError as e:
         raise ValueError(f"path {user_path!r} escapes the workspace") from e
     return str(candidate)
+
+
+def _safe_convert_args(raw: Any) -> list[str]:
+    if raw is None:
+        return []
+    if not isinstance(raw, list) or len(raw) > 16 or any(not isinstance(item, str) for item in raw):
+        raise ValueError("invalid image options")
+    safe = []
+    i = 0
+    while i < len(raw):
+        flag = raw[i]
+        if flag in {"-strip", "-auto-orient"}:
+            safe.append(flag)
+            i += 1
+            continue
+        if flag not in {"-quality", "-rotate", "-resize"} or i + 1 >= len(raw):
+            raise ValueError("unsupported image option")
+        value = raw[i + 1]
+        if flag == "-quality":
+            valid = len(value) <= 3 and value.isascii() and value.isdigit() and 1 <= int(value) <= 100
+        elif flag == "-rotate":
+            try:
+                valid = bool(len(value) <= 10 and re.fullmatch(r"[+-]?[0-9]+(?:\.[0-9]+)?", value))
+                degrees = float(value) if valid else 0.0
+                valid = valid and math.isfinite(degrees) and -360 <= degrees <= 360
+            except ValueError:
+                valid = False
+        else:
+            match = re.fullmatch(r"([0-9]{1,4})?x([0-9]{1,4})?([!><^])?", value)
+            valid = bool(match and (match.group(1) or match.group(2)) and all(
+                part is None or 1 <= int(part) <= 8192 for part in match.group(1, 2)
+            ))
+            percent = re.fullmatch(r"([0-9]{1,4})%", value)
+            valid = valid or bool(percent and 1 <= int(percent.group(1)) <= 1000)
+        if not valid:
+            raise ValueError("invalid image option value")
+        safe.extend((flag, value))
+        i += 2
+    return safe
+
+
+def _safe_output_path(sandbox, user_path: str) -> str:
+    target = _safe_path(sandbox, user_path)
+    lexical = user_path.replace("\\", "/").split("/")
+    if any(part.rstrip(" .").casefold() == ".git" for part in (*lexical, *Path(target).parts)):
+        raise ValueError("refusing to write under .git/")
+    return target
 
 
 def _op_resize(args: dict, sandbox) -> str:
@@ -89,11 +135,13 @@ def _op_resize(args: dict, sandbox) -> str:
         return "ERROR: resize requires input_path and output_path"
     try:
         src = _safe_path(sandbox, src)
-        dst = _safe_path(sandbox, dst)
+        dst = _safe_output_path(sandbox, dst)
     except ValueError as e:
         return f"ERROR: {e}"
     w = int(args.get("width") or 0)
     h = int(args.get("height") or 0)
+    if not (0 <= w <= 8192 and 0 <= h <= 8192):
+        return "ERROR: image dimensions must be between 0 and 8192"
     # When neither dimension is given the f-string is "x" (truthy), so the
     # old `or "100%"` fallback never fired and ImageMagick got "-resize x".
     geom = f"{w or ''}x{h or ''}"
@@ -116,12 +164,11 @@ def _op_convert(args: dict, sandbox) -> str:
         return "ERROR: convert requires input_path and output_path"
     try:
         src = _safe_path(sandbox, src)
-        dst = _safe_path(sandbox, dst)
+        dst = _safe_output_path(sandbox, dst)
     except ValueError as e:
         return f"ERROR: {e}"
     cmd = [b] if b != "magick" else ["magick", "convert"]
-    from . import safe_media_args
-    extra = safe_media_args(args.get("args"))
+    extra = _safe_convert_args(args.get("args"))
     code, _o, stderr = _run_cmd(sandbox, cmd + [src, *extra, dst])
     if code != 0:
         return f"ERROR: convert ({code}): {stderr.strip()[-300:]}"
@@ -170,10 +217,12 @@ def _op_composite(args: dict, sandbox) -> str:
     try:
         base = _safe_path(sandbox, base)
         overlay = _safe_path(sandbox, overlay)
-        dst = _safe_path(sandbox, dst)
+        dst = _safe_output_path(sandbox, dst)
     except ValueError as e:
         return f"ERROR: {e}"
     geom = (args.get("geometry") or "+0+0").strip()
+    if not re.fullmatch(r"(?:[1-9][0-9]{0,3}x[1-9][0-9]{0,3})?(?:[+-][0-9]{1,5}){2}|[1-9][0-9]{0,3}x[1-9][0-9]{0,3}", geom):
+        return "ERROR: invalid composite geometry"
     cmd = ["magick", "composite"] if magick else [composite_bin]
     code, _o, stderr = _run_cmd(
         sandbox, cmd + ["-geometry", geom, overlay, base, dst],
@@ -207,7 +256,7 @@ def imagemagick_tool(sandbox=None) -> Tool:
         name="imagemagick",
         description=(
             "ImageMagick image ops. ops: resize (width x height), "
-            "convert (raw operator chain), identify (w h fmt size), "
+            "convert (basic bounded options), identify (w h fmt size), "
             "composite (overlay onto base with geometry). Uses "
             "magick (IM 7) or convert/identify (IM 6) on PATH."
         ),

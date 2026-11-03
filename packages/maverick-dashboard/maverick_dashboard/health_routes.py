@@ -94,28 +94,8 @@ def readiness_deep_checks() -> tuple[bool, dict[str, str]]:
 
 
 def health_should_redact() -> bool:
-    """Whether auth-exempt probe responses must omit operational details."""
-    from ._shared import dashboard_token
-
-    if dashboard_token():
-        return True
-    try:
-        from maverick.oidc import oidc_enabled
-
-        if oidc_enabled():
-            return True
-    except Exception:
-        # An unreadable auth posture is not permission to disclose internals.
-        return True
-    try:
-        from maverick.proxy_auth import proxy_auth_enabled
-
-        if proxy_auth_enabled():
-            return True
-    except Exception:
-        # An unreadable auth posture is not permission to disclose internals.
-        return True
-    return False
+    """Public probes never disclose operational details."""
+    return True
 
 
 async def health_response(
@@ -123,14 +103,14 @@ async def health_response(
     world_provider: WorldProvider,
     provider_key_set: ProviderKeyCheck,
     provider_verdict: Callable[[], dict[str, Any]] | None = None,
+    include_details: bool = False,
 ) -> JSONResponse:
     """Build the deep health response without coupling to the app singleton.
 
     ``llm_key`` keeps its load-balancer meaning (a provider is configured at
-    all). ``provider`` adds the workspace verdict every page shows (``ready``
-    / ``needs_test`` / ``not_ready`` and why) so a probe and the UI cannot
-    disagree; it never changes the status code, because a saved key that is
-    merely untested must not take a pod out of rotation.
+    all). When requested by an authorized caller, ``provider`` adds the
+    workspace verdict and reason. It never changes the status code, because a
+    saved key that is merely untested must not take a pod out of rotation.
     """
     from maverick.runner import MAX_CONCURRENT_GOALS, inflight_goals
 
@@ -144,7 +124,7 @@ async def health_response(
     except Exception as exc:
         checks["db"] = (
             f"fail: {type(exc).__name__}"
-            if health_should_redact()
+            if not include_details
             else f"fail: {type(exc).__name__}: {exc}"
         )
         overall_ok = False
@@ -171,23 +151,26 @@ async def health_response(
     status = "ok" if overall_ok else "degraded"
     payload: dict[str, Any] = (
         {"status": status}
-        if health_should_redact()
+        if not include_details
         else {"status": status, "checks": checks}
     )
     return JSONResponse(payload, status_code=200 if overall_ok else 503)
 
 
 async def readiness_response(
-    *, world_provider: WorldProvider, provider_key_set: ProviderKeyCheck
+    *, world_provider: WorldProvider, provider_key_set: ProviderKeyCheck,
+    include_details: bool = False,
+    provider_verdict: Callable[[], dict[str, Any]] | None = None,
 ) -> JSONResponse:
     """Combine health with fail-closed trust and client-binding readiness."""
     health = await health_response(
-        world_provider=world_provider, provider_key_set=provider_key_set
+        world_provider=world_provider, provider_key_set=provider_key_set,
+        include_details=include_details, provider_verdict=provider_verdict,
     )
     health_ok = health.status_code == 200
     deep_ok, deep_checks = await run_in_threadpool(readiness_deep_checks)
     overall_ok = health_ok and deep_ok
-    if health_should_redact():
+    if not include_details:
         payload: dict[str, Any] = {"status": "ok" if overall_ok else "not_ready"}
     else:
         health_body = json.loads(bytes(health.body).decode("utf-8"))

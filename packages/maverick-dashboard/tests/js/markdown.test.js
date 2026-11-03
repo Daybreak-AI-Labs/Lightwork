@@ -50,6 +50,15 @@ test("emphasis, strike and links render; unsafe links and raw HTML become text",
   assert.equal(window.document.querySelectorAll("img, script").length, 0);
 });
 
+test("links cannot use backslashes to escape the current origin", t => {
+  const window = fixture(); t.after(() => window.close());
+  for (const href of ["/\\evil.example/path", "https:\\evil.example", "/path\\evil"]) {
+    assert.equal(window.lwMarkdown.safeHref(href), null);
+  }
+  assert.equal(window.lwMarkdown.safeHref("/goals/3"), "/goals/3");
+  assert.equal(window.lwMarkdown.safeHref("https://example.com/a"), "https://example.com/a");
+});
+
 test("tables, block quotes and rules render", t => {
   const window = fixture(); t.after(() => window.close());
   assert.equal(html(window, "| Channel | Cost |\n|:--|--:|\n| Email | $0 |\n| Ads | $500 |"),

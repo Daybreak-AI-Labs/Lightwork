@@ -14,7 +14,7 @@ def _isolate(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_FLOWS", "1")
-    monkeypatch.setenv("MAVERICK_WEBHOOK_SECRET", "link-secret")  # pragma: allowlist secret
+    monkeypatch.setenv("MAVERICK_FLOW_APPROVAL_SECRET", "link-secret")  # pragma: allowlist secret
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     from maverick import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")

@@ -5,6 +5,7 @@ import importlib.util
 import io
 import json
 import os
+import shlex
 import shutil
 import subprocess
 from pathlib import Path, PurePosixPath
@@ -23,6 +24,26 @@ ROOT = Path(__file__).resolve().parents[3]
 BASH = shutil.which("bash") if os.name != "nt" else "C:/Program Files/Git/bin/bash.exe"
 
 
+@pytest.mark.parametrize("port", [None, "9900"])
+def test_demo_compose_publishes_only_on_loopback(port):
+    docker = shutil.which("docker")
+    if docker is None or subprocess.run([docker, "compose", "version"], capture_output=True).returncode:
+        pytest.skip("Docker Compose is unavailable")
+    env = {**os.environ, "MAVERICK_DASHBOARD_TOKEN": "synthetic-test-token"}
+    env.pop("MAVERICK_DEMO_PORT", None)
+    if port:
+        env["MAVERICK_DEMO_PORT"] = port
+    result = subprocess.run(
+        [docker, "compose", "-f", str(ROOT / "deploy/demo/docker-compose.yml"),
+         "config", "--format", "json"],
+        env=env, capture_output=True, text=True, check=True, timeout=30,
+    )
+    published = json.loads(result.stdout)["services"]["maverick-demo"]["ports"][0]
+    assert published["host_ip"] == "127.0.0.1"
+    assert str(published["published"]) == (port or "8765")
+    assert published["target"] == 8765
+
+
 def load(relative):
     spec = importlib.util.spec_from_file_location("deployment_fixture", ROOT / relative)
     module = importlib.util.module_from_spec(spec)
@@ -30,13 +51,31 @@ def load(relative):
     return module
 
 
+@pytest.mark.skipif(os.name == "nt", reason="VPS renderer uses POSIX descriptor protections")
+def test_vps_renderer_rejects_fifo_and_symlinked_config(tmp_path):
+    renderer = load("deploy/vps/render_service.py")
+    state = tmp_path / ".maverick"
+    state.mkdir()
+    config_file = state / "config.toml"
+    os.mkfifo(config_file)
+    with pytest.raises(ValueError, match="regular file"):
+        renderer._read_user_config(tmp_path)
+    config_file.unlink()
+    outside = tmp_path / "outside.toml"
+    outside.write_text('[sandbox]\nworkdir = "/tmp"\n')
+    config_file.symlink_to(outside)
+    with pytest.raises(OSError):
+        renderer._read_user_config(tmp_path)
+
+
 @pytest.mark.skipif(not BASH or not Path(BASH).is_file(), reason="existing Bash runtime unavailable")
 @pytest.mark.parametrize("mode", ["ready", "missing", "render-failed"])
-def test_vps_service_uses_application_python_and_preserves_unit_on_failure(tmp_path, mode):
+def test_vps_service_uses_system_python_and_preserves_unit_on_failure(tmp_path, mode):
     # Execute the actual install_service function with filesystem/systemctl
     # commands intercepted into a disposable tree; never touch the host unit.
     source = (ROOT / "deploy/vps/install.sh").read_text(encoding="utf-8")
     function = source[source.index("install_service() {"):source.index("\nmain() {")]
+    function = function.replace("/usr/bin/python3 -I", "root_python -I")
     fixture = r'''
 set -euo pipefail
 cd "$1"
@@ -56,6 +95,11 @@ run_as_user() {
   [[ "$2" == /opt/maverick/deploy/vps/render_service.py ]] || return 92
   printf '%s\n' "$1" > interpreter-used
   [[ "$MODE" != render-failed ]] || return 93
+  printf 'untrusted unit that must never be published\n'
+}
+root_python() {
+  [[ "$1" == -I && "$2" == /opt/maverick/deploy/vps/render_service.py ]] || return 94
+  printf 'system interpreter\n' > root-interpreter-used
   printf 'rendered unit\n'
 }
 mktemp() { command mktemp "$PWD/render.XXXXXX"; }
@@ -71,6 +115,7 @@ systemctl() { printf '%s\n' "$*" >> systemctl-calls; }
     assert (tmp_path / "published-unit").read_text() == ("rendered unit\n" if mode == "ready" else "original unit\n")
     assert (tmp_path / "systemctl-calls").exists() == (mode == "ready")
     assert (tmp_path / "interpreter-used").exists() == (mode != "missing")
+    assert (tmp_path / "root-interpreter-used").exists() == (mode == "ready")
 
 
 @pytest.mark.parametrize("override,configured,expected", [
@@ -96,9 +141,10 @@ def test_ssh_uses_explicit_posix_workspace_in_actual_command(monkeypatch, overri
     assert isinstance(backend.workdir, PurePosixPath)
     assert str(backend.workdir) == expected
     assert backend.exec("pwd").exit_code == 0
-    assert backend._quote_workdir() in calls[0][-1]
+    assert backend._quote_workdir() in shlex.split(calls[0][-1])[-1]
 
 
+@pytest.mark.skipif(os.name == "nt", reason="VPS renderer uses POSIX descriptor protections")
 @pytest.mark.parametrize("workspace", ["Documents/Maverick", "custom workspace/with%sign"])
 def test_vps_renderer_provisions_saved_workspace_and_quotes_both_unit_paths(tmp_path, workspace):
     renderer = load("deploy/vps/render_service.py")
@@ -116,6 +162,7 @@ def test_vps_renderer_provisions_saved_workspace_and_quotes_both_unit_paths(tmp_
     assert not list(selected.iterdir())
 
 
+@pytest.mark.skipif(os.name == "nt", reason="VPS renderer uses POSIX descriptor protections")
 def test_vps_workspace_failure_precedes_any_completed_unit(tmp_path, monkeypatch):
     renderer = load("deploy/vps/render_service.py")
     state = tmp_path / ".maverick"
@@ -130,6 +177,7 @@ def test_vps_workspace_failure_precedes_any_completed_unit(tmp_path, monkeypatch
         renderer.render_service("WorkingDirectory=@WORKDIR@", user="fixture", home=tmp_path)
 
 
+@pytest.mark.skipif(os.name == "nt", reason="VPS renderer uses POSIX descriptor protections")
 @pytest.mark.parametrize("remote", ["~/remote-only", "/remote/customer/workspace"])
 def test_vps_ssh_workspace_stays_remote_despite_local_collision(tmp_path, monkeypatch, remote):
     renderer = load("deploy/vps/render_service.py")

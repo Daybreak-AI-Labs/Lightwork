@@ -332,6 +332,8 @@ def test_saml_only_session_reaches_protected_route_and_anonymous_is_denied(
     # authenticated (403 rather than 401) and can still reach the redacted page.
     assert authenticated.get("/api/v1/providers").status_code == 403
     assert authenticated.get("/providers").status_code == 200
+    assert authenticated.post("/api/v1/goals", json={"title": "work"}).status_code == 403
+    assert authenticated.post("/api/v1/approvals/1/approve").status_code == 403
 
 
 # --- ACS --------------------------------------------------------------------

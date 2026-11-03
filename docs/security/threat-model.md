@@ -99,8 +99,9 @@ or unknown caller is refused before any work is done.
   `network`/`fs_write`/`subprocess`/`sensitive_envs` permission is skipped
   (never loaded) unless granted via `[plugins] grant=[...]`; setting
   `enforce_permissions = false` (or `MAVERICK_PLUGINS_ENFORCE=0`) downgrades to
-  load-with-warning. Plugin tool calls can additionally run out-of-process
-  under `[plugins] isolation`.
+  load-with-warning. These checks compare declared permissions; they do not
+  constrain what plugin code can actually do. Import, discovery, and factories
+  run in the host process even when tool calls use `[plugins] isolation`.
 
 ## Threats by category
 
@@ -165,7 +166,7 @@ or unknown caller is refused before any work is done.
 
 | Threat                                                  | Mitigation                                                                            |
 |---------------------------------------------------------|----------------------------------------------------------------------------------------|
-| Plugin escapes its declared capabilities               | Manifest permissions enforced by default (ungranted → plugin skipped); tool ACLs filter at registry time; optional out-of-process isolation. |
+| Plugin escapes its declared capabilities               | Residual risk: grants check declarations, not runtime behavior; trusted plugins and an external OS isolation boundary are required. |
 | Browser tool reaches private/loopback addresses        | `http_fetch` refuses private IPs by default; `MAVERICK_FETCH_ALLOW_PRIVATE=1` opt-in.  |
 | Computer-use tool drives mouse/keyboard outside scope  | Kill switch `MAVERICK_COMPUTER_DISABLE=1`; per-action approval for every input action.   |
 | Shell tool reads sensitive files (gold patches, etc.)  | Opaque-mode blocklists for benchmark contexts; tool ACLs.                              |

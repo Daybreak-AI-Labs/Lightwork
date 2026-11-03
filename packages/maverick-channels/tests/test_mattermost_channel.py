@@ -105,7 +105,7 @@ def stub(monkeypatch, tmp_path):
 def _channel(handler, **extra):
     from maverick_channels.mattermost import MattermostChannel
 
-    options = {"url": BASE, "bot_token": TOKEN, "allowed_user_ids": {"alice"}, **extra}
+    options = {"url": BASE, "bot_token": TOKEN, "allowed_user_ids": {ALICE}, **extra}
     return MattermostChannel(handler=handler, **options)
 
 
@@ -145,6 +145,13 @@ def test_direct_message_from_an_allowed_person_is_answered_in_its_thread(stub):
     asyncio.run(_started(_channel(handler))._poll_once())
     assert seen == [("mattermost", DM, ALICE, "summarise the quarter")]
     assert stub.created == [{"channel_id": DM, "message": "on it", "root_id": "x" * 26}]
+
+
+def test_reassigned_username_does_not_authorize_new_account(stub):
+    channel = _started(_channel(_reply, allowed_user_ids={"alice"}))
+    stub.add("y" * 26, ALICE, DM, "hello")
+    asyncio.run(channel._poll_once())
+    assert stub.created == []
 
 
 def test_channel_posts_need_a_mention_and_the_mention_is_removed(stub):

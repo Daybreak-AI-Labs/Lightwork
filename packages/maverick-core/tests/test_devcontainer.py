@@ -65,7 +65,14 @@ def test_parse_accepts_normal_image(tmp_path, good):
 # --network none) and, with the spec-default remoteUser="root", the agent ran
 # as root against the writable {project_dir}:{workspace} host bind-mount. These
 # pin the corrected defaults: network off, and the container user pinned to the
-# invoking uid:gid unless a non-root remoteUser or an explicit allow_root opt-in.
+# invoking uid:gid unless there is an explicit allow_root opt-in.
+
+
+@pytest.fixture(autouse=True)
+def _nonroot_invoking_identity(monkeypatch):
+    if hasattr(os, "getuid"):
+        monkeypatch.setattr(os, "getuid", lambda: 1234)
+        monkeypatch.setattr(os, "getgid", lambda: 1234)
 
 
 def _devc_args(monkeypatch, tmp_path, *, spec, **kw):
@@ -109,11 +116,27 @@ def test_allow_network_true_omits_network_none(tmp_path, monkeypatch):
     assert "--network" not in args
 
 
-def test_non_root_remoteuser_is_honored(tmp_path, monkeypatch):
-    # An explicit non-root remoteUser from the spec is a safe choice: honor it.
-    spec = DevcontainerSpec(image="python:3.12-slim", remote_user="vscode")
+@pytest.mark.skipif(not hasattr(os, "getuid"), reason="POSIX uid/gid only")
+@pytest.mark.parametrize("remote_user", ["vscode", "0", "000", "0:0", "root:root", "1001"])
+def test_repo_remoteuser_cannot_override_invoking_identity(tmp_path, monkeypatch, remote_user):
+    monkeypatch.delenv("MAVERICK_SANDBOX_ALLOW_ROOT", raising=False)
+    spec = DevcontainerSpec(image="python:3.12-slim", remote_user=remote_user)
     args = _devc_args(monkeypatch, tmp_path, spec=spec)
-    assert args[args.index("--user") + 1] == "vscode"
+    assert args[args.index("--user") + 1] == f"{os.getuid()}:{os.getgid()}"
+
+
+def test_devcontainer_fails_closed_without_nonroot_host_identity(tmp_path, monkeypatch):
+    monkeypatch.delenv("MAVERICK_SANDBOX_ALLOW_ROOT", raising=False)
+    monkeypatch.setattr("maverick.sandbox.devcontainer.container_user_args", lambda _: ["--user", "0:0"])
+    spec = DevcontainerSpec(image="python:3.12-slim")
+    with pytest.raises(RuntimeError, match="non-root invoking user"):
+        _devc_args(monkeypatch, tmp_path, spec=spec)
+    monkeypatch.setattr("maverick.sandbox.devcontainer.container_user_args", lambda _: ["--user", "1000:0"])
+    with pytest.raises(RuntimeError, match="non-root invoking user"):
+        _devc_args(monkeypatch, tmp_path, spec=spec)
+    monkeypatch.setattr("maverick.sandbox.devcontainer.container_user_args", lambda _: [])
+    with pytest.raises(RuntimeError, match="non-root invoking user"):
+        _devc_args(monkeypatch, tmp_path, spec=spec)
 
 
 def test_allow_root_opts_back_into_root(tmp_path, monkeypatch):
@@ -122,6 +145,15 @@ def test_allow_root_opts_back_into_root(tmp_path, monkeypatch):
     spec = DevcontainerSpec(image="python:3.12-slim")  # remoteUser root
     args = _devc_args(monkeypatch, tmp_path, spec=spec, allow_root=True)
     assert "--user" not in args
+
+
+@pytest.mark.parametrize("use_env", [False, True])
+@pytest.mark.parametrize("remote_user", ["0:0", "vscode"])
+def test_explicit_root_opt_in_allows_repo_user(tmp_path, monkeypatch, use_env, remote_user):
+    monkeypatch.setenv("MAVERICK_SANDBOX_ALLOW_ROOT", "1" if use_env else "0")
+    spec = DevcontainerSpec(image="python:3.12-slim", remote_user=remote_user)
+    args = _devc_args(monkeypatch, tmp_path, spec=spec, allow_root=not use_env)
+    assert args[args.index("--user") + 1] == remote_user
 
 
 def test_build_sandbox_devcontainer_defaults_isolated(tmp_path, monkeypatch):

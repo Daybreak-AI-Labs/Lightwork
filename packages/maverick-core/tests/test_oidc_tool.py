@@ -70,10 +70,11 @@ def test_tool_authorize_op():
     assert out.startswith("https://idp/auth?")
 
 
-def test_tool_exchange_via_monkeypatched_fetch(monkeypatch):
+def test_tool_rejects_exchange_without_sending_credentials(monkeypatch):
     import maverick.tools.oidc_tool as mod
-    monkeypatch.setattr(mod, "_default_fetch",
-                        lambda u, d: {"access_token": "t", "id_token": ""})
+    calls = []
+    monkeypatch.setattr(mod, "_default_fetch", lambda u, d: calls.append((u, d)))
     out = oidc_tool().fn({"op": "exchange", "token_url": "https://idp/token",
-                          "client_id": "c", "code": "x", "redirect_uri": "https://app/cb"})
-    assert "token exchange ok" in out
+                          "client_id": "c", "code": "x", "client_secret": "secret",
+                          "redirect_uri": "https://app/cb"})
+    assert out.startswith("ERROR:") and calls == [] and "secret" not in out

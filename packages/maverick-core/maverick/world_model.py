@@ -2201,11 +2201,16 @@ class WorldModel:
         )
         return {r["status"]: int(r["n"]) for r in rows}
 
-    def goal_status_counts(self) -> dict[str, int]:
+    def goal_status_counts(self, *, owner: str | None = None) -> dict[str, int]:
         """All goals keyed by status -- the backend-agnostic source for the
         ``/metrics`` ``maverick_goals_total`` gauge (the dashboard inlined this
         SQL against SQLite, so a Postgres deployment counted a stale local file)."""
-        rows = self._read_all("SELECT status, COUNT(*) AS n FROM goals GROUP BY status")
+        sql = "SELECT status, COUNT(*) AS n FROM goals"
+        params: tuple = ()
+        if owner is not None:
+            sql += " WHERE owner = ?"
+            params = (owner,)
+        rows = self._read_all(sql + " GROUP BY status", params)
         return {r["status"]: int(r["n"]) for r in rows}
 
     # -- backend-portable raw reads ------------------------------------------
@@ -2616,6 +2621,7 @@ class WorldModel:
         offset: int = 0,
         order: str = "asc",
         before_id: int | None = None,
+        strict_tenant: bool = False,
     ) -> list[Goal]:
         """List goals, optionally filtered + paginated.
 
@@ -2628,7 +2634,8 @@ class WorldModel:
         ``before_id`` excludes that immutable ID and all newer IDs without
         reading an anchor row. Use descending order for continuation; in
         ascending order it remains only an upper ID bound. Existing offset
-        callers retain their historical behavior.
+        callers retain their historical behavior. ``strict_tenant`` is accepted
+        for backend parity; SQLite databases are already tenant-scoped.
         """
         if before_id is not None and not 0 < int(before_id) <= 2**63 - 1:
             raise ValueError("before_id must be a positive signed 64-bit goal ID")
@@ -3713,7 +3720,7 @@ class WorldModel:
         except Exception:  # pragma: no cover - webhooks never block an approval
             pass
 
-    def get_approval(self, approval_id: int) -> Approval | None:
+    def get_approval(self, approval_id: int, *, strict_tenant: bool = False) -> Approval | None:
         row = self._read_one(
             "SELECT * FROM approvals WHERE id = ?", (approval_id,)
         )
@@ -3738,6 +3745,23 @@ class WorldModel:
             (float(since), float(until)),
         )
         return _approvals_from_rows(rows)
+
+    def pending_unattached_approval_ids(self, owner: str, *, limit: int) -> list[int]:
+        rows = self._read_all(
+            "SELECT id FROM approvals WHERE status='pending' AND goal_id IS NULL "
+            "AND requested_by=? ORDER BY id DESC LIMIT ?", (owner, max(1, int(limit))),
+        )
+        return [int(row[0]) for row in rows]
+
+    def pending_goal_approval_ids(self, goal_ids: list[int], *, limit: int) -> list[int]:
+        if not goal_ids:
+            return []
+        marks = ",".join("?" for _ in goal_ids)
+        rows = self._read_all(
+            f"SELECT id FROM approvals WHERE status='pending' AND goal_id IN ({marks}) "
+            "ORDER BY id DESC LIMIT ?", (*goal_ids, max(1, int(limit))),
+        )
+        return [int(row[0]) for row in rows]
 
     def pending_approvals(self) -> list[Approval]:
         rows = self._read_all(

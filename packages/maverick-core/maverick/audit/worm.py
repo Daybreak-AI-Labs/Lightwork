@@ -155,27 +155,18 @@ def _segment_text_from_bytes(raw: bytes) -> str:
 
 
 def _trusted_public_key(key_id: str, cache: dict[str, bytes]) -> bytes:
-    """Load the public key named by a signed row from private key custody."""
+    """Load the public key named by a signed row from the shared trust roots."""
     cached = cache.get(key_id)
     if cached is not None:
         return cached
     if not _KEY_ID_RE.fullmatch(key_id):
         raise WormUnavailable("signed evidence contains an invalid key id")
-    pub_path, priv_path = _signing._key_paths_for_id(key_id)
-    marker = _signing._injected_marker_for_id(key_id)
-    if pub_path is None or priv_path is None:
-        raise WormUnavailable("signed evidence contains an invalid key id")
     try:
-        if priv_path.exists():
-            ensure_private_file(priv_path, 0o600)
-        elif marker is not None and marker.exists():
-            ensure_private_file(marker, 0o600)
-        else:
-            raise WormUnavailable("signed evidence public key has no trusted custody marker")
-        raw = _read_custodied_file(pub_path, mode=0o644, max_bytes=32)
-    except WormUnavailable:
-        raise
-    except (OSError, PermissionError) as exc:
+        public = _signing.trusted_audit_public_keys().get(key_id)
+        if public is None:
+            raise WormUnavailable("signed evidence public key is not trusted")
+        raw = bytes.fromhex(public)
+    except (OSError, PermissionError, ValueError) as exc:
         raise WormUnavailable("signed evidence public key is unavailable") from exc
     if len(raw) != 32 or hashlib.sha256(raw).hexdigest()[:16] != key_id:
         raise WormUnavailable("signed evidence public key does not match its key id")

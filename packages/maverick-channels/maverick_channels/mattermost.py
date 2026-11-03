@@ -129,8 +129,7 @@ class MattermostChannel(Channel):
 
     # ------------------------------------------------------------ intake
     def _allowed(self, user_id: str, username: str) -> bool:
-        return is_allowed(user_id, self.allowed_user_ids) or (
-            bool(username) and is_allowed(username, self.allowed_user_ids))
+        return is_allowed(user_id, self.allowed_user_ids)
 
     def _text_for(self, post: dict, channel_type: str) -> str | None:
         """The request text, or None when the post is not addressed to the bot."""

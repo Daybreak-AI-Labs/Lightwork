@@ -32,6 +32,35 @@ def test_page_starts_with_no_limits_and_plain_controls(client):
         assert word not in body
 
 
+def test_workspace_admin_only_sees_workspace_roster(client, monkeypatch):
+    from maverick import paths
+    from maverick.quotas import UsageLedger
+    from maverick_dashboard import auth, rbac
+
+    monkeypatch.setattr(auth, "has_global_permission", lambda request, permission: False)
+    monkeypatch.setattr(paths, "current_tenant_id_strict", lambda: "workspace-a")
+    monkeypatch.setattr(rbac, "list_users", lambda: {"user:global-secret": "admin"})
+    monkeypatch.setattr(rbac, "list_tenant_roles", lambda tenant: {"user:workspace-member": "viewer"})
+    monkeypatch.setattr(UsageLedger, "_load", lambda self: {})
+    page = client.get("/spending-limits")
+    assert page.status_code == 200
+    assert "user:workspace-member" in page.text
+    assert "user:global-secret" not in page.text
+
+
+def test_workspace_spending_roster_failure_does_not_fall_back_to_global(client, monkeypatch):
+    from maverick import paths
+    from maverick_dashboard import auth, rbac
+
+    monkeypatch.setattr(auth, "has_global_permission", lambda request, permission: False)
+    monkeypatch.setattr(paths, "current_tenant_id_strict", lambda: "workspace-a")
+    def unavailable(tenant):
+        raise OSError("roster unavailable")
+    monkeypatch.setattr(rbac, "list_tenant_roles", unavailable)
+    monkeypatch.setattr(rbac, "list_users", lambda: pytest.fail("global roster must not be read"))
+    assert client.get("/spending-limits").status_code == 503
+
+
 def test_admin_sets_and_clears_every_kind_of_limit(client):
     from maverick import spending_limits
     from maverick.quotas import UsageLedger

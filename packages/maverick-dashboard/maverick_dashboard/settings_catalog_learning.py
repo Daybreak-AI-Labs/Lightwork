@@ -417,24 +417,22 @@ def _adopting(S) -> tuple:
           weaker="higher",
           warning="A new answer checker could replace the current one on weaker evidence."),
         S("self_improvement", "require_signed_approval", "Require signed approval of big changes",
-          "Changes to Lightwork's own code or model weights need a person's cryptographic "
-          "signature, even before approver keys are added.", "toggle", group, False,
+          "Human-gated changes require a person's cryptographic signature. Configure trusted "
+          "startup keys before promotion; this cannot be switched off here.", "toggle", group, True,
           "maverick.approval_signing", subgroup=_ADOPT,
           env=("MAVERICK_REQUIRE_SIGNED_APPROVAL",), weaker=False,
-          warning="Code and model changes could be approved without a signature."),
+          warning="Human-gated changes always require a valid signature."),
         S("self_improvement", "approver_keys", "People who may sign big changes",
-          "Only a signature from one of these keys approves a change to Lightwork's own code "
-          "or model weights. Add each approver's public key file.", "keys", group, [],
+          "Legacy stored keys no longer grant approval authority. Set MAVERICK_APPROVER_KEYS "
+          "in the trusted server environment to configure approver public keys.", "keys", group, [],
           "maverick.approval_signing", subgroup=_ADOPT, weaker="grow",
-          warning="Whoever holds the new key will be able to approve code and model "
-                  "changes."),
+          warning="Keys saved here do not grant approval authority."),
         S("self_improvement", "approver_keys_dir", "Folder of approver key files",
-          "A folder on the server whose key files are also trusted to approve big changes.",
+          "Legacy key folders no longer establish approval trust. Configure MAVERICK_APPROVER_KEYS in the server environment.",
           "text", group, "", "maverick.approval_signing", subgroup=_ADOPT,
           env=("MAVERICK_APPROVER_KEYS_DIR",), max_length=400, pattern=_PATH,
           weaker="change",
-          warning="The key files in the new folder will be trusted to approve code and model "
-                  "changes."),
+          warning="Files in this folder do not grant approval authority."),
     )
 
 

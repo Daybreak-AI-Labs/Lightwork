@@ -107,7 +107,7 @@ def existing_local_account(email: str) -> bool:
     """
     from maverick.suite_grants import get_grant, is_admin_principal
 
-    from . import auth, local_passphrases, passphrase_resets, rbac, scim_groups
+    from . import local_passphrases, passphrase_resets, rbac, scim_groups
 
     email = (email or "").strip().lower()
     principal = "user:" + email
@@ -119,8 +119,9 @@ def existing_local_account(email: str) -> bool:
                     or rbac.has_tenant_membership(principal)
                     or get_grant(principal) is not None
                     or scim_groups.active_for_principal(principal) is not None
-                    # Not the default: a SCIM group role, or an unreadable source (None).
-                    or auth.global_role_for_principal(principal) != rbac.default_role())
+                    # A group-derived role counts even without a local account.
+                    # The resolver fails closed on unreadable policy.
+                    or scim_groups.role_for_principal(principal) is not None)
     except Exception:
         return True
 

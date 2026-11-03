@@ -181,10 +181,11 @@ def route_allowed(config: ProxyConfig, method: str, path: str) -> bool:
     # segments can climb out of the configured upstream base path.
     if not path.startswith("/"):
         path = "/" + path  # the in-process handler receives relative paths
-    lowered = path.lower()
-    if (path.startswith("//") or "\\" in path
+    route_path = path.split("?", 1)[0]
+    lowered = route_path.lower()
+    if (route_path.startswith("//") or "\\" in route_path
             or any(token in lowered for token in ("%2e", "%2f", "%5c"))
-            or any(seg in (".", "..") for seg in path.split("?", 1)[0].split("/"))):
+            or any(seg in (".", "..") for seg in route_path.split("/"))):
         return False
     clean_path = urlparse(path).path or "/"
     if not clean_path.startswith("/"):

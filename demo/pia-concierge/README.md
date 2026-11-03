@@ -1,5 +1,9 @@
 # PIA Concierge — governed privacy-assessment demo
 
+In standalone mode, a deployment owner may configure an Ed25519 license token
+and the public key they choose to trust. This is an operator-managed policy,
+not a vendor-enforced licensing boundary for the open-source deployment.
+
 ## Standalone and platform modes
 
 PIA Concierge runs in two modes from one codebase:
@@ -10,7 +14,9 @@ PIA Concierge runs in two modes from one codebase:
   imports nothing from `maverick`), files into OneTrust, and a human reviews
   and approves there. There is **no audit trail, no governance, no learning,
   no dashboard, and no control-catalog citations** in this mode. The agent
-  still works end to end. `/about` shows the live capability matrix.
+  works with a configured OneTrust tenant. To run the local mock instead, set
+  `PIA_ENABLE_ONETRUST_MOCK=1` before launching; the script generates a fresh
+  mock token if none is supplied. `/about` shows the live capability matrix.
 * **Platform mode** — the same agent running on the Lightwork platform, which
   adds the governed engine, the Ed25519 signed audit chain, the world-model
   approval queue, the privacy workspace + program insights, the full
@@ -95,7 +101,12 @@ demo store; the world model and signed audit chain stay clean.
 
 ## Run it
 
+Set `PIA_OPERATOR_TOKEN` to a strong secret before starting the demo. The
+reviewer signs in using `PIA_OPERATOR_USER` (default `reviewer`) and that
+token; use HTTPS for any non-local deployment.
+
 ```bash
+export PIA_OPERATOR_TOKEN="<your-reviewer-token>"
 bash demo/pia-concierge/run_demo.sh
 ```
 

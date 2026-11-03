@@ -984,3 +984,33 @@ def test_the_page_title_is_words_and_its_script_loads_once():
     title = re.search(r"<title>(.*?)</title>", page.text, re.DOTALL).group(1)
     assert title.strip() == "Access keys · Lightwork"
     assert page.text.count("lightwork-access-key-requests.js") == 1
+
+
+def test_workspace_only_owner_key_tracks_saved_selection(monkeypatch):
+    from maverick.paths import tenant_scope
+    from maverick.tenant import registry
+    from maverick_dashboard import api_keys, rbac, workspace_tenants
+
+    registry.create_tenant("acme")
+    rbac.set_tenant_role("acme", "user:alice", "operator")
+    workspace_tenants.set_selection("user:alice", "acme")
+    with tenant_scope(tenant="acme"):
+        _, secret = api_keys.create_key(label="integration", scopes=["tasks:read"],
+                                        owner="user:alice", created_by="user:alice")
+    verified, reason = api_keys.verify(secret)
+    assert verified is not None, reason
+    assert "view" in verified.permissions
+    workspace_tenants.set_selection("user:alice", None)
+    assert api_keys.verify(secret)[0] is None
+
+
+def test_unreadable_group_policy_cannot_grant_root_view(monkeypatch):
+    from maverick.tenant import registry
+    from maverick_dashboard import auth, rbac, scim_groups
+
+    registry.create_tenant("acme")
+    rbac.set_tenant_role("acme", "user:alice", "viewer")
+    def broken(_name):
+        raise scim_groups.GroupAccessPolicyError("unavailable")
+    monkeypatch.setattr(scim_groups, "_ci_mapping", broken)
+    assert auth.global_role_for_principal("user:alice") is None

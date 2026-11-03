@@ -19,7 +19,7 @@ from maverick import factory_learning as factory
 from maverick.authority_effects import authority_effect_fence
 from maverick.file_lock import cross_process_lock
 from maverick.governed_operations import digest
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from . import auth
 from . import learning_jobs as jobs
@@ -47,6 +47,11 @@ class CompareIn(BaseModel):
     dollars: float = Field(ge=0, le=5)
     seconds: int = Field(ge=15, le=300)
     authorize_input_use: bool
+
+
+class AdoptIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    operation: str = Field(pattern=r"^[a-f0-9]{32}$")
 
 
 def authority(request, context=None, *, write=False, restoring=False):
@@ -233,14 +238,24 @@ def review_rows(prepared):
 
 
 def review(request, action, values):
+    authority(request)
+    try:
+        if action == "compare":
+            CompareIn.model_validate(values)
+        elif action == "adopt":
+            operation = AdoptIn.model_validate(values).operation
+        elif action == "restore":
+            RestoreIn.model_validate(values)
+        else:
+            raise HTTPException(422, "Choose a supported guidance decision.")
+    except ValidationError as exc:
+        raise HTTPException(422, "Check the guidance decision details and try again.") from exc
     if action == "compare":
         prepared = prepare_compare(request, values)
     elif action == "adopt":
-        prepared = prepare_adopt(request, values["operation"])
-    elif action == "restore":
-        prepared = prepare_restore(request, values)
+        prepared = prepare_adopt(request, operation)
     else:
-        raise HTTPException(422, "Choose a supported guidance decision.")
+        prepared = prepare_restore(request, values)
     expires = time.time() + TTL
     from . import learning_ops_api as native
     operation = secrets.token_hex(16)

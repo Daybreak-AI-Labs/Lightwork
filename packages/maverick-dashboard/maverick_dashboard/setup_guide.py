@@ -177,6 +177,21 @@ def _check(raw: bytes) -> dict[str, Any]:
     except ConfigInstallError as exc:
         return {"valid": False, "summary": "This isn't a valid settings file, so it can't be installed.",
                 "problems": 0, "technical": [{"level": "error", "text": str(exc)[:300]}]}
+    from maverick.config import _ENV_PATTERN
+
+    def has_environment_reference(value):
+        if isinstance(value, str):
+            return bool(_ENV_PATTERN.search(value))
+        if isinstance(value, dict):
+            return any(has_environment_reference(item) for item in value.values())
+        if isinstance(value, list):
+            return any(has_environment_reference(item) for item in value)
+        return False
+
+    if has_environment_reference(cfg):
+        return {"valid": False,
+                "summary": "Environment references must be installed by the server operator, not through the dashboard.",
+                "problems": 1, "technical": [{"level": "error", "text": "Environment references require operator-owned configuration."}]}
     findings = config_findings(cfg)
     blocking = blocking_config_findings(findings)
     if blocking:
@@ -270,9 +285,10 @@ def _prepare_file(request: Request, raw: bytes) -> dict:
         if not checked["valid"]:
             return checked
         layers = page._sources()
-        from maverick.config import _interp
-        preview_layers = {key: _interp(value) for key, value in layers.items()}
-        proposed = {**preview_layers, "base": _interp(parse_config_bytes(raw))}
+        # _sources already expands only the operator-owned layers. Re-expanding
+        # the dashboard or workspace layer would reveal process secrets.
+        preview_layers = layers
+        proposed = {**preview_layers, "base": parse_config_bytes(raw)}
         impact = []
         for setting in catalog.SETTINGS:
             old, new = page._resolve(setting, preview_layers), page._resolve(setting, proposed)
@@ -374,6 +390,8 @@ def _install_reviewed(request: Request, raw: bytes, token: str) -> dict:
     from .system_checks_api import _record
 
     with settings_store._locked(strict=True):
+        if not _check(raw)["valid"]:
+            raise HTTPException(422, "The settings file is no longer permitted. Check it again.")
         path, receipt = _read_receipt(request, token)
         if receipt["digest"] != hashlib.sha256(raw).hexdigest():
             raise HTTPException(409, "The file changed after review. Check it again.")

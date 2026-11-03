@@ -26,12 +26,16 @@ Both processes share MAVERICK_HOME (world.db + audit chain + keys).
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import datetime as _dt
+import hmac
 import os
 import re
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 # The agent talks to the platform (or its standalone stand-ins) through the
 # backend seam only -- so the same app runs in platform mode AND in
@@ -49,7 +53,7 @@ from backend import (
     save_session,
 )
 from capabilities import CAPS, STANDALONE, caps_summary
-from fastapi import FastAPI, Form, Request, UploadFile
+from fastapi import Depends, FastAPI, Form, Request, UploadFile
 from fastapi.responses import (
     HTMLResponse,
     JSONResponse,
@@ -2218,7 +2222,8 @@ async def _send_back_case(case: Case, decided_by: str, *, via: str) -> None:
 import ot_mock as _ot_mock  # noqa: E402
 from ot_mock import router as _ot_router  # noqa: E402
 
-app.include_router(_ot_router)
+if os.environ.get("PIA_ENABLE_ONETRUST_MOCK", "").strip().lower() in {"1", "true", "yes", "on"}:
+    app.include_router(_ot_router, dependencies=[Depends(_ot_mock.require_bearer)])
 
 
 def _vendor_documents(subject: str) -> list[dict]:
@@ -2252,9 +2257,11 @@ _ATT_FILENAME_RE = re.compile(r"[^A-Za-z0-9._ -]")
 
 
 @app.get("/onetrust/attachment/{att_id}")
-async def onetrust_attachment(att_id: str) -> Response:
+async def onetrust_attachment(request: Request, att_id: str) -> Response:
     """Open a document from the tenant's Documents tab: text renders in the
     browser, a .docx downloads for Word (that's where tracked changes live)."""
+    if denial := _reviewer_denial(request):
+        return denial
     att = _ot_mock.ATTACHMENTS.get(att_id)
     if att is None:
         return PlainTextResponse("unknown attachment", status_code=404)
@@ -2278,6 +2285,8 @@ async def onetrust_attachment(att_id: str) -> Response:
 
 @app.get("/onetrust", response_class=HTMLResponse)
 async def onetrust_viewer(request: Request) -> HTMLResponse:
+    if denial := _reviewer_denial(request):
+        return denial
     items = sorted(STORE.onetrust.values(), key=lambda a: a.filed_at, reverse=True)
     # Serializable payload for the record-detail / review pop-out.
     def _speed(a: OneTrustAssessment) -> dict:
@@ -2315,16 +2324,79 @@ async def onetrust_viewer(request: Request) -> HTMLResponse:
                  records_json=records_json, n_review=n_review)
 
 
+def _reviewer_identity(request: Request) -> tuple[str, str, int]:
+    """Authenticate the reviewer and reject cross-origin browser requests."""
+    expected_user = os.environ.get("PIA_OPERATOR_USER", "reviewer")
+    expected_token = os.environ.get("PIA_OPERATOR_TOKEN", "")
+    if not expected_token:
+        return "", "PIA_OPERATOR_TOKEN must be configured before review.", 503
+    if request.method not in ("GET", "HEAD"):
+        origin = request.headers.get("origin", "")
+        try:
+            parsed = urlsplit(origin)
+            # A TLS proxy may connect over HTTP using its private host name.
+            # The configured public URL is authoritative; forwarded headers
+            # are not trusted as an origin source.
+            public_url = os.environ.get("PIA_BASE_URL", "").strip() or BASE_URL
+            expected = urlsplit(public_url)
+            scheme = parsed.scheme.lower()
+            expected_scheme = expected.scheme.lower()
+            if (scheme not in ("http", "https") or expected_scheme not in ("http", "https")
+                    or not parsed.hostname or not expected.hostname
+                    or parsed.username is not None or parsed.password is not None
+                    or expected.username is not None or expected.password is not None
+                    or parsed.path or parsed.query or parsed.fragment
+                    or scheme != expected_scheme or parsed.hostname.lower() != expected.hostname.lower()
+                    or (parsed.port if parsed.port is not None else (443 if scheme == "https" else 80))
+                    != (expected.port if expected.port is not None else (443 if expected_scheme == "https" else 80))
+                    or request.headers.get("sec-fetch-site", "").lower() == "cross-site"):
+                return "", "A same-origin review request is required.", 403
+        except ValueError:
+            return "", "A same-origin review request is required.", 403
+    scheme, _, encoded = request.headers.get("authorization", "").partition(" ")
+    try:
+        raw = base64.b64decode(encoded, validate=True).decode("utf-8") if scheme.lower() == "basic" else ""
+    except (binascii.Error, UnicodeDecodeError):
+        raw = ""
+    username, separator, token = raw.partition(":")
+    user_ok = hmac.compare_digest(username.encode(), expected_user.encode())
+    token_ok = hmac.compare_digest(token.encode(), expected_token.encode())
+    if not (separator and user_ok and token_ok):
+        return "", "Reviewer authentication required.", 401
+    return expected_user, "", 200
+
+
+def _reviewer_denial(request: Request) -> JSONResponse | None:
+    _reviewer, error, status_code = _reviewer_identity(request)
+    if not error:
+        return None
+    headers = {"WWW-Authenticate": 'Basic realm="PIA reviewer"'} if status_code == 401 else None
+    return JSONResponse({"ok": False, "error": error}, status_code=status_code, headers=headers)
+
+
+@app.get("/onetrust/reviewer-session")
+async def reviewer_session(request: Request):
+    """Prompt for reviewer credentials before returning to the review screen."""
+    _reviewer, error, status_code = _reviewer_identity(request)
+    if error:
+        headers = {"WWW-Authenticate": 'Basic realm="PIA reviewer"'} if status_code == 401 else None
+        return JSONResponse({"ok": False, "error": error}, status_code=status_code, headers=headers)
+    return RedirectResponse("/onetrust", status_code=303)
+
+
 @app.post("/onetrust/decide")
 async def onetrust_decide(request: Request) -> JSONResponse:
     """The reviewer's decision, made INSIDE OneTrust. It drives the same
     governed machinery as the Lightwork queue: the world approval row is
     decided, the real assessment record is decided, and the signed audit
     chain records who clicked."""
+    reviewer, error, status_code = _reviewer_identity(request)
+    if error:
+        headers = {"WWW-Authenticate": 'Basic realm="PIA reviewer"'} if status_code == 401 else None
+        return JSONResponse({"ok": False, "error": error}, status_code=status_code, headers=headers)
     body = await request.json()
     ot_id = str(body.get("assessment_id", ""))
     decision = str(body.get("decision", ""))
-    reviewer = str(body.get("reviewer", "")).strip()[:80] or "OneTrust reviewer"
     ot = STORE.onetrust.get(ot_id)
     if not ot:
         return JSONResponse({"ok": False, "error": "unknown assessment"},
@@ -2337,11 +2409,8 @@ async def onetrust_decide(request: Request) -> JSONResponse:
                              "or send_back"}, status_code=422)
     case = STORE.cases.get(ot.case_id)
     if case is None:
-        # Record predates a demo restart: flip it locally, honestly labeled.
-        ot.status = "Completed" if decision == "approve" else "Sent back"
-        ot.decided_by = reviewer
-        ot.decided_at = time.time()
-        return JSONResponse({"ok": True, "status": ot.status})
+        return JSONResponse({"ok": False, "error": "The original review case is unavailable."},
+                            status_code=409)
     if decision == "approve" and await asyncio.to_thread(_open_followups, case):
         return JSONResponse(
             {"ok": False, "error": "follow-up questions are still open with "
@@ -2349,10 +2418,24 @@ async def onetrust_decide(request: Request) -> JSONResponse:
             status_code=409)
     status = "approved" if decision == "approve" else "denied"
     w = _world()
+    if not STANDALONE and (w is None or not case.approval_id):
+        return JSONResponse({"ok": False, "error": "The governed approval is unavailable."},
+                            status_code=503)
     if w is not None and case.approval_id:
-        await asyncio.to_thread(
-            w.decide_approval, int(case.approval_id), status,
-            decided_by=reviewer)
+        accepted = await asyncio.to_thread(
+            w.decide_approval, int(case.approval_id), status, decided_by=reviewer)
+        if not accepted:
+            return JSONResponse({"ok": False, "error": "The review decision was not accepted."},
+                                status_code=409)
+        approval = await asyncio.to_thread(w.get_approval, int(case.approval_id))
+        if approval is None:
+            return JSONResponse({"ok": False, "error": "The approval could not be read back."},
+                                status_code=503)
+        if approval.status == "pending":
+            return JSONResponse({"ok": True, "status": "Under Review", "pending": True})
+        if approval.status != status:
+            return JSONResponse({"ok": False, "error": "The approval status changed."},
+                                status_code=409)
     if decision == "approve":
         await _complete_case(case, reviewer, via="onetrust")
     else:
@@ -2455,10 +2538,33 @@ async def _read_upload_bounded(file: UploadFile) -> tuple[bytes | None, str]:
 
 
 @app.post("/onetrust/record/{ot_id}/add-document")
-async def onetrust_add_document(ot_id: str, file: UploadFile) -> JSONResponse:
+async def onetrust_add_document(request: Request, ot_id: str) -> JSONResponse:
     """"We've already done the assessment — we're just adding stuff": append
     a document to an existing OneTrust record, analyze it, and flag whether
     the addition warrants a re-review."""
+    if denial := _reviewer_denial(request):
+        return denial
+    limit = backend.MAX_FILE_BYTES + 256 * 1024
+    try:
+        declared = request.headers.get("content-length")
+        if declared is not None and (int(declared) < 0 or int(declared) > limit):
+            return JSONResponse({"ok": False, "error": "file too large"}, status_code=413)
+    except ValueError:
+        return JSONResponse({"ok": False, "error": "invalid content length"}, status_code=400)
+    body = bytearray()
+    async for chunk in request.stream():
+        if len(body) + len(chunk) > limit:
+            return JSONResponse({"ok": False, "error": "file too large"}, status_code=413)
+        body.extend(chunk)
+    request._body = bytes(body)
+    form = await request.form()
+    file = form.get("file")
+    if file is None or not hasattr(file, "read"):
+        return JSONResponse({"ok": False, "error": "file is required"}, status_code=400)
+    return await _onetrust_add_document(ot_id, file)
+
+
+async def _onetrust_add_document(ot_id: str, file: UploadFile) -> JSONResponse:
     ot = STORE.onetrust.get(ot_id)
     if not ot:
         return JSONResponse({"ok": False, "error": "unknown assessment"},

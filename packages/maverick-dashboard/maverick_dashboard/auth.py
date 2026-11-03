@@ -39,7 +39,7 @@ from . import scim_groups  # noqa: F401
 from ._request_memo import fresh_configuration, memoized
 
 # Probe/discovery endpoints that must answer without a bearer even when OIDC is
-# on (load balancers and k8s liveness/readiness probes, plus the OpenAPI docs,
+# on (load balancers and k8s liveness/readiness probes
 # can't present an ID token). Mirrors the dashboard's existing bearer-auth
 # exemptions in ``app._AUTH_EXEMPT`` -- the HMAC-signed webhooks are NOT listed
 # here because they carry their own credential and are gated separately.
@@ -48,10 +48,6 @@ _OIDC_EXEMPT_PATHS = frozenset(
         "/healthz",
         "/livez",
         "/readyz",
-        "/openapi.json",
-        "/docs",
-        "/redoc",
-        "/docs/oauth2-redirect",
         "/.well-known/agent-card.json",
         "/.well-known/agent.json",
         # Built-in browser-login endpoints must answer without an existing
@@ -110,13 +106,6 @@ PUBLIC_STATIC_PATHS = frozenset(
         # unstyled (system serif font, full-size logo, sideways scrolling).
         "/static/lightwork.css",
         "/static/daybreak-logo.jpg",
-        # Fixed public API-reference code and its retained upstream notices.
-        "/static/swagger-ui-5.33.1-bundle.js",
-        "/static/swagger-ui-5.33.1.css",
-        "/static/swagger-ui-5.33.1-LICENSE.txt",
-        "/static/swagger-ui-5.33.1-NOTICE.txt",
-        "/static/swagger-ui-bundle.js.LICENSE.txt",
-
         "/static/daybreak-mark.png",
         # The self-hosted fonts lightwork.css references.
         "/static/fonts/manrope-var.woff2",
@@ -606,10 +595,19 @@ def global_role_for_principal(principal: str | None) -> str | None:
         stored = rbac.get_stored_role(principal)
         if stored:
             return stored
-        from . import scim_groups
-        group_role = scim_groups.role_for_principal(principal)
+        from . import scim_groups, strict_reads
+
+        # An unreadable group policy must not turn its fallback viewer into
+        # installation-wide authority for a workspace-only account.
+        with strict_reads.strict():
+            group_role = scim_groups.role_for_principal(principal)
         if group_role:
             return group_role
+        # Once workspace membership is in use, an unassigned account is not
+        # implicitly entitled to the separate installation-wide namespace. The
+        # durable roster remains after revocation, preventing privilege return.
+        if rbac.tenant_role_scope_initialized():
+            return None
         return rbac.default_role()
     except Exception:
         # A damaged role roster, group-membership source, or config default is
@@ -629,7 +627,7 @@ def role_for_principal(principal: str | None) -> str | None:
     disable itself (single-user mode). A config-pinned bootstrap admin
     (:func:`is_dashboard_admin`) is always ``"admin"`` and cannot be demoted via
     the store, so you can't lock yourself out. Otherwise the stored role, or the
-    configured default (``operator``) for an authenticated user with no explicit
+    configured default (``viewer``) for an authenticated user with no explicit
     assignment.
     """
     if principal is None:
@@ -648,6 +646,15 @@ def role_for_principal(principal: str | None) -> str | None:
             tenant_role = rbac.get_tenant_role(tid, principal)
             if tenant_role:
                 return tenant_role
+            from maverick.paths import tenant_by_user_enabled
+
+            if tenant_by_user_enabled() and tid == f"api:{principal}":
+                # Per-user isolation is not a shared workspace membership.
+                # Keep its configured default without granting root access.
+                from . import strict_reads
+
+                with strict_reads.strict():
+                    return global_role_for_principal(principal) or rbac.default_role()
     except Exception:
         # Never replace an unreadable tenant-local demotion with the broader
         # global/default role.
@@ -770,6 +777,27 @@ def require_permission(request: Request, permission: str, *, api_scope: str | No
                else has_permission(request, permission))
     if not allowed:
         raise _permission_denied(request, permission, api_scope=api_scope)
+
+
+def require_workspace_picker_access(request: Request, *, write: bool = False) -> None:
+    """Allow a signed-in principal to select only its own workspace.
+
+    This narrow navigation capability does not grant access to unbound data.
+    API keys retain their own view/operate scope checks.
+    """
+    from .execution_identity import refresh_explicit_api_key
+
+    refresh_explicit_api_key(request)
+    principal = _authorization_principal(request)
+    if principal is None:
+        if write:
+            require_personal_write(request)
+        else:
+            require_permission(request, "view")
+        return
+    permission = "operate" if write and api_key_permissions(request) is not None else "view"
+    if not _api_key_allows(request, permission):
+        raise _permission_denied(request, permission)
 
 
 def require_personal_write(request: Request) -> None:
@@ -1246,8 +1274,13 @@ def _authenticate_api_key(connection, token: str) -> VerifiedPrincipal:
     client = connection.client.host if getattr(connection, "client", None) else ""
     verified, reason = api_keys.verify(token, client_ip=client or "")
     if verified is None:
-        raise HTTPException(status_code=401, detail=reason,
-                            headers={"WWW-Authenticate": "Bearer"})
+        # A recognized key whose workspace was revoked, paused or differs from
+        # the deployment binding is authenticated but lacks current authority.
+        workspace_denied = (reason.startswith("This API key's workspace")
+                            or reason.startswith("This API key is bound")
+                            or reason.startswith("Workspace-bound API keys"))
+        raise HTTPException(status_code=403 if workspace_denied else 401, detail=reason,
+                            headers=None if workspace_denied else {"WWW-Authenticate": "Bearer"})
     key = verified.key
     sub = key.owner[len("user:"):]
     principal = VerifiedPrincipal(

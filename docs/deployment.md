@@ -115,17 +115,25 @@ run old and new executors concurrently when relying on either property. The
 database remains upgrade-compatible; the security semantics take effect after
 all relevant writers are on the upgraded code.
 
+## Legacy workspace records
+
+On PostgreSQL, department boards use exact workspace ownership for their task
+population and approvals even when legacy compatibility reads are enabled.
+Older unassigned tasks and approvals are excluded from named-workspace boards
+until an administrator migrates them, so board totals can differ from views
+that still include legacy records.
+
+Flow `regex()` expressions now allow at most one unescaped quantifier and no
+counted repetitions. Unsupported patterns fail the flow step instead of
+silently returning an empty value; revise existing expressions before upgrade.
+
 ## Behind a load balancer or reverse proxy
 
-The dashboard's per-address limits (the public phone and TV consent endpoints
-count each caller's address, 120 requests a minute for each of enrolling,
-sending and refreshing) use the address of whoever opened the connection. Behind
-a load balancer that is the balancer, so every phone and TV in the fleet shares
-one allowance and one busy app can lock the rest out. The dashboard only
-believes the `X-Forwarded-For` header from addresses listed in the
-`FORWARDED_ALLOW_IPS` environment variable, which defaults to loopback only. To
-count each device on its own, list your balancer in the environment the
-dashboard starts in:
+The dashboard preserves the actual network peer rather than allowing Uvicorn
+to rewrite it from forwarding headers. Public phone and TV consent endpoints
+have their own address resolution and use `FORWARDED_ALLOW_IPS` to identify
+trusted forwarders. To count each device separately, list the balancer in the
+environment the dashboard starts in:
 
 ```bash
 # the balancer's address; current uvicorn also accepts a range such as 10.0.0.0/16
@@ -136,13 +144,11 @@ export FORWARDED_ALLOW_IPS="10.0.1.20"
   connection they received to `X-Forwarded-For` (most load balancers do). Do not
   use `*` when the dashboard can also be reached directly: any caller could then
   choose the address it is counted under.
-- The setting changes the caller address for everything in the dashboard that
-  reads it, not just these limits, so keep the list as short as the real
-  proxies.
-- With reverse-proxy sign-in switched on (`[auth.proxy] enabled`), the
-  dashboard turns this handling off so that a forwarded header can never
-  impersonate a trusted proxy. `FORWARDED_ALLOW_IPS` then has no effect and the
-  devices behind the balancer still share one per-address allowance.
+- The dashboard's other address checks use `[auth.proxy] trusted_proxies`,
+  rather than treating `FORWARDED_ALLOW_IPS` as permission to rewrite the peer.
+  If running an external ASGI server instead of Lightwork's launcher, disable
+  its proxy-header middleware (for Uvicorn, use `--no-proxy-headers`) so the
+  true peer reaches the application.
 - The per-app limit (Settings, "Requests per minute from each app") is
   separate and always applies to the whole app, whatever the address.
 - To check, send requests from two devices and look at the dashboard's request

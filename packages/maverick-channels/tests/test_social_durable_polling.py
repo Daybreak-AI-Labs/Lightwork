@@ -152,7 +152,7 @@ def test_bluesky_opaque_pages_late_index_and_restart_floor(monkeypatch):
 
 def threads(handler=None):
     return ThreadsChannel(handler or AsyncMock(return_value="answer"), user_id="100", access_token="fixture",
-                          allowed_user_ids={"owner"})
+                          allowed_user_ids={"200"})
 
 
 def thread_item(identity, timestamp="2026-01-02T00:00:00Z"):

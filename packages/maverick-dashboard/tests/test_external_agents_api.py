@@ -4,6 +4,7 @@ routes (minted bearer or platform-native credential — no session, no CSRF
 surface, 404 while disabled)."""
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac as hmac_mod
 import threading
@@ -60,6 +61,73 @@ def _isolated(tmp_path, monkeypatch):
     config.reset_config_cache()
     yield
     config.reset_config_cache()
+
+
+@pytest.mark.parametrize(("path", "maximum"), [
+    ("/api/v1/external/runs", 256 * 1024),
+    ("/api/v1/external/runtime/evaluate", 512 * 1024),
+    ("/api/v1/external/discovery-sensors/sensor/observations", 64 * 1024),
+    ("/api/v1/external/ai-vendor/submissions", 128 * 1024),
+    ("/api/v1/external/red-team/campaign/results", 2 * 1024 * 1024),
+])
+def test_external_body_limit_applies_before_authentication(monkeypatch, path, maximum):
+    monkeypatch.setenv("MAVERICK_EXTERNAL_AGENTS", "0")
+    response = client.post(path, content=b"{}", headers={"Content-Length": str(maximum + 1)})
+    assert response.status_code == 413
+
+
+def test_chunked_external_body_stops_reading_at_limit(monkeypatch):
+    import httpx
+
+    monkeypatch.setenv("MAVERICK_EXTERNAL_AGENTS", "0")
+    sent = []
+
+    async def chunks():
+        for i in range(3):
+            sent.append(i)
+            yield b"x" * (128 * 1024 + 1)
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                     base_url="http://testserver") as requester:
+            return await requester.post("/api/v1/external/runs", content=chunks())
+
+    assert asyncio.run(run()).status_code == 413
+    assert sent == [0, 1]
+
+
+def test_signed_get_body_is_limited_before_authentication(monkeypatch):
+    monkeypatch.setenv("MAVERICK_EXTERNAL_AGENTS", "0")
+    response = client.request(
+        "GET", "/api/v1/external/approvals/1", content=b"{}",
+        headers={"Content-Length": str(256 * 1024 + 1), "X-Agent-Signature": "synthetic"},
+    )
+    assert response.status_code == 413
+
+
+def test_slow_external_body_times_out_and_releases_capacity(monkeypatch):
+    import httpx
+    from maverick_dashboard import app as dash_app
+
+    monkeypatch.setenv("MAVERICK_EXTERNAL_AGENTS", "0")
+    monkeypatch.setattr(dash_app, "_EXTERNAL_BODY_SLOTS", 1)
+    monkeypatch.setattr(dash_app, "_EXTERNAL_BODY_TIMEOUT_SECONDS", 0.03)
+
+    async def slow():
+        yield b"{"
+        await asyncio.sleep(1)
+        yield b"}"
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                     base_url="http://testserver") as requester:
+            first = await requester.post("/api/v1/external/runs", content=slow())
+            second = await requester.post("/api/v1/external/runs", content=b"{}")
+            return first.status_code, second.status_code
+
+    first, second = asyncio.run(run())
+    assert first == 408
+    assert second != 503
 
 
 def _enroll(**overrides):
@@ -780,11 +848,12 @@ def test_red_team_case_pull_body_is_bounded_before_signed_auth():
 
 def test_memory_routes_over_http(monkeypatch):
     monkeypatch.setenv("MAVERICK_FLEET_MEMORY", "1")
+    monkeypatch.setenv("MAVERICK_AGENT_TRUST", "0")
     from maverick import fleet_memory
     monkeypatch.setattr(fleet_memory, "registry_path",
                         lambda: fleet_memory.inbox_dir().parent
                         / "agents.ndjson")
-    _enroll()
+    _enroll(data_scopes=["sales"])
     token = _mint()
     bare = TestClient(app)
     hdr = {"Authorization": f"Bearer {token}"}
@@ -797,6 +866,12 @@ def test_memory_routes_over_http(monkeypatch):
                   json={"query": "renewal quote"})
     assert r.status_code == 200
     assert "context" in r.json() and "reason" in r.json()
+    denied = bare.post("/api/v1/external/memory/ingest", headers=hdr,
+                       json={"kind": "success", "goal_text": "finance", "domain": "finance"})
+    assert denied.status_code == 403
+    denied = bare.post("/api/v1/external/memory/recall", headers=hdr,
+                       json={"query": "finance", "domain": "finance"})
+    assert denied.status_code == 200 and not denied.json()["context"]
     # The scorecard surfaces the contribution.
     page = client.get("/external-agents/sf-quotebot").text
     assert "Learning contributions" in page

@@ -33,6 +33,12 @@ def _mirror_lightwork_env() -> None:
 
 _mirror_lightwork_env()
 
+# Trust roots are captured before any writable wizard/config file is loaded.
+# A service supervisor must provide these values independently of the service
+# account's writable home directory.
+_STARTUP_APPROVER_KEYS = os.environ.get("MAVERICK_APPROVER_KEYS", "")
+_STARTUP_AUDIT_TRUSTED_PUBLIC_KEYS = os.environ.get("MAVERICK_AUDIT_TRUSTED_PUBLIC_KEYS", "")
+
 
 def _install_egress_guard() -> None:
     """Wrap the HTTP client send paths so the enterprise egress lock applies.

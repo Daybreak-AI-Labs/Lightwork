@@ -19,12 +19,13 @@ from maverick_dashboard.app import app
 client = TestClient(app)
 
 SECRET = "test-webhook-secret"
+JIRA_SECRET = "test-jira-secret"
 LINEAR_BOT = "linear-bot-id"
 JIRA_BOT = "jira-bot-account-id"
 
 
-def _sign(body: bytes) -> str:
-    return hmac.new(SECRET.encode("utf-8"), body, hashlib.sha256).hexdigest()
+def _sign(body: bytes, secret: str = SECRET) -> str:
+    return hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
 
 
 @pytest.fixture(autouse=True)
@@ -59,7 +60,8 @@ def _no_real_run(monkeypatch):
 
 @pytest.fixture
 def _configured(monkeypatch):
-    monkeypatch.setenv("MAVERICK_WEBHOOK_SECRET", SECRET)
+    monkeypatch.setenv("MAVERICK_LINEAR_WEBHOOK_SECRET", SECRET)
+    monkeypatch.setenv("MAVERICK_JIRA_WEBHOOK_SECRET", JIRA_SECRET)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
     monkeypatch.setenv("MAVERICK_BOT_LINEAR_ID", LINEAR_BOT)
     monkeypatch.setenv("MAVERICK_BOT_JIRA_ACCOUNT_ID", JIRA_BOT)
@@ -168,7 +170,7 @@ def test_linear_non_assign_event_ignored(_configured, _no_real_run):
 
 
 def test_linear_missing_bot_id_fails_closed(monkeypatch, _no_real_run):
-    monkeypatch.setenv("MAVERICK_WEBHOOK_SECRET", SECRET)
+    monkeypatch.setenv("MAVERICK_LINEAR_WEBHOOK_SECRET", SECRET)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
     monkeypatch.delenv("MAVERICK_BOT_LINEAR_ID", raising=False)
 
@@ -182,13 +184,23 @@ def test_linear_missing_bot_id_fails_closed(monkeypatch, _no_real_run):
     assert _no_real_run == []
 
 
+def test_linear_rejects_control_secret_reuse(monkeypatch, _no_real_run):
+    monkeypatch.setenv("MAVERICK_LINEAR_WEBHOOK_SECRET", SECRET)
+    monkeypatch.setenv("MAVERICK_INBOUND_WEBHOOK_SECRET", SECRET)
+    body = json.dumps(_linear_assigned()).encode()
+    resp = client.post("/webhook/linear", content=body,
+                       headers={"Linear-Signature": _sign(body)})
+    assert resp.status_code == 401
+    assert not _no_real_run
+
+
 # ----- Jira -----
 
 def test_jira_valid_signature_assigned_to_bot_creates_goal(_configured, _no_real_run):
     body = json.dumps(_jira_assigned()).encode()
     resp = client.post(
         "/webhook/jira", content=body,
-        headers={"X-Hub-Signature": "sha256=" + _sign(body)},
+        headers={"X-Hub-Signature": "sha256=" + _sign(body, JIRA_SECRET)},
     )
     assert resp.status_code == 201
     goal_id = resp.json()["goal_id"]
@@ -218,7 +230,7 @@ def test_jira_assigned_to_someone_else_ignored(_configured, _no_real_run):
     body = json.dumps(_jira_assigned(account_id="other-human")).encode()
     resp = client.post(
         "/webhook/jira", content=body,
-        headers={"X-Hub-Signature": "sha256=" + _sign(body)},
+        headers={"X-Hub-Signature": "sha256=" + _sign(body, JIRA_SECRET)},
     )
     assert resp.status_code == 200
     assert resp.json()["ignored"] is True
@@ -226,14 +238,14 @@ def test_jira_assigned_to_someone_else_ignored(_configured, _no_real_run):
 
 
 def test_jira_missing_bot_id_fails_closed(monkeypatch, _no_real_run):
-    monkeypatch.setenv("MAVERICK_WEBHOOK_SECRET", SECRET)
+    monkeypatch.setenv("MAVERICK_JIRA_WEBHOOK_SECRET", JIRA_SECRET)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
     monkeypatch.delenv("MAVERICK_BOT_JIRA_ACCOUNT_ID", raising=False)
 
     body = json.dumps(_jira_assigned(account_id="some-human")).encode()
     resp = client.post(
         "/webhook/jira", content=body,
-        headers={"X-Hub-Signature": "sha256=" + _sign(body)},
+        headers={"X-Hub-Signature": "sha256=" + _sign(body, JIRA_SECRET)},
     )
     assert resp.status_code == 200
     assert resp.json()["ignored"] is True
@@ -243,7 +255,7 @@ def test_jira_missing_bot_id_fails_closed(monkeypatch, _no_real_run):
 # ----- shared auth -----
 
 def test_no_secret_configured_fails_closed(monkeypatch, _no_real_run):
-    monkeypatch.delenv("MAVERICK_WEBHOOK_SECRET", raising=False)
+    monkeypatch.delenv("MAVERICK_LINEAR_WEBHOOK_SECRET", raising=False)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
     import maverick.webhooks as wh
     monkeypatch.setattr(wh, "_load_config_outbound", lambda: ([], None))
@@ -301,7 +313,7 @@ def test_jira_undated_event_rejected(_configured, _no_real_run):
     body = json.dumps(payload).encode()
     resp = client.post(
         "/webhook/jira", content=body,
-        headers={"X-Hub-Signature": "sha256=" + _sign(body)},
+        headers={"X-Hub-Signature": "sha256=" + _sign(body, JIRA_SECRET)},
     )
     assert resp.status_code == 403
     assert _no_real_run == []
@@ -344,7 +356,7 @@ def test_jira_duplicate_delivery_rejected_with_bare_variant(_configured, _no_rea
     # Same bypass in the opposite direction for Jira: a prefixed signature and
     # its bare digest form are the same verified delivery.
     body = json.dumps(_jira_assigned()).encode()
-    digest = _sign(body)
+    digest = _sign(body, JIRA_SECRET)
     first = client.post(
         "/webhook/jira",
         content=body,

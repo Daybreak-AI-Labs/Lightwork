@@ -95,6 +95,9 @@ def desk(demo, tmp_path, monkeypatch):
     reviewers, and the OneTrust client bound to the in-process mock."""
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.setenv("PIA_SEED_TENANT", "0")
+    monkeypatch.setenv("PIA_OPERATOR_USER", "reviewer")
+    monkeypatch.setenv("PIA_OPERATOR_TOKEN", "review-test-value")
+    monkeypatch.setenv("PIA_BASE_URL", "http://testserver")
     app_mod = demo["app"]
     STORE = demo["store"].STORE
     Case = demo["store"].Case
@@ -337,7 +340,9 @@ def test_documents_open_from_the_onetrust_viewer(desk):
         template="Privacy Impact Assessment", subject="Acme CRM",
         status="Completed", risk_level="high", result={})
     desk["store"].onetrust[ot.assessment_id] = ot
-    html = client.get("/onetrust").text
+    auth = ("reviewer", "review-test-value")
+    assert client.get("/onetrust").status_code == 401
+    html = client.get("/onetrust", auth=auth).text
     assert "Acme-CRM-dpa-v1-redline.docx" in html
     assert "Acme-CRM-dpa-v1-analysis.txt" in html
 
@@ -346,15 +351,16 @@ def test_documents_open_from_the_onetrust_viewer(desk):
                 if a["filename"].endswith("-analysis.txt"))
     redline = next(a for a in atts.values()
                    if a["filename"].endswith("-redline.docx"))
-    r = client.get(f"/onetrust/attachment/{memo['id']}")
+    assert client.get(f"/onetrust/attachment/{memo['id']}").status_code == 401
+    r = client.get(f"/onetrust/attachment/{memo['id']}", auth=auth)
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("text/plain")
     assert "VENDOR PAPER REVIEW — Acme CRM" in r.text
-    r = client.get(f"/onetrust/attachment/{redline['id']}")
+    r = client.get(f"/onetrust/attachment/{redline['id']}", auth=auth)
     assert r.status_code == 200
     assert r.headers["content-type"].startswith(DOCX_MIME)
     assert "attachment" in r.headers["content-disposition"]
-    assert client.get("/onetrust/attachment/att-none").status_code == 404
+    assert client.get("/onetrust/attachment/att-none", auth=auth).status_code == 404
 
 
 def _tiny_pdf(text: str) -> bytes:
@@ -466,10 +472,13 @@ def test_addendum_upload_is_openable_from_the_tenant(desk):
         status="Completed", risk_level="high", result={})
     desk["store"].onetrust[ot.assessment_id] = ot
     pdf = _tiny_pdf("Amendment to the data processing agreement terms.")
+    assert client.post(f"/onetrust/record/{ot.assessment_id}/add-document",
+                       files={"file": ("amendment.pdf", pdf, "application/pdf")}).status_code in (401, 403)
     r = client.post(f"/onetrust/record/{ot.assessment_id}/add-document",
-                    files={"file": ("amendment.pdf", pdf, "application/pdf")})
+                    files={"file": ("amendment.pdf", pdf, "application/pdf")},
+                    auth=("reviewer", "review-test-value"), headers={"Origin": "http://testserver"})
     assert r.status_code == 200, r.text
     entry = r.json()["addendum"]
     assert entry["attachment_id"]
-    served = client.get(f"/onetrust/attachment/{entry['attachment_id']}")
+    served = client.get(f"/onetrust/attachment/{entry['attachment_id']}", auth=("reviewer", "review-test-value"))
     assert served.status_code == 200 and served.content == pdf

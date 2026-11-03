@@ -146,8 +146,8 @@ def test_approval_blocks_carry_the_card_and_buttons(tmp_path):
     blocks = approval_blocks(card_content(world.get_approval(aid)), dashboard_url="https://lw.test/")
     assert blocks[0]["type"] == "header" and "Browser click" in blocks[0]["text"]["text"]
     text = json.dumps(blocks)
-    for phrase in ("What it will do", "Press Save once", "*Risk*", "Medium risk", "Up to $2.50",
-                   "Can't be undone", "*Decide by*", "https://lw.test/approvals#approval-"):
+    for phrase in ("What it will do", "Press Save once", "Risk", "Medium risk", "Up to $2.50",
+                   "Can't be undone", "Decide by", "https://lw.test/approvals#approval-"):
         assert phrase in text, phrase
     actions = blocks[-1]
     assert actions["type"] == "actions"
@@ -195,6 +195,15 @@ def test_decided_and_text_and_digest_blocks(tmp_path):
     blocks = digest_blocks(digest, dashboard_url="https://lw.test")
     assert "1 waiting for your decision" in blocks[1]["text"]["text"]
     assert "$1.50 of your $10.00" in blocks[-1]["elements"][0]["text"]
+
+
+def test_agent_text_cannot_create_slack_links_or_mentions():
+    from maverick.slack_interactive import text_blocks
+
+    blocks = text_blocks("Result", "<!channel> <https://attacker.example|Open>")
+    section = blocks[1]["text"]
+    assert section["type"] == "plain_text"
+    assert section["text"] == "<!channel> <https://attacker.example|Open>"
 
 
 # ------------------------------------------------------------ interactions
@@ -473,4 +482,4 @@ def test_approval_card_in_the_shared_channel_says_why_it_is_there(tmp_path):
     blocks = approval_blocks(card_content(world.get_approval(aid)), dashboard_url="https://lw.test/")
     text = json.dumps(blocks)
     assert "Posted here because this channel receives Lightwork approval requests" in text
-    assert "*Decide by*" in text and f"https://lw.test/approvals#approval-{aid}" in text
+    assert "Decide by" in text and f"https://lw.test/approvals#approval-{aid}" in text

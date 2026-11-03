@@ -74,6 +74,31 @@ def test_unregistered_agent_is_refused():
     assert not ok and "unregistered" in reason
 
 
+def test_per_agent_scope_is_enforced_when_global_trust_is_off(monkeypatch):
+    from types import SimpleNamespace
+
+    from maverick import agent_trust
+
+    _register()
+    agent = agent_trust.TrustedAgent(id="order-bot", data_scopes=frozenset({"sales"}))
+    monkeypatch.setattr(agent_trust, "load_trust_state", lambda: (False, {"order-bot": agent}))
+    monkeypatch.setattr(reflexion, "recall", lambda *args, **kwargs: [
+        (1.0, SimpleNamespace(domain="finance", reflection="confidential finance")),
+        (1.0, SimpleNamespace(domain="sales", reflection="sales lesson")),
+    ])
+    seen = []
+    monkeypatch.setattr(reflexion, "format_context", lambda hits, **kwargs: seen.extend(hits) or "sales lesson")
+    monkeypatch.setattr(dreaming, "recall_insights", lambda *args, **kwargs: [])
+    with fleet_memory.bind_caller("order-bot"):
+        denied, reason = fleet_memory.recall("work", agent_id="order-bot", vendor="agentforce", domain="finance")
+        assert not denied and "scope" in reason
+        denied, reason = fleet_memory.recall("work", agent_id="order-bot", vendor="agentforce")
+        assert not denied and "scope" in reason
+        context, reason = fleet_memory.recall("work", agent_id="order-bot", vendor="agentforce", domain="sales")
+    assert context == "sales lesson" and reason == "ok"
+    assert len(seen) == 1 and seen[0][1].domain == "sales"
+
+
 def test_lesson_lands_as_provenance_tagged_reflexion():
     _register()
     ok, reason = fleet_memory.ingest({

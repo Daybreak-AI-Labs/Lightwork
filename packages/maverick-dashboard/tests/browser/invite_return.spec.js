@@ -69,6 +69,7 @@ test('invited colleague sets a passphrase, signs out and signs back in on a phon
 
     // Sign out, then come back: the sign-in page is styled and accepts the passphrase.
     await page.goto(origin+'/auth/logout');
+    await page.getByRole('button',{name:'Sign out',exact:true}).click();
     expect((await phone.cookies()).some(cookie=>cookie.name==='mvk_session')).toBe(false);
     await page.goto(origin+'/goals');
     await expect(page).toHaveURL(/\/auth\/local-login/);

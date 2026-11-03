@@ -95,7 +95,9 @@ def _fake_argv():
 
 
 def _tool():
-    return lsp_bridge()
+    import os
+    from types import SimpleNamespace
+    return lsp_bridge(SimpleNamespace(workdir=os.environ.get("MAVERICK_WORKSPACE_ROOT")))
 
 
 def _use_fake_server(monkeypatch, tmp_path, argv=None):
@@ -207,6 +209,72 @@ def test_file_and_root_must_stay_in_workspace(tmp_path, monkeypatch):
     assert "escapes the workspace" in _tool().fn({"op": "symbols", "file": str(outside)})
     assert "escapes the workspace" in _tool().fn({"op": "symbols", "file": str(inside),
                                                  "root": str(tmp_path.parent)})
+
+
+def test_task_workspace_overrides_host_cwd_and_environment(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    workspace = tmp_path / "task"
+    workspace.mkdir()
+    outside = tmp_path / "outside.py"
+    outside.write_text("private = True\n")
+    monkeypatch.setenv("MAVERICK_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    tool = lsp_bridge(SimpleNamespace(workdir=workspace))
+    assert "escapes the workspace" in tool.fn({"op": "symbols", "file": str(outside)})
+    assert "require a local task workspace" in lsp_bridge().fn({"op": "symbols", "file": str(outside)})
+
+
+def test_lsp_approval_discloses_host_repository_execution(tmp_path, monkeypatch):
+    from maverick.safety import ConsentDenied
+    _use_fake_server(monkeypatch, tmp_path)
+    path = tmp_path / "code.py"
+    path.write_text("x = 1\n")
+    seen = {}
+    def deny(*args, **kwargs):
+        seen.update(kwargs)
+        raise ConsentDenied("lsp_bridge")
+    monkeypatch.setattr(lsp_bridge_module, "request_execution_consent", deny)
+    assert "not approved" in _tool().fn({"op": "symbols", "file": str(path)})
+    assert "outside the task sandbox" in seen["effect"]
+    assert "build scripts" in seen["effect"] and "plugins" in seen["effect"]
+
+
+def test_lsp_binds_source_bytes_and_absolute_executable(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    workspace = tmp_path / "task"
+    workspace.mkdir()
+    path = workspace / "code.py"
+    path.write_text("original\n")
+    executable = tmp_path / "local-lsp"
+    executable.write_text("#!/bin/sh\nexit 0\n")
+    executable.chmod(0o755)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PATH", ".")
+    monkeypatch.setitem(lsp_bridge_module.DEFAULT_SERVERS, "python", ["local-lsp"])
+    def changed(*args, **kwargs):
+        assert kwargs["parameters"]["argv"][0] == str(executable)
+        path.write_text("different\n")
+        kwargs["input_versions_provider"]()
+        raise AssertionError("changed source was accepted")
+    monkeypatch.setattr(lsp_bridge_module, "request_execution_consent", changed)
+    result = lsp_bridge(SimpleNamespace(workdir=workspace)).fn({"op": "symbols", "file": str(path)})
+    assert "changed" in result
+
+
+def test_lsp_revalidation_refuses_substituted_fifo(tmp_path, monkeypatch):
+    import os
+    if not hasattr(os, "mkfifo"):
+        pytest.skip("named pipes are not supported")
+    _use_fake_server(monkeypatch, tmp_path)
+    path = tmp_path / "code.py"
+    path.write_text("original\n")
+    def replaced(*args, **kwargs):
+        path.unlink()
+        os.mkfifo(path)
+        kwargs["input_versions_provider"]()
+    monkeypatch.setattr(lsp_bridge_module, "request_execution_consent", replaced)
+    assert "changed" in _tool().fn({"op": "symbols", "file": str(path)})
 
 
 def test_lsp_bridge_is_high_risk():

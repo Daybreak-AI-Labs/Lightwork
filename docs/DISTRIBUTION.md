@@ -115,11 +115,13 @@ push it to a registry your cloud can pull from, and substitute that name.
 docker pull ghcr.io/daybreak-ai-labs/lightwork:<version>
 ```
 
-**AWS** — ECS/Fargate task, or plain EC2:
+**AWS** — ECS/Fargate task, or plain EC2. For remote access, put the EC2
+loopback port behind an authenticated TLS-terminating proxy:
 ```bash
-docker run -d -p 8765:8765 \
+# Set ANTHROPIC_API_KEY or configure a provider such as Bedrock.
+docker run -d -p 127.0.0.1:8765:8765 \
   -e MAVERICK_DASHBOARD_TOKEN=... \
-  -e ANTHROPIC_API_KEY=...            # or point at Bedrock via the provider config
+  -e ANTHROPIC_API_KEY=... \
   -v /srv/maverick:/home/maverick/.maverick \
   ghcr.io/daybreak-ai-labs/lightwork:<version> \
   dashboard --host 0.0.0.0 --port 8765

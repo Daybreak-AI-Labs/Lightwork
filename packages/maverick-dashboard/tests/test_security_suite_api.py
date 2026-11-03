@@ -2201,7 +2201,7 @@ def test_environment_response_requires_executor_opt_in_and_exact_approval_bindin
     )
     assert missing_trust.status_code == 403
     assert "approver keys" in missing_trust.json()["detail"]
-    monkeypatch.setenv("MAVERICK_APPROVER_KEYS", public_hex)
+    monkeypatch.setattr("maverick._STARTUP_APPROVER_KEYS", public_hex)
     swapped_executor = client.post(
         "/api/v1/security/soc/responses/execute",
         json={**base, "executor": "another-edr"},

@@ -83,7 +83,7 @@ def _is_safe_path(rel: str, workdir: Path) -> bool:
     # core.fsmonitor hook or filter smudge/clean command that a later
     # host-side git call would execute. `write_file` and friends already
     # refuse this (fs.py); apply_patch's own path check must too.
-    if ".git" in rel_to_workdir.parts:
+    if any(part.rstrip(" .").casefold() == ".git" for part in rel_to_workdir.parts):
         return False
     return True
 

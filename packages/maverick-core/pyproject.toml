@@ -52,7 +52,7 @@ plugin-workbench = ["jsonschema>=4.18,<5"]
 openai     = ["openai>=1.30,<4"]
 release-runtime = [
     "openai>=1.30,<4",
-    "openpyxl>=3.1", "lxml>=5.0", "pypdf>=6.14.2", "pdfplumber>=0.10",
+    "openpyxl>=3.1", "lxml>=5.0", "pypdf>=6.21.4", "pdfplumber>=0.10",
     # A frozen executable cannot add Python packages after it is built. Include
     # the supported SQL driver, local MathML conversion and metrics collector.
     "sqlalchemy>=2.0,<3", "psycopg[binary,pool]>=3.3.5,<4",
@@ -100,13 +100,13 @@ gemini-session  = ["httpx>=0.27"]
 capture         = ["playwright>=1.40"]
 browser         = ["playwright>=1.40", "lxml>=5.0"]
 computer-use    = ["pillow>=13.0.0", "mss>=9.0", "pyautogui>=0.9.54"]
-pdf             = ["pdfplumber>=0.10", "pypdf>=6.14.2"]
+pdf             = ["pdfplumber>=0.10", "pypdf>=6.21.4"]
 # Bounded local parsers used by the AI Evidence Analysis workbench. Production
 # OCR invokes an operator-installed, absolute-path/SHA-pinned Tesseract binary;
 # it never discovers a binary from PATH. Legacy XLS dependencies are narrowly
 # pinned and runtime configuration must repeat their exact installed versions.
 evidence-analysis = [
-    "pypdf>=6.14.2",
+    "pypdf>=6.21.4",
     "openpyxl>=3.1",
     "pillow>=13.0.0",
     "xlrd==2.0.2",
@@ -136,7 +136,7 @@ issue-trackers  = ["httpx>=0.27"]
 spreadsheet     = ["openpyxl>=3.1", "lxml>=5.0"]
 youtube         = ["youtube-transcript-api>=0.6"]
 latex           = ["latex2mathml>=3.77"]
-websocket       = ["websockets>=12.0"]
+websocket       = ["websockets>=12.0,<17"]
 webrtc          = ["aiortc>=1.9"]
 mongodb         = ["pymongo>=4.6"]
 redis           = ["redis>=5.0"]

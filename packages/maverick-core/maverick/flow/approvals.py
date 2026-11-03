@@ -5,9 +5,8 @@ A link carries a stateless HMAC token over the run, decision, expiry, and
 the exact approval pause (cursor/prompt/run timestamp). The
 dashboard verifies the token and separately requires an authenticated,
 authorized approver identity before resuming, so a forwarded token is not a
-bearer decision capability. The token reuses the control-plane webhook secret
-(:func:`maverick.webhooks.inbound_secret`) so operators configure one key, and
-it FAILS CLOSED -- with no secret configured, no token is minted and no link is
+bearer decision capability. The token uses a dedicated approval-link secret and
+FAILS CLOSED -- with no secret configured, no token is minted and no link is
 posted (the human falls back to the dashboard).
 """
 from __future__ import annotations
@@ -94,8 +93,10 @@ def approval_card_presentation(flow, paused, next_node, prompt: str | None,
 
 
 def _secret() -> str | None:
-    from ..webhooks import inbound_secret
-    return inbound_secret()
+    from ..secret_provider import get_secret
+    from ..webhooks import separate_webhook_credential
+    secret = get_secret("MAVERICK_FLOW_APPROVAL_SECRET")
+    return secret if separate_webhook_credential(secret, "approval") else None
 
 
 def _secret_for_tenant(tenant: str) -> str | None:

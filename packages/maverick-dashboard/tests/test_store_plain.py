@@ -84,7 +84,8 @@ def test_add_button_is_disabled_without_the_install_opt_in(monkeypatch):
     monkeypatch.setattr("maverick.catalog.load_catalog", lambda kind, **_k: [entry])
     monkeypatch.delenv("MAVERICK_ALLOW_SKILL_INSTALL", raising=False)
     html = _client().get("/store").text
-    assert "Weekly report" in html and "Checked author" in html
+    assert "Weekly report" in html and "Checked author" not in html
+    assert "catalog-provided" in html
     assert re.search(r'aria-label="Add to workspace: Weekly report"\s+disabled', html)
     assert "switched off on this server" in html
 

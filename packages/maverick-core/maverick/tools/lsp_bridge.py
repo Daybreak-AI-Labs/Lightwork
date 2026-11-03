@@ -16,8 +16,10 @@ is **host-bound by nature** — language servers live on the host PATH, and the
 conversation is bidirectional stdio, which ``sandbox.exec``'s run-to-completion
 contract can't carry. So this module spawns only built-in or operator-configured
 language-server argv lists directly (never a shell), with the secret-scrubbed
-child env, a hard wall-clock deadline, and a guaranteed kill in ``finally``.
+child env, a query deadline, and direct-process cleanup in ``finally``.
 Model-controlled per-call executable overrides are intentionally not supported.
+The language server may access host files and networks and may leave child
+processes running; its deadline is not a process-tree isolation boundary.
 
 ops:
   - symbols(file[, language])                  — document symbols (name/kind/line)
@@ -28,9 +30,11 @@ ops:
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
+import stat
 import time
 from pathlib import Path
 from typing import Any
@@ -38,7 +42,7 @@ from typing import Any
 from ..approval_cards import ApprovalCardError
 from ..safety import ConsentDenied, consume_operation_consent
 from . import Tool, scrub_child_env
-from .execution_consent import execution_target, file_version, request_execution_consent
+from .execution_consent import execution_target, request_execution_consent
 
 # Default servers per language; operators may override via [lsp.servers] {lang = [argv...]}.
 # Per-call executable overrides are intentionally forbidden: tool arguments are
@@ -71,6 +75,26 @@ _SYMBOL_KINDS = {
 _SEVERITIES = {1: "error", 2: "warning", 3: "info", 4: "hint"}
 
 _TIMEOUT_S = 30.0
+
+
+def _read_bounded_file(path: Path, limit: int, *, include_bytes: bool = False) -> tuple[dict[str, str], bytes]:
+    """Hash a bounded regular file without waiting on a substituted FIFO."""
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0))
+    with os.fdopen(fd, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_size > limit:
+            raise OSError("not a bounded regular file")
+        digest = hashlib.sha256()
+        chunks: list[bytes] = []
+        total = 0
+        while chunk := stream.read(min(1024 * 1024, limit - total + 1)):
+            total += len(chunk)
+            if total > limit:
+                raise OSError("file exceeds the allowed size")
+            digest.update(chunk)
+            if include_bytes:
+                chunks.append(chunk)
+    return {"path": str(path.resolve()), "sha256": digest.hexdigest()}, b"".join(chunks)
 
 
 class _LspSession:
@@ -230,15 +254,19 @@ def _server_for(language: str) -> list[str] | str:
     if not argv:
         return (f"ERROR: no LSP server known for language {language!r} "
                 f"(configure [lsp.servers] {language} = [\"<server>\", ...])")
-    if shutil.which(argv[0]) is None:
+    executable = shutil.which(argv[0])
+    if executable is None:
         return (f"ERROR: LSP server {argv[0]!r} is not installed on the host "
                 f"(install it, or configure [lsp.servers] {language})")
-    return argv
+    return [str(Path(executable).resolve()), *argv[1:]]
 
 
-def _workspace_root() -> Path:
-    root = os.environ.get("MAVERICK_WORKSPACE_ROOT") or os.getcwd()
-    return Path(root).resolve()
+def _workspace_root(sandbox: Any) -> Path | None:
+    from ..sandbox.ssh import SSHBackend
+    if sandbox is None or isinstance(sandbox, SSHBackend):
+        return None
+    workdir = getattr(sandbox, "workdir", None)
+    return Path(workdir).resolve() if workdir else None
 
 
 def _resolve_workspace_path(raw: Any, workspace: Path, *, label: str) -> Path | str:
@@ -325,21 +353,38 @@ def _op_diagnostics(session: _LspSession) -> str:
     return "\n".join(out)
 
 
-def _run_query(args: dict[str, Any]) -> str:
+def _run_query(args: dict[str, Any], sandbox: Any = None) -> str:
     op = args.get("op")
     if "server" in args:
         return "ERROR: per-call LSP server argv overrides are not allowed; configure [lsp.servers] instead"
     file_arg = args.get("file")
-    workspace = _workspace_root()
+    workspace = _workspace_root(sandbox)
+    if workspace is None:
+        return "ERROR: language-server queries require a local task workspace"
     path = _resolve_workspace_path(file_arg, workspace, label="file")
     if isinstance(path, str):
         return path
     if not path.exists():
         return f"ERROR: no such file: {path}"
     try:
-        source_text = path.read_text(encoding="utf-8", errors="replace")
+        source_version, source_bytes = _read_bounded_file(path, 2 * 1024 * 1024, include_bytes=True)
+        source_text = source_bytes.decode("utf-8", errors="replace")
     except OSError as exc:
         return f"ERROR: cannot read file: {exc}"
+    current_path = path.resolve()
+    try:
+        current_path.relative_to(workspace)
+    except ValueError:
+        return "ERROR: file changed outside the workspace"
+    if source_version["path"] != str(current_path):
+        return "ERROR: file changed during reading"
+
+    def input_version():
+        current, _ = _read_bounded_file(path, 2 * 1024 * 1024)
+        if current != source_version:
+            raise ApprovalCardError("language-server source changed before approval")
+        executable, _ = _read_bounded_file(Path(argv[0]), 256 * 1024 * 1024)
+        return {"source": current, "server": executable}
 
     language = str(args.get("language") or _EXT_LANG.get(path.suffix, "")).lower()
     if not language:
@@ -371,14 +416,21 @@ def _run_query(args: dict[str, Any]) -> str:
                                      "server": shutil.which(argv[0])},
             parameters=parameters,
             detail=f"Start the {language} language server for one {op} query.",
-            effect="Starts an operator-configured language-server process on the host.",
+            effect=("Starts a language server on the host, outside the task sandbox. "
+                    "It can execute repository-controlled build scripts, plugins, or tools "
+                    "with the server process's host permissions, including host files "
+                    "and network. Child processes may outlive the query."),
             review_items=[f"Executable: {argv[0]}", f"File: {path}",
+                          f"Workspace: {workspace}",
+                          "Repository build scripts and plugins can execute on the host.",
                           "Complete server arguments are included in the exact-operation digest."],
             timeout=timeout,
             parameters_provider=lambda: {"args": args, "argv": _server_for(language),
                                          "root": str(root), "file": str(path),
                                          "timeout_seconds": timeout},
-            input_versions_provider=lambda: file_version(path),
+            input_versions_provider=input_version,
+            integrity_note=("The selected source and executable are hashed; other repository files, "
+                            "interpreters and runtime dependencies are not pinned."),
         )
     except ConsentDenied:
         return "ERROR: language-server execution was not approved; no process was started"
@@ -439,7 +491,7 @@ _SCHEMA: dict[str, Any] = {
 }
 
 
-def lsp_bridge() -> Tool:
+def lsp_bridge(sandbox: Any = None) -> Tool:
     return Tool(
         name="lsp_bridge",
         description=(
@@ -450,5 +502,5 @@ def lsp_bridge() -> Tool:
             "override via [lsp.servers]). One-shot session per call."
         ),
         input_schema=_SCHEMA,
-        fn=_run_query,
+        fn=lambda args: _run_query(args, sandbox),
     )

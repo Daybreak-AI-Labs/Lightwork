@@ -1,5 +1,11 @@
 # Outbound webhooks
 
+Inbound control requests use a separate `MAVERICK_INBOUND_WEBHOOK_SECRET`.
+Configure each Linear, Jira, GitLab and GitHub integration and actionable flow
+approval links with a distinct credential as described in `env-vars.md`.
+When upgrading, update callers and providers before relying on those routes;
+existing approval links need to be reissued after setting the new approval key.
+
 Lightwork can tell another system when something happens to a goal, a
 data-subject request, a privacy incident, an assessment, a vendor contract,
 an approval or a policy. Each event is one signed HTTP POST to every

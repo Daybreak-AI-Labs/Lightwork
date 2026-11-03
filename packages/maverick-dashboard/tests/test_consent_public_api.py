@@ -55,6 +55,15 @@ _SERVICE_CREDENTIAL = "service-client-credential-ccccccccccccccccccccccccccccccc
 _NOTICE_SHA256 = hashlib.sha256(b"public notice v1").hexdigest()
 
 
+def test_browser_rate_key_separates_clients(monkeypatch):
+    from maverick_dashboard import ip_allowlist
+
+    monkeypatch.setattr(ip_allowlist, "client_ip", lambda request: request.client.host)
+    first = SimpleNamespace(client=SimpleNamespace(host="192.0.2.1"))
+    second = SimpleNamespace(client=SimpleNamespace(host="192.0.2.2"))
+    assert consent_public_api._browser_rate_key(first, "site") != consent_public_api._browser_rate_key(second, "site")
+
+
 def _sha256(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
 
@@ -793,6 +802,7 @@ def test_exact_enrolled_origin_gets_bounded_cors_preflight_and_response(
         headers=_browser_headers(),
     )
     assert configuration.status_code == 200
+    assert environment.limiter_state["calls"][-1][1] == "request"
     assert configuration.headers["access-control-allow-origin"] == _ORIGIN
     assert configuration.headers["vary"] == "Origin"
     assert configuration.json()["policy_sha256"] == environment.policy["policy_sha256"]

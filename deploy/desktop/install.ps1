@@ -150,8 +150,7 @@ function Resolve-Python {
   $parents = @(
     (Join-Path $env:LOCALAPPDATA 'Programs\Python'),
     $env:ProgramFiles,
-    (Join-Path $env:ProgramFiles 'Python'),
-    'C:\'
+    (Join-Path $env:ProgramFiles 'Python')
   )
   if (${env:ProgramFiles(x86)}) { $parents += ${env:ProgramFiles(x86)} }
   foreach ($p in $parents) {

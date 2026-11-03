@@ -9,7 +9,7 @@ from maverick import config
 from maverick import public_rights_form as prf
 from maverick_dashboard.app import app
 
-client = TestClient(app, headers={"Origin": "http://testserver"})
+client = TestClient(app, base_url="https://testserver", headers={"Origin": "https://testserver"})
 PUBLIC = "/api/v1/public/rights"
 ADMIN = "/api/v1/privacy/rights-form"
 _CONFIG = (
@@ -26,6 +26,7 @@ def _isolate(tmp_path, monkeypatch):
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    monkeypatch.setenv("MAVERICK_PUBLIC_BASE_URL", "https://testserver")
     monkeypatch.setenv("MAVERICK_ENTERPRISE", "0")
     monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
     for name in (
@@ -197,6 +198,8 @@ def test_submit_verify_status_happy_path(_isolate):
     # Reuse fails the same way an unknown token does.
     assert client.post("/" + path).status_code == 404
     assert client.post("/rights/verify/unknown").status_code == 404
+
+
     # Status page by its own token.
     status_url = next(
         line for line in sent[0]["body"].splitlines() if "/rights/status/" in line).strip()
@@ -213,6 +216,39 @@ def test_submit_verify_status_happy_path(_isolate):
     assert detail.status_code == 200
     assert "California (CCPA/CPRA)" in detail.text and "Confirmed by email" in detail.text
     assert 'data-kind="refusal"' in detail.text
+
+
+def test_host_header_cannot_control_verification_email_or_inject_name(_isolate):
+    sent = _isolate
+    _property()
+    response = client.post(f"{PUBLIC}/shop/requests", json=_submission(),
+                           headers={"Host": "attacker.example", "Origin": "http://attacker.example"})
+    assert response.status_code == 403 and sent == []
+    response = client.post(f"{PUBLIC}/shop/requests", json=_submission(name="Casey\n\nVisit attacker.example"),
+                           headers={"Host": "attacker.example", "Origin": "https://www.acme.example"})
+    assert response.status_code == 202
+    assert _link(sent, "/rights/verify/").startswith("https://testserver/rights/verify/")
+    assert "attacker.example" not in sent[-1]["body"]
+
+
+def test_public_rights_requires_configured_origin(monkeypatch):
+    _property()
+    body = _submission()
+    monkeypatch.delenv("MAVERICK_PUBLIC_BASE_URL")
+    monkeypatch.delenv("MAVERICK_PUBLIC_URL", raising=False)
+    assert client.post(f"{PUBLIC}/shop/requests", json=body).status_code == 503
+
+
+def test_public_rights_origin_normalization_and_invalid_config(monkeypatch):
+    from maverick_dashboard.public_rights_api import _origin_of, _public_base_url
+    from fastapi import HTTPException
+
+    assert _origin_of("https://Example.COM:443/path") == "https://example.com"
+    assert _origin_of("http://[") == ""
+    for url in ("http://public.example", "https://public.example/prefix", "https://@public.example"):
+        monkeypatch.setenv("MAVERICK_PUBLIC_BASE_URL", url)
+        with pytest.raises(HTTPException):
+            _public_base_url()
 
 
 def test_challenge_honeypot_and_rate_limit_over_http(_isolate):

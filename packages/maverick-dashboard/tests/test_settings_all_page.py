@@ -368,9 +368,8 @@ def test_existing_overlay_settings_survive_a_catalog_save(audit_rows):
     cfg = _loaded()
     assert cfg["sandbox"] == {"backend": "docker", "timeout": 90}
     assert cfg["features"]["skills"] is False
-    from maverick.webhooks import inbound_secret
-
-    assert inbound_secret() == "keep-me-secret"  # pragma: allowlist secret
+    from maverick.webhooks import _load_config_outbound
+    assert _load_config_outbound()[1] == "keep-me-secret"  # pragma: allowlist secret
     assert config.config_source_errors() == {}
 
 

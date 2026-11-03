@@ -91,7 +91,7 @@ def _sources() -> dict[str, Any]:
     tenant_path = config.tenant_config_path()
     if tenant_path:
         try:
-            tenant = config._load_config_file(tenant_path)
+            tenant = config._load_config_file(tenant_path, interpolate=False)
         except Exception:
             tenant = {}
     return {

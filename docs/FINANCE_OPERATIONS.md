@@ -207,8 +207,20 @@ timeout = "fail_closed"      # the only value
 | `[finance] framework` | Adds that framework's policy pack, unioned strictest-wins with `[finance] regimes`. Both packs require a person to post, close a period, or change an accounting policy. US GAAP refuses `reverse_impairment_loss` (ASC 360-10-35-20, ASC 350-20-35) and `revalue_fixed_asset` (historical cost). IFRS requires a person for both (IAS 16.31, IAS 36.114) and refuses `apply_lifo_inventory` (IAS 2.25). |
 | `[finance] materiality` | Review scope. A duplicate, just-under-limit, split-payment or off-hours anomaly finding whose transactions total at least this amount is raised to high severity, so closing its case needs a second, independent person. The amount is recorded in the finding's metrics and in the scan's configuration digest. Benford is a population screen and is unchanged. Materiality also caps `auto_threshold`: an action with an amount above it always waits for a person. |
 | `[finance.automation] default` | The automation ladder (§3.1) for the committing finance actions (`maverick.finance.profile.FINANCE_ACTIONS`: payments, postings, payroll, master-data changes, approvals of expenses/POs/suppliers, invoices, credit limits, write-offs, disposals, trades, tax and filings). `draft` refuses the agent's call, because an agent prepares and a person carries the action out. `approve` requires a person for every call. `auto_threshold` runs only when the call carries an amount within the lower of `[governance] require_human_above` and materiality; otherwise it requires a person. `straight_through` adds no gate. Other keys in the table set one action class's level. |
+
+Dollar thresholds also apply to flow and workflow dispatch. When a relevant
+transaction's amount cannot be verified, a configured deny ceiling refuses the
+call and an approval threshold requires a person. Refunds for the full balance,
+non-USD amounts without a trusted conversion, and Stripe refunds whose charge
+currency is unknown cannot be compared to a dollar ceiling. A configured ceiling
+therefore blocks those calls or sends them for approval; do not supply a guessed
+currency to bypass that decision.
+Generic tools whose transaction amount cannot be established from a known
+operation are also refused or require approval when a threshold applies, even
+when they carry an `amount` field. Wildcard thresholds can therefore restrict
+unrelated generic actions; use explicit action thresholds when appropriate.
 | `[finance.sod] mode` | An action-time separation-of-duties check on the agent path and on flow/workflow dispatch. When a duty-bearing tool (record, authorize, custody, reconcile) is about to run, the acting agent's grant is linted together with every pack sharing its compartment. An agent with no allow-list holds every duty. `enforce` refuses a conflict. `warn` writes a `finance_sod_finding` audit row as the compensating control's evidence and requires a person's approval (§3.6); if the row cannot be written, the action is refused. A conflict on a hard-floored action is refused in both modes. A flow step holds no agent grant, so a conflict there is always refused. |
-| `[finance.approvals] timeout` | `fail_closed` sends a finance action that needs approval to a person through `require_person`. The automatic consent mode and earlier "remember this" grants never answer it. A request nobody decides within `[approval] dashboard_wait_seconds` is refused and withdrawn from the Approvals page. No value can make an unanswered finance approval proceed, so none is offered. Unset, finance approvals follow the general rule, which already never auto-approves but may reuse a standing grant. |
+| `[finance.approvals] timeout` | `fail_closed` sends a finance action that needs approval to a person through `require_person`. The automatic consent mode and earlier "remember this" grants never answer it. A request nobody decides within `[approval] dashboard_wait_seconds` is refused and withdrawn from the Approvals page. No value can make an unanswered finance approval proceed, so none is offered. Unset, finance approvals follow the general rule, which also requires a fresh human decision. |
 
 **Hard floors.** While the ladder is in use, these actions stay at `approve` or
 stricter whatever the default: `release_payment`, `send_payment`,

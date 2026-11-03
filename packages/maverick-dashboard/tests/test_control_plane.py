@@ -174,6 +174,23 @@ def test_replay_chain_flags_deleted_anchored_day(monkeypatch):
     assert chain["break_count"] == 1
     assert chain["breaks"][0]["reason"] == "anchored_file_deleted"
 
+
+def test_stripped_signed_rows_are_integrity_breaks(monkeypatch, replay_signing_key):
+    from maverick.audit.writer import default_audit_log
+    from maverick_dashboard.control_plane import _verify_days
+
+    monkeypatch.setenv("MAVERICK_AUDIT_SIGN", "1")
+    _seed_run()
+    path = next(default_audit_log().audit_dir.glob("????-??-??.ndjson"))
+    rows = [json.loads(line) for line in path.read_text().splitlines()]
+    for row in rows:
+        for key in ("prev_hash", "hash", "sig", "key_id"):
+            row.pop(key, None)
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    result = _verify_days([path.stem])
+    assert result["status"] == "broken" and result["break_count"] > 0
+    assert result["signed"] is False
+
 def test_replay_filters_to_one_goal():
     gid = _seed_run()
     other = _seed_run()

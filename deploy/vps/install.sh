@@ -81,6 +81,10 @@ ensure_target_user() {
     useradd --system --create-home --home-dir "$TARGET_HOME" --shell /usr/sbin/nologin "$TARGET_USER"
   else
     log "Using existing Lightwork install user ${TARGET_USER} (${TARGET_HOME})..."
+    if [[ "$(id -u "$TARGET_USER")" -eq 0 ]]; then
+      echo "Refusing to install Lightwork under a UID 0 account." >&2
+      exit 1
+    fi
     if [[ ! -d "$TARGET_HOME" ]]; then
       primary_group="$(id -gn "$TARGET_USER")"
       install -d -o "$TARGET_USER" -g "$primary_group" "$TARGET_HOME"
@@ -97,8 +101,8 @@ install_system_deps() {
     git curl ca-certificates sqlite3 sudo
   # The distro python3 can be older than the floor (3.10 on Ubuntu 22.04);
   # stop here rather than at pip's requires-python check.
-  if [ "$(python3 -c 'import sys;print("%d%02d"%sys.version_info[:2])')" -lt 311 ]; then
-    echo "Lightwork needs Python 3.11 or newer, but this system's python3 is $(python3 -c 'import sys;print("%d.%d"%sys.version_info[:2])'). Use a distribution release whose python3 is 3.11 or newer, then re-run." >&2
+  if [ "$(/usr/bin/python3 -I -c 'import sys;print("%d%02d"%sys.version_info[:2])')" -lt 311 ]; then
+    echo "Lightwork needs Python 3.11 or newer, but /usr/bin/python3 is $(/usr/bin/python3 -I -c 'import sys;print("%d.%d"%sys.version_info[:2])'). Use a distribution release whose python3 is 3.11 or newer, then re-run." >&2
     exit 1
   fi
   pipx ensurepath || true
@@ -158,8 +162,8 @@ run_wizard() {
 
 install_service() {
   log "Installing systemd unit (User=${TARGET_USER}, home=${TARGET_HOME})..."
-  # The system Python may be 3.10 without tomli. The verified application
-  # environment already contains the renderer's declared dependencies.
+  # The service user's interpreter is untrusted. It may probe its own
+  # workspace, but its output must never become a root-installed unit.
   local venvs service_python
   venvs="$(run_as_user pipx environment --value PIPX_LOCAL_VENVS)" || return 1
   service_python="$venvs/maverick-agent/bin/python"
@@ -172,7 +176,15 @@ install_service() {
   local rendered_unit
   rendered_unit="$(mktemp /etc/systemd/system/.maverick.service.XXXXXX)"
   if ! run_as_user "$service_python" /opt/maverick/deploy/vps/render_service.py \
-      --user "$TARGET_USER" --home "$TARGET_HOME" > "$rendered_unit"; then
+      --user "$TARGET_USER" --home "$TARGET_HOME" > /dev/null; then
+    rm -f -- "$rendered_unit"
+    echo "Workspace validation failed; the service was not enabled." >&2
+    return 1
+  fi
+  # install_system_deps requires Python >= 3.11, so isolated system Python
+  # has tomllib and does not load the service user's packages or startup hooks.
+  if ! /usr/bin/python3 -I /opt/maverick/deploy/vps/render_service.py \
+      --user "$TARGET_USER" --home "$TARGET_HOME" --no-probe > "$rendered_unit"; then
     rm -f -- "$rendered_unit"
     echo "Workspace validation failed; the service was not enabled." >&2
     return 1

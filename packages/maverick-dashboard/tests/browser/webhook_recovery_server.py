@@ -24,6 +24,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="lightwork-webhook-recovery-") as temporary:
         directory = Path(temporary)
         server.environment(directory)
+        os.environ["MAVERICK_INBOUND_WEBHOOK_SECRET"] = "synthetic-fixture-control-key"  # pragma: allowlist secret
         server.block_outbound()
         app = server.build_app(directory)
         from maverick import audit, config

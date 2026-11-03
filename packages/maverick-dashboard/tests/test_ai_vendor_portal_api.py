@@ -34,6 +34,8 @@ portal_enable = true
     monkeypatch.setattr(model_risk_api, "_human_principal", lambda _request: "user:admin")
     monkeypatch.setattr(external_gateway, "_rate_times", {})
     config.reset_config_cache()
+    from maverick.tenant.registry import create_tenant
+    create_tenant("tenant-a")
     yield
     config.reset_config_cache()
 
@@ -51,6 +53,17 @@ def _answers(questionnaire: dict) -> dict[str, dict[str, str]]:
         question["id"]: {"answer": "unknown", "note": "Pending evidence."}
         for question in questionnaire["questions"]
     }
+
+
+def test_unknown_vendor_tenants_do_not_create_namespace_claims(tmp_path):
+    claims = tmp_path / "home" / ".tenant-namespaces"
+    before = set(claims.rglob("*.json")) if claims.exists() else set()
+    for index in range(10):
+        response = client.get("/api/v1/external/ai-vendor/questionnaire",
+                              headers=_portal_headers("fake-token", tenant=f"unknown-{index}"))
+        assert response.status_code == 401
+    after = set(claims.rglob("*.json")) if claims.exists() else set()
+    assert after == before
 
 
 def test_vendor_portal_http_roundtrip_is_token_scoped_and_review_gated() -> None:

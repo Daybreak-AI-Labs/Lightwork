@@ -44,3 +44,45 @@ def test_echo_roundtrip(monkeypatch):
                 {"url": f"ws://127.0.0.1:{port}", "message": "ping"})
 
     assert asyncio.run(scenario()) == "echo:ping"
+
+
+@pytest.mark.parametrize("relative", [False, True])
+def test_redirect_does_not_contact_destination(monkeypatch, relative):
+    pytest.importorskip("websockets.legacy.client")
+    monkeypatch.setenv("MAVERICK_FETCH_ALLOW_PRIVATE", "1")
+
+    async def scenario():
+        contacted = []
+        attempts = []
+
+        async def target(reader, writer):
+            contacted.append(True)
+            writer.close()
+            await writer.wait_closed()
+
+        target_server = await asyncio.start_server(target, "127.0.0.1", 0)
+        target_port = target_server.sockets[0].getsockname()[1]
+
+        async def redirect(reader, writer):
+            attempts.append(True)
+            await reader.readuntil(b"\r\n\r\n")
+            location = "/other" if relative else f"ws://127.0.0.1:{target_port}/private"
+            writer.write(f"HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Length: 0\r\n\r\n".encode())
+            await writer.drain()
+            writer.close()
+            await writer.wait_closed()
+
+        first_server = await asyncio.start_server(redirect, "127.0.0.1", 0)
+        first_port = first_server.sockets[0].getsockname()[1]
+        try:
+            result = await websocket_tool().fn({"url": f"ws://127.0.0.1:{first_port}/start", "timeout": 1})
+            assert "redirects are not allowed" in result
+            assert not contacted
+            assert len(attempts) == 1
+        finally:
+            first_server.close()
+            target_server.close()
+            await first_server.wait_closed()
+            await target_server.wait_closed()
+
+    asyncio.run(scenario())

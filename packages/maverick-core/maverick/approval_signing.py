@@ -21,10 +21,9 @@ set before the human-approval gate passes. Two properties follow:
     approval of a benign diff cannot be replayed onto a swapped malicious one
     (TOCTOU). Change the payload, and the signature no longer verifies.
 
-Posture: OFF by default and backward-compatible. :func:`signing_enforced`
-returns False unless a deployment configures trusted approver keys (or sets the
-require flag), in which case the boolean is *ignored* and a valid signature is
-mandatory. When enforced, the gate fails **closed**: missing key material, an
+Posture: human-gated promotions require a valid signature from a startup-pinned
+key; a self-settable boolean cannot approve the change. The gate fails **closed**:
+missing key material, an
 absent ``cryptography`` install, or any verification error means "not approved",
 never "approved". Reuses the audit chain's Ed25519 verifier
 (:func:`maverick.audit.signing.verify_ed25519`); no new dependency.
@@ -34,7 +33,6 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -192,7 +190,8 @@ def verify_candidate(candidate: object) -> str | None:
 
 
 def _keys_from_env() -> list[str]:
-    raw = os.environ.get("MAVERICK_APPROVER_KEYS", "")
+    from . import _STARTUP_APPROVER_KEYS
+    raw = _STARTUP_APPROVER_KEYS
     return [k for k in raw.replace(",", " ").split() if k]
 
 
@@ -241,21 +240,18 @@ def _config_approval() -> dict:
 
 def _trusted_approver_keys(cfg: dict) -> list[str]:
     """Resolve trusted keys from one already-validated policy snapshot."""
+    # The process startup environment is the trust root. Config files and key
+    # directories writable by the service identity cannot independently grant
+    # approval authority, even if they can request stricter enforcement.
     keys = list(_keys_from_env())
-    cfg_keys = cfg.get("approver_keys")
-    if isinstance(cfg_keys, list):
-        keys.extend(str(k).strip() for k in cfg_keys if str(k).strip())
-    keys.extend(_keys_from_dir(os.environ.get("MAVERICK_APPROVER_KEYS_DIR")
-                               or cfg.get("approver_keys_dir")))
     return list(dict.fromkeys(k for k in keys if k))
 
 
 def trusted_approver_keys() -> list[str]:
     """The deployment's trusted approver public keys (hex), de-duplicated.
 
-    Sources, unioned: ``MAVERICK_APPROVER_KEYS`` (env, whitespace/comma list),
-    ``[self_improvement] approver_keys`` (config list), and any ``*.pub`` under
-    ``MAVERICK_APPROVER_KEYS_DIR`` / ``[self_improvement] approver_keys_dir``.
+    ``MAVERICK_APPROVER_KEYS`` is supplied by the deployment supervisor. Mutable
+    configuration and directory contents do not establish trust.
     Empty (the default) means no cryptographic approval is configured."""
     cfg = _config_approval()
     return _trusted_approver_keys(cfg)
@@ -266,7 +262,7 @@ def trusted_global_approver_keys() -> list[str]:
 
     Tenant configuration may narrow or opt into model-improvement behavior, but
     it cannot nominate a key that becomes its own promotion trust anchor.
-    Environment and key-directory inputs remain deployment process policy.
+    The startup environment supplies the trust roots.
     """
     from .config import config_source_errors, load_global_config
 
@@ -290,14 +286,15 @@ def trusted_global_approver_keys() -> list[str]:
         and not isinstance(raw.get("require_signed_approval"), bool)
     ):
         raise RuntimeError("global approver trust policy is unavailable or invalid")
+    # Validate legacy configuration, but never allow mutable file contents to
+    # add a key to the trusted startup environment.
+    for raw_key in raw_keys:
+        try:
+            if len(bytes.fromhex(raw_key.strip())) != 32:
+                raise ValueError("invalid key length")
+        except ValueError as exc:
+            raise RuntimeError("global approver trust policy contains a malformed key") from exc
     keys = list(_keys_from_env())
-    keys.extend(value.strip() for value in raw_keys if value.strip())
-    keys.extend(
-        _keys_from_dir(
-            os.environ.get("MAVERICK_APPROVER_KEYS_DIR")
-            or (raw_dir.strip() if isinstance(raw_dir, str) else None),
-        ),
-    )
     normalized: list[str] = []
     for raw_key in keys:
         key = raw_key.strip().lower()
@@ -317,39 +314,9 @@ def trusted_global_approver_keys() -> list[str]:
 
 
 def signing_enforced() -> bool:
-    """Whether a valid approver signature is REQUIRED at human-gated rungs.
-
-    True when trusted approver keys are configured, or when
-    ``MAVERICK_REQUIRE_SIGNED_APPROVAL`` / ``[self_improvement]
-    require_signed_approval`` is set (a strict posture: require signatures even
-    before keys are provisioned -- which then fails closed until they are).
-    False by default, so a deployment that has not opted in keeps the legacy
-    boolean-approval behaviour untouched."""
-    from .config import env_flag
-
-    cfg = _config_approval()
-    keys = _trusted_approver_keys(cfg)
-    env_name = "MAVERICK_REQUIRE_SIGNED_APPROVAL"
-    value = env_flag(env_name)
-    # A configured trust source is enforcement intent even when it currently
-    # yields no usable key (missing/unreadable directory, malformed key bytes).
-    # That condition must lock promotion, not reactivate boolean approval.
-    trust_source_configured = bool(
-        keys
-        or os.environ.get("MAVERICK_APPROVER_KEYS", "").strip()
-        or os.environ.get("MAVERICK_APPROVER_KEYS_DIR", "").strip()
-        or cfg.get("approver_keys")
-        or cfg.get("approver_keys_dir")
-    )
-    if value is not None:
-        # Preserve the documented environment override, except that configured
-        # keys always keep signature verification armed.
-        return value or trust_source_configured
-    if env_name in os.environ:
-        # Present but malformed boolean: uncertainty tightens to enforcement.
-        return True
-    return trust_source_configured or bool(
-        cfg.get("require_signed_approval", False))
+    """Require signatures at human-gated rungs, including before provisioning."""
+    _config_approval()  # Invalid policy must still surface as unavailable.
+    return True
 
 
 __all__ = [

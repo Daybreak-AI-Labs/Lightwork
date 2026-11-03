@@ -273,6 +273,34 @@ def test_fleet_source_is_for_enrolled_external_callers(sources, events):
     assert res.per_source["fleet"] == 1 and res.hits[0].text == "lesson from copilot"
 
 
+def test_external_caller_cannot_recall_unscoped_cortex_sources(sources, events):
+    ext = cortex.Caller(principal="copilot:ops-02", agent_id="ops-02", vendor="copilot", external=True)
+    result = cortex.recall("payment", caller=ext, domain="finance", world=object(),
+                           sources=("skills", "lessons", "record", "fleet"))
+    assert result.per_source["fleet"] == 1
+    assert all(result.per_source[name] == 0 and name in result.denied
+               for name in ("skills", "lessons", "record"))
+
+
+def test_external_cortex_cannot_replace_transport_identity(sources, events):
+    from maverick import fleet_memory
+
+    ext = cortex.Caller(principal="copilot:ops-02", agent_id="ops-02", vendor="copilot", external=True)
+    with fleet_memory.bind_caller("different-agent"):
+        result = cortex.recall("payment", caller=ext, domain="finance", world=object(), sources=("fleet",))
+        ok, reason = cortex.deposit("lesson", caller=ext, domain="finance", kind="fleet")
+    assert not result.hits and "fleet" in result.denied
+    assert not ok and "identity" in reason
+
+
+def test_bound_external_identity_cannot_claim_internal_cortex_access(sources, events):
+    from maverick import fleet_memory
+
+    with fleet_memory.bind_caller("outside-agent"):
+        result = cortex.recall("payment", caller=cortex.Caller(), world=object(), sources=("record",))
+    assert not result.hits and "record" in result.denied
+
+
 def test_external_caller_is_gated_before_any_source_is_touched(sources, events, monkeypatch):
     from maverick import agent_trust, knowledge_admin
     monkeypatch.setattr(agent_trust, "decide_memory_access",

@@ -12,6 +12,11 @@ dashboard package. Use the standard container image when you need the complete
 eight-package release cohort, provider runtime, setup wizard, channels, evolve,
 MCP, or knowledge services.
 
+The runtime uses uid and gid 1000, with state in `/home/maverick/.maverick`.
+Mounted workspace and state directories must be writable by that user. Migrate
+any state from the former `/root/.maverick` location explicitly. Custom base
+images must leave uid and gid 1000 available.
+
 ```bash
 # One time per host: register the QEMU handlers used for cross-builds.
 docker run --privileged --rm tonistiigi/binfmt --install all

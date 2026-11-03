@@ -91,14 +91,18 @@ async def test_require_human_runs_with_grant(monkeypatch, tmp_path):
     # A real human approval (here, a granted consent decision) lets the
     # require-human action proceed.
     import maverick.safety.consent as consent
-    from maverick.safety.consent import ConsentDecision
+    from contextlib import nullcontext
+    seen = []
     monkeypatch.setattr(
-        consent, "require_consent",
-        lambda *a, **k: ConsentDecision(True, "test", "high", 0.0),
+        consent, "require_operation_consent",
+        lambda *a, **k: seen.append(k) or object(),
     )
+    monkeypatch.setattr(consent, "consume_operation_consent", lambda permit: nullcontext())
     _gov(monkeypatch, {"require_human_actions": ["ping"]})
     out = await _agent(tmp_path)._run_tool("ping", {})
     assert "pong" in out
+    assert seen[0]["parameters"] == {}
+    assert seen[0]["require_fresh_person"] is True
 
 
 @pytest.mark.asyncio
@@ -197,16 +201,15 @@ async def test_require_fresh_human_approval_bypasses_ledger(monkeypatch, tmp_pat
 
 
 @pytest.mark.asyncio
-async def test_ledger_grant_satisfies_gate_by_default(monkeypatch, tmp_path):
-    # Default (flag off): a persistent ledger grant satisfies the gate, the
-    # documented backwards-compatible behavior.
+async def test_ledger_grant_never_satisfies_require_human(monkeypatch, tmp_path):
+    # A standing grant cannot stand in for a person even with the old flag off.
     import maverick.safety.consent as consent
     monkeypatch.setattr(consent, "CONSENT_LEDGER_PATH", tmp_path / "consent.ledger")
     consent.grant_persistent("ping")
     monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-approve")
     _gov(monkeypatch, {"require_human_actions": ["ping"]})  # flag defaults False
     out = await _agent(tmp_path)._run_tool("ping", {})
-    assert "pong" in out
+    assert "requires human approval" in out and "pong" not in out
 
 
 def test_consult_ledger_false_ignores_prior_grant(monkeypatch, tmp_path):
@@ -251,16 +254,23 @@ def test_scopeless_persistent_grant_can_be_revoked(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_require_human_above_amount_gates_through_chokepoint(monkeypatch, tmp_path):
-    # The finance dollar-tier gate must fire through the agent chokepoint: a
-    # tool call carrying an `amount` over the policy threshold needs human
-    # approval, not a silent auto-approve.
+    # The known Shopify refund contract carries cents, not a generic amount.
     monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-approve")
-    _gov(monkeypatch, {"require_human_above": {"ping": 5000}})
-    over = await _agent(tmp_path)._run_tool("ping", {"amount": 6000})
+    _gov(monkeypatch, {"require_human_above": {"shopify": 5000}})
+    agent = _agent(tmp_path)
+    agent.tools.register(Tool(name="shopify", description="test refund",
+                              fn=lambda args: "pong", input_schema={"type": "object"}))
+    over = await agent._run_tool("shopify", {"op": "refund_create", "amount_cents": 600000})
     assert "requires human approval" in over and "pong" not in over
-    # Under the threshold -> the tool runs.
-    under = await _agent(tmp_path)._run_tool("ping", {"amount": 4000})
+    under = await agent._run_tool("shopify", {"op": "refund_create", "amount_cents": 400000})
     assert "pong" in under
+
+
+@pytest.mark.asyncio
+async def test_generic_connector_cannot_smuggle_nested_value(monkeypatch, tmp_path):
+    _gov(monkeypatch, {"deny_above": {"*": 100}})
+    out = await _agent(tmp_path)._run_tool("ping", {"amount": 1, "body": {"amount": 100000}})
+    assert "DENIED by org policy" in out and "pong" not in out
 
 
 @pytest.mark.asyncio

@@ -444,6 +444,8 @@ def test_audit_retention_integrity_bounds_and_public_rate_limit(
     limited_response = public_client.get(f"{PUBLIC}/{link['link_id']}")
     assert limited_response.status_code == 429
     assert limited_response.headers["retry-after"] == "60"
+    # Changing the link ID cannot reset a client's anonymous request budget.
+    assert public_client.get(f"{PUBLIC}/another-link").status_code == 429
 
     with sqlite3.connect(tmp_path / "registry.sqlite3") as connection:
         row = connection.execute(

@@ -10,14 +10,28 @@ MCPClient. This is how Lightwork consumes the wider MCP ecosystem.
 """
 from __future__ import annotations
 
+import contextlib
 import os
 from collections.abc import Awaitable, Callable
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any
 
 from .. import killswitch
 from ..budget import BudgetExceeded, UsageAccountingError
 from ..config import load_config
+
+# Host scope is trusted execution context, never a model-supplied argument.
+_TOOL_HOST_SCOPE: ContextVar[tuple[str, ...] | None] = ContextVar("tool_host_scope", default=None)
+
+
+@contextlib.contextmanager
+def bind_tool_host_scope(hosts: tuple[str, ...] | None):
+    token = _TOOL_HOST_SCOPE.set(hosts)
+    try:
+        yield
+    finally:
+        _TOOL_HOST_SCOPE.reset(token)
 
 
 def _env_true(name: str) -> bool:
@@ -103,13 +117,14 @@ _DANGEROUS_MEDIA_FLAGS = (
 
 
 def safe_media_args(raw: Any) -> list[str]:
-    """Filter a model-supplied freeform args[] list for media tools.
+    """Legacy filter for extensions that accept freeform media arguments.
 
     By default DROP dangerous flags (input/filter/template injection that
     bypasses the tool's path confinement -- e.g. ``pandoc --lua-filter=x.lua``
     = arbitrary code, ``ffmpeg -i /etc/passwd`` = arbitrary file read). An
     operator who genuinely needs raw passthrough can opt in with
     ``MAVERICK_ALLOW_RAW_MEDIA_ARGS=1`` (then the list passes verbatim).
+    Built-in media tools use their own closed option sets instead.
     """
     items = [str(a) for a in (raw or [])]
     from ..env_setting import env_or_config
@@ -581,6 +596,7 @@ class ToolRegistry:
             (name, args) for name, args in predictions
             if self._tool_access_error(name) is None
             and _ambient_credential_denial(name, self._principal) is None
+            and not any(isinstance(key, str) and key.startswith("_capability_") for key in args)
         ]
         return speculate(self, allowed, namespace=self.cache_namespace(),
                          principal=self._principal, budget_guard=budget_guard)
@@ -611,6 +627,13 @@ class ToolRegistry:
             )
 
     async def run(self, name: str, args: dict[str, Any]) -> str:
+        # Flow actions and library callers can reach the registry without the
+        # agent. Strip all caller-provided internal capability metadata here.
+        args = {key: value for key, value in args.items()
+                if not (isinstance(key, str) and key.startswith("_capability_"))}
+        hosts = _TOOL_HOST_SCOPE.get()
+        if hosts:
+            args["_capability_allow_hosts"] = hosts
         access_error = self._tool_access_error(name)
         if access_error:
             return access_error
@@ -1215,7 +1238,7 @@ def base_registry(
     from .control_tools import find_controls_tool
     reg.register(find_controls_tool())
     reg.register(read_pdf(sandbox))
-    reg.register(view_image())
+    reg.register(view_image(sandbox, budget=budget))
     reg.register(view_video(sandbox, budget=budget))
     reg.register(dep_graph(sandbox))
     reg.register(ast_edit(sandbox))
@@ -1422,7 +1445,7 @@ def base_registry(
     # template_generator / web_archive / anki: registered once above
     # (parallel-built on both branches; unified at merge).
     reg.register(image_content_classifier(sandbox))
-    reg.register(lsp_bridge())
+    reg.register(lsp_bridge(sandbox))
     reg.register(oauth_helper())
     reg.register(github_search())
     reg.register(governance_explainer())
@@ -1663,6 +1686,22 @@ def base_registry(
         # fresh-human governed transaction boundary. Done last so it wraps the
         # final tool objects; assembly fails closed if the boundary cannot load.
         apply_governed_connectors(reg, goal_id=goal_id)
+
+    # Host pathlib tools cannot safely interpret an SSH workdir: it denotes a
+    # path on another machine. Keep remote shell available, and remove known
+    # local workspace tools after optional/plugin registration has completed.
+    from ..sandbox.ssh import SSHBackend
+    if isinstance(sandbox, SSHBackend):
+        from ..agent import _FILE_TOOL_POLICIES
+        host_path_tools = set(_FILE_TOOL_POLICIES) | {
+            "apply_patch", "repo_map", "dep_graph", "preview_diff", "file_watcher",
+            "cross_repo_deps", "semantic_code_search", "pandas_query", "lsp_bridge",
+            "view_video", "model3d_inspect", "office_convert", "image_edit",
+            "container_build", "workspace_snapshot", "html_to_app", "notebook_exec",
+            "read_pdf", "audio_understanding", "embedded_device", "a11y",
+        }
+        for name in host_path_tools:
+            reg._tools.pop(name, None)
 
     return reg
 

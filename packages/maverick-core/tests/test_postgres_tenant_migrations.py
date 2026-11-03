@@ -388,11 +388,10 @@ def test_projects_migration_adds_table_and_goal_fk():
     assert "ALTER TABLE goals ADD COLUMN IF NOT EXISTS project_id INTEGER" in joined
 
 
-def test_tenant_scope_noop_without_active_tenant(monkeypatch):
+def test_tenant_scope_limits_unbound_reads_to_legacy_rows(monkeypatch):
     monkeypatch.setattr(pg, "_active_tenant", lambda: None)
-    frag, params = pg._tenant_scope()
-    assert frag == ""
-    assert params == []
+    assert pg._tenant_scope() == ("tenant_id IS NULL", [])
+    assert pg._tenant_scope("g.tenant_id") == ("g.tenant_id IS NULL", [])
 
 
 def test_erasure_scope_never_turns_unbound_admin_view_into_global_delete(

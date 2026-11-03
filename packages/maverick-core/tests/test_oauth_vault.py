@@ -108,7 +108,11 @@ class TestExpiryAndRefresh:
         monkeypatch.setattr(oauth_helper, "_post_form", respond)
         v = _vault()
         v.put("p", {"access_token": "stale", "refresh_token": "old-refresh", "expires_at": time.time() - 10})
-        config = {"provider": "p", "token_url": "https://fixture.invalid/token", "client_id": "fixture"}
+        from maverick import oauth_providers
+        oauth_providers.register(oauth_providers.OAuthProvider(
+            "p", "https://fixture.invalid/auth", "https://fixture.invalid/token"))
+        monkeypatch.setenv("P_OAUTH_CLIENT_ID", "fixture")
+        config = {"provider": "p"}
         with pytest.raises(OAuthRefreshError, match="reconnect"):
             automation_events._oauth_bearer(config)
         assert v.get("p")["access_token"] == "stale"

@@ -2956,17 +2956,9 @@ def runs(ctx, as_json: bool, limit: int, goal_id) -> None:
 @main.command()
 @click.option("--host", default="127.0.0.1")
 @click.option("--port", default=8765, type=int)
-@click.option("--token", default=None,
-              help="Bearer token for non-/healthz requests.")
 @click.option("--recovery-mode", is_flag=True, help="Local isolated recovery: no normal jobs or schedulers.")
-def dashboard(host: str, port: int, token, recovery_mode: bool = False) -> None:
+def dashboard(host: str, port: int, recovery_mode: bool = False) -> None:
     """Start the local web dashboard + REST API."""
-    if token:
-        os.environ["MAVERICK_DASHBOARD_TOKEN"] = token
-        click.echo(click.style(
-            "Bearer auth enabled. Authenticate with the Authorization: Bearer header.",
-            fg="yellow",
-        ))
     # Mirror the module entrypoint's safety contract (app.main): refuse to bind a
     # non-loopback host without a token, so this CLI path can't expose an
     # unauthenticated admin surface even though the middleware would also 401.
@@ -2975,7 +2967,7 @@ def dashboard(host: str, port: int, token, recovery_mode: bool = False) -> None:
     ):
         click.echo(
             "Refusing to bind dashboard to a non-loopback host without "
-            "MAVERICK_DASHBOARD_TOKEN set (pass --token or set the env var).",
+            "MAVERICK_DASHBOARD_TOKEN set in the server environment.",
             err=True,
         )
         sys.exit(2)

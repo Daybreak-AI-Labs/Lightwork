@@ -1,5 +1,9 @@
 # Bounded social channel polling
 
+Threads and Mattermost authorize senders using their stable provider user IDs,
+not usernames. Replace any existing username entries in their `allowed_user_ids`
+configuration with provider IDs before upgrading; usernames may be reassigned.
+
 Mastodon, Bluesky and Threads persist each authorized input in the channel
 inbox before advancing a page checkpoint. A process restart or rate limit
 resumes the last covered page boundary. Repeating an incompletely admitted

@@ -652,16 +652,25 @@ class TestOpenAPI:
         resp = client.get("/docs")
         assert resp.status_code == 200
 
-    def test_openapi_exempt_from_bearer_auth(self, monkeypatch):
-        """OpenAPI tooling needs /openapi.json without a token."""
+    def test_openapi_requires_bearer_auth(self, monkeypatch):
         monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "s3cr3t")
         resp = client.get("/openapi.json")
-        assert resp.status_code == 200
+        assert resp.status_code == 401
 
-    def test_docs_exempt_from_bearer_auth(self, monkeypatch):
+    def test_docs_require_bearer_auth(self, monkeypatch):
         monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "s3cr3t")
         resp = client.get("/docs")
-        assert resp.status_code == 200
+        assert resp.status_code == 401
+
+    @pytest.mark.parametrize("path", [
+        "/openapi.json", "/docs", "/redoc", "/docs/oauth2-redirect",
+        "/static/swagger-ui-5.33.1-bundle.js", "/static/swagger-ui-5.33.1.css",
+    ])
+    def test_documentation_requires_valid_bearer(self, monkeypatch, path):
+        monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "s3cr3t")
+        assert client.get(path).status_code == 401
+        assert client.get(path, headers={"Authorization": "Bearer invalid"}).status_code == 401
+        assert client.get(path, headers={"Authorization": "Bearer s3cr3t"}).status_code == 200
 
     def test_api_endpoint_requires_bearer_when_token_set(self, monkeypatch):
         """/api/v1 was never tested with auth.
@@ -705,17 +714,12 @@ class TestOpenAPI:
         assert resp.status_code == 200
         assert resp.json() == {"status": "ok"}
 
-    def test_healthz_deep_probe_returns_checks(self, monkeypatch):
-        """Deep healthz probes DB, LLM key, runner."""
+    def test_healthz_deep_probe_returns_status_only(self, monkeypatch):
+        """Deep healthz checks remain private on the public endpoint."""
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
         resp = client.get("/healthz")
-        # Either ok or degraded -- the important property is that the
-        # response includes per-check status.
         body = resp.json()
-        assert "checks" in body
-        assert "db" in body["checks"]
-        assert "llm_key" in body["checks"]
-        assert "runner" in body["checks"]
+        assert set(body) == {"status"}
 
     def test_healthz_503_when_no_llm_key(self, monkeypatch):
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
@@ -723,7 +727,7 @@ class TestOpenAPI:
         resp = client.get("/healthz")
         assert resp.status_code == 503
         assert resp.json()["status"] == "degraded"
-        assert "missing" in resp.json()["checks"]["llm_key"]
+        assert set(resp.json()) == {"status"}
 
 
 class TestMetrics:

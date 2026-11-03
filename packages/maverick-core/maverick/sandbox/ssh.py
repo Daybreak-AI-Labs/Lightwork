@@ -3,6 +3,8 @@
 Executes commands on a remote host via the system ``ssh`` binary. No
 Python dep (paramiko) -- we just shell out to ssh so users get the
 same keys / config / agents they already have set up.
+Remote hosts must provide GNU ``timeout``. Its process-group deadline does not
+contain commands that deliberately detach; use remote OS isolation for those.
 
 Config::
 
@@ -16,6 +18,7 @@ Config::
 """
 from __future__ import annotations
 
+import math
 import os
 import shlex
 import subprocess
@@ -120,13 +123,18 @@ class SSHBackend:
 
     def exec(self, cmd: str, timeout: float | None = None) -> ExecResult:
         effective = self.timeout if timeout is None else timeout
+        if not math.isfinite(effective) or effective <= 0:
+            return ExecResult(stdout="", stderr="Invalid SSH command timeout", exit_code=1)
         # Run cmd as a single quoted argument inside ``sh -c`` so a leading
         # ``;`` / ``&&`` / ``||`` / unbalanced quote can't escape the ``cd``
         # guard and run outside the workspace. The workdir itself is quoted too.
         wd = self._quote_workdir()
-        remote = (
-            f"mkdir -p {wd} && cd {wd} && sh -c {shlex.quote(cmd)}"
-        )
+        inner = f"mkdir -p {wd} && cd {wd} && sh -c {shlex.quote(cmd)}"
+        # A local ssh timeout only kills the client. GNU timeout also enforces
+        # a deadline remotely, even after the connection disappears. Requiring
+        # it fails closed on hosts where it is unavailable. Processes that
+        # deliberately create a new session still need remote OS isolation.
+        remote = f"timeout --signal=KILL {max(effective, 0.001):.6f}s sh -c {shlex.quote(inner)}"
         # Env hygiene: ssh forwards local env to the remote shell only via
         # SendEnv/SetEnv, neither of which we set -- so the remote never
         # inherits host secrets. We additionally scrub the LOCAL ssh client's

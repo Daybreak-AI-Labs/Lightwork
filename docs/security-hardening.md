@@ -1,5 +1,20 @@
 # Security hardening (operator guide)
 
+When a capability restricts workspace paths, tools that cannot enforce those
+restrictions—including shell execution, workspace-wide searches and language
+servers—are refused. Use a dedicated sandbox or an appropriately scoped tool
+instead. Path checks alone do not establish an OS isolation boundary.
+
+When a capability restricts hosts, only reviewed local tools and network tools
+that enforce the grant are admitted. Unclassified/custom tools and built-ins
+with unscoped network paths are refused, even if some of their operations are
+local. Additions require an explicit security review before they are available
+under a host-restricted grant.
+
+The deferred `find_tools` discovery tool is also unavailable with restricted
+host or path grants until its registry identity can be authenticated. Configure
+the required reviewed tools directly for those agents.
+
 Lightwork ships **defense in depth**. The protective controls that don't break
 the happy path are now **on by default** ([Secure by default](#secure-by-default)
 — at-rest encryption, audit signing, fail-closed consent for high/critical
@@ -134,8 +149,9 @@ security posture by name:
     available container backend (docker → podman) instead of running
     `shell=True` on the host; if no container runtime is installed it fails
     closed rather than running unsandboxed (`[sandbox] backend` / `require_container`).
-  - **Plugin isolation = subprocess.** Third-party plugins run out-of-process by
-    default instead of in-process (`[plugins] isolation`).
+  - **Plugin tool calls = subprocess.** The configured proxy can move tool
+    calls out-of-process, but plugin discovery, import, and factories still
+    run in the host process; install only trusted plugins (`[plugins] isolation`).
   - **Plugin lock = enforce.** The version/content lockfile is enforced (a no-op
     until you run `maverick plugin lock`, then drifted/unpinned plugins are
     refused) (`[plugins] lock_policy`).
@@ -615,13 +631,20 @@ that, the browser is authenticated by the cookie — no bearer header needed.
 > login flow out of Lightwork entirely. Reach for this built-in flow only when
 > running a proxy isn't practical.
 
-**Off by default, fail-closed.** The `/auth/login`, `/auth/callback`, and
-`/auth/logout` routes are inert (they return `404`) unless the flow is **fully
-configured**; an unconfigured deployment behaves exactly as before, and the
+**Off by default, fail-closed.** The `/auth/login` and `/auth/callback` routes
+are inert (they return `404`) unless the flow is **fully configured**; an
+unconfigured deployment behaves exactly as before, and the
 bearer gate is untouched. "Fully configured" means OIDC is enabled **and**
 `client_id` **and** `session_secret` are set **and** the authorization/token
 endpoints are reachable (either an `issuer` for discovery, or both endpoints set
 explicitly).
+
+`GET /auth/logout` shows a confirmation; only a same-origin `POST` ends the
+browser session or, with `?all=1`, revokes all sessions. Local and SAML sessions
+also use this sign-out route. Behind a TLS proxy, configure the public HTTPS
+origin with `MAVERICK_PUBLIC_URL` or `[dashboard] public_url` so the origin
+check matches the browser's address. Open the dashboard at that canonical
+origin; other host aliases cannot submit the sign-out form.
 
 **config.toml** (extends the same `[auth.oidc]` table)
 

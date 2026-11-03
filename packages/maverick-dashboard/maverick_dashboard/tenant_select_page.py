@@ -196,9 +196,9 @@ def create_tenant_select_page_router(templates: Jinja2Templates) -> APIRouter:
 
     @router.get(PAGE_PATH, response_class=HTMLResponse, include_in_schema=False)
     async def workspace_tenant(request: Request) -> HTMLResponse:
-        from .auth import require_permission
+        from .auth import require_workspace_picker_access
 
-        require_permission(request, "view")
+        require_workspace_picker_access(request)
         return templates.TemplateResponse(
             request,
             "tenant_select.html",
