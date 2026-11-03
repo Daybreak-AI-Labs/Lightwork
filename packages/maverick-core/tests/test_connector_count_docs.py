@@ -29,7 +29,7 @@ DOCS_STATING_THE_COUNT = (
     "docs/FEATURES.md",
     "docs/handbook.md",
     "docs/index.md",
-    "docs/enterprise/diligence.md",
+    "docs/enterprise/security-evidence-map.md",
 )
 
 # Matches "2,877 write-capable" and "**2,877 write-capable" alike, with or
@@ -66,12 +66,11 @@ def test_doc_connector_count_matches_the_registry(relpath: str) -> None:
 
 
 def test_no_doc_still_carries_the_stale_214_figure() -> None:
-    """Belt and braces: catch the old number anywhere, including docs/research/.
+    """Belt and braces: catch the old number in any Markdown file.
 
-    The research and competitive-analysis docs are not in DOCS_STATING_THE_COUNT
-    because they are point-in-time write-ups we do not want to churn on every
-    connector PR -- but 214 specifically was wrong when written, so it should
-    never reappear anywhere.
+    Only the files in DOCS_STATING_THE_COUNT are checked against the registry
+    total, but 214 specifically was never correct, so it should not reappear
+    anywhere in the tree.
     """
     stale = []
     for path in REPO_ROOT.glob("**/*.md"):

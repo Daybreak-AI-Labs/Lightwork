@@ -150,7 +150,7 @@ nav:
   - Architecture:
       - Governed agent control plane: enterprise/architecture.md
       - Security & compliance overview: enterprise/security-overview.md
-      - Security evidence map: enterprise/diligence.md
+      - Security evidence map: enterprise/security-evidence-map.md
       - Interface contracts: contracts/README.md
   - Integrations:
       - Observability integrations: integrations/observability-partners.md

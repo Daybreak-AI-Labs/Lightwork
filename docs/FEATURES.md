@@ -3205,7 +3205,7 @@ execution policy; admission rejects a caller deadline shorter than that fixed
 cap before execution. See [legacy sandbox policy](operations/legacy-sandbox-policy.md).
 Docker/Podman cleanup checks exit status, retains unresolved owned container
 identities, and shares one total cleanup deadline; see
-[runtime integrity and bounded work](operations/refactor-runtime-safety.md).
+[runtime integrity and bounded work](operations/runtime-integrity.md).
 **gVisor** is offered as a backend (`backend = "gvisor"`): Docker with the
 `runsc` runtime (`--runtime=runsc`), interposing a userspace application kernel
 between a possibly prompt-injected agent and the host — stronger isolation than
