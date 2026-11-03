@@ -1676,6 +1676,15 @@ class PostgresWorldModel:
         now = time.time()
         tenant = _active_tenant()
         with self._tx() as cur:
+            for table, ref_id in (("goals", parent_id), ("projects", project_id)):
+                if ref_id is not None:
+                    ref_scope, ref_params = _mutation_tenant_scope()
+                    cur.execute(
+                        f"SELECT id FROM {table} WHERE id=%s AND " + ref_scope + " FOR SHARE",
+                        (int(ref_id), *ref_params),
+                    )
+                    if cur.fetchone() is None:
+                        raise ValueError(f"unknown {table} reference for the active tenant")
             cur.execute(
                 "INSERT INTO goals(parent_id, title, description, status, "
                 "created_at, updated_at, owner, execution_principal, domain, "
@@ -1859,7 +1868,7 @@ class PostgresWorldModel:
         """Replace a running goal's result with the answer written so far;
         matches the SQLite backend (non-terminal rows only, no sign-off effect)."""
         now = time.time()
-        frag, fparams = _tenant_scope()
+        frag, fparams = _mutation_tenant_scope()
         sql = (
             "UPDATE goals SET result=%s, updated_at=GREATEST(updated_at + 0.000001, %s) "
             "WHERE id=%s AND status NOT IN "
@@ -2007,7 +2016,7 @@ class PostgresWorldModel:
         primitive, mirroring the SQLite semantics: only in-flight rows
         qualify, and the owner predicate rides in the same statement."""
         now = time.time()
-        frag, fparams = _tenant_scope()
+        frag, fparams = _mutation_tenant_scope()
         sql = ("UPDATE goals SET updated_at=GREATEST(updated_at + 0.000001, %s) "
                "WHERE id=%s AND status IN ('active', 'pending')")
         params: list = [now, int(goal_id)]
@@ -2028,7 +2037,7 @@ class PostgresWorldModel:
 
     def set_goal_domain(self, goal_id: int, domain: str) -> None:
         """Record the department (domain pack) a goal runs as (plain text)."""
-        frag, fparams = _tenant_scope()
+        frag, fparams = _mutation_tenant_scope()
         sql = "UPDATE goals SET domain=%s WHERE id=%s"
         params: list = [domain or "", goal_id]
         if frag:
@@ -2040,7 +2049,7 @@ class PostgresWorldModel:
     def set_goal_title(self, goal_id: int, title: str) -> None:
         """Rename a goal, sealing the title column like ``create_goal`` does."""
         now = time.time()
-        frag, fparams = _tenant_scope()
+        frag, fparams = _mutation_tenant_scope()
         sql = "UPDATE goals SET title=%s, updated_at=GREATEST(updated_at + 0.000001, %s) WHERE id=%s"
         params: list = [_seal(title), now, goal_id]
         if frag:
@@ -2052,14 +2061,25 @@ class PostgresWorldModel:
     def set_goal_parent(self, goal_id: int, parent_id: int | None) -> None:
         """Move a goal under a new parent (or to the root with ``None``)."""
         now = time.time()
-        frag, fparams = _tenant_scope()
+        frag, fparams = _mutation_tenant_scope()
         sql = "UPDATE goals SET parent_id=%s, updated_at=GREATEST(updated_at + 0.000001, %s) WHERE id=%s"
         params: list = [
             int(parent_id) if parent_id is not None else None, now, goal_id]
         if frag:
             sql += " AND " + frag
             params += fparams
+        if parent_id is not None:
+            sql += " AND EXISTS (SELECT 1 FROM goals parent WHERE parent.id=%s AND "
+            # Qualify the column to bind the subquery to the candidate parent.
+            parent_scope, parent_params = _mutation_tenant_scope("parent.tenant_id")
+            sql += parent_scope + ")"
+            params.extend([int(parent_id), *parent_params])
         with self._tx() as cur:
+            if parent_id is not None:
+                cur.execute("SELECT id FROM goals WHERE id=%s AND " + frag + " FOR SHARE",
+                            tuple([int(parent_id), *fparams]))
+                if cur.fetchone() is None:
+                    return
             cur.execute(sql, tuple(params))
 
     def goal_parent_pairs(self) -> list[tuple[int, int | None]]:
@@ -2321,7 +2341,7 @@ class PostgresWorldModel:
 
     def set_goal_project(self, goal_id: int, project_id: int | None) -> None:
         """File a goal under a project (or clear it with ``None``)."""
-        frag, fparams = _tenant_scope()
+        frag, fparams = _mutation_tenant_scope()
         sql = "UPDATE goals SET project_id=%s, updated_at=GREATEST(updated_at + 0.000001, %s) WHERE id=%s"
         params: list = [
             int(project_id) if project_id is not None else None,
@@ -2330,7 +2350,17 @@ class PostgresWorldModel:
         if frag:
             sql += " AND " + frag
             params += fparams
+        if project_id is not None:
+            project_scope, project_params = _mutation_tenant_scope("project.tenant_id")
+            sql += " AND EXISTS (SELECT 1 FROM projects project WHERE project.id=%s AND "
+            sql += project_scope + ")"
+            params.extend([int(project_id), *project_params])
         with self._tx() as cur:
+            if project_id is not None:
+                cur.execute("SELECT id FROM projects WHERE id=%s AND " + frag + " FOR SHARE",
+                            tuple([int(project_id), *fparams]))
+                if cur.fetchone() is None:
+                    return
             cur.execute(sql, tuple(params))
 
     def project_status_counts(self, project_id: int) -> dict[str, int]:
@@ -2418,9 +2448,8 @@ class PostgresWorldModel:
             version = int(cur.fetchone()[0]) + 1
             # Gate the write on the parent goal being in the active tenant (see
             # start_episode) so a write against another tenant's goal_id can't
-            # plant a deliverable. Single-tenant (empty frag) keeps the direct
-            # insert.
-            frag, fparams = _tenant_scope()
+            # plant a deliverable. Legacy rows require an unbound caller.
+            frag, fparams = _mutation_tenant_scope()
             if frag:
                 cur.execute(
                     "INSERT INTO artifacts(goal_id, kind, title, content, version, "
@@ -2495,8 +2524,8 @@ class PostgresWorldModel:
         exp = now + float(ttl_seconds) if ttl_seconds else None
         # Gate the write on the parent goal being in the active tenant (see
         # start_episode): a tenant must not mint a share link over another
-        # tenant's goal_id. Single-tenant (empty frag) keeps the direct insert.
-        frag, fparams = _tenant_scope()
+        # tenant's goal_id. Legacy rows require an unbound caller.
+        frag, fparams = _mutation_tenant_scope()
         with self._tx() as cur:
             if frag:
                 cur.execute(
@@ -2574,8 +2603,8 @@ class PostgresWorldModel:
 
         Both branches are scoped to the active tenant's goals so a tenant can't
         revoke (deny access to) another tenant's link by guessing a sequential
-        ``link_id``. Single-tenant (empty frag) keeps the direct update."""
-        frag, fparams = _tenant_scope("g.tenant_id")
+        ``link_id``. Legacy rows require an unbound caller."""
+        frag, fparams = _mutation_tenant_scope("g.tenant_id")
         tcond = ""
         if frag:
             tcond = (" AND goal_id IN (SELECT g.id FROM goals g WHERE " + frag + ")")
@@ -2608,7 +2637,7 @@ class PostgresWorldModel:
         idempotent retry."""
         if decision not in {"approved", "rejected"}:
             raise ValueError("decision must be 'approved' or 'rejected'")
-        frag, fparams = _tenant_scope()
+        frag, fparams = _mutation_tenant_scope()
         with (self._tx() if _cursor is None else nullcontext(_cursor)) as cur:
             check_sql = (
                 "SELECT status, updated_at FROM goals WHERE id=%s"
@@ -2688,7 +2717,7 @@ class PostgresWorldModel:
         Gated on the parent goal being in the active tenant (see start_episode)
         so a write against another tenant's goal_id can't land. Single-tenant
         (empty frag) keeps the direct insert."""
-        frag, fparams = _tenant_scope()
+        frag, fparams = _mutation_tenant_scope()
         with self._tx() as cur:
             if frag:
                 cur.execute(
@@ -3109,7 +3138,7 @@ class PostgresWorldModel:
                 raise ValueError("exact orphan reclaim requires a configured tenant")
             frag, fparams = "tenant_id = %s", [tenant]
         else:
-            frag, fparams = _tenant_scope()
+            frag, fparams = _mutation_tenant_scope()
         from ..crypto_at_rest import at_rest_enabled
         if not at_rest_enabled():
             sql = (
@@ -3193,8 +3222,8 @@ class PostgresWorldModel:
         # tenancy through their goal/conversation FK, and reads enforce it via a
         # JOIN. The writes must too: gate the insert on the parent goal being in
         # the active tenant so a write against another tenant's goal_id can't
-        # land. Single-tenant (empty frag) keeps the original direct insert.
-        frag, fparams = _tenant_scope()
+        # land. Legacy rows require an unbound caller.
+        frag, fparams = _mutation_tenant_scope()
         with self._tx() as cur:
             if frag:
                 cur.execute(
@@ -3216,9 +3245,8 @@ class PostgresWorldModel:
 
     def _episode_tenant_cond(self) -> tuple[str, list]:
         """SQL fragment + params restricting an episode UPDATE (keyed by
-        episode_id) to episodes whose parent goal is in the active tenant.
-        Empty in single-tenant mode."""
-        frag, fparams = _tenant_scope()
+        episode_id) to episodes whose parent goal is owned by the active scope."""
+        frag, fparams = _mutation_tenant_scope()
         if not frag:
             return "", []
         return (" AND goal_id IN (SELECT id FROM goals WHERE " + frag + ")", fparams)
@@ -3418,7 +3446,7 @@ class PostgresWorldModel:
 
     def append_event(self, goal_id: int, agent: str, kind: str, content: str) -> int:
         # Gate on the parent goal being in the active tenant (see start_episode).
-        frag, fparams = _tenant_scope()
+        frag, fparams = _mutation_tenant_scope()
         with self._tx() as cur:
             if frag:
                 cur.execute(
@@ -4035,7 +4063,7 @@ class PostgresWorldModel:
         # When attached to a goal, gate on that goal being in the active tenant
         # (matches `answer`, which scopes by the parent goal). A goal-less
         # question has no parent to inherit from, so it inserts directly.
-        frag, fparams = _tenant_scope()
+        frag, fparams = _mutation_tenant_scope()
         with self._tx() as cur:
             if frag and goal_id is not None:
                 cur.execute(
@@ -4067,7 +4095,7 @@ class PostgresWorldModel:
 
         Scoped through the parent goal's tenant so a tenant cannot answer
         (overwrite) another tenant's question by id (no-op single-tenant)."""
-        frag, fparams = _tenant_scope("g.tenant_id")
+        frag, fparams = _mutation_tenant_scope("g.tenant_id")
         sql = "UPDATE questions SET answer = %s, answered_at = %s WHERE id = %s"
         params: list = [_seal(answer), time.time(), question_id]
         if expected_owner is not None:
@@ -4126,7 +4154,7 @@ class PostgresWorldModel:
         conversation_id: int, owner: str, execution_principal: str,
     ) -> bool:
         """Claim one open question under its owner, thread, and tenant."""
-        frag, fparams = _tenant_scope("g.tenant_id")
+        frag, fparams = _mutation_tenant_scope("g.tenant_id")
         with self._tx() as cur:
             cur.execute(
                 "UPDATE questions SET answer = %s, answered_at = %s "
@@ -4184,13 +4212,16 @@ class PostgresWorldModel:
         from ..world_model import APPROVAL_UNDO_OPEN
 
         context_goal = current_goal_id()
-        frag, fparams = _tenant_scope()
+        frag, fparams = _mutation_tenant_scope()
         goal_sql = "SELECT id, domain FROM goals WHERE id=%s"
         if frag:
             goal_sql += " AND " + frag
+        goal_sql += " FOR SHARE"
         with self._tx() as cur:
             cur.execute(goal_sql, tuple([context_goal, *fparams]))
             goal = cur.fetchone()
+            if context_goal is not None and goal is None:
+                raise ValueError("approval goal is unavailable for the active tenant")
             cur.execute(
                 "INSERT INTO approvals(action, risk, scope, detail, provenance, status, "
                 "requested_at, tenant_id, approvals_required, requested_by, goal_id, department, "
@@ -4313,7 +4344,7 @@ class PostgresWorldModel:
         """The waiting task is about to act on this decision (mirrors SQLite; see there)."""
         from ..world_model import APPROVAL_UNDO_OPEN, APPROVAL_UNDO_SETTLED
 
-        approval_scope, approval_params = _tenant_scope()
+        approval_scope, approval_params = _mutation_tenant_scope()
         sql = ("UPDATE approvals SET undo_hold = %s WHERE id = %s AND status <> 'pending' "
                "AND undo_hold = %s AND decided_at <= %s")
         values: list = [APPROVAL_UNDO_SETTLED, int(approval_id), APPROVAL_UNDO_OPEN, float(decided_before)]
@@ -4340,7 +4371,7 @@ class PostgresWorldModel:
         )
 
         tenant = _active_tenant()
-        approval_scope, approval_params = _tenant_scope()
+        approval_scope, approval_params = _mutation_tenant_scope()
         outbox_scope, outbox_params = _approval_outbox_scope()
         sql = "SELECT status, decided_at, decided_by, undo_hold, action FROM approvals WHERE id = %s"
         values: list = [int(approval_id)]
@@ -4450,7 +4481,7 @@ class PostgresWorldModel:
         from ..approval_vote_review import require_locked_vote_review
         from ..world_model import _single_approver
 
-        approval_scope, approval_params = _tenant_scope()
+        approval_scope, approval_params = _mutation_tenant_scope()
         outbox_scope, outbox_params = _approval_outbox_scope()
         sql = ("SELECT id, action, risk, scope, detail, provenance, status, requested_at, decided_at, claimed_by, claimed_at, decided_by, approvals_required, requested_by, goal_id, department, undo_hold FROM approvals WHERE id = %s")
         values = [int(approval_id)]
@@ -4501,7 +4532,7 @@ class PostgresWorldModel:
         from ..world_records import ApprovalAuditEvent
 
         tenant = _active_tenant()
-        approval_scope, approval_params = _tenant_scope()
+        approval_scope, approval_params = _mutation_tenant_scope()
         outbox_scope, outbox_params = _approval_outbox_scope()
         approval_sql = (
             "SELECT status, approvals_required, requested_by "
@@ -4679,7 +4710,7 @@ class PostgresWorldModel:
     ) -> bool:
         """Acknowledge signed delivery and apply any now-safe final outcome."""
         outbox_scope, outbox_params = _approval_outbox_scope()
-        approval_scope, approval_params = _tenant_scope()
+        approval_scope, approval_params = _mutation_tenant_scope()
         finalized: tuple[str, str] | None = None
         with self._tx() as cur:
             cur.execute(
@@ -4695,7 +4726,7 @@ class PostgresWorldModel:
                 return False
             source_guard = getattr(effect_guard, "approval_source", None)
             if source_guard is not None:
-                goal_scope, goal_params = _tenant_scope("g.tenant_id")
+                goal_scope, goal_params = _mutation_tenant_scope("g.tenant_id")
                 cur.execute("SELECT g.id,g.owner,g.domain FROM approvals a JOIN goals g ON g.id=a.goal_id WHERE a.id=%s" + (" AND " + goal_scope if goal_scope else "") + " FOR SHARE OF g", tuple([event[1], *goal_params]))
                 source = cur.fetchone()
                 if source is None:
@@ -4777,7 +4808,7 @@ class PostgresWorldModel:
         required = max(1, int(getattr(appr, "approvals_required", 1) or 1))
         # Tenant-scope the write so a tenant can't decide another's parked action
         # by enumerating ids it can't see.
-        frag, params = _tenant_scope()
+        frag, params = _mutation_tenant_scope()
         if required <= 1:
             sql = ("UPDATE approvals SET status = %s, decided_at = %s, "
                    "decided_by = %s WHERE id = %s AND status = 'pending' "
@@ -4921,7 +4952,7 @@ class PostgresWorldModel:
         principal = (principal or "").strip()
         if not principal:
             raise ValueError("principal is required to claim an approval")
-        frag, params = _tenant_scope()
+        frag, params = _mutation_tenant_scope()
         sql = (
             "UPDATE approvals SET claimed_by = %s, claimed_at = %s "
             "WHERE id = %s AND status = 'pending' "
@@ -4941,7 +4972,7 @@ class PostgresWorldModel:
         principal = (principal or "").strip()
         if not principal:
             raise ValueError("principal is required to release an approval")
-        frag, params = _tenant_scope()
+        frag, params = _mutation_tenant_scope()
         sql = (
             "UPDATE approvals SET claimed_by = NULL, claimed_at = NULL "
             "WHERE id = %s AND status = 'pending' AND claimed_by = %s"
@@ -4993,27 +5024,30 @@ class PostgresWorldModel:
         # A turn inherits tenancy through its CONVERSATION (conversations carries
         # tenant_id); gate the insert on that conversation being in the active
         # tenant so a write against another tenant's conversation can't land.
-        frag, fparams = _tenant_scope()
+        frag, fparams = _mutation_tenant_scope()
         with self._tx() as cur:
-            if frag:
-                cur.execute(
-                    "INSERT INTO turns(conversation_id, goal_id, role, content, ts) "
-                    "SELECT %s, %s, %s, %s, %s WHERE EXISTS "
-                    "(SELECT 1 FROM conversations WHERE id=%s AND " + frag
-                    + ") RETURNING id",
-                    (conversation_id, goal_id, role, _seal(content), time.time(),
-                     conversation_id, *fparams),
-                )
-            else:
-                cur.execute(
-                    "INSERT INTO turns(conversation_id, goal_id, role, content, ts) "
-                    "VALUES(%s, %s, %s, %s, %s) RETURNING id",
-                    (conversation_id, goal_id, role, _seal(content), time.time()),
-                )
+            if goal_id is not None:
+                goal_scope, goal_params = _mutation_tenant_scope()
+                cur.execute("SELECT id FROM goals WHERE id=%s AND " + goal_scope + " FOR SHARE",
+                            tuple([int(goal_id), *goal_params]))
+                if cur.fetchone() is None:
+                    raise ValueError("unknown conversation or goal for the active tenant")
+            sql = (
+                "INSERT INTO turns(conversation_id, goal_id, role, content, ts) "
+                "SELECT %s, %s, %s, %s, %s WHERE EXISTS "
+                "(SELECT 1 FROM conversations WHERE id=%s AND " + frag + ")"
+            )
+            params = [conversation_id, goal_id, role, _seal(content), time.time(),
+                      conversation_id, *fparams]
+            if goal_id is not None:
+                goal_scope, goal_params = _mutation_tenant_scope("g.tenant_id")
+                sql += " AND EXISTS (SELECT 1 FROM goals g WHERE g.id=%s AND " + goal_scope + ")"
+                params.extend([int(goal_id), *goal_params])
+            cur.execute(sql + " RETURNING id", tuple(params))
             row = cur.fetchone()
         if row is None:
             raise ValueError(
-                f"unknown conversation_id {conversation_id!r} for the active tenant"
+                "unknown conversation or goal for the active tenant"
             )
         return int(row[0])
 
@@ -5562,7 +5596,7 @@ class PostgresWorldModel:
         #
         # Gate on the parent goal being in the active tenant (see start_episode);
         # a cross-tenant write silently no-ops, like set_goal_status.
-        frag, fparams = _tenant_scope()
+        frag, fparams = _mutation_tenant_scope()
         with self._tx() as cur:
             if frag:
                 cur.execute(

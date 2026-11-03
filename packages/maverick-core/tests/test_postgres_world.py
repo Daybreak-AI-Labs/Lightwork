@@ -2227,6 +2227,48 @@ def test_fk_readers_are_tenant_scoped(world, monkeypatch):
     assert world.origin_status_counts("schedule", "shared-ref")  # non-empty
 
 
+def test_named_tenant_cannot_mutate_legacy_or_link_foreign_rows(world, monkeypatch):
+    from maverick.world_model_backends import postgres as pg
+
+    tenant = "mutation-" + uuid.uuid4().hex
+    monkeypatch.setattr(pg, "_strict_tenant_isolation", lambda: False)
+    active = [None]
+    monkeypatch.setattr(pg, "_active_tenant", lambda: active[0])
+    legacy = world.create_goal("legacy")
+    legacy_project = world.create_project("legacy project")
+    active[0] = tenant
+    own = world.create_goal("own")
+    own_project = world.create_project("own project")
+    conversation = world.get_or_create_conversation("channel", tenant).id
+    try:
+        world.set_goal_project(own, own_project)
+        assert world.get_goal(own).project_id == own_project
+        assert world.add_artifact(own, "text", "own report", "data") > 0
+        assert world.append_turn(conversation, "user", "message", goal_id=own) > 0
+        world.set_goal_title(legacy, "changed")
+        assert world.get_goal(legacy).title == "legacy"  # compatibility read only
+        with pytest.raises(ValueError):
+            world.add_artifact(legacy, "text", "report", "data")
+        with pytest.raises(ValueError):
+            world.start_episode(legacy)
+        with pytest.raises(ValueError):
+            world.append_turn(conversation, "user", "message", goal_id=legacy)
+        with pytest.raises(ValueError):
+            world.create_goal("foreign child", parent_id=legacy)
+        with pytest.raises(ValueError):
+            world.create_goal("foreign project", project_id=legacy_project)
+        world.set_goal_parent(own, legacy)
+        assert world.get_goal(own).parent_id is None
+        world.set_goal_project(own, legacy_project)
+        assert world.get_goal(own).project_id == own_project
+    finally:
+        with world._tx() as cur:
+            cur.execute("DELETE FROM turns WHERE conversation_id=%s", (conversation,))
+            cur.execute("DELETE FROM conversations WHERE id=%s", (conversation,))
+            cur.execute("DELETE FROM goals WHERE id IN (%s,%s)", (legacy, own))
+            cur.execute("DELETE FROM projects WHERE id IN (%s,%s)", (legacy_project, own_project))
+
+
 def test_erase_conversations_deletes_all_goal_child_rows(world):
     # GDPR erase of a goal that carries a row in EVERY child table referencing
     # goals(id). Postgres enforces FKs per statement (no ON DELETE CASCADE), so

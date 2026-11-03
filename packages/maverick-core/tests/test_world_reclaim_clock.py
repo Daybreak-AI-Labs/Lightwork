@@ -20,6 +20,7 @@ def reclaim_world(request, tmp_path, monkeypatch):
 
     outside_scope = world.create_goal("outside tenant scope", "")
     monkeypatch.setattr(postgres, "_tenant_scope", lambda: ("id != %s", [outside_scope]))
+    monkeypatch.setattr(postgres, "_mutation_tenant_scope", lambda: ("id != %s", [outside_scope]))
 
     class Cursor:
         def __init__(self, cursor):
