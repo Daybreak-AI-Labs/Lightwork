@@ -384,7 +384,6 @@ jobs:
             --lockfile demo/environment-threat-hunter/requirements.txt \
             --lockfile demo/grc-concierge/requirements.txt \
             --lockfile demo/model-risk-ai-assurance-officer/requirements.txt \
-            --lockfile demo/pia-concierge/requirements-standalone.txt \
             --lockfile demo/platform-threat-hunter/requirements.txt \
             --format json \
             --output-file "$report" || scan_status=$?

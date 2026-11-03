@@ -1,7 +1,7 @@
 "use strict";
 const {test} = require("node:test");
 const assert = require("node:assert/strict");
-const fs = require("node:fs"), path = require("node:path"), vm = require("node:vm");
+const fs = require("node:fs"), path = require("node:path");
 const {JSDOM} = require("jsdom");
 const root = path.resolve(__dirname,"../..");
 const read = file => fs.readFileSync(path.join(root,file),"utf8");
@@ -12,39 +12,6 @@ function clock() {
   return {timers,setTimeout(fn,ms){timers.set(++sequence,{fn,ms});return sequence;},clearTimeout(id){timers.delete(id);},
     fire(ms){for(const [id,timer] of [...timers])if(timer.ms===ms){timers.delete(id);timer.fn();}}};
 }
-function intake(fetch) {
-  const source=read("demo/pia-concierge/templates/intake.html"),buttons=[{disabled:false},{disabled:true}],messages=[],scheduled=[];
-  const context={fetch,FormData,controls:{querySelectorAll:()=>buttons},bubble:(who,text)=>messages.push({who,text}),
-    CASE:"case-1",DTOKEN:"",ANSWERED:{},idx:0,ask(){},setTimeout(fn){scheduled.push(fn);}};
-  vm.createContext(context);
-  vm.runInContext(source.slice(source.indexOf("let answering = false;"),source.indexOf("async function sendFree(")),context);
-  return {context,buttons,messages,scheduled};
-}
-for(const failure of [403,404,500,"network","invalid-json","unacknowledged"])test(`PIA answer ${failure} preserves question and permits retry`,async()=>{
-  let fail=true;
-  const f=intake(async()=>{
-    if(!fail)return {ok:true,json:async()=>({ok:true})};
-    if(failure==="network")throw new Error("Connection lost");
-    return {ok:typeof failure!=="number",json:async()=>{
-      if(failure==="invalid-json")throw new Error("Invalid JSON");
-      return {ok:false,error:"Not saved"};
-    }};
-  });
-  await f.context.answer({id:"q1"},"yes","Yes");
-  assert.equal(f.context.idx,0);assert.deepEqual(f.context.ANSWERED,{});
-  assert.equal(f.scheduled.length,0);assert.equal(f.buttons[0].disabled,false);assert.equal(f.buttons[1].disabled,true);
-  assert.match(f.messages.at(-1).text,/not saved/);
-  fail=false;await f.context.answer({id:"q1"},"yes","Yes");
-  assert.equal(f.context.idx,1);assert.equal(f.context.ANSWERED.q1,true);assert.equal(f.scheduled.length,1);
-});
-test("PIA guided answer ignores duplicate clicks until acknowledgement",async()=>{
-  const pending=deferred();let calls=0;const f=intake(async()=>{calls++;return pending.promise;});
-  const first=f.context.answer({id:"q1"},"yes","Yes");
-  await f.context.answer({id:"q1"},"no","No");assert.equal(calls,1);
-  pending.resolve({ok:true,json:async()=>({ok:true})});await first;assert.equal(f.context.idx,1);
-  await f.context.answer({id:"q1"},"no","No");assert.equal(calls,1);assert.equal(f.context.idx,1);
-  assert.equal(f.buttons[0].disabled,true);
-});
 async function statusWidget(fetch) {
   const dom=new JSDOM('<body><script id="embed" data-interval="5000"></script></body>',{url:"https://fixture.invalid/",runScripts:"outside-only"});
   const w=dom.window,timers=clock();

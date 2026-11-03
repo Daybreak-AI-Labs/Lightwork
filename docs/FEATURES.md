@@ -13,7 +13,7 @@ catalogue of built features and tools; planned work is listed in
 
 | Section | Entries |
 | --- | ---: |
-| [Agent kernel and orchestration](#agent-kernel-and-orchestration) | 218 |
+| [Agent kernel and orchestration](#agent-kernel-and-orchestration) | 216 |
 | [Tools](#tools) | 10 |
 | [Channels](#channels) | prose |
 | [Sandboxes](#sandboxes) | prose |
@@ -33,7 +33,7 @@ catalogue of built features and tools; planned work is listed in
 | [Distribution and install](#distribution-and-install) | 22 |
 | [Customer workflow completion and readiness](#customer-workflow-completion-and-readiness) | 18 in 24 subsections |
 
-481 entries in 19 sections. This block is generated: `python scripts/features_toc.py --write` (the test suite fails when it is stale).
+479 entries in 19 sections. This block is generated: `python scripts/features_toc.py --write` (the test suite fails when it is stale).
 <!-- toc:end -->
 
 ## Agent kernel and orchestration
@@ -885,7 +885,7 @@ Settings and the installation wizard.
   Without a token, those two demos run in evaluation mode (fully functional,
   open-case cap, visible banner); changing capabilities or renewing is a key
   swap, not a reinstall.
-- **DSAR Concierge** (`demo/dsar-concierge/`) — a second
+- **DSAR Concierge** (`demo/dsar-concierge/`) — a
   standalone agent on the capability seam: subject-facing intake + a
   deterministic message detector, the emailed identity-verification loop,
   the statutory clock with SLA aging, access/portability packages built
@@ -894,23 +894,6 @@ Settings and the installation wizard.
   full deployment kit (Dockerfile, launcher, env reference). With
   Lightwork the same agent mirrors into the privacy workspace registers
   and the signed audit chain.
-- **Verified OneTrust wire protocol** (`demo/pia-concierge/
-  onetrust_client.py`, reference: `demo/pia-concierge/
-  ONETRUST-INTEGRATION.md`) — the concierge files assessments through the
-  protocol a live OneTrust tenant actually accepted: launch (v3, org group +
-  respondent), export-first response writes (option answers with optionId +
-  responseKey; justifications as entries in the responses array — the
-  top-level field is silently dropped; PERSONAL_DATA as catalog triples
-  whose write replaces the row set), submit with locally-computed
-  completeness (the server under-reports), stage self-check by re-read,
-  two-step attachments onto the vendor record (assessment-level ops are
-  session-gated), typo-tolerant inventory dedup (vendors created only on
-  true no-match; entities never), the Enterprise Policy notices API, and a
-  deterministic notice cross-check (contradictions with published promises
-  escalate the filed rating) + jurisdiction-driven contract instrument
-  guard + per-work-product value ledger. The mock tenant (`ot_mock.py`)
-  enforces every trap, so the test suite proves wire compatibility offline;
-  autonomy stops at Under Review — the human gate.
 - **Privacy command center** (`/privacy/board`, `GET /api/v1/privacy/board`,
   operate-gated) — the whole program on one live executive board, every
   number from the operating record: KPI tiles with 30-day delta chips and
@@ -1783,12 +1766,6 @@ Settings and the installation wizard.
   approvals, managed connectors, or cross-run learning. Both hunters are
   proposal-only; response execution is exclusive to the integrated platform's
   exact approval-bound, explicitly enabled executor seam.
-- **Workspace history seeder** (`demo/pia-concierge/seed_workspace.py`) —
-  seeds an enterprise year through the real engines: ~436 assessments over
-  14 months across both departments (weighted statuses, cadences with a
-  due-for-re-review queue, varied risk), DPA reviews, the AI registry, a
-  populated Art. 30 register, a DSAR queue with history, and incidents in
-  three states. Reproducible (seeded random), <1s, marker-guarded.
 - **Savings dashboard** (`savings.py`, `maverick savings`, dashboard
   `/savings` + `/api/v1/savings`) — money saved vs the typical human cost,
   from real completed work and the CLIENT's own inputs: fully-loaded human

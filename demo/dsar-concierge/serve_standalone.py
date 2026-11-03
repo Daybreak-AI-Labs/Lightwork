@@ -2,7 +2,7 @@
 
 Env: DSAR_STANDALONE=1 is set by the launcher; DSAR_HOST defaults to
 loopback (set 0.0.0.0 for containers/proxies), DSAR_PORT to 8891, and
-DSAR_DATA_DIR to ./.dsar-data. See DEPLOYMENT.md.
+DSAR_DATA_DIR to ./.dsar-data. See README.md.
 """
 from __future__ import annotations
 

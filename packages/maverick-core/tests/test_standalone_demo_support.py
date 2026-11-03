@@ -12,7 +12,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[3]
 
 
-@pytest.mark.parametrize("demo", ["pia-concierge", "dsar-concierge"])
+@pytest.mark.parametrize("demo", ["dsar-concierge"])
 def test_standalone_context_contains_shared_support_and_captures_mail(demo, tmp_path):
     """A copied build context runs without access to the repository's shared dir."""
     source = ROOT / "demo" / demo

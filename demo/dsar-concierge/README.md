@@ -40,9 +40,8 @@ DSAR_OPERATOR_TOKEN=$(openssl rand -hex 24) bash run_standalone.sh
                                 # /about    (capability + license matrix)
 ```
 
-Container + cloud installs: `Dockerfile.standalone` here, and the per-cloud
-guides in [`../pia-concierge/DEPLOYMENT.md`](../pia-concierge/DEPLOYMENT.md)
-apply to this app with the env names below. For remote access, place the
+Container installs: `Dockerfile.standalone` here; its header shows the build
+and run commands, configured with the env names below. For remote access, place the
 loopback-bound container behind an HTTPS proxy: HTTP Basic credentials need
 TLS in transit. Set `DSAR_BASE_URL` to that proxy's public HTTPS URL.
 Operator changes require an Origin or Referer matching the public scheme, host

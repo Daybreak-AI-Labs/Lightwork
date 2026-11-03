@@ -41,7 +41,7 @@ def _load(demo):
     return module
 
 
-@pytest.mark.parametrize("demo", ["pia-concierge", "dsar-concierge"])
+@pytest.mark.parametrize("demo", ["dsar-concierge"])
 @pytest.mark.parametrize("payload", [
     [],
     {"expires_at": "not a timestamp"},
@@ -73,7 +73,7 @@ def test_platform_verifier_rejects_bad_signed_payloads(payload, signing_key):
         verify_license(_token(signing_key, payload), os.environ["LIGHTWORK_LICENSE_PUBKEY"])
 
 
-@pytest.mark.parametrize("demo", ["pia-concierge", "dsar-concierge"])
+@pytest.mark.parametrize("demo", ["dsar-concierge"])
 def test_valid_and_expired_signed_licenses_keep_their_contract(demo, signing_key, monkeypatch):
     module = _load(demo)
     monkeypatch.setenv("LIGHTWORK_LICENSE", _token(signing_key, {

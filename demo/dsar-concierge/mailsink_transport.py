@@ -55,7 +55,7 @@ async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, *, 
         writer.write((line + "\r\n").encode())
         await writer.drain()
 
-    await send("220 pia-concierge-mailsink ESMTP")
+    await send("220 demo-mailsink ESMTP")
     data_lines: list[bytes] = []
     in_data = False
     try:
@@ -77,7 +77,7 @@ async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, *, 
             verb = raw.split(None, 1)[0].upper() if raw.strip() else b""
             if verb in (b"EHLO", b"HELO"):
                 # Advertise STARTTLS + AUTH PLAIN so the real tool's flow works.
-                writer.write(b"250-pia-concierge-mailsink\r\n")
+                writer.write(b"250-demo-mailsink\r\n")
                 if tls_context() is not None:
                     writer.write(b"250-STARTTLS\r\n")
                 writer.write(b"250 AUTH PLAIN LOGIN\r\n")

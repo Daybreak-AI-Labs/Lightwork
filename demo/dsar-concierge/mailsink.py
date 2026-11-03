@@ -1,4 +1,4 @@
-"""In-process SMTP capture server for the PIA Concierge demo.
+"""In-process SMTP capture server for the DSAR Concierge demo.
 
 The production email tool (maverick.tools.email_tool) sends over SMTP with
 STARTTLS + AUTH. This sink speaks exactly that so the *real* tool delivers here

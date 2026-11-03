@@ -11,7 +11,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SHARED = ROOT / "demo" / "shared"
-CONCIERGES = ("pia-concierge", "dsar-concierge")
+CONCIERGES = ("dsar-concierge",)
 STANDALONE_STORES = ("grc-concierge", "platform-threat-hunter",
                      "environment-threat-hunter", "model-risk-ai-assurance-officer")
 FILES = {

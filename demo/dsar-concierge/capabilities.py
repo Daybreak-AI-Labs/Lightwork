@@ -1,7 +1,7 @@
 """What this build of the DSAR Concierge can do — the capability seam.
 
-Same pattern as the PIA Concierge: STANDALONE (env ``DSAR_STANDALONE=1`` or
-the platform simply not importable) forces the platform-only capabilities
+STANDALONE (env ``DSAR_STANDALONE=1`` or the platform simply not importable)
+forces the platform-only capabilities
 off. The agent itself — intake, the message detector, identity
 verification, the statutory clock and aging, package assembly, the
 non-destructive erasure handoff, and the counted value ledger — always
