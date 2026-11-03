@@ -9,6 +9,7 @@ on:
       - 'apps/mobile-companion/**'
       - 'apps/desktop/ui/**'
       - 'apps/desktop/tests/**'
+      - 'extensions/chat-widget/**'
       - '.github/workflows/ui-regressions.yml'
   push:
     branches: [main]
@@ -19,6 +20,7 @@ on:
       - 'apps/mobile-companion/**'
       - 'apps/desktop/ui/**'
       - 'apps/desktop/tests/**'
+      - 'extensions/chat-widget/**'
       - '.github/workflows/ui-regressions.yml'
 
 permissions:

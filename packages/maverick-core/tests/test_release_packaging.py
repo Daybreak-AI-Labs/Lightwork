@@ -1260,8 +1260,6 @@ def test_customer_surfaces_do_not_reference_the_retired_repository_owner():
             "packages/maverick-mcp/maverick_mcp/publish.py",
             "scripts/build_standalone_skus.py",
             "scripts/train_runpod.sh",
-            "web/README.md",
-            "web/index.html",
         )
     }
     checked.update(public_sources)

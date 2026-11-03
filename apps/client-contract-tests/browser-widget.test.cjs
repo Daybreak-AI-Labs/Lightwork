@@ -212,7 +212,7 @@ async function widget(fetch, retained, attributes) {
     for(const [name,value] of Object.entries(attributes)) tag.setAttribute(name,value);
     Object.defineProperty(dom.window.document,'currentScript',{get:()=>tag});
   }
-  dom.window.eval(read('web/widget/maverick-widget.js'));
+  dom.window.eval(read('extensions/chat-widget/maverick-widget.js'));
   const form=dom.window.document.querySelector('form'), input=form.querySelector('input'),send=form.querySelector('button');
   function submit(){form.dispatchEvent(new dom.window.Event('submit',{cancelable:true}));}
   return {dom,timers,form,input,send,submit,check:[...dom.window.document.querySelectorAll('button')].find(b=>b.textContent==='Check start status'),close(){dom.window.dispatchEvent(new dom.window.Event('pagehide'));dom.window.close();}};

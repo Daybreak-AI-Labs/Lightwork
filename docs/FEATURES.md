@@ -5871,7 +5871,7 @@ tested without spawning py-spy.
   the wire shape for the gRPC plugin host) — both Draft, open for comment.
 - **Embeddable widgets** — two dependency-free `<script>`-tag surfaces,
   both self-hosted: the floating **chat widget**
-  (`web/widget/maverick-widget.js`) posting to your own dashboard's
+  (`extensions/chat-widget/maverick-widget.js`) posting to your own dashboard's
   `/chat/send`, and the read-only **status widget**
   (`extensions/widget/maverick-widget.js`): a Shadow-DOM pill → panel
   polling the real goals API and bucketing counts client-side, with the
