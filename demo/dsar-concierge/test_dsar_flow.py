@@ -203,3 +203,43 @@ def test_license_key_lifts_the_cap(tmp_path, monkeypatch):
         assert "licensed to <b>Acme</b>" in tc.get("/about").text
     finally:
         sys.path.remove(str(HERE))
+
+
+def test_platform_intake_requires_an_allowed_email_domain(client, monkeypatch):
+    tc, module, _operator = client
+    monkeypatch.setattr(module, "STANDALONE", False)
+    monkeypatch.delenv("DSAR_EMAIL_ALLOWED_DOMAINS", raising=False)
+    response = tc.post("/request", data={"subject_id": "victim@example.test", "kind": "access"})
+    assert "not enabled" in response.text
+    assert not module.engine.list_requests()
+    monkeypatch.setenv("DSAR_EMAIL_ALLOWED_DOMAINS", "allowed.test")
+    response = tc.post("/webhook/message", json={"text": "access request", "sender": "victim@example.test"})
+    assert response.status_code == 422
+    assert not module.engine.list_requests()
+    assert tc.post("/webhook/message", json={"text": "access request", "sender": "bad\r\n@example.test"}).status_code == 422
+
+
+def test_public_intake_limits_repeated_requests(client):
+    tc, module, _operator = client
+    module._intake_attempts.clear()
+    for _ in range(30):
+        tc.post("/webhook/message", json={"text": "not a request"})
+    assert tc.post("/webhook/message", json={"text": "not a request"}).status_code == 429
+
+
+def test_intake_suppresses_repeated_email_to_same_recipient(client):
+    tc, module, _operator = client
+    first = tc.post("/request", data={"subject_id": "victim@example.test", "kind": "access"})
+    second = tc.post("/webhook/message", json={"text": "access request", "sender": "VICTIM@example.test"})
+    assert first.status_code == 200
+    assert second.status_code == 429
+    assert len(module.INBOX) == 1
+    assert len(module.engine.list_requests()) == 1
+
+
+def test_invalid_intake_does_not_reserve_email_quota(client):
+    tc, module, _operator = client
+    assert tc.post("/webhook/message", json={"text": "weather", "sender": "victim@example.test"}).status_code == 422
+    tc.post("/request", data={"subject_id": "victim@example.test", "kind": "invalid"})
+    assert tc.post("/request", data={"subject_id": "victim@example.test", "kind": "access"}).status_code == 200
+    assert len(module.INBOX) == 1

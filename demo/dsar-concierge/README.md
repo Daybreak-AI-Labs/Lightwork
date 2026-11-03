@@ -56,7 +56,13 @@ address; API clients performing changes must send the same trusted origin.
 | `DSAR_DATA_DIR` | `.dsar-data` | the request store (mount `/data` in containers) |
 | `DSAR_BASE_URL` | `http://127.0.0.1:8891` | public URL used in verification links |
 | `DSAR_OPERATOR_USER` / `DSAR_OPERATOR_TOKEN` | `operator` / unset | HTTP Basic credentials required for the operator queue, case pages, package downloads, and workflow actions |
+| `DSAR_EMAIL_ALLOWED_DOMAINS` | unset | Required in platform mode: comma-separated exact recipient domains permitted for public intake and verification email. Configure shared rate limiting at the reverse proxy and mail service; the in-process peer, recipient, and global limits are per worker and reset on restart. External ASGI servers must disable proxy-header rewriting so callers cannot spoof the peer. |
 | `DSAR_SLA_DAYS` | `30` | the statutory clock |
 | `EMAIL_USER` / `EMAIL_SMTP_PORT` | — | outbound mail identity (standalone captures locally) |
 | `LIGHTWORK_LICENSE` / `LIGHTWORK_LICENSE_PUBKEY` | unset | signed license token + issuer public key |
 | `VALUE_HOURLY_RATE`, `VALUE_DSAR_*_HOURS` | `$60`, 2.5/2.5/3.0h | the operator's own value inputs |
+
+Public intake limits are best-effort abuse reduction. Recipient aliases can map
+multiple addresses to the same mailbox, and a failed delivery still consumes a
+short-term reservation. Configure recipient-aware quotas at the mail service;
+review failed deliveries through the operator's normal mail monitoring.

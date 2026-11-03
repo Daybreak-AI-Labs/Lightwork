@@ -1312,3 +1312,9 @@ maverick audit verify
 (SOC 2 TSC → control mapping), the enterprise-mode docs under
 [`docs/security/`](security/), and [`docs/env-vars.md`](env-vars.md) for the
 full environment-variable reference.
+
+Evidence PDF extraction runs in a child process with a 30-second timeout and a
+per-process concurrency limit. This bounds worker occupancy; it does not impose
+OS memory or CPU limits, isolate filesystem or network access, or coordinate
+limits across workers. Deployments that accept untrusted PDFs still need
+OS-enforced resource limits and process isolation around the service.

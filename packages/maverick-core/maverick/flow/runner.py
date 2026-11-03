@@ -30,6 +30,7 @@ from ..killswitch import Halted
 from .continuation_frame import ContinuationFrame
 from .expressions import (
     FlowRegexRefused,
+    _regex_is_safe,
     _CREDENTIAL_REPAIR,
     _FN_CALL,
     _as_text,

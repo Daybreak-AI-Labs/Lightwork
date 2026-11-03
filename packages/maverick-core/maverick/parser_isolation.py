@@ -57,6 +57,13 @@ PARSERS: dict[str, ParserEntry] = {
         feeds="attachments / channel uploads",
         memory_safe=False,  # pdfplumber(pdfminer)/pypdf C-accelerated paths
     ),
+    "evidence_pdf_text": ParserEntry(
+        name="evidence_pdf_text",
+        module="maverick.ai_evidence_analysis",
+        func="_isolated_evidence_pdf_text",
+        feeds="AI evidence PDF uploads",
+        memory_safe=False,
+    ),
     "image_meta": ParserEntry(
         name="image_meta",
         module="maverick.parser_isolation",

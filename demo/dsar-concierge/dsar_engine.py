@@ -118,7 +118,7 @@ def open_request(subject_id: str, kind: str, *, channel: str = "web",
     return _save(rec)
 
 
-def from_message(text: str, *, sender: str = "") -> dict | None:
+def from_message(text: str, *, sender: str = "", before_open=None) -> dict | None:
     """Deterministic triage of an inbound message. Returns the opened
     record, or None when no request kind or no subject address is
     detectable — the caller refuses honestly instead of guessing."""
@@ -136,6 +136,8 @@ def from_message(text: str, *, sender: str = "") -> dict | None:
         subject = m.group(0) if m else ""
     if matched_kind is None or not subject:
         return None
+    if before_open is not None:
+        subject = before_open(subject)
     return open_request(
         subject, matched_kind, channel="message",
         note=(text or "")[:2000],

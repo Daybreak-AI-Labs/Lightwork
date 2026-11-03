@@ -55,7 +55,7 @@ def _guess_mime(source: str) -> str:
     return _MIME_BY_EXT.get(ext, "image/jpeg")
 
 
-def _load_image(source: str, sandbox=None) -> tuple[bytes, str] | None:
+def _load_image(source: str, sandbox=None, *, workdir: Path | None = None) -> tuple[bytes, str] | None:
     """Return (image_bytes, mime_type) for the source, or None on failure."""
     if source.startswith(("http://", "https://")):
         try:
@@ -90,7 +90,7 @@ def _load_image(source: str, sandbox=None) -> tuple[bytes, str] | None:
         except Exception as e:
             log.warning("image fetch failed: %s", e)
             return None
-    workdir = Path(getattr(sandbox, "workdir", Path.cwd())).resolve()
+    workdir = Path(getattr(sandbox, "workdir", None) or workdir or Path.cwd()).resolve()
     path = Path(os.path.expanduser(source))
     if not path.is_absolute():
         path = (workdir / path).resolve()
