@@ -23,6 +23,8 @@ see `/about` in the running app):
   functional, with a cap of 5 open requests. The deployment owner selects the
   trusted public key; this is not a vendor-enforced restriction on a
   self-hosted open-source deployment.
+  See the [self-managed demo license guide](../../docs/self-managed-demo-licenses.md)
+  to generate and use your own keys.
 
 **With Lightwork** the same agent additionally mirrors every request into
 the governed privacy workspace registers, lands every step on the signed

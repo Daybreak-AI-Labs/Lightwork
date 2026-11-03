@@ -7,8 +7,8 @@ compact token::
     LW1.<base64url(payload JSON)>.<base64url(Ed25519 signature)>
 
 with payload ``{customer, sku, capabilities, issued_at, expires_at}``. The
-agent ships only the PUBLIC key (env ``LIGHTWORK_LICENSE_PUBKEY``) and the
-token (``LIGHTWORK_LICENSE``); the private key stays with the issuer. A
+deployment owner supplies the PUBLIC key (env ``LIGHTWORK_LICENSE_PUBKEY``)
+and the token (``LIGHTWORK_LICENSE``); the private key stays with that issuer. A
 new license is a token swap, not a reinstall. No license -> the agent runs in
 evaluation mode (bounded, honest, never crippled mid-flight).
 

@@ -3,6 +3,8 @@
 In standalone mode, a deployment owner may configure an Ed25519 license token
 and the public key they choose to trust. This is an operator-managed policy,
 not a vendor-enforced licensing boundary for the open-source deployment.
+See the [self-managed demo license guide](../../docs/self-managed-demo-licenses.md)
+for key generation and setup.
 
 ## Standalone and platform modes
 
