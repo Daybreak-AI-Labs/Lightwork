@@ -1503,6 +1503,7 @@ PAGE_AREAS: dict[str, tuple[str, str]] = {
     "/agents": ("Agents", "Build an agent"),
     "/roles": ("Agents", "Workforce"),
     "/workforce": ("Agents", "Workforce"),
+    "/starter-teams": ("Agents", "Workforce"),
     "/workflows": ("Work", "Workflows"),
     "/flows/designer": ("Work", "Workflows"),
     "/workflow-builder": ("Work", "Workflows"),

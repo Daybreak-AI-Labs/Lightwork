@@ -18,10 +18,12 @@
     try { const saved = JSON.parse(sessionStorage.getItem('lightwork-starter-team-review') || 'null'); if (!saved) return; if (saved.accountContext !== accountContext) { sessionStorage.removeItem('lightwork-starter-team-review'); return; } token = saved.token; $('st-review-content').replaceChildren(element('p', 'A previous confirmation may have completed. Check its original result before making another change.')); $('st-confirm').disabled = true; $('st-original').hidden = false; $('st-review').showModal(); } catch (_) { /* An unreadable marker never authorizes a repeat. */ }
   }
   async function api(path, body) {
-    const response = await fetch(base + path, {method: body === undefined ? 'GET' : 'POST', credentials: 'same-origin', headers: {'Accept': 'application/json', 'Content-Type': 'application/json'}, body: body === undefined ? undefined : JSON.stringify(body)});
-    const value = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(typeof value.detail === 'string' ? value.detail : 'This work could not be completed. Check the selected workspace and try again.');
-    return value;
+    return window.mvFetchJSON(base + path, {
+      method: body === undefined ? 'GET' : 'POST', credentials: 'same-origin',
+      headers: {'Accept': 'application/json', 'Content-Type': 'application/json'}, body,
+      serverDetail: 'This work could not be completed. Check the selected workspace and try again.',
+      messages: {unreadable: 'The response could not be read. Check the original result before trying again.'}
+    }, 'check the starter-team work');
   }
   function addList(host, title, values) {
     host.appendChild(element('h3', title)); const list = element('ul');

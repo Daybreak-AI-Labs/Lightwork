@@ -795,6 +795,65 @@ def test_interrupted_bootstrap_restore_rolls_exact_empty_state_back_to_prepared(
     assert recovery._last_restore()["state"] == "rolled_back_to_empty"
 
 
+@pytest.mark.parametrize("namespace,state", [
+    ("starter_team_setups", "active"),
+    ("starter_team_reviews", "confirmed"),
+    ("starter_team_cases", "completed"),
+    ("starter_team_schedules", "active"),
+    ("starter_team_inbox", "approved"),
+    ("starter_team_ticks", "started"),
+    ("starter_team_runtime", "running"),
+    ("starter_team_runtime_reviews", "approved"),
+    ("starter_team_goal_bindings", "worker_admitted"),
+])
+def test_restored_starter_team_authority_cannot_release_normal_start(
+    monkeypatch, tmp_path, namespace, state,
+):
+    """A signed old backup grants neither fresh approval nor replay permission."""
+    root = _select_home(monkeypatch, tmp_path / "target-home")
+    recovery.configure_key()
+    recovery.prepare_bootstrap(isolated=True, actor="admin-a", source_offline=True)
+    _record(root, namespace, {
+        "id": "restored", "status": state, "owner": "user:alice",
+        "idempotency_key": "already-dispatched", "goal_id": "native-goal-a",
+        "approved_at": 1_800_000_000.0, "committed_usd": 5.0,
+    })
+    source = root / namespace / "restored.json"
+    original = source.read_bytes()
+    removed, reconciliation = recovery._reconcile_bootstrap_stage(root)
+    assert removed == set()
+    marker = recovery._read_bootstrap(actor="admin-a")
+    recovery._write_bootstrap({
+        **{key: value for key, value in marker.items() if key != "authentication"},
+        "state": "reconciliation_required",
+        "snapshot": "a" * 32,
+        "safety_snapshot": None,
+        "reconciliation": reconciliation,
+    })
+    item, = recovery.reconciliation_status(actor="admin-a")["items"]
+    assert item["safe_state"] == "global_start_blocked"
+    assert item["requires_external_readback"] is True
+    assert recovery.bootstrap_reconciliation_pending() is True
+    with pytest.raises(recovery.RecoveryError, match="reconciliation is unfinished"):
+        recovery.assert_bootstrap_start_allowed()
+    # No starter-team adapter exists; a generic evidence reference must not
+    # release a restored approval, native-goal binding or occurrence receipt.
+    for disposition in (
+        "external_effect_absent", "external_effect_recorded", "retire_and_create_new_request",
+    ):
+        with pytest.raises(recovery.RecoveryError, match="cannot be safely rewritten"):
+            recovery.resolve_reconciliation(
+                item["id"], disposition,
+                evidence_reference="synthetic current readback reference",
+                isolated=True, actor="admin-a",
+            )
+    with pytest.raises(recovery.RecoveryError, match="Resolve all restored work"):
+        recovery.complete_reconciliation(isolated=True, actor="admin-a")
+    assert recovery.bootstrap_reconciliation_pending() is True
+    assert recovery.reconciliation_status(actor="admin-a")["unresolved"] == 1
+    assert source.read_bytes() == original
+
+
 def test_reconciliation_refuses_source_tampering_before_and_after_disposition(
     monkeypatch, tmp_path,
 ):

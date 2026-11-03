@@ -1,6 +1,7 @@
 """Explicit shared-shell product copy; draft translations, never employee content."""
 
 ROWS = [
+    ("Starter teams", "Équipes de démarrage", "Starterteams", "スターターチーム", "入门团队"),
     ("Pinned:", "Épinglé :", "Angeheftet:", "固定：", "已置顶："),
     ("(archived)", "(archivé)", "(archiviert)", "（アーカイブ済み）", "（已归档）"),
     ("No chats yet.", "Aucune discussion pour le moment.", "Noch keine Chats.", "まだチャットはありません。", "暂无对话。"),

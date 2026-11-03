@@ -11,10 +11,12 @@
   const text = value => String(value === null || value === undefined ? '' : value);
   function message(value) { $('sts-message').textContent = value; }
   async function api(path, body) {
-    const response = await fetch(base + path, {method: body === undefined ? 'GET' : 'POST', credentials: 'same-origin', headers: {'Accept': 'application/json', 'Content-Type': 'application/json'}, body: body === undefined ? undefined : JSON.stringify(body)});
-    const result = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(typeof result.detail === 'string' ? result.detail : 'The schedule operation could not be completed. Refresh its current state and review again.');
-    return result;
+    return window.mvFetchJSON(base + path, {
+      method: body === undefined ? 'GET' : 'POST', credentials: 'same-origin',
+      headers: {'Accept': 'application/json', 'Content-Type': 'application/json'}, body,
+      serverDetail: 'The schedule operation could not be completed. Refresh its current state and review again.',
+      messages: {unreadable: 'The response could not be read. Check the original result before trying again.'}
+    }, 'check the scheduled team work');
   }
   function options(select, values, preferred, empty) {
     select.replaceChildren();
@@ -72,9 +74,7 @@
   }
   async function refresh(preferred) {
     try {
-      const [current, catalogResponse] = await Promise.all([api(''), fetch('/api/v1/starter-teams', {credentials: 'same-origin', headers: {'Accept': 'application/json'}})]);
-      if (!catalogResponse.ok) throw new Error('Your saved teams are unavailable. Check workspace access and refresh.');
-      const catalog = await catalogResponse.json();
+      const [current, catalog] = await Promise.all([api(''), window.mvFetchJSON('/api/v1/starter-teams', {credentials: 'same-origin'}, 'read your saved teams').catch(() => { throw new Error('Your saved teams are unavailable. Check workspace access and refresh.'); })]);
       if (current.context !== catalog.context) throw new Error('Your workspace changed while loading. Refresh before reviewing scheduled work.');
       const old = $('sts-saved').value;
       account = current.context; schedules = current.schedules; setups = catalog.setups; teams = catalog.teams;

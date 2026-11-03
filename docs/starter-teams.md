@@ -143,6 +143,15 @@ run binds its idempotency key to its exact inputs, date, and setup. Repeating
 the same request retrieves its existing case; changing inputs under the same
 key is refused. Restarting the service does not erase those receipts.
 
+Backup restore has an additional limit. The recovery inventory retains all nine
+starter-team stores as authority-bearing state. Restoring any of those stores
+blocks normal application startup, reconciliation completion, and automatic
+dispatch. Their bytes remain intact for investigation. A starter-team restore
+adapter that safely reconciles pending work and invalidates old approvals is
+not implemented; supplying a generic readback reference cannot clear this hold.
+Normal restart using the intact original stores and original-result recovery
+remain supported by the workflows described here.
+
 The shared governed-record store supplies revision checks and a durable audit
 outbox. The starter-team service supports one persistent application replica;
 it refuses unsupported shared execution rather than assuming a local lock

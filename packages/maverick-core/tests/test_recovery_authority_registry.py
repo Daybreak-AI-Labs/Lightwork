@@ -47,6 +47,57 @@ def test_canonical_authority_registry_covers_every_declared_store() -> None:
     assert authority_policy("future-authority.lock", is_sqlite=True) == "unknown_sqlite"
 
 
+def test_all_starter_team_stores_retain_recovery_authority(tmp_path: Path) -> None:
+    expected = {
+        "starter_team_setups": "starter_team_setup_authority",
+        "starter_team_reviews": "starter_team_review_authority",
+        "starter_team_cases": "starter_team_case_authority",
+        "starter_team_schedules": "starter_team_schedule_authority",
+        "starter_team_inbox": "starter_team_input_approval_authority",
+        "starter_team_ticks": "starter_team_tick_receipt_authority",
+        "starter_team_runtime": "starter_team_runtime_authority",
+        "starter_team_runtime_reviews": "starter_team_runtime_review_authority",
+        "starter_team_goal_bindings": "starter_team_goal_binding_authority",
+    }
+    stage = file_lock.ensure_private_directory(tmp_path / "stage")
+    originals = {}
+    policies = {}
+    for namespace, policy in expected.items():
+        assert GLOBAL_START_JSON_AUTHORITY_POLICIES[namespace] == policy
+        assert GLOBAL_START_BLOCKED_AUTHORITY_SAMPLES[f"{namespace}/recovered.json"] == policy
+        assert namespace not in NON_AUTHORIZING_GOVERNED_NAMESPACES
+        for relative in (
+            f"{namespace}/recovered.json",
+            f"tenants/acme/{namespace}/recovered.json",
+            f"tenants/acme/{namespace}/archive/recovered.json",
+        ):
+            assert authority_policy(relative.swapcase(), is_sqlite=False) == policy
+            assert authority_policy(relative + ".lock", is_sqlite=False) is None
+            path = _write(stage, relative, {
+                "id": "restored-record", "owner": "user:alice",
+                "status": "approved", "idempotency_key": "consumed-before-backup",
+            })
+            originals[relative] = path.read_bytes()
+            policies[relative] = policy
+
+    removed, report = recovery._reconcile_bootstrap_stage(stage)
+
+    assert removed == set()
+    assert report["queued_work"]["automatic_replay_blocked"] is True
+    assert report["protected_authority"]["classification_complete"] is True
+    assert report["protected_authority"]["file_count"] == len(originals)
+    assert report["protected_authority"]["classified_count"] == len(originals)
+    assert {item["source"] for item in report["items"]} == set(originals)
+    for item in report["items"]:
+        relative = item["source"]
+        assert item["prior_state"] == f"unclassified:{policies[relative]}"
+        assert item["state"] == "unresolved"
+        assert item["safe_state"] == "global_start_blocked"
+        assert item["requires_external_readback"] is True
+        assert item["content_sha256"] == hashlib.sha256(originals[relative]).hexdigest()
+        assert (stage / relative).read_bytes() == originals[relative]
+
+
 def test_retained_knowledge_rights_are_protected_recovery_authority(tmp_path: Path) -> None:
     relative = "tenants/acme/knowledge-rights-archive/recovered.json"
     assert authority_policy(relative, is_sqlite=False) == "knowledge_access_authority"
