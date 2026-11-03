@@ -79,13 +79,6 @@ Model usage is billed by the provider you connect, if any.
 and [Pricing governance](pricing-governance.md) explains how model prices are
 recorded and when a price may affect a budget.
 
-## Roadmap
-
-The [roadmap](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/ROADMAP.md)
-lists the themes and near-term work the maintainers are focused on. Shipped
-capabilities are catalogued in
-[`FEATURES.md`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/FEATURES.md).
-
 ## License
 
 Lightwork is licensed under the Apache License 2.0 (see
@@ -108,6 +101,7 @@ not by the Apache License.
 - [Plugins](plugins.md) — extending the tool / channel / skill surface
 - [Governed model improvement](MODEL_IMPROVEMENT_PLATFORM.md) — the learning lifecycle, regression detection, and promotion controls
 - [Starter goals](starter-goals.md) — ready-to-run examples for common workflows
+- [Feature catalogue](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/FEATURES.md) — every shipped capability, by area
 - [Contributing](CONTRIBUTING.md) — how to send PRs
 - [Code of Conduct](CODE_OF_CONDUCT.md) — expected behavior in project spaces
 - [Security policy](https://daybreak-ai-labs.github.io/Lightwork/security-policy/) — how to report a vulnerability

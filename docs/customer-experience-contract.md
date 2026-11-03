@@ -139,7 +139,5 @@ presentation and request construction only; keep that evidence distinct from
 native execution, installed-app and customer acceptance.
 
 No unqualified promise of complete readiness or zero errors follows from this
-contract. Delivery reports must identify what was actually exercised, unresolved
-gaps and local-versus-released status. Use
-[the learned-capability journey contract](./learned-capabilities-product-contract.md)
-for the current learning families.
+contract. A pull request must state what was actually exercised and which gaps
+remain unresolved.

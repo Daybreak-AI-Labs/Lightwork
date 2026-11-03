@@ -1,8 +1,7 @@
 # Lightwork - Shipped Features
 
-What Lightwork **does today**, grounded in the current repository code. This is the
-catalogue of built features and tools; planned work is listed in
-[`ROADMAP.md`](./ROADMAP.md).
+What Lightwork **does**, grounded in the current repository code. This is the
+catalogue of built features and tools.
 
 > Conventions: capabilities are grouped by concern. Module paths are relative to
 > `packages/maverick-core/maverick/` unless noted. CLI verbs are shown as
@@ -30,10 +29,10 @@ catalogue of built features and tools; planned work is listed in
 | [Information-flow control](#information-flow-control) | 1 |
 | [Adaptive immunity](#adaptive-immunity) | 5 |
 | [Unified cross-suite audit projection](#unified-cross-suite-audit-projection) | 6 |
-| [Distribution and install](#distribution-and-install) | 22 |
+| [Distribution and install](#distribution-and-install) | 21 |
 | [Customer workflow completion and readiness](#customer-workflow-completion-and-readiness) | 18 in 24 subsections |
 
-481 entries in 19 sections. This block is generated: `python scripts/features_toc.py --write` (the test suite fails when it is stale).
+480 entries in 19 sections. This block is generated: `python scripts/features_toc.py --write` (the test suite fails when it is stale).
 <!-- toc:end -->
 
 ## Agent kernel and orchestration
@@ -2391,12 +2390,11 @@ Settings and the installation wizard.
   withdrawal preparation and withdrawal remain available while execution or
   learning is disabled, retaining current ownership, source, retention, revision
   and audit checks. Pending recording is not success; withdrawal does not undo
-  business work or erase exported copies. This completes the withdrawal control,
-  not the wider learning lifecycle or its Copilot operations.
-  See [usage, controls and limits](./learned-action-recipes.md). These engine and
-  API capabilities do not yet have a complete nontechnical dashboard journey;
-  [customer experience acceptance](./learned-capabilities-product-contract.md)
-  defines the remaining setup, teaching, consent, use and recovery requirements.
+  business work or erase exported copies. See
+  [usage, controls and limits](./learned-action-recipes.md). Apart from that
+  withdrawal control, these capabilities are operated through the engine, CLI
+  and API; the dashboard and Copilot do not provide a complete setup, teaching,
+  consent, use and recovery journey for them.
 
 - **Flow engine & visual automation** (`maverick.flow.*`, gated on `[flows]`) — a
   deterministic graph of typed nodes (`ir.py`: agent / action / branch / switch /
@@ -5937,13 +5935,6 @@ tested without spawning py-spy.
   gates (fenced code preserved, glossary + structure verified before
   anything is written, human translations never overwritten); `--check` is
   offline, and the model resolves by the `translator` role.
-- **2.0 release machinery** ([`docs/migration-2.0.md`](./migration-2.0.md)
-  + [`docs/release-checklist-2.0.md`](./release-checklist-2.0.md)): the
-  operator migration playbook (rehearsable today — snapshot, `maverick
-  migrate`/`schema-plan`/`config-lint` dry runs, apply, verify, rollback)
-  and the release gate the maintainer cut runs through (CI matrix,
-  contract checks, deprecation sunsets, migration rehearsal, LTS branch
-  cut, signing).
 - **AR plan tree (visionOS scaffold)** (`apps/visionos-plan-tree/`):
   SwiftUI + RealityKit volumetric window rendering the goal forest from
   `GET /api/v1/goal-tree` — status-colored spheres, parent link bars,
