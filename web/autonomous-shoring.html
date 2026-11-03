@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Autonomous Shoring: move a whole function onto AI agents | Lightwork</title>
+<meta name="description" content="Autonomous Shoring in Lightwork moves a whole business function, such as accounts payable, tier-1 support or contract review, onto AI agents you run yourself: a book of work, service levels measured from finished work, an exception desk for people, and a savings estimate from your own rates. Open source.">
+<link rel="stylesheet" href="styles.css">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="icon" type="image/png" sizes="512x512" href="favicon-512.png">
+<link rel="apple-touch-icon" href="favicon-180.png">
+<meta name="theme-color" content="#04050A">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Autonomous Shoring: move a whole function onto AI agents | Lightwork">
+<meta property="og:description" content="Find the work, build the team, hand it over, prove the savings. Autonomous Shoring moves a whole business function onto AI agents you run yourself. Open source under the Apache License 2.0.">
+<meta property="og:image" content="https://daybreakailabs.com/og.png">
+<meta property="og:url" content="https://daybreakailabs.com/autonomous-shoring">
+<meta name="twitter:card" content="summary_large_image">
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='{"token": "28d5584c57bd4c699bbc499ed4c37359"}'></script><!-- pragma: allowlist secret -->
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Lightwork Autonomous Shoring","applicationCategory":"BusinessApplication","operatingSystem":"Linux, macOS, Windows","license":"https://www.apache.org/licenses/LICENSE-2.0","isAccessibleForFree":true,"url":"https://daybreakailabs.com/autonomous-shoring","sameAs":["https://github.com/Daybreak-AI-Labs/Lightwork"],"author":{"@type":"Organization","name":"Daybreak Labs"}}
+</script>
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="index.html" aria-label="Daybreak Labs home">
+      <span class="brand-mark"><img src="daybreak-mark-dark.png" alt="" width="425" height="322"></span>
+      <span class="brand-word">Daybreak Labs<small>Lightwork</small></span>
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="autonomous-shoring.html" aria-current="page">Autonomous Shoring</a>
+      <a href="product.html">Platform</a>
+      <a href="packs.html">Specialists</a>
+      <a href="cortex.html">Cortex</a>
+      <a href="autonomous-compliance.html">Autonomous Compliance</a>
+      <a href="company.html">Company</a>
+    </nav>
+    <div class="nav-cta">
+      <a class="btn btn-ghost" href="https://daybreak-ai-labs.github.io/Lightwork/">Docs</a>
+      <a class="btn btn-primary" href="https://github.com/Daybreak-AI-Labs/Lightwork">GitHub</a>
+    </div>
+  </div>
+</header>
+
+<!-- HERO -->
+<section class="hero inner">
+  <div class="wrap hero-grid">
+    <div>
+      <span class="pill rv"><span class="dot"></span> Autonomous Shoring &middot; the fifth way to source work</span>
+      <h1 class="rv d1">Move a whole function <b>onto AI agents.</b></h1>
+      <div class="dline rv d1" role="presentation"></div>
+      <p class="lede rv d2">Offshore, nearshore, reshore, onshore: each one moved a function to another place, run by other people. Autonomous Shoring moves it onto AI agents you run yourself. Pick the work, switch on the team, hand it over a stage at a time, and watch every target, every exception and the savings on one page.</p>
+      <div class="hero-cta rv d3">
+        <a class="btn btn-primary" href="#try">Try it yourself</a>
+        <a class="btn btn-ghost" href="https://github.com/Daybreak-AI-Labs/Lightwork">View on GitHub</a>
+      </div>
+      <div class="hero-marks rv d3">
+        <span><b>On</b> in every install</span>
+        <span><b>Book</b> of work</span>
+        <span><b>Measured</b> service levels</span>
+        <span><b>Exception</b> desk</span>
+        <span><b>Savings</b> estimate</span>
+      </div>
+    </div>
+    <aside class="rv d2">
+      <div class="term glow">
+        <div class="bar"><span class="chip">accounts payable &middot; one business area</span><span>start to finish</span></div>
+        <div class="body">
+          <div class="row"><span>Ekko &middot; invoice matching repeats</span><span class="cap">DRAFTED</span></div>
+          <div class="row"><span>finance AP specialists</span><span class="ok">&#10003; SWITCHED ON</span></div>
+          <div class="row"><span>stage &middot; trying it out</span><span class="cap">ALONGSIDE TEAM</span></div>
+          <div class="row"><span>stage &middot; running</span><span class="ok">&#10003; LIVE</span></div>
+          <div class="row"><span>invoices per day &middot; 15.0 / 14</span><span class="ok">ON TARGET</span></div>
+          <div class="row"><span>needing a person &middot; 6.6% / 8%</span><span class="ok">ON TARGET</span></div>
+          <div class="row"><span>payment run &middot; 37 vendors</span><span class="human">WAITING FOR A PERSON</span></div>
+          <div class="row"><span>saved &middot; last 90 days</span><span class="ok">$79,727</span></div>
+        </div>
+      </div>
+      <p class="art-cap"><b>Fig. 01</b> &middot; One business area from discovery to savings. Illustrative, with figures from a synthetic sample run.</p>
+    </aside>
+  </div>
+</section>
+
+<!-- 01 JOURNEY -->
+<section>
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">01</span> How a function moves</span>
+      <h2>Find it. Build it. Hand it over. <b>Prove it.</b></h2>
+      <p>Autonomous Shoring is part of every Lightwork install, at <code>/shoring</code> in the dashboard. Moving a function becomes a sequence of steps you can see, not a leap of faith.</p>
+    </div>
+    <div class="gate four rv">
+      <div class="stage"><div class="n">01</div><div class="t">Find the work</div><div class="d">Ekko notices the work your team repeats and turns it into workflow drafts, ranked by the hours they could save. Or list the work yourself.</div></div>
+      <div class="stage"><div class="n">02</div><div class="t">Build the team</div><div class="d">Switch on the department's specialists, describe a new one in plain English, or show Lightwork a person doing the job.</div></div>
+      <div class="stage"><div class="n">03</div><div class="t">Hand it over</div><div class="d">Planning, then trying it out alongside your team, then running with people on the exceptions. You move each area when you're ready.</div></div>
+      <div class="stage final"><div class="n">04</div><div class="t">Prove it</div><div class="d">Targets measured from finished work, exceptions on one desk, and the cost by hand next to what Lightwork spent.</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- 02 BOOK OF WORK -->
+<section class="panel">
+  <div class="wrap">
+    <div class="split" style="margin-top:0;align-items:start">
+      <div class="rv">
+        <span class="eyebrow"><span class="n">02</span> The book of work</span>
+        <h2 class="sm" style="margin-top:18px">Every function you've handed over, <b>on one page.</b></h2>
+        <dl class="spec" style="grid-template-columns:150px 1fr">
+          <dt>Business areas</dt><dd>Name each one, choose the work to measure, set an owner and say what's included.</dd>
+          <dt>Stages</dt><dd><b>Planning</b> &rarr; <b>Trying it out</b> alongside your team &rarr; <b>Running</b> with people on the exceptions &rarr; <b>Proving results</b>.</dd>
+          <dt>Service levels</dt><dd>Items completed per day, the share needing a person, the longest time to finish. On target, at risk or missed, from finished work.</dd>
+          <dt>Savings</dt><dd>Your loaded hourly rate and how long a task takes a person, overall or per department, against what Lightwork spent. From 30 days to a year.</dd>
+        </dl>
+      </div>
+      <figure class="rv d1" style="margin:0">
+        <div class="instrument glow">
+          <div class="bar"><span class="chip">book of work</span><span>last 90 days</span></div>
+          <div class="save">
+            <div><div class="v ok">$79,727</div><div class="k">Saved</div></div>
+            <div><div class="v">$88,311</div><div class="k">Cost by hand</div></div>
+            <div><div class="v">$8,584</div><div class="k">Lightwork spend</div></div>
+          </div>
+          <div class="area"><div class="ah"><b>Accounts payable</b><span class="badge ok">Running</span><span class="badge ok">On target</span></div>
+            <div class="am">Owner Dana W. &middot; 1,354 delivered &middot; 2 waiting for a person</div>
+            <div class="slas"><span class="sla">Invoices per day <i>15.0 / 14</i></span><span class="sla">Needing a person <i>6.6% / 8%</i></span><span class="sla">Longest finish <i>0.6h / 24h</i></span></div></div>
+          <div class="area"><div class="ah"><b>Tier-1 support</b><span class="badge ok">Running</span><span class="badge ok">On target</span></div>
+            <div class="am">Owner Marcus L. &middot; 3,566 delivered &middot; 1 waiting for a person</div>
+            <div class="slas"><span class="sla">Tickets per day <i>39.6 / 36</i></span><span class="sla">Escalations <i>8.4% / 12%</i></span><span class="sla">First response <i>0.6h / 4h</i></span></div></div>
+          <div class="area"><div class="ah"><b>Contract review</b><span class="badge info">Trying it out</span><span class="badge warn">At risk</span></div>
+            <div class="am">Owner Priya R. &middot; 185 delivered &middot; 1 waiting for a person</div>
+            <div class="slas"><span class="sla warn">Contracts per day <i>2.1 / 2.5</i></span><span class="sla">Sent to counsel <i>11.9% / 20%</i></span></div></div>
+        </div>
+        <figcaption class="art-cap"><b>Fig. 02</b> &middot; The book of work. Figures from a synthetic sample run.</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<!-- 03 EXCEPTIONS AND INDEPENDENCE -->
+<section>
+  <div class="wrap">
+    <div class="split" style="margin-top:0;align-items:center">
+      <figure class="rv" style="margin:0">
+        <div class="instrument desk glow">
+          <div class="bar"><span class="chip">waiting for a person</span><span>4 items</span></div>
+          <div class="item"><div><span class="where">Accounts payable</span>Release this week's payment run to 37 vendors</div><span class="badge hi">High</span><span class="decide">Decide</span></div>
+          <div class="item"><div><span class="where">Accounts payable</span>Pay an invoice whose quantity doesn't match the receipt</div><span class="badge hi">High</span><span class="decide">Decide</span></div>
+          <div class="item"><div><span class="where">Tier-1 support</span>Refund a customer above the policy limit</div><span class="badge warn">Medium</span><span class="decide">Decide</span></div>
+          <div class="item"><div><span class="where">Contract review</span>Send a redlined services agreement to counsel</div><span class="badge warn">Medium</span><span class="decide">Decide</span></div>
+        </div>
+        <figcaption class="art-cap"><b>Fig. 03</b> &middot; The exception desk, sorted by business area. Illustrative.</figcaption>
+      </figure>
+      <div class="rv d1">
+        <span class="eyebrow"><span class="n">03</span> People on the exceptions</span>
+        <h2 class="sm" style="margin-top:18px">The agents do the routine. <b>Your people make the calls.</b></h2>
+        <p style="font-size:18px;color:var(--muted)">Anything that needs a decision lands on the exception desk for its business area, with Decide and See the task one click away.</p>
+        <div class="gate four levels" style="margin-top:28px">
+          <div class="stage"><div class="n">L1</div><div class="t">Observe</div></div>
+          <div class="stage"><div class="n">L2</div><div class="t">Suggest</div></div>
+          <div class="stage human"><div class="n">L3</div><div class="t">Ask first</div></div>
+          <div class="stage final"><div class="n">L4</div><div class="t">Act</div></div>
+        </div>
+        <p style="font-size:16px;color:var(--muted);margin-top:18px">Turn on independence levels and choose how far each specialist goes on its own, risk level by risk level. A newly hired specialist works a level lower until it's promoted.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 04 BUILD THE TEAM -->
+<section class="panel">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">04</span> Build the team</span>
+      <h2>Four ways to staff a function, <b>none of them a blank prompt.</b></h2>
+    </div>
+    <div class="caps rv">
+      <div class="cap-i"><span class="k">Switch on</span><div><h3>Specialists that already know the job</h3><p>Finance, tax, legal, privacy, customer support, HR, procurement and many industries. Deploy a department's team from the Workforce page. <a class="btn-link" href="packs.html">See the specialists</a></p></div></div>
+      <div class="cap-i"><span class="k">Describe</span><div><h3>Hire from a job description</h3><p>In Agent Factory, paste the job description you'd post or describe the agent in plain English. Review the specialist, its tools and its limits before it runs.</p></div></div>
+      <div class="cap-i"><span class="k">Demonstrate</span><div><h3>Show it the job</h3><p>Record what a person does and run <code>lightwork learn-demo</code>. Secrets are removed, the specialist and its workflow are drafted with a final review step, and nothing runs until you approve it.</p></div></div>
+      <div class="cap-i"><span class="k">Discover</span><div><h3>Let Ekko find and build<span class="opt">optional</span></h3><p>Ekko looks for the same steps repeated across the apps you allow, then builds private workflow drafts in batches, each run capped at 30 minutes and $5. Nothing is published or run until you say so.</p></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- 05 THE REAL PAGE -->
+<section>
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">05</span> The real thing</span>
+      <h2>This is the page <b>you'll open.</b></h2>
+      <p>Captured from a Lightwork dashboard running on a laptop, loaded with synthetic sample data: three business areas and 90 days of finished work, priced with example hourly rates.</p>
+    </div>
+    <div class="shots-2 rv">
+      <figure style="margin:0"><div class="shot"><div class="bar"><i></i><i></i><i></i><span>localhost &middot; /shoring</span></div><img src="shots/shoring.jpg" alt="The Autonomous Shoring page: the savings estimate and the book of work with contract review, tier-1 support and accounts payable and their service-level targets." width="1400" height="1532" loading="lazy"></div><figcaption class="art-cap"><b>Fig. 04</b> &middot; Savings estimate and book of work.</figcaption></figure>
+      <figure style="margin:0"><div class="shot"><div class="bar"><i></i><i></i><i></i><span>localhost &middot; /shoring</span></div><img src="shots/exception-desk.jpg" alt="The Waiting for a person section: items waiting for a decision in each business area, with risk, target status and Decide and See the task buttons." width="1400" height="890" loading="lazy"></div><figcaption class="art-cap"><b>Fig. 05</b> &middot; Waiting for a person.</figcaption></figure>
+    </div>
+  </div>
+</section>
+
+<!-- 06 FUNCTIONS -->
+<section class="panel">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">06</span> Where to start</span>
+      <h2>Functions that suit it <b>first.</b></h2>
+      <p>High-volume, rules-heavy work with a clear definition of done: the kind of work usually sent to an outsourcing provider.</p>
+    </div>
+    <div class="inds">
+      <div class="ind rv"><div class="t">Accounts payable</div><div class="d">Invoice intake, matching against orders and receipts, exception routing, and payment runs held for a person.</div></div>
+      <div class="ind rv d1"><div class="t">Tier-1 support</div><div class="d">Ticket triage, answers from your knowledge base, refunds inside policy, escalation to tier 2.</div></div>
+      <div class="ind rv d2"><div class="t">Contract review</div><div class="d">First-pass review against your playbook, redlines for counsel, and a clause-risk summary.</div></div>
+      <div class="ind rv"><div class="t">Claims intake</div><div class="d">First notice of loss captured, documents gathered, and claims routed to the right adjuster.</div></div>
+      <div class="ind rv d1"><div class="t">Month-end close</div><div class="d">Reconciliations, close checklists and variance notes, ready for the controller's review.</div></div>
+      <div class="ind rv d2"><div class="t">Employee questions</div><div class="d">Benefits and policy questions answered from your own documents, with a person for the hard ones.</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- 07 COMPARISON -->
+<section>
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">07</span> Compared with outsourcing</span>
+      <h2>The questions to ask <b>before you move a function.</b></h2>
+    </div>
+    <table class="maptbl rv">
+      <thead><tr><th>Question</th><th>Outsourcing a function</th><th>Autonomous Shoring</th></tr></thead>
+      <tbody>
+        <tr><td class="ctrl">Where does the work run?</td><td class="mech">In the provider's facility, by the provider's people.</td><td class="mech">Wherever you run Lightwork: your servers, your cloud account or an air-gapped network.</td></tr>
+        <tr><td class="ctrl">How long is the transition?</td><td class="mech">Months of knowledge transfer and shadowing.</td><td class="mech">Switch on specialists, or demonstrate the job and approve the specialist Lightwork drafts, then try it alongside your team.</td></tr>
+        <tr><td class="ctrl">How do you know it's working?</td><td class="mech">Monthly reports and sampled QA.</td><td class="mech">Live service levels from every finished item, and every action in a signed record.</td></tr>
+        <tr><td class="ctrl">What happens when the work grows?</td><td class="mech">Hire, train and re-run the transition.</td><td class="mech">Switch on more specialists. The targets and the exception desk cover each new area.</td></tr>
+        <tr><td class="ctrl">Does it get better?</td><td class="mech">Attrition resets what the team knew.</td><td class="mech">Skills learned on your work are kept once a person approves them, and Cortex remembers your documents and decisions.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- 08 TRY IT -->
+<section id="try" class="panel">
+  <div class="wrap">
+    <div class="split" style="margin-top:0;align-items:center">
+      <div class="rv">
+        <span class="eyebrow"><span class="n">08</span> Try it yourself</span>
+        <h2 class="sm" style="margin-top:18px">Set up your first business area <b>this afternoon.</b></h2>
+        <ol style="margin:22px 0 0;padding-left:20px;color:var(--muted);font-size:17px;line-height:1.75">
+          <li><b>Install</b> Lightwork from source and connect a model provider.</li>
+          <li><b>Add a business area</b> at <code>/shoring</code>: name, work to measure, owner, stage.</li>
+          <li><b>Set targets</b>: items per day, the share needing a person, the longest time to finish.</li>
+          <li><b>Staff it</b> from Workforce, or build a specialist in Agent Factory.</li>
+          <li><b>Price it</b> on the Savings page with your hourly rate and how long a task takes a person.</li>
+        </ol>
+        <p style="font-size:15px;color:var(--muted);margin-top:18px">On by default; set <code>[shoring] enable = false</code> or <code>MAVERICK_SHORING=0</code> to hide it.</p>
+      </div>
+      <div class="term rv d1 glow">
+        <div class="bar"><span class="chip">macOS &middot; Linux</span><span>from a fresh terminal</span></div>
+        <div class="body">
+          <div>git clone https://github.com/Daybreak-AI-Labs/Lightwork</div>
+          <div>cd Lightwork</div>
+          <div>python3 -m venv .venv</div>
+          <div>. .venv/bin/activate</div>
+          <div>python -m pip install --upgrade pip</div>
+          <div>python scripts/install_release_cohort.py --core-extra release-runtime,evidence-analysis</div>
+          <div>lightwork dashboard</div>
+          <div class="c"># open http://127.0.0.1:8765/shoring</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FINAL CTA -->
+<section class="cta-final">
+  <div class="wrap rv">
+    <div class="dline" role="presentation"></div>
+    <span class="eyebrow">Get started</span>
+    <h2>Shore one function. <b>Then the next.</b></h2>
+    <p class="lede">Autonomous Shoring is part of Lightwork, open source under the Apache License 2.0. Run it on your own machine, your own servers or an air-gapped network.</p>
+    <div class="hero-cta">
+      <a class="btn btn-primary" href="https://github.com/Daybreak-AI-Labs/Lightwork">View on GitHub</a>
+      <a class="btn btn-ghost" href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/source-install.md">Install from source</a>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer class="footer">
+  <div class="wrap">
+    <div class="top">
+      <div>
+        <div class="footer-brand"><span class="brand-mark"><img src="daybreak-mark-dark.png" alt="" width="425" height="322"></span><span>Daybreak Labs</span></div>
+        <p class="blurb">An AI lab for agentic workforces, built on compliance and governance. Our agent runtime, Lightwork, is open source under the Apache License 2.0.</p>
+        <div class="dline" role="presentation"></div>
+      </div>
+      <div>
+        <h4>Lightwork</h4>
+        <ul>
+          <li><a href="autonomous-shoring.html">Autonomous Shoring</a></li>
+          <li><a href="product.html">Platform</a></li>
+          <li><a href="packs.html">Specialists</a></li>
+          <li><a href="cortex.html">Cortex</a></li>
+          <li><a href="fleet-governance.html">Fleet governance</a></li>
+          <li><a href="autonomous-compliance.html">Autonomous Compliance</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Open source</h4>
+        <ul>
+          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork">Source code</a></li>
+          <li><a href="https://daybreak-ai-labs.github.io/Lightwork/">Documentation</a></li>
+          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/source-install.md">Install from source</a></li>
+          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/CONTRIBUTING.md">Contributing</a></li>
+          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork/discussions">Discussions</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Company</h4>
+        <ul>
+          <li><a href="company.html">About the lab</a></li>
+          <li><a href="security.html">Security</a></li>
+          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/SECURITY.md">Report a vulnerability</a></li>
+          <li><a href="company.html#contact">Contact</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="legal">
+      <span>&copy; 2026 Daybreak Labs. Lightwork is licensed under the <a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/LICENSE">Apache License 2.0</a>; the Lightwork name and logo are <a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/TRADEMARK.md">trademarks</a>.</span>
+      <span><a href="privacy.html">Privacy &amp; cookies</a> &middot; <a href="terms.html">Terms</a> &middot; Self-hosted fonts, no trackers</span>
+    </div>
+  </div>
+</footer>
+
+<script src="lab.js"></script>
+</body>
+</html>

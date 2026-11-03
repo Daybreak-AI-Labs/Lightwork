@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Autonomous Compliance &middot; open-source compliance work, run by governed agents</title>
+<meta name="description" content="Autonomous Compliance is the privacy, GRC and AI-governance part of Lightwork, the open-source agent runtime from Daybreak Labs: six suites of dashboard modules where governed agents do the work, a second person approves the steps that matter, and every action lands in a signed audit log. Self-hosted or air-gapped, under the Apache License 2.0.">
+<link rel="stylesheet" href="styles.css">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="icon" type="image/png" sizes="512x512" href="favicon-512.png">
+<link rel="apple-touch-icon" href="favicon-180.png">
+<meta name="theme-color" content="#04050A">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Autonomous Compliance: open-source compliance work, run by governed agents">
+<meta property="og:description" content="Six compliance suites in the open-source Lightwork runtime. The agents do the work; a person approves the steps that matter; every action is in a signed, verifiable record. Self-hosted or air-gapped.">
+<meta property="og:image" content="https://daybreakailabs.com/og.png">
+<meta property="og:url" content="https://daybreakailabs.com/autonomous-compliance">
+<meta name="twitter:card" content="summary_large_image">
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='{"token": "28d5584c57bd4c699bbc499ed4c37359"}'></script><!-- pragma: allowlist secret -->
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Lightwork","applicationCategory":"DeveloperApplication","operatingSystem":"Linux, macOS, Windows","license":"https://www.apache.org/licenses/LICENSE-2.0","isAccessibleForFree":true,"url":"https://daybreakailabs.com/autonomous-compliance","sameAs":["https://github.com/Daybreak-AI-Labs/Lightwork"],"publisher":{"@type":"Organization","name":"Daybreak Labs","url":"https://daybreakailabs.com"},"description":"Autonomous Compliance is the privacy, GRC and AI-governance part of the open-source Lightwork runtime: AI governance, privacy automation, consent and preferences, tech risk and compliance, third-party management and data use governance, with every action recorded in a signed, hash-chained audit log."}
+</script>
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="index.html" aria-label="Daybreak Labs home">
+      <span class="brand-mark"><img src="daybreak-mark-dark.png" alt="" width="425" height="322"></span>
+      <span class="brand-word">Daybreak Labs<small>Lightwork</small></span>
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="autonomous-shoring.html">Autonomous Shoring</a>
+      <a href="product.html">Platform</a>
+      <a href="packs.html">Specialists</a>
+      <a href="cortex.html">Cortex</a>
+      <a href="autonomous-compliance.html" aria-current="page">Autonomous Compliance</a>
+      <a href="company.html">Company</a>
+    </nav>
+    <div class="nav-cta">
+      <a class="btn btn-ghost" href="https://daybreak-ai-labs.github.io/Lightwork/">Docs</a>
+      <a class="btn btn-primary" href="https://github.com/Daybreak-AI-Labs/Lightwork">GitHub</a>
+    </div>
+  </div>
+</header>
+
+<!-- HERO -->
+<section class="hero inner">
+  <div class="wrap hero-grid">
+    <div>
+      <span class="pill rv"><span class="dot"></span> Open source &middot; compliance work, run by agents</span>
+      <h1 class="rv d1">Compliance that does the work, <b>under a record an auditor can verify.</b></h1>
+      <div class="dline rv d1" role="presentation"></div>
+      <p class="lede rv d2">Autonomous Compliance is the privacy, GRC and AI-governance side of Lightwork: six suites of dashboard modules where governed agents do the work. They work a privacy request, propose assessment answers from evidence you already have and keep the AI inventory current. A second person approves the steps that matter, and every action lands in the signed audit log. It ships in every Lightwork install and runs wherever you run Lightwork.</p>
+      <div class="hero-cta rv d3">
+        <a class="btn btn-primary" href="#suites">See the six suites</a>
+        <a class="btn btn-ghost" href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/compliance/README.md">Read the compliance docs</a>
+      </div>
+      <div class="hero-marks rv d3">
+        <span><b>Open source</b> &middot; Apache 2.0</span>
+        <span><b>6</b> suites</span>
+        <span><b>Evidence</b> generated as the work happens</span>
+        <span><b>A second person</b> on destructive steps</span>
+        <span><b>Self-hosted</b> or air-gapped</span>
+      </div>
+    </div>
+    <aside class="rv d2">
+      <div class="term">
+        <div class="bar"><span class="chip">privacy-automation &middot; rights request</span><span>audit log</span></div>
+        <div class="body">
+          <div class="row"><span>intake &middot; access and deletion request</span><span class="seal">SEALED</span></div>
+          <div class="row"><span>identity evidence recorded</span><span class="ok">&#10003; SIGNED</span></div>
+          <div class="row"><span>sources &middot; M365 &middot; Salesforce &middot; ServiceNow</span><span class="ok">&#10003; RETRIEVED</span></div>
+          <div class="row"><span>deletion task</span><span class="human">REQUIRE_HUMAN</span></div>
+          <div class="row"><span>approved by a second reviewer</span><span class="ok">&#10003; SIGNED</span></div>
+          <div class="row"><span>case closed &middot; four eyes</span><span class="ok">&#10003; SIGNED</span></div>
+          <div class="row"><span class="c">&middot; alter the retrieval row after closure &middot;</span><span class="deny">&#10007; CAUGHT</span></div>
+        </div>
+      </div>
+      <p class="art-cap"><b>Fig. 02</b> &middot; One rights request, end to end (illustrative). The agents retrieve and draft; destructive work and closure wait for a second person; the record refuses to be rewritten.</p>
+    </aside>
+  </div>
+</section>
+
+<!-- WHY -->
+<section>
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">01</span> Why agents</span>
+      <h2>A workflow platform tracks the work. <b>It doesn't do it.</b></h2>
+      <p>Most compliance platforms were built for a team that does everything by hand: they give that team forms, workflows, reminders and a dashboard. The team is still the bottleneck, the evidence is still collected before the audit, and the AI register is something someone has to remember to update.</p>
+    </div>
+    <div class="vs rv">
+      <div class="them">
+        <h4>A workflow-based compliance platform</h4>
+        <ul>
+          <li><b>The team does the work.</b> The platform records that it was done.</li>
+          <li><b>Evidence is collected</b> by people, on a calendar, before the audit.</li>
+          <li><b>The AI register</b> drifts the day after it's filled in.</li>
+          <li><b>One deployment model.</b> The vendor's.</li>
+          <li><b>Closed source.</b> You take the vendor's word for what it does.</li>
+        </ul>
+      </div>
+      <div class="us">
+        <h4>Autonomous Compliance</h4>
+        <ul>
+          <li><b>Governed agents do the work.</b> A person approves the steps that matter.</li>
+          <li><b>Evidence is generated</b> as the work happens: signed, hash-chained, verifiable offline.</li>
+          <li><b>The AI inventory is filled</b> by read-only connectors to your model registries and AI platforms.</li>
+          <li><b>Self-hosted or air-gapped.</b> The same gates either way.</li>
+          <li><b>Open source.</b> Read the code behind every line on this page.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- SUITES -->
+<section class="panel" id="suites">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">02</span> The six suites</span>
+      <h2>The compliance program, <b>as an agentic workforce.</b></h2>
+      <p>Each suite is a set of dashboard modules worked by governed agents with fixed jobs and least-privilege tools. They draft and recommend; a person approves the steps that change something. Items marked <span class="tagpill">Preview</span> work but are still being expanded; everything else is shipped.</p>
+    </div>
+    <div class="cols cols-2">
+      <div class="card rv">
+        <span class="idx">Suite 01</span>
+        <h3>AI Governance</h3>
+        <p>The AI inventory, and the obligations that follow from it.</p>
+        <ul>
+          <li>Governance agents that keep the AI inventory and its reviews current</li>
+          <li>Read-only inventory connectors for MLflow, Amazon SageMaker, Snowflake Cortex, Salesforce Agentforce, Hugging Face, Azure AI Foundry, Amazon Bedrock, Copilot Studio, Databricks Unity Catalog and Vertex AI</li>
+          <li>Review and remediation tasks tied to each AI system</li>
+          <li>EU AI Act readiness, AI literacy and Article 73 serious-incident clocks and drafts <span class="tagpill">Preview</span></li>
+          <li>Evidence analysis of uploaded documents about your AI systems <span class="tagpill">Preview</span></li>
+        </ul>
+      </div>
+      <div class="card rv d1">
+        <span class="idx">Suite 02</span>
+        <h3>Privacy Automation</h3>
+        <p>Rights requests worked, not just tracked.</p>
+        <ul>
+          <li>A privacy workspace for assessments (PIA, DPIA, TIA, LIA, CCPA, US state privacy, Colorado ADMT and others), vendors, requests, breaches and consent</li>
+          <li>Rights orchestration: retrieval, deletion and verification tasks, with opt-in source adapters for Microsoft 365, Google Workspace, Salesforce and ServiceNow, independent approval for destructive work, and four-eyes closure</li>
+          <li>Privacy-notice releases that are independently reviewed, versioned and reversible</li>
+          <li>California DROP requests, and a public rights-request form with email verification</li>
+          <li>Discovery of where personal data lives in your storage <span class="tagpill">Preview</span></li>
+        </ul>
+      </div>
+      <div class="card rv">
+        <span class="idx">Suite 03</span>
+        <h3>Consent &amp; Preferences</h3>
+        <p>Consent as a record, not a banner.</p>
+        <ul>
+          <li>Consent receipts and a governed preference center</li>
+          <li>Browser opt-out signals such as Global Privacy Control, applied to the matching requests</li>
+          <li>Publishing your consent banner and preference center <span class="tagpill">Preview</span></li>
+          <li>Cookie and tracker scans of your websites <span class="tagpill">Preview</span></li>
+        </ul>
+      </div>
+      <div class="card rv d1">
+        <span class="idx">Suite 04</span>
+        <h3>Tech Risk &amp; Compliance</h3>
+        <p>Evidence generated as the work happens.</p>
+        <ul>
+          <li>Framework scoping with control libraries for SOC 2, ISO 27001, NIST CSF, NIST 800-53, CIS v8, PCI DSS, HIPAA, CMMC Level 2 and FedRAMP Moderate</li>
+          <li>Assessment answers proposed from evidence you already have, approved by a different person before they are filled in</li>
+          <li>A no-code GRC studio for objects, fields, forms, rules, evidence bindings and report views, reviewed and approved before it is published</li>
+          <li>Typed sync of findings, risk acceptances and AI incidents to ServiceNow IRM and Archer</li>
+          <li>Continuous evidence collection from your systems <span class="tagpill">Preview</span></li>
+        </ul>
+      </div>
+      <div class="card rv">
+        <span class="idx">Suite 05</span>
+        <h3>Third-Party Management</h3>
+        <p>Vendor risk with the contract on record.</p>
+        <ul>
+          <li>Vendor onboarding, review and offboarding, step by step</li>
+          <li>Vendor contracts and engagements kept as records with their own lifecycle</li>
+          <li>Executive PDF reports built from exact source records, with governed downloads</li>
+          <li>Monitoring vendors for risk signals <span class="tagpill">Preview</span></li>
+        </ul>
+      </div>
+      <div class="card rv d1">
+        <span class="idx">Suite 06</span>
+        <h3>Data Use Governance</h3>
+        <p>Every use of data has a purpose and a recorded decision.</p>
+        <ul>
+          <li>Purpose capture, and a policy compiler that turns data-use decisions into machine-readable policy</li>
+          <li>Applying those rules natively inside Snowflake and Databricks <span class="tagpill">Preview</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- HOW IT'S BUILT -->
+<section>
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">03</span> How it's built</span>
+      <h2>Agents, not forms. <b>The same governance as everything else Lightwork runs.</b></h2>
+      <p>Autonomous Compliance is not a separate system with its own security model. It runs on the Lightwork runtime, so every module above inherits the runtime's controls.</p>
+    </div>
+    <div class="gate rv">
+      <div class="stage"><div class="n">01</div><div class="t">Capability</div><div class="d">With capability enforcement on, an agent's grant can only narrow from its parent's, never widen.</div></div>
+      <div class="stage human"><div class="n">02</div><div class="t">Policy</div><div class="d">Deletion, publication and case closure wait for a second, independent person.</div></div>
+      <div class="stage"><div class="n">03</div><div class="t">Shield</div><div class="d">Inputs, every tool call and every answer are scanned for dangerous actions and prompt injection.</div></div>
+      <div class="stage"><div class="n">04</div><div class="t">Budget</div><div class="d">The same dollar, time, token and tool-call caps as any other run.</div></div>
+      <div class="stage final"><div class="n">05</div><div class="t">Audit</div><div class="d">The evidence an auditor asks for is the record the work produced, signed and verifiable offline.</div></div>
+    </div>
+    <dl class="spec rv">
+      <dt>Switches</dt><dd>Most modules sit behind their own switch and start off. An administrator turns on the ones they need, in the dashboard or in <code>config.toml</code>.</dd>
+      <dt>Tenancy</dt><dd>Records are scoped to the exact workspace they belong to. Sensitive local stores are encrypted at rest with AES-256-GCM by default, and the key can be supplied from your own KMS or secrets manager.</dd>
+      <dt>Deployment</dt><dd><b>Self-hosted or air-gapped.</b> On your own machine, your own servers or your own cloud account. <code>lightwork airgap</code> checks the configuration for outbound paths.</dd>
+      <dt>Human role</dt><dd>Agents draft and recommend. Destructive and publishing steps need a second person, and an agent cannot approve its own request.</dd>
+      <dt>Interoperability</dt><dd>Read from your registries and platforms; write findings, risk acceptances and AI incidents back to ServiceNow IRM and Archer; export signed records.</dd>
+    </dl>
+  </div>
+</section>
+
+<!-- WHAT'S INSIDE, AND WHAT'S PROVEN -->
+<section class="panel" id="status">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">04</span> What's inside, and what's proven</span>
+      <h2>Built for the whole compliance program, <b>with an honest status on every module.</b></h2>
+      <p>Every module carries one of three labels, assigned from a review of what the code implements. The dashboard's Autonomous Compliance page shows the same labels, read from one source in the code, so the two can't drift apart.</p>
+    </div>
+    <div class="stats four rv">
+      <div class="s"><div class="big"><b>Six</b> suites</div><div class="lbl">AI governance &middot; privacy &middot; consent &middot; tech risk &middot; third parties &middot; data use</div></div>
+      <div class="s"><div class="big"><b>Shipped</b></div><div class="lbl">a working local path that is configurable and covered by focused tests</div></div>
+      <div class="s"><div class="big"><b>Preview</b></div><div class="lbl">useful code exists; breadth or live proof is still being built, and it is labelled so</div></div>
+      <div class="s"><div class="big"><b>External</b></div><div class="lbl">licensed content, commercial feeds or certification that code alone can't establish</div></div>
+    </div>
+    <div class="fig rv">
+      <div class="term">
+        <div class="bar"><span class="chip">how status is labelled</span><span>compliance_catalog.py</span></div>
+        <div class="body">
+          <div class="row"><span>shipped</span><span class="ok">a coherent local path is mounted, configurable and test-covered</span></div>
+          <div class="row"><span>preview</span><span class="cap">useful code; product breadth or live operational proof still missing</span></div>
+          <div class="row"><span>external</span><span class="seal">licensed content, feeds, certification or live scale</span></div>
+          <div class="row"><span>not a claim we make</span><span class="deny">certification, or parity with any other vendor's product</span></div>
+        </div>
+      </div>
+      <p class="figcap"><b>Fig. 03</b> &middot; Status labels describe Lightwork and nothing else. "Shipped" is not a claim of live provider interoperability or operation at scale. Lightwork is software, not a certified service: using it does not make an organization compliant, and Lightwork itself is not audited or certified against any framework. The full list is in <a class="btn-link" href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/packages/maverick-core/maverick/compliance_catalog.py">compliance_catalog.py</a>; how the controls map to SOC 2, ISO 27001 and ISO 42001 is in the <a class="btn-link" href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/compliance/README.md">compliance documentation</a>.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ROLLOUT -->
+<section>
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">05</span> How to roll it out</span>
+      <h2>Run it beside what you have. <b>Switch over when the record proves it.</b></h2>
+      <p>Keep your current process running while the agents do the same work alongside it, every action recorded. Decide to switch over on the evidence, one suite at a time.</p>
+    </div>
+    <div class="gate rv">
+      <div class="stage"><div class="n">01</div><div class="t">Shadow</div><div class="d">Turn on one suite and connect your registries and platforms read-only. The agents do the same work beside your current process, and every action is recorded.</div></div>
+      <div class="stage human"><div class="n">02</div><div class="t">Switch over</div><div class="d">Suite by suite, on the evidence in the record, with the people who approve already in the loop.</div></div>
+      <div class="stage final"><div class="n">03</div><div class="t">Prove</div><div class="d">Answer the next audit from the record, signed and verifiable offline.</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- FINAL CTA -->
+<section class="cta-final">
+  <div class="wrap rv">
+    <div class="dline" role="presentation"></div>
+    <span class="eyebrow">Get started</span>
+    <h2>Run it yourself. <b>Read every line of it.</b></h2>
+    <p class="lede">Lightwork is open source under the Apache License 2.0. Install it from source and run it on your own machine, your own servers or an air-gapped network.</p>
+    <div class="hero-cta">
+      <a class="btn btn-primary" href="https://github.com/Daybreak-AI-Labs/Lightwork">View on GitHub</a>
+      <a class="btn btn-ghost" href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/source-install.md">Install from source</a>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer class="footer">
+  <div class="wrap">
+    <div class="top">
+      <div>
+        <div class="footer-brand"><span class="brand-mark"><img src="daybreak-mark-dark.png" alt="" width="425" height="322"></span><span>Daybreak Labs</span></div>
+        <p class="blurb">An AI lab for agentic workforces, built on compliance and governance. Our agent runtime, Lightwork, is open source under the Apache License 2.0.</p>
+        <div class="dline" role="presentation"></div>
+      </div>
+      <div>
+        <h4>Lightwork</h4>
+        <ul>
+          <li><a href="autonomous-shoring.html">Autonomous Shoring</a></li>
+          <li><a href="product.html">Platform</a></li>
+          <li><a href="packs.html">Specialists</a></li>
+          <li><a href="cortex.html">Cortex</a></li>
+          <li><a href="fleet-governance.html">Fleet governance</a></li>
+          <li><a href="autonomous-compliance.html">Autonomous Compliance</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Open source</h4>
+        <ul>
+          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork">Source code</a></li>
+          <li><a href="https://daybreak-ai-labs.github.io/Lightwork/">Documentation</a></li>
+          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/source-install.md">Install from source</a></li>
+          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/CONTRIBUTING.md">Contributing</a></li>
+          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork/discussions">Discussions</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Company</h4>
+        <ul>
+          <li><a href="company.html">About the lab</a></li>
+          <li><a href="security.html">Security</a></li>
+          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/SECURITY.md">Report a vulnerability</a></li>
+          <li><a href="company.html#contact">Contact</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="legal">
+      <span>&copy; 2026 Daybreak Labs. Lightwork is licensed under the <a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/LICENSE">Apache License 2.0</a>; the Lightwork name and logo are <a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/TRADEMARK.md">trademarks</a>.</span>
+      <span><a href="privacy.html">Privacy &amp; cookies</a> &middot; <a href="terms.html">Terms</a> &middot; Self-hosted fonts, no trackers</span>
+    </div>
+  </div>
+</footer>
+
+<script src="lab.js"></script>
+</body>
+</html>

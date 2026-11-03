@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Security &amp; deployment: Lightwork</title>
+<meta name="description" content="How Lightwork's security controls work and where each one lives in the open-source code: self-hosted or air-gapped deployment, sandboxed execution, capability tokens, approvals with separation of duties, an egress lock for model calls, and a signed, hash-chained audit log you can verify offline.">
+<link rel="stylesheet" href="styles.css">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="icon" type="image/png" sizes="512x512" href="favicon-512.png">
+<link rel="apple-touch-icon" href="favicon-180.png">
+<meta name="theme-color" content="#04050A">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Security &amp; deployment: Lightwork">
+<meta property="og:description" content="Every control a security reviewer asks about, mapped to a mechanism in Lightwork's open-source code. Self-hosted or air-gapped, with a signed, hash-chained audit log you can verify offline.">
+<meta property="og:image" content="https://daybreakailabs.com/og.png">
+<meta property="og:url" content="https://daybreakailabs.com/security">
+<meta name="twitter:card" content="summary_large_image">
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='{"token": "28d5584c57bd4c699bbc499ed4c37359"}'></script><!-- pragma: allowlist secret -->
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="index.html" aria-label="Daybreak Labs home">
+      <span class="brand-mark"><img src="daybreak-mark-dark.png" alt="" width="425" height="322"></span>
+      <span class="brand-word">Daybreak Labs<small>Lightwork</small></span>
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="autonomous-shoring.html">Autonomous Shoring</a>
+      <a href="product.html">Platform</a>
+      <a href="packs.html">Specialists</a>
+      <a href="cortex.html">Cortex</a>
+      <a href="autonomous-compliance.html">Autonomous Compliance</a>
+      <a href="company.html">Company</a>
+    </nav>
+    <div class="nav-cta">
+      <a class="btn btn-ghost" href="https://daybreak-ai-labs.github.io/Lightwork/">Docs</a>
+      <a class="btn btn-primary" href="https://github.com/Daybreak-AI-Labs/Lightwork">GitHub</a>
+    </div>
+  </div>
+</header>
+
+<!-- HERO -->
+<section class="hero inner">
+  <div class="wrap hero-grid">
+    <div>
+      <span class="pill rv"><span class="dot"></span> Security &amp; deployment</span>
+      <h1 class="rv d1">Built to clear <b>your security review.</b></h1>
+      <div class="dline rv d1" role="presentation"></div>
+      <p class="lede rv d2">Every control a reviewer asks about maps to a mechanism in code you can read, not a promise on a slide. Lightwork is self-hosted or air-gapped, with sandboxed execution, capability tokens, approvals with separation of duties, a policy on every action, an egress lock for model calls, and a signed, hash-chained audit log you can verify offline.</p>
+      <div class="hero-cta rv d3">
+        <a class="btn btn-primary" href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/SECURITY.md">Read the security policy</a>
+        <a class="btn btn-ghost" href="product.html">How it works</a>
+      </div>
+      <div class="hero-marks rv d3">
+        <span><b>Open source</b> &middot; read the code</span>
+        <span><b>Self-hosted</b> or air-gapped</span>
+        <span><b>Signed,</b> hash-chained audit</span>
+        <span><b>6</b> invariants, machine-checked</span>
+      </div>
+    </div>
+    <aside class="rv d2">
+      <div class="term">
+        <div class="bar"><span class="chip">security review &middot; control map</span><span>10 controls &middot; 10 mechanisms</span></div>
+        <div class="body">
+          <div class="row"><span>you decide where data is held</span><span class="ok">SELF-HOST / AIR-GAP</span></div>
+          <div class="row"><span>model calls locked by policy</span><span class="ok">EGRESS LOCK</span></div>
+          <div class="row"><span>least privilege, per action</span><span class="ok">CAPABILITY TOKENS</span></div>
+          <div class="row"><span>separation of duties</span><span class="ok">DUAL CONTROL</span></div>
+          <div class="row"><span>a person stays in control</span><span class="human">REQUIRE_HUMAN</span></div>
+          <div class="row"><span>a provable, tamper-evident record</span><span class="seal">SIGNED CHAIN</span></div>
+          <div class="row"><span>keys and data at rest</span><span class="ok">AES-256-GCM</span></div>
+        </div>
+      </div>
+      <p class="art-cap"><b>Fig. 06</b> &middot; Every control on a reviewer's list resolves to a mechanism in the code. The full map, all ten rows, is below.</p>
+    </aside>
+  </div>
+</section>
+
+<!-- CONTROL -> MECHANISM -->
+<section>
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">01</span> The controls</span>
+      <h2>Mapped, <b>not promised.</b></h2>
+      <p>What a security reviewer requires, and the mechanism in Lightwork that addresses it. Some controls are on by default; the rest are switches you turn on, noted below.</p>
+    </div>
+    <table class="maptbl rv">
+      <thead><tr><th>What your reviewers require</th><th>The mechanism</th></tr></thead>
+      <tbody>
+        <tr><td class="ctrl">You decide where data is held</td><td class="mech"><b>Self-host or air-gap.</b> The world model, the audit log and the keys live on infrastructure you run. Model calls go only to the providers you configure.</td></tr>
+        <tr><td class="ctrl">Model calls locked by policy</td><td class="mech"><b>Egress lock</b> (Enterprise mode): model calls are pinned to local or self-hosted providers, and a cloud call is refused before any prompt is sent. Outbound requests made through the supported Python HTTP clients are checked against a per-tenant allow/deny policy. It is an application-layer control, not a packet firewall: pair it with sandbox network isolation and a default-deny network egress policy to cover raw sockets and subprocesses.</td></tr>
+        <tr><td class="ctrl">Least privilege, per action</td><td class="mech"><b>Capability tokens</b> (attenuate-only): a spawned agent's grant is narrowed from its parent's and can never exceed it. On in Enterprise mode or with <code>MAVERICK_ENFORCE_CAPABILITIES=1</code>.</td></tr>
+        <tr><td class="ctrl">Separation of duties</td><td class="mech"><b>Dual control</b>: by default the requester cannot approve their own request, and the agent can never approve its own. Require N distinct approvers globally or per risk band with <code>[security] approvals_required</code>.</td></tr>
+        <tr><td class="ctrl">Bounded blast radius</td><td class="mech"><b>Sandbox backends</b>: Docker and Podman run each command in a throwaway container with all Linux capabilities dropped, a process limit and no network by default; Kubernetes, gVisor and SSH backends isolate further. The default <code>local</code> backend runs commands on the host, so use a container backend for untrusted goals. Hard budget caps on tokens, dollars, wall-clock time and tool calls.</td></tr>
+        <tr><td class="ctrl">A person stays in control</td><td class="mech"><b>Policy on every action</b>: allow, deny, or require a human. High- and critical-risk actions require confirmation by default, and a connector change to an external system waits on the Approvals page until a person approves it.</td></tr>
+        <tr><td class="ctrl">A provable, tamper-evident record</td><td class="mech"><b>Signed, hash-chained audit</b> (the Operating Record): Ed25519-signed by default and verifiable offline with <code>lightwork audit verify</code> or a standalone Rust verifier. Export it as JSONL or ArcSight CEF for a SIEM.</td></tr>
+        <tr><td class="ctrl">Evidence on demand</td><td class="mech"><b>Proof pack</b> (<code>python -m maverick.proof_pack</code>): a signed evidence bundle and a <code>PROOF.md</code> that verify offline. A section it cannot run reports NOT RUN with the command to reproduce it, instead of a number.</td></tr>
+        <tr><td class="ctrl">Safety posture asserted in CI</td><td class="mech"><b>Machine-readable reports</b>: <code>lightwork safety --json</code> prints the shield status, sandbox backend and egress policy, and <code>lightwork airgap</code> exits non-zero on any outbound path in the configuration.</td></tr>
+        <tr><td class="ctrl">Keys and data at rest</td><td class="mech"><b>Encrypted at rest</b>: sensitive local stores use AES-256-GCM by default, and the key can come from a KMS or secrets manager. An optional out-of-process model proxy holds provider API keys so they never enter the agent's process.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- MACHINE-PROVEN GOVERNANCE -->
+<section class="on-navy">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">02</span> Governance, machine-checked</span>
+      <h2>Safety you audit, <b>not safety you trust.</b></h2>
+      <p>Six governance invariants are tested on every CI run, the pack-level ones across every built-in specialist pack. Randomized property tests run thousands of cases, and fault-injection controls prove the pack-wide checks can fail, so a passing result can't be vacuously true. The tests are in the repository for you to read and run.</p>
+    </div>
+    <div class="stats rv">
+      <div class="s"><div class="big">Six <b>invariants</b></div><div class="lbl">governance properties, each with its own test file</div></div>
+      <div class="s"><div class="big">Every <b>pack</b></div><div class="lbl">every built-in specialist pack, checked on every CI run</div></div>
+      <div class="s"><div class="big"><b>Fault injection</b></div><div class="lbl">controls that prove each checker can fail</div></div>
+    </div>
+    <div class="fig rv">
+      <div class="term">
+        <div class="bar"><span class="chip">invariant run</span><span class="ok">&#9679; every pack</span></div>
+        <div class="body">
+          <div class="row"><span>no drafting agent reaches a state-mutating tool</span><span class="ok">&#10003; HELD</span></div>
+          <div class="row"><span>no child agent out-scopes its parent</span><span class="ok">&#10003; HELD</span></div>
+          <div class="row"><span>a quarantine seal never bleeds across compartments</span><span class="ok">&#10003; HELD</span></div>
+          <div class="row"><span>hard refusals can't be stripped</span><span class="ok">&#10003; HELD</span></div>
+          <div class="row"><span>budget caps can't be silently exceeded</span><span class="ok">&#10003; HELD</span></div>
+          <div class="row"><span>onboarding &amp; high-risk actions are never autonomous</span><span class="ok">&#10003; HELD</span></div>
+        </div>
+      </div>
+      <p class="figcap"><b>Fig. 07</b> &middot; The invariant run. Each line is a property that must hold for every pack; the fault-injection controls prove the checker can fail, so a green result means something.</p>
+    </div>
+  </div>
+</section>
+
+<!-- DEPLOYMENT MODELS -->
+<section>
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">03</span> Deployment</span>
+      <h2>Runs where <b>your policy requires.</b></h2>
+      <p>You run Lightwork yourself. The same gates, the same record, and your own keys, wherever you put it.</p>
+    </div>
+    <div class="cols cols-3">
+      <div class="card rv"><span class="idx">01</span><h3>Your machine</h3><p>Install from source and open the dashboard on <code>127.0.0.1</code>. Serving it on any other address requires a dashboard token.</p></div>
+      <div class="card rv d1"><span class="idx">02</span><h3>Your servers or cloud</h3><p>Docker, Kubernetes with the Helm chart, or a single VPS, with SQLite or Postgres for the world model. Reference deployments are in the repository.</p></div>
+      <div class="card rv d2"><span class="idx">03</span><h3>Air-gapped</h3><p>Run local models through Ollama, vLLM or TGI with Enterprise mode on. <code>lightwork airgap</code> checks the configuration for any outbound path and exits non-zero if it finds one.</p></div>
+    </div>
+    <p class="muted rv" style="margin-top:26px;font-size:16px">Lightwork is alpha software. No release, PyPI package or container image is published yet; install from source, and security fixes land on <code>main</code>. Read the <a class="btn-link" href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/SECURITY.md#execution-posture">execution posture</a> before running untrusted goals.</p>
+  </div>
+</section>
+
+<!-- AUDIT & EVIDENCE -->
+<section class="on-navy">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">04</span> Audit &amp; evidence</span>
+      <h2>Proof a reviewer can verify, <b>offline.</b></h2>
+      <p>The Operating Record is a signed, hash-chained log of every governed action. Each entry carries the hash of the one before it, so altering a single row after the fact breaks the chain and the verifier reports it.</p>
+    </div>
+    <div class="split rv" style="margin-top:48px">
+      <div class="term">
+        <div class="bar"><span class="chip">operating record</span><span class="ok">&#9679; chain verified</span></div>
+        <div class="body">
+          <div class="c"># each entry chains to the one before it</div>
+          <div class="row"><span>0xA2 &middot; deny $60k wire</span><span class="ok">&#10003; signed</span></div>
+          <div class="row"><span>0xA3 &middot; require-human $6k</span><span class="ok">&#10003; signed</span></div>
+          <div class="row"><span>0xA4 &middot; cap runaway loop</span><span class="ok">&#10003; signed</span></div>
+          <div class="row"><span class="c">&middot; alter 0xA2 after the fact &middot;</span><span class="deny">&#10007; CAUGHT</span></div>
+        </div>
+      </div>
+      <div class="term">
+        <div class="bar"><span class="chip">proof pack</span><span class="ok">&#9679; Ed25519 signed</span></div>
+        <div class="body">
+          <div class="c"># PROOF.md &middot; verifies offline</div>
+          <div class="row"><span>signature</span><span class="ok">&#10003; Ed25519</span></div>
+          <div class="row"><span>governance checks</span><span class="ok">&#10003; PASS</span></div>
+          <div class="row"><span>benchmark without a key</span><span class="seal">NOT RUN, never filled in</span></div>
+        </div>
+      </div>
+    </div>
+    <p class="muted rv" style="margin-top:26px;font-size:16px">One limit, stated plainly: by default the audit signing key lives on the same host, which catches accidental or unprivileged edits but not someone running as the service account. Supply the key from outside the host (<code>MAVERICK_AUDIT_SIGNING_KEY</code>, or a KMS-wrapped key) and publish checkpoints with <code>lightwork audit checkpoint</code> to an independent location to narrow that gap.</p>
+  </div>
+</section>
+
+<!-- COMPLIANCE & STATUS -->
+<section>
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">05</span> Compliance &amp; status</span>
+      <h2>Mapped to the frameworks <b>your auditors use.</b></h2>
+      <p>The repository ships a control crosswalk that maps Lightwork's technical controls to three frameworks, names the code behind each one, and marks the controls your organization must run itself.</p>
+    </div>
+    <div class="stats rv">
+      <div class="s"><div class="big">SOC 2</div><div class="lbl">Trust Services Criteria, control crosswalk</div></div>
+      <div class="s"><div class="big">ISO 27001</div><div class="lbl">ISO/IEC 27001:2022, control crosswalk</div></div>
+      <div class="s"><div class="big">ISO 42001</div><div class="lbl">ISO/IEC 42001:2023, control crosswalk</div></div>
+    </div>
+    <p class="muted rv" style="margin-top:26px;font-size:16px">Lightwork is software, not a certified service. It is not audited or certified against any framework, and using it does not make an organization compliant. <a class="btn-link" href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/compliance/README.md">Read the compliance documentation &rarr;</a></p>
+  </div>
+</section>
+
+<!-- REPORTING -->
+<section class="panel">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">06</span> Report a vulnerability</span>
+      <h2>Found a problem? <b>Tell us privately.</b></h2>
+      <p>Please don't open a public issue for a vulnerability. The full process is in <a class="btn-link" href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/SECURITY.md">SECURITY.md</a>.</p>
+    </div>
+    <div class="cols cols-3">
+      <div class="card rv"><span class="idx">preferred</span><h3>GitHub private reporting</h3><p>Open the repository's Security tab and choose <a class="btn-link" href="https://github.com/Daybreak-AI-Labs/Lightwork/security/advisories/new">Report a vulnerability</a>. Include the version or commit, reproduction steps and the impact.</p></div>
+      <div class="card rv d1"><span class="idx">otherwise</span><h3>Email</h3><p>If you can't use GitHub, email <a class="btn-link" href="mailto:chris@daybreakailabs.com">chris@daybreakailabs.com</a>.</p></div>
+      <div class="card rv d2"><span class="idx">disclosure</span><h3>Coordinated, and credited</h3><p>A 90-day coordinated disclosure window, an advisory once a fix is available, and credit for the reporter unless you prefer to stay anonymous. There is no paid bug bounty.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- FINAL CTA -->
+<section class="cta-final">
+  <div class="wrap rv">
+    <div class="dline" role="presentation"></div>
+    <span class="eyebrow">Get started</span>
+    <h2>Review it yourself. <b>Every line is public.</b></h2>
+    <p class="lede">Lightwork is open source under the Apache License 2.0. Install it from source and run it on your own machine, your own servers or an air-gapped network.</p>
+    <div class="hero-cta">
+      <a class="btn btn-primary" href="https://github.com/Daybreak-AI-Labs/Lightwork">View on GitHub</a>
+      <a class="btn btn-ghost" href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/source-install.md">Install from source</a>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer class="footer">
+  <div class="wrap">
+    <div class="top">
+      <div>
+        <div class="footer-brand"><span class="brand-mark"><img src="daybreak-mark-dark.png" alt="" width="425" height="322"></span><span>Daybreak Labs</span></div>
+        <p class="blurb">An AI lab for agentic workforces, built on compliance and governance. Our agent runtime, Lightwork, is open source under the Apache License 2.0.</p>
+        <div class="dline" role="presentation"></div>
+      </div>
+      <div>
+        <h4>Lightwork</h4>
+        <ul>
+          <li><a href="autonomous-shoring.html">Autonomous Shoring</a></li>
+          <li><a href="product.html">Platform</a></li>
+          <li><a href="packs.html">Specialists</a></li>
+          <li><a href="cortex.html">Cortex</a></li>
+          <li><a href="fleet-governance.html">Fleet governance</a></li>
+          <li><a href="autonomous-compliance.html">Autonomous Compliance</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Open source</h4>
+        <ul>
+          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork">Source code</a></li>
+          <li><a href="https://daybreak-ai-labs.github.io/Lightwork/">Documentation</a></li>
+          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/source-install.md">Install from source</a></li>
+          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/CONTRIBUTING.md">Contributing</a></li>
+          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork/discussions">Discussions</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Company</h4>
+        <ul>
+          <li><a href="company.html">About the lab</a></li>
+          <li><a href="security.html">Security</a></li>
+          <li><a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/SECURITY.md">Report a vulnerability</a></li>
+          <li><a href="company.html#contact">Contact</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="legal">
+      <span>&copy; 2026 Daybreak Labs. Lightwork is licensed under the <a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/LICENSE">Apache License 2.0</a>; the Lightwork name and logo are <a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/TRADEMARK.md">trademarks</a>.</span>
+      <span><a href="privacy.html">Privacy &amp; cookies</a> &middot; <a href="terms.html">Terms</a> &middot; Self-hosted fonts, no trackers</span>
+    </div>
+  </div>
+</footer>
+
+<script src="lab.js"></script>
+</body>
+</html>
