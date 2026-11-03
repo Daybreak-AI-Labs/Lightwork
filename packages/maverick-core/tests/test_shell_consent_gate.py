@@ -91,7 +91,7 @@ def test_shell_never_requests_approval_for_hidden_command_content(tmp_path, monk
         "echo safe\u202e; touch hidden",
         "echo safe\u2028; touch hidden",
         "echo safe\u00a0; touch hidden",
-        "printf '-----BEGIN PRIVATE KEY-----'; touch hidden; printf '-----END PRIVATE KEY-----'",
+        "printf '-----BEGIN PRIVATE KEY-----'; touch hidden; printf '-----END PRIVATE KEY-----'",  # pragma: allowlist secret
     ):
         assert "ERROR:" in tool.fn({"cmd": cmd})
     assert calls == []

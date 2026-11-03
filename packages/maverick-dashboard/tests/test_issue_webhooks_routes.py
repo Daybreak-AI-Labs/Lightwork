@@ -19,7 +19,7 @@ from maverick_dashboard.app import app
 client = TestClient(app, base_url="http://127.0.0.1")
 
 SECRET = "test-webhook-secret"
-JIRA_SECRET = "test-jira-secret"
+JIRA_SECRET = "test-jira-secret"  # pragma: allowlist secret
 LINEAR_BOT = "linear-bot-id"
 JIRA_BOT = "jira-bot-account-id"
 

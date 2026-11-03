@@ -1244,7 +1244,7 @@ def test_partial_progress_never_persists_oidc_secrets(tmp_path, monkeypatch):
     path = tmp_path / "wizard-partial.json"
     monkeypatch.setattr(wizard, "PARTIAL_STATE_PATH", path)
     state = {"deployment": "desktop", "advanced": {"oidc": {
-        "client_secret": "private-client-value", "session_secret": "private-session-value"}}}
+        "client_secret": "private-client-value", "session_secret": "private-session-value"}}}  # pragma: allowlist secret
     wizard._save_partial(state)
     assert json.loads(path.read_text()) == {"deployment": "desktop"}
     assert state["advanced"]["oidc"]["client_secret"] == "private-client-value"
@@ -1264,7 +1264,7 @@ def test_resume_refuses_when_legacy_secret_cleanup_fails(tmp_path, monkeypatch):
     from maverick_installer import wizard
 
     path = tmp_path / "wizard-partial.json"
-    path.write_text(json.dumps({"advanced": {"oidc": {"session_secret": "old-private-value"}}}))
+    path.write_text(json.dumps({"advanced": {"oidc": {"session_secret": "old-private-value"}}}))  # pragma: allowlist secret
     monkeypatch.setattr(wizard, "PARTIAL_STATE_PATH", path)
     def cannot_write(*args, **kwargs):
         raise OSError("not writable")

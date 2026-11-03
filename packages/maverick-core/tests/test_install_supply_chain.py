@@ -277,11 +277,12 @@ def test_vps_installer_checks_the_python_floor_after_installing(tmp_path, report
     script = _read("deploy/vps/install.sh")
     start = script.index("install_system_deps() {")
     function = script[start:script.index("\n}\n", start) + 3]
+    function = function.replace("/usr/bin/python3", str(tmp_path / "bin" / "python3"))
     major, minor = reported.split(".")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     stubs = {
-        "python3": f'#!/bin/sh\ncase "$2" in *02d*) echo {major}{int(minor):02d} ;; *) echo {reported} ;; esac\n',
+        "python3": f'#!/bin/sh\ncase "$*" in *02d*) echo {major}{int(minor):02d} ;; *) echo {reported} ;; esac\n',
         "apt-get": "#!/bin/sh\nexit 0\n",
         "pipx": "#!/bin/sh\nexit 0\n",
     }

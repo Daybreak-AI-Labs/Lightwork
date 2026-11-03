@@ -39,7 +39,7 @@ def test_workspace_admin_only_sees_workspace_roster(client, monkeypatch):
 
     monkeypatch.setattr(auth, "has_global_permission", lambda request, permission: False)
     monkeypatch.setattr(paths, "current_tenant_id_strict", lambda: "workspace-a")
-    monkeypatch.setattr(rbac, "list_users", lambda: {"user:global-secret": "admin"})
+    monkeypatch.setattr(rbac, "list_users", lambda: {"user:global-secret": "admin"})  # pragma: allowlist secret
     monkeypatch.setattr(rbac, "list_tenant_roles", lambda tenant: {"user:workspace-member": "viewer"})
     monkeypatch.setattr(UsageLedger, "_load", lambda self: {})
     page = client.get("/spending-limits")
