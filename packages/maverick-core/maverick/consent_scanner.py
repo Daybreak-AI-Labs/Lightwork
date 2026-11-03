@@ -716,6 +716,10 @@ class PlaywrightPageCollector:
                 "--disable-background-networking",
                 "--disable-component-update",
                 "--disable-domain-reliability",
+                # A SOCKS CONNECT exposes the destination only once. Avoid
+                # HTTP/2 origin coalescing that may reuse the encrypted tunnel
+                # for a different authority without a new proxy authorization.
+                "--disable-http2",
                 "--disable-quic",
                 "--disable-sync",
                 "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",

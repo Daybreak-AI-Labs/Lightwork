@@ -630,6 +630,7 @@ def test_playwright_capture_launches_chromium_through_the_pinned_proxy(
     args = launched["args"]
     assert isinstance(args, list)
     assert "--disable-quic" in args
+    assert "--disable-http2" in args
     assert "--proxy-bypass-list=<-loopback>" in args
     assert "--force-webrtc-ip-handling-policy=disable_non_proxied_udp" in args
 

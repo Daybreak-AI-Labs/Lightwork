@@ -83,6 +83,7 @@ def test_browser_routes_all_connections_through_owned_pinned_proxy(monkeypatch):
         "bypass": "<-loopback>",
     }
     assert "--disable-quic" in launches[0]["args"]
+    assert "--disable-http2" in launches[0]["args"]
     assert "--force-webrtc-ip-handling-policy=disable_non_proxied_udp" in launches[0]["args"]
     assert "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1" in launches[0]["args"]
     session.close()

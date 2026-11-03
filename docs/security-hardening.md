@@ -1341,8 +1341,10 @@ container boundary. Long-idle browser connections may be closed by the proxy.
 
 For interactive-browser proxy connections, the enterprise and originating
 workspace hostname policies are checked before DNS resolution, including for
-WebSocket connections. This is a connection-level check: HTTP connection reuse
-can carry more than one hostname, and existing connections are not revoked
+WebSocket connections. Chromium is configured to disable HTTP/2 and QUIC to
+reduce cross-origin connection coalescing; actual browser enforcement must be
+validated for the deployed version. This remains a connection-level check,
+and existing connections are not revoked
 immediately when a policy changes. Route-level checks and network isolation
 remain necessary for stronger enforcement.
 
