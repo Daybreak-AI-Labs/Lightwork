@@ -20,7 +20,7 @@ _SCHEMA = {
     "type": "object",
     "properties": {
         "url": {"type": "string", "description": "ws:// or wss:// URL"},
-        "message": {"type": "string", "description": "text to send after connect"},
+        "message": {"type": "string", "description": "Unsupported until human approval is available"},
         "timeout": {"type": "number", "description": "seconds to await a reply (default 30)"},
         "recv": {"type": "boolean", "description": "wait for one reply (default true)"},
     },
@@ -94,6 +94,8 @@ def _preflight_egress(url: str, parsed: Any) -> str | None:
 
 
 async def _run(args: dict[str, Any]) -> str:
+    if args.get("message") is not None:
+        return "ERROR: websocket message sending is unavailable until exact human approval is supported"
     url = str(args.get("url") or "").strip()
     if not url:
         return "ERROR: url is required"
@@ -110,7 +112,6 @@ async def _run(args: dict[str, Any]) -> str:
                 "Run: python -m pip install -e './packages/maverick-core[websocket]'")
     except Exception:
         return "ERROR: installed websockets cannot enforce the connection safety policy"
-    message = args.get("message")
     timeout = float(args.get("timeout") or 30)
     want_recv = args.get("recv", True)
     # SSRF: _check_url resolved the host once to validate it, but
@@ -137,10 +138,8 @@ async def _run(args: dict[str, Any]) -> str:
         connect_kwargs["server_hostname"] = parsed.hostname
     try:
         async with connect(url, **connect_kwargs) as ws:
-            if message is not None:
-                await ws.send(str(message))
             if not want_recv:
-                return "sent (no reply requested)"
+                return "connected (no reply requested)"
             reply = await asyncio.wait_for(ws.recv(), timeout=timeout)
             if isinstance(reply, bytes):
                 reply = reply.decode("utf-8", errors="replace")
@@ -155,8 +154,8 @@ def websocket_tool() -> Tool:
     return Tool(
         name="websocket",
         description=(
-            "Connect to a ws:// or wss:// endpoint, optionally send a message, "
-            "and read one reply. Input: url, message (optional), timeout, recv. "
+            "Connect to a ws:// or wss:// endpoint and read one reply. "
+            "Message sending is unavailable pending human approval support. "
             "Refuses private/loopback hosts (SSRF guard)."
         ),
         input_schema=_SCHEMA,

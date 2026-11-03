@@ -29,21 +29,26 @@ def test_run_requires_url():
     assert out.startswith("ERROR")
 
 
-def test_echo_roundtrip(monkeypatch):
+def test_receive_roundtrip(monkeypatch):
     websockets = pytest.importorskip("websockets")
     monkeypatch.setenv("MAVERICK_FETCH_ALLOW_PRIVATE", "1")  # allow loopback
 
     async def scenario():
         async def handler(ws, *args):
-            async for msg in ws:
-                await ws.send("echo:" + msg)
+            await ws.send("server message")
 
         async with websockets.serve(handler, "127.0.0.1", 0) as server:
             port = server.sockets[0].getsockname()[1]
-            return await websocket_tool().fn(
-                {"url": f"ws://127.0.0.1:{port}", "message": "ping"})
+            return await websocket_tool().fn({"url": f"ws://127.0.0.1:{port}"})
 
-    assert asyncio.run(scenario()) == "echo:ping"
+    assert asyncio.run(scenario()) == "server message"
+
+
+def test_sending_is_refused_before_network(monkeypatch):
+    from maverick.tools import websocket_tool as ws_tool
+    monkeypatch.setattr(ws_tool, "_safe_connector", lambda: pytest.fail("network reached"))
+    result = asyncio.run(ws_tool.websocket_tool().fn({"url": "wss://example.com", "message": "data"}))
+    assert "sending is unavailable" in result
 
 
 @pytest.mark.parametrize("relative", [False, True])

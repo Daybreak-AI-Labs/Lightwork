@@ -1339,6 +1339,16 @@ enforce the originating agent's attenuated tool, path and host grant. Direct
 registry calls and independently started jobs need their own authorization.
 Use governed agent steps until that propagation is implemented.
 
+Teams sends require a fresh human decision in the live registry, including when
+the default operation is omitted.
+Teams destinations must be configured by the operator in `TEAMS_WEBHOOK_URL`;
+the tool refuses caller-supplied webhook URLs.
+WebSocket message sending is unavailable until its asynchronous effect can be
+bound to a human decision. HTTP requests and WebSocket handshakes can transmit
+information to destinations; direct calls to raw tool functions do not pass
+through the registry's connector wrapper. Use destination controls and process
+isolation where untrusted content can influence outgoing requests.
+
 The interactive browser connects through the same DNS-pinning proxy used by the
 consent scanner. It refuses private addresses and permits outbound TCP only on
 ports 80 and 443, even when `MAVERICK_FETCH_ALLOW_PRIVATE` is enabled. The proxy

@@ -2,7 +2,7 @@
 
 Completes the Slack/Discord/Teams trio (``slack_bot``, ``discord_bot`` already
 exist). Posts a plain message or a simple title+text card to a Teams incoming
-webhook URL (from the ``webhook`` arg or ``TEAMS_WEBHOOK_URL``). The POST goes
+webhook URL configured in ``TEAMS_WEBHOOK_URL``. The POST goes
 through ``_ssrf.safe_client``, which resolves the host once and pins the
 connection to a validated public IP (DNS-rebind-safe, redirects disabled).
 ``_build_card`` is pure and unit-tested.
@@ -21,8 +21,7 @@ _SCHEMA = {
         "op": {"type": "string", "enum": ["send"], "default": "send"},
         "text": {"type": "string", "description": "message body (markdown)"},
         "title": {"type": "string", "description": "optional card title"},
-        "webhook": {"type": "string",
-                    "description": "Teams incoming webhook URL (or TEAMS_WEBHOOK_URL)"},
+        "webhook": {"type": "string", "description": "Unsupported; configure TEAMS_WEBHOOK_URL"},
     },
     "required": ["text"],
 }
@@ -44,10 +43,12 @@ def _build_card(text: str, title: str = "") -> dict:
 
 
 def _webhook(args: dict) -> str:
-    return (args.get("webhook") or os.environ.get("TEAMS_WEBHOOK_URL") or "").strip()
+    return os.environ.get("TEAMS_WEBHOOK_URL", "").strip()
 
 
 def _run(args: dict[str, Any]) -> str:
+    if args.get("webhook"):
+        return "ERROR: Teams accepts only the operator-configured webhook destination"
     op = args.get("op") or "send"
     if op != "send":
         return f"ERROR: unknown op {op!r}"
@@ -56,7 +57,7 @@ def _run(args: dict[str, Any]) -> str:
         return "ERROR: text is required"
     url = _webhook(args)
     if not url:
-        return "ERROR: no webhook (pass 'webhook' or set TEAMS_WEBHOOK_URL)"
+        return "ERROR: no webhook (set TEAMS_WEBHOOK_URL)"
     parsed = urlparse(url)
     if parsed.scheme != "https":
         return "ERROR: Teams webhook must be https://"
@@ -86,8 +87,8 @@ def teams_tool() -> Tool:
         name="teams",
         description=(
             "Post a message to a Microsoft Teams channel via an incoming webhook. "
-            "op: send (text [+title]). Webhook from the 'webhook' arg or "
-            "TEAMS_WEBHOOK_URL. Refuses non-https / private hosts."
+            "op: send (text [+title]). Destination is configured by the operator "
+            "in TEAMS_WEBHOOK_URL. Refuses non-https / private hosts."
         ),
         input_schema=_SCHEMA,
         fn=_run,
