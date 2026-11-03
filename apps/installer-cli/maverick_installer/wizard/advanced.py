@@ -2004,7 +2004,7 @@ def _ask_regulated_deployment(advanced: dict[str, Any]) -> None:
         advanced["tax_pubkeys"] = [k.strip() for k in raw.split(",") if k.strip()]
     # Regulated-deployment posture: data-residency region + a compliance
     # disclosure line. These map to the independent [residency]/[compliance]
-    # scalar tables a regulated deployment needs; previously only hand-editable.
+    # scalar tables a regulated deployment needs.
     # (Action-level [governance] guards stay config-only: they share the
     # [governance] table the finance step already owns.)
     if _q_confirm(

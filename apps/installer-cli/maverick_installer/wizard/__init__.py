@@ -1691,10 +1691,10 @@ def pick_self_learning() -> dict[str, Any]:
     on by default. Generating executable tools remains a separate trust choice.
     Returns a dict written under ``[self_learning]``.
 
-    MCP-server acquisition (#422) is a separate, even-higher-trust knob: it
-    re-enables the capability #392 disabled, but only for curated, hash-pinned
-    catalog servers AND only after explicit operator approval. It ships OFF
-    independently of the self-learning master switch.
+    MCP-server acquisition is a separate, even-higher-trust knob: it allows
+    acquiring MCP servers, but only curated, hash-pinned catalog servers AND
+    only after explicit operator approval. It ships OFF independently of the
+    self-learning master switch.
     """
     console.print()
     console.print(
@@ -2055,8 +2055,8 @@ def pick_flows() -> dict[str, Any]:
         "Let flows self-correct (autonomous revert of a regressed rewrite)?", default=False
     ):
         out["auto_evolve"] = True
-        # Workflow suggestions always need a person's review; automatic forward
-        # apply was retired, so the wizard no longer offers [flows] auto_apply.
+        # Workflow suggestions always need a person's review, so the wizard
+        # offers no automatic forward apply.
     return out
 
 
@@ -6095,10 +6095,9 @@ def run_express() -> int:
             oauth={"vault": True},
             durable={"enabled": True},
             deployment="desktop",
-            # Express historically wrote NO [retention] table, and absent
-            # means keep-forever (retention is opt-in pruning). Preserve that
-            # at the default level; only an explicitly-picked governance
-            # upgrade may introduce pruning windows.
+            # Express writes NO [retention] table at the default level, and
+            # absent means keep-forever (retention is opt-in pruning); only an
+            # explicitly-picked governance upgrade introduces pruning windows.
             retention=(
                 dict(preset["retention"]) if profile != DEFAULT_GOVERNANCE_PROFILE else None
             ),

@@ -1,12 +1,12 @@
 """pick_sandbox() lets container users pick a coding language.
 
-0.1.4 added per-language sandbox images (sandbox._IMAGE_BY_LANGUAGE: rust ->
-rust:1, go -> golang:1, ...) but nothing in the wizard let a non-Python user
-reach it -- they'd land on python:3.12-slim with no cargo/go toolchain. The
-wizard now asks, for container backends only, and writes [sandbox] language.
+The sandbox has per-language images (sandbox._IMAGE_BY_LANGUAGE: rust ->
+rust:1, go -> golang:1, ...). For container backends only, the wizard asks
+for the language and writes [sandbox] language, so a non-Python user gets a
+cargo/go toolchain instead of python:3.12-slim.
 
-Python is the default image, so picking it (or a non-container backend) leaves
-the config byte-identical to before.
+Python is the default image, so picking it (or a non-container backend) writes
+no [sandbox] language.
 """
 from __future__ import annotations
 
