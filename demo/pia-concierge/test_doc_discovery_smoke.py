@@ -102,13 +102,9 @@ def test_public_discovery_route_returns_mock_hits_from_msgraph_only(
     response = asyncio.run(demo_app.intake_discover(case_id))
     payload = json.loads(response.body)
 
-    assert response.status_code == 200
-    assert payload["hits"][0]["doc_id"] == "mock-doc-1"
-    assert observed == {
-        "subject": "Acme CRM",
-        "sources": ["msgraph"],
-        "allow_ambient_credentials": True,
-    }
+    assert response.status_code == 403
+    assert payload["ok"] is False
+    assert observed == {}  # no discovery occurs without reviewer authority
 
 
 def test_real_discovery_path_reaches_only_scoped_loopback_mock(demo_app, monkeypatch):
@@ -211,5 +207,5 @@ def test_public_attach_route_rejects_every_non_mock_source(demo_app, monkeypatch
 
     response = asyncio.run(demo_app.intake_attach_found(case_id, request))
 
-    assert response.status_code == 400
+    assert response.status_code == 403
     assert json.loads(response.body)["ok"] is False

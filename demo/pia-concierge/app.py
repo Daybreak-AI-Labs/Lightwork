@@ -28,9 +28,14 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import contextlib
 import datetime as _dt
 import hmac
+import hashlib
 import os
+import secrets
+import threading
+from collections import deque
 import re
 import time
 from pathlib import Path
@@ -70,12 +75,204 @@ templates = Jinja2Templates(directory=str(HERE / "templates"))
 templates.env.filters["timestamp_hm"] = (
     lambda ts: _dt.datetime.fromtimestamp(float(ts or 0)).strftime("%H:%M"))
 
-BASE_URL = os.environ.get("PIA_BASE_URL", "http://127.0.0.1:8890")
+BASE_URL = os.environ.get("PIA_BASE_URL", "http://127.0.0.1:8890").rstrip("/")
 DASHBOARD_URL = os.environ.get("LIGHTWORK_DASHBOARD_URL", "http://127.0.0.1:8765")
 AGENT = "pia-concierge"
 ANALYST = "privacy-analyst-agent"
 
 app = FastAPI(title="PIA Concierge — external world (ServiceNow / mail / OneTrust)")
+
+# Intake links are short-lived case-specific bearer capabilities. Only hashes
+# are stored with the in-memory case; a restart invalidates all existing links.
+_INTAKE_TTL_SECONDS = 7 * 24 * 3600
+_INTAKE_UPLOAD_LIMIT = 10 * 1024 * 1024
+_INTAKE_RATE_LOCK = threading.Lock()
+_INTAKE_RATE: dict[str, deque[float]] = {}
+
+
+def _grant_hash(token: str) -> str:
+    return hashlib.sha256(token.encode("ascii")).hexdigest()
+
+
+def _issue_requester_grant(case: Case) -> str:
+    token = secrets.token_urlsafe(32)
+    case.intake_grant_hash = _grant_hash(token)
+    case.intake_grant_expires_at = time.time() + _INTAKE_TTL_SECONDS
+    return token
+
+
+def _grant_identity(case: Case, token: str) -> tuple[str, str] | None:
+    if not isinstance(token, str) or not re.fullmatch(r"[A-Za-z0-9_-]{43}", token):
+        return None
+    digest = _grant_hash(token)
+    now = time.time()
+    if (case.intake_grant_hash and case.intake_grant_expires_at > now
+            and hmac.compare_digest(digest, case.intake_grant_hash)):
+        return "requester", ""
+    delegated = case.delegations.get(digest)
+    if delegated and float(delegated.get("expires_at", 0)) > now:
+        return "delegate", digest
+    return None
+
+
+def _intake_origin(value: str, *, origin_header: bool = False) -> tuple[str, str, int] | None:
+    try:
+        parsed = urlsplit(value)
+        if (parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname
+                or parsed.username is not None or parsed.password is not None
+                or (origin_header and (parsed.path or parsed.query or parsed.fragment))):
+            return None
+        return (parsed.scheme.lower(), parsed.hostname.lower(),
+                parsed.port if parsed.port is not None else (443 if parsed.scheme.lower() == "https" else 80))
+    except ValueError:
+        return None
+
+
+def _same_origin_intake(request: Request) -> bool:
+    origin = request.headers.get("origin")
+    supplied = origin or request.headers.get("referer") or ""
+    return (bool(_intake_origin(BASE_URL))
+            and _intake_origin(supplied, origin_header=origin is not None) == _intake_origin(BASE_URL)
+            and request.headers.get("sec-fetch-site", "").lower() != "cross-site")
+
+
+def _declared_body_length(request: Request, limit: int) -> int | None:
+    lengths = request.headers.getlist("content-length")
+    if len(lengths) != 1 or request.headers.get("transfer-encoding"):
+        return None
+    try:
+        size = int(lengths[0])
+    except ValueError:
+        return None
+    return size if 0 <= size <= limit else None
+
+
+def _intake_rate_allowed(request: Request) -> bool:
+    peer = request.client.host if request.client else "unknown"
+    now = time.monotonic()
+    with _INTAKE_RATE_LOCK:
+        for key, hits in list(_INTAKE_RATE.items()):
+            while hits and hits[0] <= now - 60:
+                hits.popleft()
+            if not hits:
+                del _INTAKE_RATE[key]
+        if peer not in _INTAKE_RATE and len(_INTAKE_RATE) >= 8192:
+            return False
+        hits = _INTAKE_RATE.setdefault(peer, deque())
+        if len(hits) >= 120:
+            return False
+        hits.append(now)
+        return True
+
+
+def _trusted_intake_base() -> bool:
+    """Capabilities require HTTPS except for an explicitly local demo."""
+    try:
+        base = urlsplit(BASE_URL)
+        if (not base.hostname or base.username is not None or base.password is not None
+                or base.query or base.fragment or base.path not in {"", "/"}):
+            return False
+        _ = base.port  # reject an invalid port
+        if base.scheme.lower() == "https":
+            return True
+        return base.scheme.lower() == "http" and base.hostname.lower() in {
+            "localhost", "127.0.0.1", "::1",
+        }
+    except ValueError:
+        return False
+
+
+def _recipient_allowed(value: str) -> bool:
+    if not isinstance(value, str):
+        return False
+    address = value.strip()
+    if (len(address) > 200 or not re.fullmatch(
+            r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?", address)):
+        return False
+    if STANDALONE:
+        return True  # standalone mail is delivered only to the local mock inbox
+    domains = {item.strip().lower() for item in
+               os.environ.get("PIA_EMAIL_ALLOWED_DOMAINS", "").split(",") if item.strip()}
+    return address.rsplit("@", 1)[1].lower() in domains
+
+
+@app.middleware("http")
+async def _pia_access_boundary(request: Request, call_next):
+    path = request.url.path
+    if path.startswith("/intake/"):
+        parts = path.split("/")
+        case_id = parts[2] if len(parts) > 2 else ""
+        if not _intake_rate_allowed(request):
+            return JSONResponse({"ok": False, "error": "too many intake requests"}, status_code=429)
+        case = STORE.cases.get(case_id)
+        if case is None:
+            return JSONResponse({"ok": False, "error": "valid intake link required"}, status_code=403,
+                                headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
+        supplied = request.query_params.get("grant", "") if request.method == "GET" else ""
+        token = supplied or request.cookies.get("pia_intake", "")
+        identity = _grant_identity(case, token)
+        if identity is None:
+            return JSONResponse({"ok": False, "error": "valid intake link required"}, status_code=403,
+                                headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
+        role, delegate_key = identity
+        if supplied:
+            # Exchange the emailed token for a case-path-scoped, HttpOnly cookie.
+            response = RedirectResponse(f"/intake/{case_id}", status_code=303)
+            response.set_cookie("pia_intake", supplied, max_age=_INTAKE_TTL_SECONDS,
+                                path=f"/intake/{case_id}", httponly=True,
+                                secure=BASE_URL.lower().startswith("https://"), samesite="strict")
+        else:
+            if request.method not in {"GET", "HEAD"} and not _same_origin_intake(request):
+                return JSONResponse({"ok": False, "error": "same-origin request required"}, status_code=403)
+            if role == "delegate" and (request.method != "GET" and path not in {
+                    f"/intake/{case_id}/answer", f"/intake/{case_id}/interpret"}):
+                return JSONResponse({"ok": False, "error": "delegate action not permitted"}, status_code=403)
+            # Serialize state-changing calls so duplicate submissions and
+            # delegation issuances cannot both pass the stage/rate checks.
+            async with (case.intake_lock if request.method not in {"GET", "HEAD"}
+                        else contextlib.nullcontext()):
+                if _grant_identity(case, token) != identity:
+                    return JSONResponse({"ok": False, "error": "intake grant expired or changed"}, status_code=403)
+                if request.method not in {"GET", "HEAD"}:
+                    operation = path.removeprefix(f"/intake/{case_id}/")
+                    required_stage = "followup" if operation == "followup-answer" else "intake_sent"
+                    if case.stage != required_stage:
+                        return JSONResponse({"ok": False, "error": "intake is no longer open for this action"}, status_code=409)
+                if request.method not in {"GET", "HEAD"}:
+                    upload = path.endswith(("/upload", "/append-doc"))
+                    limit = _INTAKE_UPLOAD_LIMIT + 256 * 1024 if upload else 128 * 1024
+                    if _declared_body_length(request, limit) is None:
+                        return JSONResponse({"ok": False, "error": "invalid or oversized request body"}, status_code=413)
+                request.state.intake_role = role
+                request.state.intake_delegate_key = delegate_key
+                response = await call_next(request)
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        return response
+    # These services have their own bearer authentication. The public about,
+    # health and static pages contain no case or operator data.
+    if path in {"/about", "/health"} or path.startswith(("/static/", "/ot-api/", "/graph-sim/")):
+        return await call_next(request)
+    if path == "/webhook/pia":
+        if not _intake_rate_allowed(request):
+            return JSONResponse({"ok": False, "error": "too many intake requests"}, status_code=429)
+        if _declared_body_length(request, 128 * 1024) is None:
+            return JSONResponse({"ok": False, "error": "invalid or oversized request body"}, status_code=413)
+        expected = os.environ.get("PIA_WEBHOOK_TOKEN", "")
+        authorization = request.headers.get("authorization", "")
+        supplied = authorization[7:] if authorization.startswith("Bearer ") else ""
+        disallowed = {os.environ.get("PIA_OPERATOR_TOKEN", ""),
+                      os.environ.get("ONETRUST_TOKEN", ""), GRAPH_SIM_TOKEN}
+        if (expected and expected not in disallowed and supplied
+                and hmac.compare_digest(supplied.encode(), expected.encode())):
+            return await call_next(request)
+    operator, error, status_code = _reviewer_identity(request)
+    if error:
+        headers = {"WWW-Authenticate": 'Basic realm="PIA operator"'} if status_code == 401 else None
+        return JSONResponse({"ok": False, "error": error}, status_code=status_code, headers=headers)
+    request.state.pia_operator = operator
+    return await call_next(request)
+
 
 # The concierge's own assets (the natural-voice module). Standalone-safe:
 # starlette ships StaticFiles; the directory travels in the deployment kit.
@@ -111,7 +308,10 @@ def _post_event(goal_id: int, agent: str, kind: str, content: str) -> None:
 async def _send_email(to: str, subject: str, body: str) -> str:
     """Send off the event loop (the in-process capture sink shares this loop;
     a blocking send from a handler would deadlock)."""
-    return await asyncio.to_thread(backend.send_email, to, subject, body)
+    try:
+        return await asyncio.to_thread(backend.send_email, to, subject, body)
+    except Exception:
+        return "ERROR: email delivery could not be confirmed"
 
 
 # Plain-language phrasing for the intake interview; answers map onto the real
@@ -780,7 +980,7 @@ async def _startup() -> None:
 # maverick.doc_discovery module, exactly as they would against graph.microsoft
 # .com. Docs are seeded per case so "find my documents" has something to find.
 # ===========================================================================
-GRAPH_SIM_TOKEN = "demo-graph-token"  # pragma: allowlist secret
+GRAPH_SIM_TOKEN = secrets.token_urlsafe(32)
 GRAPH_DOCS: dict[str, dict[str, Any]] = {}
 
 
@@ -969,6 +1169,8 @@ async def servicenow_create(
     system_name: str = Form(...),
     data_types: str = Form(...),
 ) -> RedirectResponse:
+    if not _recipient_allowed(requester_email):
+        return JSONResponse({"ok": False, "error": "requester email domain is not enabled"}, status_code=400)
     number = STORE.next_ticket_number()
     ticket = Ticket(
         number=number,
@@ -994,7 +1196,10 @@ async def servicenow_create(
     }
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            await client.post(f"{BASE_URL}/webhook/pia", json=payload)
+            await client.post(
+                f"{BASE_URL}/webhook/pia", json=payload,
+                headers={"Authorization": request.headers.get("authorization", ""), "Origin": BASE_URL},
+            )
     except Exception as exc:  # pragma: no cover
         ticket.note(f"Webhook delivery failed: {exc}", by="ServiceNow")
 
@@ -1036,6 +1241,8 @@ def _license_gate() -> str | None:
 
 @app.post("/webhook/pia")
 async def webhook_pia(request: Request) -> JSONResponse:
+    if not _trusted_intake_base():
+        return JSONResponse({"ok": False, "error": "configure a secure PIA_BASE_URL"}, status_code=503)
     body = await request.json()
     gate = _license_gate()
     if gate:
@@ -1044,6 +1251,8 @@ async def webhook_pia(request: Request) -> JSONResponse:
     ticket = STORE.tickets.get(number)
     if not ticket:
         # Intake from a system we haven't seen (email, Jira, curl...).
+        if not _recipient_allowed(body.get("requester_email", "")):
+            return JSONResponse({"ok": False, "error": "requester email domain is not enabled"}, status_code=400)
         number = number or STORE.next_ticket_number()
         ticket = Ticket(
             number=number,
@@ -1054,79 +1263,117 @@ async def webhook_pia(request: Request) -> JSONResponse:
             data_types=body.get("data_types", ""),
         )
         STORE.tickets[number] = ticket
+    if not _recipient_allowed(ticket.requester_email):
+        return JSONResponse({"ok": False, "error": "stored requester email domain is not enabled"}, status_code=400)
+    async with ticket.intake_lock:
+        if ticket.case_id and ticket.case_id in STORE.cases:
+            return JSONResponse({"ok": False, "error": "ticket already has an intake", "case_id": ticket.case_id}, status_code=409)
 
-    # A governed goal in the shared world (platform only) — appears on the
-    # dashboard /goals page. Standalone has no world: gid stays None and the
-    # agent runs ungoverned but fully functional.
-    def _mk_goal() -> int | None:
-        w = _world()
-        if w is None:
-            return None
-        gid = w.create_goal(
-            f"Privacy assessment: {ticket.system_name} ({number})",
-            description=(f"{ticket.short_description} — requested by {ticket.requester} "
-                         f"via {body.get('source', 'webhook')}. Data: {ticket.data_types}"),
-            owner=AGENT, domain="itgrc_dpia",
+        # A governed goal in the shared world (platform only) — appears on the
+        # dashboard /goals page. Standalone has no world: gid stays None and the
+        # agent runs ungoverned but fully functional.
+        def _mk_goal() -> int | None:
+            w = _world()
+            if w is None:
+                return None
+            gid = w.create_goal(
+                f"Privacy assessment: {ticket.system_name} ({number})",
+                description=(f"{ticket.short_description} — requested by {ticket.requester} "
+                             f"via {body.get('source', 'webhook')}. Data: {ticket.data_types}"),
+                owner=AGENT, domain="itgrc_dpia",
+            )
+            w.set_goal_status(gid, "running")
+            return gid
+
+        gid = await asyncio.to_thread(_mk_goal)
+
+        case_id = STORE.next_case_id()
+        case = Case(
+            id=case_id,
+            ticket_number=number,
+            subject=ticket.system_name,
+            requester=ticket.requester,
+            requester_email=ticket.requester_email,
+            data_types=ticket.data_types,
         )
-        w.set_goal_status(gid, "running")
-        return gid
+        case.goal_id = gid  # type: ignore[attr-defined]
+        STORE.cases[case_id] = case
+        ticket.case_id = case_id
+        # The org "already has" this vendor's paperwork in the simulated tenant.
+        _seed_corp_docs(ticket.system_name)
+        # The ticket itself already answers what it can (quoted provenance).
+        _prefill_from_ticket(case)
 
-    gid = await asyncio.to_thread(_mk_goal)
+        _audit("GOAL_START", AGENT, gid, case=case_id, ticket=number,
+               subject=ticket.system_name, source=body.get("source", "webhook"))
+        _post_event(gid, AGENT, "plan",
+                    f"PIA request {number} received from {body.get('source', 'webhook')}. "
+                    f"Plan: interview requester → score risk → map controls → "
+                    f"file to OneTrust for review → human approves in OneTrust.")
+        case.log(f"Intake received from {body.get('source', 'webhook')} ticket {number}.")
 
-    case_id = STORE.next_case_id()
-    case = Case(
-        id=case_id,
-        ticket_number=number,
-        subject=ticket.system_name,
-        requester=ticket.requester,
-        requester_email=ticket.requester_email,
-        data_types=ticket.data_types,
-    )
-    case.goal_id = gid  # type: ignore[attr-defined]
-    STORE.cases[case_id] = case
-    ticket.case_id = case_id
-    # The org "already has" this vendor's paperwork in the simulated tenant.
-    _seed_corp_docs(ticket.system_name)
-    # The ticket itself already answers what it can (quoted provenance).
-    _prefill_from_ticket(case)
+        ticket.state = "In Progress"
+        ticket.note(
+            f"Privacy assessment {case_id} opened in Lightwork (goal #{gid}). Requester "
+            f"emailed an intake link; awaiting questionnaire completion.")
 
-    _audit("GOAL_START", AGENT, gid, case=case_id, ticket=number,
-           subject=ticket.system_name, source=body.get("source", "webhook"))
-    _post_event(gid, AGENT, "plan",
-                f"PIA request {number} received from {body.get('source', 'webhook')}. "
-                f"Plan: interview requester → score risk → map controls → "
-                f"file to OneTrust for review → human approves in OneTrust.")
-    case.log(f"Intake received from {body.get('source', 'webhook')} ticket {number}.")
+        intake_link = f"{BASE_URL}/intake/{case_id}?grant={_issue_requester_grant(case)}"
+        result = await _send_email(
+            ticket.requester_email,
+            f"[Action needed] Privacy assessment for {ticket.system_name} ({case_id})",
+            (
+                f"Hi {ticket.requester},\n\n"
+                f"Thanks for requesting a privacy assessment for {ticket.system_name}.\n\n"
+                f"Please complete the short intake questionnaire and attach any vendor "
+                f"documents (DPA, security overview) here:\n\n    {intake_link}\n\n"
+                f"It takes about two minutes — answer in the chat (typing or "
+                f"voice) or use the guided buttons. Once you submit, the analysis "
+                f"is filed straight into OneTrust for the privacy team to review "
+                f"and approve.\n\n"
+                f"— Privacy Office (automated)\n"
+            ),
+        )
+        _audit("TOOL_CALL", ANALYST, gid, tool="email", to=ticket.requester_email,
+               case=case_id, outcome=result[:80])
+        _post_event(gid, ANALYST, "observation",
+                    f"Intake interview link emailed to {ticket.requester_email}. Waiting on requester.")
+        if result.lower().startswith("error"):
+            case.log("Intake email delivery could not be confirmed; an operator can reissue the link.")
+            return JSONResponse({"ok": False, "error": "intake email delivery could not be confirmed",
+                                 "case_id": case_id}, status_code=502)
+        case.log(f"Intake email sent to {ticket.requester_email}.")
 
-    ticket.state = "In Progress"
-    ticket.note(
-        f"Privacy assessment {case_id} opened in Lightwork (goal #{gid}). Requester "
-        f"emailed an intake link; awaiting questionnaire completion.")
+        return JSONResponse({"ok": True, "case_id": case_id, "goal_id": gid,
+                             "intake": intake_link})
 
-    intake_link = f"{BASE_URL}/intake/{case_id}"
-    result = await _send_email(
-        ticket.requester_email,
-        f"[Action needed] Privacy assessment for {ticket.system_name} ({case_id})",
-        (
-            f"Hi {ticket.requester},\n\n"
-            f"Thanks for requesting a privacy assessment for {ticket.system_name}.\n\n"
-            f"Please complete the short intake questionnaire and attach any vendor "
-            f"documents (DPA, security overview) here:\n\n    {intake_link}\n\n"
-            f"It takes about two minutes — answer in the chat (typing or "
-            f"voice) or use the guided buttons. Once you submit, the analysis "
-            f"is filed straight into OneTrust for the privacy team to review "
-            f"and approve.\n\n"
-            f"— Privacy Office (automated)\n"
-        ),
-    )
-    _audit("TOOL_CALL", ANALYST, gid, tool="email", to=ticket.requester_email,
-           case=case_id, outcome=result[:80])
-    _post_event(gid, ANALYST, "observation",
-                f"Intake interview link emailed to {ticket.requester_email}. Waiting on requester.")
-    case.log(f"Intake email sent to {ticket.requester_email}.")
 
-    return JSONResponse({"ok": True, "case_id": case_id, "goal_id": gid,
-                         "intake": intake_link})
+@app.post("/cases/{case_id}/intake-link")
+async def reissue_intake_link(case_id: str) -> JSONResponse:
+    case = STORE.cases.get(case_id)
+    if not case:
+        return JSONResponse({"ok": False, "error": "case not found"}, status_code=404)
+    if case.stage not in {"intake_sent", "followup"}:
+        return JSONResponse({"ok": False, "error": "case intake is not open"}, status_code=409)
+    if not _trusted_intake_base():
+        return JSONResponse({"ok": False, "error": "configure a secure PIA_BASE_URL"}, status_code=503)
+    if not _recipient_allowed(case.requester_email):
+        return JSONResponse({"ok": False, "error": "requester email domain is not enabled"}, status_code=400)
+    async with case.intake_lock:
+        if case.stage not in {"intake_sent", "followup"}:
+            return JSONResponse({"ok": False, "error": "case intake is not open"}, status_code=409)
+        previous = (case.intake_grant_hash, case.intake_grant_expires_at)
+        token = _issue_requester_grant(case)
+        delivery = await _send_email(
+            case.requester_email, f"Privacy assessment link for {case.subject}",
+            f"Continue your privacy assessment here:\n\n{BASE_URL}/intake/{case.id}?grant={token}",
+        )
+        if delivery.lower().startswith("error"):
+            case.intake_grant_hash, case.intake_grant_expires_at = previous
+            return JSONResponse({"ok": False, "error": "intake email delivery could not be confirmed"}, status_code=502)
+        # Reissue is also the recovery path for a compromised requester link.
+        # Revoke any delegate grants issued under the previous authority.
+        case.delegations.clear()
+    return JSONResponse({"ok": True})
 
 
 # ===========================================================================
@@ -1151,7 +1398,7 @@ async def mail(request: Request) -> HTMLResponse:
 # Intake questionnaire — requester-facing (the emailed link)
 # ===========================================================================
 @app.get("/intake/{case_id}", response_class=HTMLResponse)
-async def intake(request: Request, case_id: str, d: str = "") -> HTMLResponse:
+async def intake(request: Request, case_id: str) -> HTMLResponse:
     case = STORE.cases.get(case_id)
     if not case:
         return _page(request, "notfound.html", what=f"case {case_id}")
@@ -1163,33 +1410,27 @@ async def intake(request: Request, case_id: str, d: str = "") -> HTMLResponse:
         "prompt": _INTAKE_PHRASING.get(q.id, q.text),
     } for q in tpl.questions]
 
-    # Delegate mode: an emailed ?d=<token> link scopes the interview to the
-    # questions a colleague was asked to answer.
+    # The cookie was authorized by the intake middleware; callers cannot
+    # select or omit a delegate identity in form fields.
+    role = getattr(request.state, "intake_role", "")
+    delegate_key = getattr(request.state, "intake_delegate_key", "")
     delegation = None
-    if d:
-        rec = (getattr(case, "delegations", None) or {}).get(d)
-        if rec:
-            qids = set(rec["qids"])
-            questions = [q for q in questions if q["id"] in qids]
-            delegation = {"token": d, "to_name": rec["to_name"],
-                          "note": rec.get("note", ""),
-                          "from_name": case.requester}
+    if role == "delegate":
+        rec = case.delegations.get(delegate_key)
+        if not rec:
+            return JSONResponse({"ok": False, "error": "delegate grant expired"}, status_code=403)
+        qids = set(rec["qids"])
+        questions = [q for q in questions if q["id"] in qids]
+        delegation = {"token": "delegate", "to_name": rec["to_name"],
+                      "note": rec.get("note", ""), "from_name": case.requester}
 
     # Follow-up mode: the privacy team sent questions back; the requester
-    # answers ONLY those (free text), then the case returns to review. A
-    # delegate link stays scoped to its delegated questions even mid-followup.
+    # answers ONLY those (free text), then the case returns to review.
     followups = (_open_followups(case)
                  if case.stage == "followup" and delegation is None else [])
 
-    # A vendor we've already assessed? Offer "just add documents" instead of
-    # a second full interview — the append-to-vendor flow. Auto-answers (from
-    # the ticket/docs) don't count as having started the interview.
-    human_answers = any(not rec.get("auto") for rec in case.answers.values())
+    # Prior assessments require a separate reviewer-authorized access path.
     prior = None
-    if case.stage == "intake_sent" and not human_answers and delegation is None:
-        prior_ot = _latest_prior_record(case.subject)
-        if prior_ot:
-            prior = _prior_summary(prior_ot)
 
     # Already-resolved questions (human, delegate, or auto with provenance):
     # the interview skips them and shows where each answer came from.
@@ -1197,14 +1438,20 @@ async def intake(request: Request, case_id: str, d: str = "") -> HTMLResponse:
                       "auto": bool(rec.get("auto")),
                       "source": rec.get("source", ""),
                       "by": rec.get("by", "")}
-                for qid, rec in case.answers.items()}
+                for qid, rec in case.answers.items()
+                if role != "delegate" or qid in qids}
+    delegated_summary = ({qid: item["to_name"]
+                          for item in case.delegations.values()
+                          for qid in item.get("qids", [])}
+                         if role == "requester" else {})
 
     done = (case.stage not in ("intake_sent", "followup")
             and delegation is None)
     return _page(request, "intake.html", case=case, questions=questions,
                  delegation=delegation, followups=followups, prior=prior,
-                 answered=answered, done=done,
-                 value=_case_value(case) if done else None)
+                 answered=answered, delegated_summary=delegated_summary, done=done,
+                 uncertain=case.stage in {"submitting", "pending_review"},
+                 value=_case_value(case) if done and case.stage not in {"submitting", "pending_review"} else None)
 
 
 @app.post("/intake/{case_id}/followup-answer")
@@ -1256,14 +1503,25 @@ async def intake_delegate(case_id: str, request: Request) -> JSONResponse:
     if not qids or not to_email or "@" not in to_email:
         return JSONResponse({"ok": False, "error": "questions and a valid "
                              "colleague email are required"}, status_code=400)
-    import uuid
-    token = uuid.uuid4().hex[:10]
-    dele = getattr(case, "delegations", None)
-    if dele is None:
-        dele = {}
-        case.delegations = dele  # type: ignore[attr-defined]
-    dele[token] = {"qids": qids, "to_name": to_name, "to_email": to_email,
-                   "note": note, "answered": []}
+    if not _trusted_intake_base():
+        return JSONResponse({"ok": False, "error": "configure a secure PIA_BASE_URL"}, status_code=503)
+    if not _recipient_allowed(to_email):
+        return JSONResponse({"ok": False, "error": "recipient email domain is not enabled"}, status_code=403)
+    valid_qids = {q.id for q in get_template("pia").questions}
+    qids = list(dict.fromkeys(qids))
+    if any(qid not in valid_qids for qid in qids):
+        return JSONResponse({"ok": False, "error": "unknown question"}, status_code=400)
+    case.delegations = {key: value for key, value in case.delegations.items()
+                        if float(value.get("expires_at", 0)) > time.time()}
+    if len(case.delegations) >= 10 or time.time() < case.next_delegation_at:
+        return JSONResponse({"ok": False, "error": "delegation limit reached; try later"}, status_code=429)
+    token = secrets.token_urlsafe(32)
+    delegate_key = _grant_hash(token)
+    dele = case.delegations
+    dele[delegate_key] = {"qids": qids, "to_name": to_name, "to_email": to_email,
+                          "note": note, "answered": [],
+                          "expires_at": time.time() + _INTAKE_TTL_SECONDS}
+    case.next_delegation_at = time.time() + 10
     gid = getattr(case, "goal_id", None)
     _audit("INTAKE_DELEGATED", ANALYST, gid, case=case_id, to=to_email,
            questions=len(qids))
@@ -1272,8 +1530,8 @@ async def intake_delegate(case_id: str, request: Request) -> JSONResponse:
                     f"{case.requester} delegated {len(qids)} question(s) "
                     f"to {to_name} ({to_email}).")
     case.log(f"Delegated {len(qids)} question(s) to {to_name}.")
-    link = f"{BASE_URL}/intake/{case_id}?d={token}"
-    await _send_email(
+    link = f"{BASE_URL}/intake/{case_id}?grant={token}"
+    delivery = await _send_email(
         to_email,
         f"[Action needed] {case.requester} needs your input — privacy "
         f"assessment for {case.subject}",
@@ -1286,27 +1544,32 @@ async def intake_delegate(case_id: str, request: Request) -> JSONResponse:
             f"— Privacy Office (automated)\n"
         ),
     )
-    return JSONResponse({"ok": True, "token": token,
-                         "delegated": {t: {"to_name": r["to_name"],
-                                           "qids": r["qids"]}
-                                       for t, r in dele.items()}})
+    if delivery.lower().startswith("error"):
+        case.delegations.pop(delegate_key, None)
+        case.log("Delegate email delivery could not be confirmed.")
+        return JSONResponse({"ok": False, "error": "delegate email delivery could not be confirmed"}, status_code=502)
+    return JSONResponse({"ok": True})
 
 
 @app.post("/intake/{case_id}/answer")
 async def intake_answer(
     case_id: str,
+    request: Request,
     question_id: str = Form(...),
     answer: str = Form(...),
     note: str = Form(""),
-    d: str = Form(""),
 ) -> JSONResponse:
     case = STORE.cases.get(case_id)
     if not case:
         return JSONResponse({"ok": False, "error": "unknown case"}, status_code=404)
-    rec = {"answer": answer.strip().lower(), "note": note.strip()}
-    # A delegate's answer is attributed and only accepted for their questions.
-    if d:
-        dele = case.delegations.get(d)
+    valid_qids = {q.id for q in get_template("pia").questions}
+    normalized = answer.strip().lower()
+    if question_id not in valid_qids or normalized not in {"yes", "no", "na", "unknown"} or len(note) > 2000:
+        return JSONResponse({"ok": False, "error": "invalid question or answer"}, status_code=400)
+    rec = {"answer": normalized, "note": note.strip()}
+    # A delegate cannot become the requester by omitting a form field.
+    if getattr(request.state, "intake_role", "") == "delegate":
+        dele = case.delegations.get(request.state.intake_delegate_key)
         if not dele or question_id not in dele["qids"]:
             return JSONResponse({"ok": False, "error": "not your question"},
                                 status_code=403)
@@ -1319,7 +1582,9 @@ async def intake_answer(
                         f"{dele['to_name']} answered all {len(dele['qids'])} "
                         f"delegated question(s).")
     case.answers[question_id] = rec
-    return JSONResponse({"ok": True, "answered": len(case.answers)})
+    answered_count = (len(dele["answered"]) if getattr(request.state, "intake_role", "") == "delegate"
+                      else len(case.answers))
+    return JSONResponse({"ok": True, "answered": answered_count})
 
 
 @app.post("/intake/{case_id}/autofill")
@@ -1394,46 +1659,11 @@ def _llm_interpret(question: str, text: str) -> str | None:
 
 @app.post("/intake/{case_id}/carry-forward")
 async def intake_carry_forward(case_id: str) -> JSONResponse:
-    """Fresh assessment for a vendor we've reviewed before: pre-answer the
-    interview from the last review's saved record. The requester only covers
-    what's new; the reviewer sees where every carried answer came from."""
-    case = STORE.cases.get(case_id)
-    if not case:
-        return JSONResponse({"ok": False}, status_code=404)
-    prior_ot = _latest_prior_record(case.subject)
-    prior_case = STORE.cases.get(prior_ot.case_id) if prior_ot else None
-    if prior_ot is None or prior_case is None:
-        return JSONResponse({"ok": True, "prefilled": []})
-    prior_answers: dict[str, dict] = {}
-    if getattr(prior_case, "assessment_id", ""):
-        record = await asyncio.to_thread(backend.load_saved,
-                                         prior_case.assessment_id)
-        prior_answers = (record or {}).get("answers") or {}
-    if not prior_answers:
-        # Seeded/legacy history has no saved platform record; the demo case
-        # still remembers the interview.
-        prior_answers = prior_case.answers
-    source = f"last review {prior_ot.assessment_id}"
-    hits: list[dict] = []
-    for qid, rec in prior_answers.items():
-        ans = (rec.get("answer") or "").strip()
-        if ans not in _ANSWER_LABELS:
-            continue
-        hit = _record_auto_answer(case, qid, ans, source,
-                                  (rec.get("note") or "")[:160])
-        if hit:
-            hits.append(hit)
-    if hits:
-        gid = getattr(case, "goal_id", None)
-        _audit("INTAKE_PREFILL", ANALYST, gid, case=case.id, source=source,
-               questions=[h["id"] for h in hits])
-        if gid:
-            _post_event(gid, ANALYST, "observation",
-                        f"Carried {len(hits)} answer(s) forward from "
-                        f"{prior_ot.assessment_id}; only new or changed "
-                        f"ground gets asked.")
-    return JSONResponse({"ok": True, "prefilled": hits,
-                         "prior": _prior_summary(prior_ot)})
+    """Prior-record access requires a separate reviewer-authorized grant."""
+    return JSONResponse(
+        {"ok": False, "error": "Prior assessments require reviewer-authorized access."},
+        status_code=403,
+    )
 
 
 @app.post("/intake/{case_id}/interpret")
@@ -1448,7 +1678,11 @@ async def intake_interpret(case_id: str, request: Request) -> JSONResponse:
     body = await request.json()
     question_id = str(body.get("question_id", ""))
     text = str(body.get("text", "")).strip()[:2000]
-    d = str(body.get("d", ""))
+    delegate_key = (getattr(request.state, "intake_delegate_key", "")
+                    if getattr(request.state, "intake_role", "") == "delegate" else "")
+    dele = case.delegations.get(delegate_key) if delegate_key else None
+    if delegate_key and (not dele or question_id not in dele["qids"]):
+        return JSONResponse({"ok": False, "error": "not your question"}, status_code=403)
     if not question_id or not text:
         return JSONResponse({"ok": False, "error": "question_id and text "
                              "are required"}, status_code=400)
@@ -1463,11 +1697,7 @@ async def intake_interpret(case_id: str, request: Request) -> JSONResponse:
                              "reply": "Sorry — I couldn't tell. Is that a yes, "
                                       "a no, not applicable, or are you unsure?"})
     rec = {"answer": answer, "note": text}
-    if d:
-        dele = case.delegations.get(d)
-        if not dele or question_id not in dele["qids"]:
-            return JSONResponse({"ok": False, "error": "not your question"},
-                                status_code=403)
+    if dele:
         rec["by"] = dele["to_name"]
         if question_id not in dele["answered"]:
             dele["answered"].append(question_id)
@@ -1475,7 +1705,7 @@ async def intake_interpret(case_id: str, request: Request) -> JSONResponse:
     labels = {"yes": "Yes", "no": "No", "na": "N/A", "unknown": "Not sure"}
     return JSONResponse({"ok": True, "answer": answer, "method": method,
                          "label": labels[answer],
-                         "answered": len(case.answers)})
+                         "answered": len(dele["answered"]) if dele else len(case.answers)})
 
 
 def _store_evidence(case: Case, filename: str, data: bytes, mime: str,
@@ -1516,11 +1746,11 @@ async def intake_upload(case_id: str, file: UploadFile) -> JSONResponse:
         return JSONResponse({"ok": False}, status_code=404)
     # Bounded read: the intake link is unauthenticated by design, so an
     # oversized body must fail fast instead of buffering without limit.
-    data = await file.read(backend.MAX_FILE_BYTES + 1)
-    if len(data) > backend.MAX_FILE_BYTES:
+    data = await file.read(_INTAKE_UPLOAD_LIMIT + 1)
+    if len(data) > _INTAKE_UPLOAD_LIMIT:
         return JSONResponse(
             {"ok": False, "error": f"file too large (limit "
-                                   f"{backend.MAX_FILE_BYTES} bytes)",
+                                   f"{_INTAKE_UPLOAD_LIMIT} bytes)",
              "uploads": case.uploads},
             status_code=400)
     mime = file.content_type or "application/octet-stream"
@@ -1538,70 +1768,20 @@ async def intake_upload(case_id: str, file: UploadFile) -> JSONResponse:
 
 @app.post("/intake/{case_id}/discover")
 async def intake_discover(case_id: str) -> JSONResponse:
-    """Search the connected document sources (here: the simulated SharePoint
-    tenant, via the REAL maverick.doc_discovery module) for this case's
-    SOW/contract/DPA/security paperwork."""
-    case = STORE.cases.get(case_id)
-    if not case:
-        return JSONResponse({"ok": False}, status_code=404)
-    if not backend.discovery_available():
-        # Connected-source discovery ships with Lightwork's connectors.
-        return JSONResponse({"ok": True, "hits": [], "unavailable": True})
-    hits = await asyncio.to_thread(_discover_mock_documents, case.subject)
-    gid = getattr(case, "goal_id", None)
-    _audit("TOOL_CALL", ANALYST, gid, tool="doc_discovery", case=case_id,
-           subject=case.subject, hits=len(hits))
-    if gid and hits:
-        _post_event(gid, ANALYST, "observation",
-                    f"Doc discovery found {len(hits)} candidate document(s) "
-                    f"for {case.subject} in connected sources.")
-    return JSONResponse({"ok": True, "hits": [h.to_dict() for h in hits]})
+    """Document discovery requires a reviewer-authorized source grant."""
+    return JSONResponse(
+        {"ok": False, "error": "Document discovery requires reviewer-authorized access."},
+        status_code=403,
+    )
 
 
 @app.post("/intake/{case_id}/attach-found")
 async def intake_attach_found(case_id: str, request: Request) -> JSONResponse:
-    """One-click attach of a discovered document: fetch through the real
-    doc_discovery path, store as real goal evidence."""
-    case = STORE.cases.get(case_id)
-    if not case:
-        return JSONResponse({"ok": False}, status_code=404)
-    if not backend.discovery_available():
-        return JSONResponse({"ok": False, "error": "document discovery "
-                             "requires Lightwork connectors"}, status_code=400)
-    body = await request.json()
-    source = str(body.get("source", ""))
-    if source != "msgraph":
-        return JSONResponse(
-            {"ok": False, "error": "document source is not available in this demo"},
-            status_code=400,
-        )
-    doc_id = str(body.get("doc_id", ""))
-    name = str(body.get("name", "")) or f"{source}-{doc_id[:16]}"
-    ref = body.get("ref") or {}
-    from maverick import doc_discovery
-    try:
-        data, mime = await asyncio.to_thread(
-            _fetch_mock_document,
-            source,
-            doc_id,
-            ref,
-        )
-    except ValueError as exc:  # our own clean validation messages
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
-    except Exception:  # noqa: BLE001 -- no transport/URL detail to the caller
-        return JSONResponse({"ok": False, "error": "could not fetch that "
-                             "document from the source"}, status_code=400)
-    resolved_mime = doc_discovery.resolve_mime(name, mime)
-    ok, msg = await asyncio.to_thread(
-        _store_evidence, case, name, data, resolved_mime,
-        via=f"found in {source}")
-    if not ok:
-        return JSONResponse({"ok": False, "error": msg,
-                             "uploads": case.uploads}, status_code=400)
-    prefilled = await asyncio.to_thread(
-        _prefills_from_bytes, case, name, data, resolved_mime)
-    return JSONResponse({"ok": True, "error": None, "uploads": case.uploads,
-                         "prefilled": prefilled})
+    """Document discovery requires a reviewer-authorized source grant."""
+    return JSONResponse(
+        {"ok": False, "error": "Document discovery requires reviewer-authorized access."},
+        status_code=403,
+    )
 
 
 @app.post("/intake/{case_id}/submit")
@@ -1610,6 +1790,9 @@ async def intake_submit(request: Request, case_id: str) -> RedirectResponse:
     if not case:
         return RedirectResponse("/", status_code=303)
     gid = getattr(case, "goal_id", None)
+    # If downstream scoring or filing becomes uncertain, do not replay effects
+    # from the same requester link; an operator must inspect the case.
+    case.stage = "submitting"
     case.submitted_at = time.time()
 
     def _score_and_park() -> tuple[dict, list[dict], int]:
@@ -1717,20 +1900,21 @@ async def intake_submit(request: Request, case_id: str) -> RedirectResponse:
     # happens inside OneTrust (or the Lightwork queue — either surface decides
     # approval #{id}); nothing is marked Completed until a person approves.
     await _file_under_review(case)
-    if gid:
-        _post_event(gid, AGENT, "verify",
-                    f"Autonomy gated: filed to OneTrust as UNDER REVIEW. Approval "
-                    f"#{approval_id} mirrors the human decision — approve in "
-                    f"OneTrust and the signed audit chain records it.")
-    case.log(f"Scored risk={result_dict['risk_rating']}; filed to OneTrust as "
-             f"Under Review (approval #{approval_id} tracks the decision).")
-
     ticket = STORE.tickets.get(case.ticket_number)
-    if ticket:
-        ticket.note(f"First-pass assessment complete — risk "
-                    f"{result_dict['risk_rating'].upper()}, {len(result_dict['findings'])} findings. "
-                    f"Filed to OneTrust as Under Review; awaiting the privacy "
-                    f"team's decision there (approval #{approval_id}).")
+    if case.stage == "in_onetrust_review":
+        if gid:
+            _post_event(gid, AGENT, "verify",
+                        f"Filed to OneTrust as UNDER REVIEW. Approval #{approval_id} "
+                        "tracks the human decision.")
+        case.log(f"Scored risk={result_dict['risk_rating']}; filed to OneTrust as Under Review.")
+        if ticket:
+            ticket.note("First-pass assessment filed to OneTrust; awaiting privacy review.")
+    else:
+        case.log("Assessment was scored, but OneTrust filing was not confirmed; operator review is required.")
+        if gid:
+            _post_event(gid, AGENT, "error", "OneTrust filing was not confirmed; review the case before retrying.")
+        if ticket:
+            ticket.note("Assessment was scored, but OneTrust filing was not confirmed; privacy team review is required.")
 
     return RedirectResponse(f"/intake/{case_id}?submitted=1", status_code=303)
 
@@ -2083,18 +2267,29 @@ async def _reopen_for_followups(case: Case) -> None:
         _post_event(gid, ANALYST, "observation",
                     f"Reviewer sent {n} follow-up question(s) back to "
                     f"{case.requester}. Awaiting answers.")
-    intake_link = f"{BASE_URL}/intake/{case.id}"
-    await _send_email(
-        case.requester_email,
-        f"[Action needed] Follow-up questions on your privacy assessment ({case.id})",
-        (
-            f"Hi {case.requester},\n\n"
-            f"The privacy team reviewed your assessment for {case.subject} and "
-            f"needs a bit more detail — {n} quick question(s):\n\n    {intake_link}\n\n"
-            f"Your earlier answers are saved; this only covers the new questions.\n\n"
-            f"— Privacy Office (automated)\n"
-        ),
-    )
+    async with case.intake_lock:
+        # The prior round's delegate grants cannot authorize follow-up work.
+        case.delegations.clear()
+        if not _trusted_intake_base() or not _recipient_allowed(case.requester_email):
+            case.log("Follow-up email was not sent; check the public URL and permitted recipient domains.")
+            return
+        previous_grant = (case.intake_grant_hash, case.intake_grant_expires_at)
+        intake_link = f"{BASE_URL}/intake/{case.id}?grant={_issue_requester_grant(case)}"
+        delivery = await _send_email(
+            case.requester_email,
+            f"[Action needed] Follow-up questions on your privacy assessment ({case.id})",
+            (
+                f"Hi {case.requester},\n\n"
+                f"The privacy team reviewed your assessment for {case.subject} and "
+                f"needs a bit more detail — {n} quick question(s):\n\n    {intake_link}\n\n"
+                f"Your earlier answers are saved; this only covers the new questions.\n\n"
+                f"— Privacy Office (automated)\n"
+            ),
+        )
+
+        if delivery.lower().startswith("error"):
+            case.intake_grant_hash, case.intake_grant_expires_at = previous_grant
+            case.log("Follow-up email delivery could not be confirmed; an operator can reissue the link.")
 
 
 def _approval_state(case: Case) -> tuple[str, str]:
@@ -2588,57 +2783,19 @@ async def _onetrust_add_document(ot_id: str, file: UploadFile) -> JSONResponse:
 
 @app.post("/intake/{case_id}/append-doc")
 async def intake_append_doc(case_id: str, file: UploadFile) -> JSONResponse:
-    """Chat-side append: the requester says they're just adding documents to
-    a vendor we've already assessed. The file lands on the EXISTING OneTrust
-    record as an analyzed addendum; no second interview."""
-    case = STORE.cases.get(case_id)
-    if not case:
-        return JSONResponse({"ok": False}, status_code=404)
-    ot = _latest_prior_record(case.subject)
-    if ot is None:
-        return JSONResponse({"ok": False, "error": "no prior assessment for "
-                             f"{case.subject}"}, status_code=404)
-    data, err = await _read_upload_bounded(file)
-    if data is None:
-        return JSONResponse({"ok": False, "error": err}, status_code=400)
-    mime = file.content_type or "application/octet-stream"
-    filename = file.filename or "document"
-    ok, msg = await asyncio.to_thread(
-        _store_evidence, case, filename, data, mime, via="append to "
-        + ot.assessment_id)
-    if not ok:
-        return JSONResponse({"ok": False, "error": msg}, status_code=400)
-    entry = await asyncio.to_thread(_analyze_addendum, ot, case, filename,
-                                    data, mime)
-    gid = getattr(case, "goal_id", None)
-    if case.stage == "intake_sent":
-        case.stage = "addendum_filed"
-        case.log(f"Append-only: document(s) added to {ot.assessment_id}.")
-        if gid:
-            await asyncio.to_thread(
-                _world().set_goal_status, gid, "done",
-                f"Append-only request: document(s) analyzed and attached to "
-                f"{ot.assessment_id}; no new interview needed.")
-        ticket = STORE.tickets.get(case.ticket_number)
-        if ticket:
-            ticket.state = "Resolved"
-            ticket.note(f"Document appended to existing assessment "
-                        f"{ot.assessment_id} — {entry['summary']}")
-    return JSONResponse({"ok": True, "ot_id": ot.assessment_id,
-                         "addendum": entry,
-                         "needs_re_review": ot.needs_re_review})
+    """Prior-record access requires a separate reviewer-authorized grant."""
+    return JSONResponse(
+        {"ok": False, "error": "Prior assessments require reviewer-authorized access."},
+        status_code=403,
+    )
 
 
-# ===========================================================================
-# Reviewer desk — a reviewer's own queue, and the vendor-paper round
-# ===========================================================================
 @app.get("/reviewer", response_class=HTMLResponse)
 async def reviewer_desk(request: Request, who: str = "") -> HTMLResponse:
     """Sign in as a reviewer and get straight to your numbered queue."""
-    paper_desk.assign_unassigned(list(_REVIEWERS))
-    names = paper_desk.reviewers() or list(_REVIEWERS)
-    who = (who or "").strip()
-    return _page(request, "reviewer.html", reviewers=names, who=who,
+    who = request.state.pia_operator
+    paper_desk.assign_unassigned([who])
+    return _page(request, "reviewer.html", reviewers=[who], who=who,
                  queue=paper_desk.queue_for(who) if who else [],
                  paper_caps=CAPS["paper_redline"])
 
@@ -2650,13 +2807,13 @@ async def reviewer_case(request: Request, case_id: str,
     if not case:
         return _page(request, "notfound.html")
     return _page(request, "reviewer_case.html", case=case,
-                 who=(who or case.assigned_to),
+                 who=request.state.pia_operator,
                  rounds=case.paper_reviews,
                  paper_caps=CAPS["paper_redline"])
 
 
 @app.post("/reviewer/case/{case_id}/paper-source")
-async def reviewer_paper_source(case_id: str, source: str = Form(...),
+async def reviewer_paper_source(case_id: str, request: Request, source: str = Form(...),
                                 who: str = Form("")) -> JSONResponse:
     """Question one: our paper, or theirs? On OUR paper the desk drafts our
     template for this vendor (values filled in red) and files it; on theirs
@@ -2679,7 +2836,7 @@ async def reviewer_paper_source(case_id: str, source: str = Form(...),
                 {"ok": True, "source": choice, "upload": False,
                  "message": "On our paper — nothing to redline. Our template "
                             "already governs."})
-        reviewer = (who or case.assigned_to or "Privacy Reviewer").strip()
+        reviewer = request.state.pia_operator
         entry = await asyncio.to_thread(paper_desk.file_our_paper, case,
                                         reviewer=reviewer)
         if entry is None:
@@ -2712,7 +2869,7 @@ async def reviewer_paper_source(case_id: str, source: str = Form(...),
 
 
 @app.post("/reviewer/case/{case_id}/paper-upload")
-async def reviewer_paper_upload(case_id: str, file: UploadFile,
+async def reviewer_paper_upload(case_id: str, request: Request, file: UploadFile,
                                 who: str = Form(""),
                                 use_model: str = Form("1")) -> JSONResponse:
     """Read their paper, decide the instrument, compare it to our template,
@@ -2749,7 +2906,7 @@ async def reviewer_paper_upload(case_id: str, file: UploadFile,
                                    "scanned PDF needs OCR before review",
              "extraction": extraction}, status_code=400)
 
-    reviewer = (who or case.assigned_to or "Privacy Reviewer").strip()
+    reviewer = request.state.pia_operator
     review = await asyncio.to_thread(
         backend.review_vendor_paper, text, vendor=case.subject,
         document_name=filename, use_model=(use_model != "0"))

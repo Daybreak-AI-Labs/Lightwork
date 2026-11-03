@@ -190,23 +190,20 @@ document.querySelectorAll('.fu-q').forEach(function (row) {
   <div class="dropzone" id="dropzone" role="button" tabindex="0"
        aria-label="Upload documents: drag and drop, or press Enter to browse">
     <div>📎 <strong>Drop files here</strong> or click to browse</div>
-    <div class="hint muted">PDF, Office, text, images — up to 100&nbsp;MB each. You can add several at once.</div>
+    <div class="hint muted">PDF, Office, text, images — up to 10&nbsp;MB each. You can add several at once.</div>
     <input type="file" id="fileInput" multiple style="display:none;">
   </div>
   <div id="uploads">
     {% for u in case.uploads %}<div class="filechip"><span>📎</span><span class="nm mono">{{ u }}</span></div>{% endfor %}
   </div>
 
-  <div class="flow" style="margin-top:14px;">
-    <button class="btn ghost" id="findDocs" type="button">🔍 Find my documents</button>
-    <span class="faint" style="font-size:12px;">Searches your connected sources (SharePoint / OneDrive) for
-      this vendor's SOW, contract, and DPA — so you don't have to.</span>
-  </div>
-  <div id="foundDocs"></div>
+  <p class="faint">Connected-source discovery is unavailable until a reviewer authorizes access.</p>
 </div>
 {% endif %}
 
-{% if done %}
+{% if done and uncertain %}
+<div class="card">Submission could not be confirmed. Ask the privacy team to check the case before trying again.</div>
+{% elif done %}
 <div class="card" style="border-color: var(--low);">
   <div class="flow">
     <span class="risk low">✓ {{ 'documents appended' if case.stage == 'addendum_filed' else 'submitted' }}</span>
@@ -269,7 +266,7 @@ document.querySelectorAll('.fu-q').forEach(function (row) {
 const CASE = "{{ case.id }}";
 const DTOKEN = "{{ delegation.token if delegation else '' }}";
 const QUESTIONS = {{ questions|tojson }};
-const PRE_DELEGATED = {{ (case.delegations or {})|tojson }};
+const PRE_DELEGATED = {{ (delegated_summary or {})|tojson }};
 const PRIOR = {{ (prior or none)|tojson }};
 // Questions already resolved server-side — by a human, a delegate, or an
 // auto-answer with provenance (ticket / attached document / last review).
@@ -281,11 +278,8 @@ let MODE = localStorage.getItem('pia-mode') || 'chat';
 let SPEAK = false;
 let ackCount = 0;   // rotates the acknowledgment phrasing
 const delegated = {};   // qid -> colleague name (skip in this session's flow)
-Object.keys(PRE_DELEGATED).forEach(function (t) {
-  if (t === DTOKEN) return;  // a delegate still answers their own set
-  (PRE_DELEGATED[t].qids || []).forEach(function (qid) {
-    delegated[qid] = PRE_DELEGATED[t].to_name;
-  });
+Object.keys(PRE_DELEGATED).forEach(function (qid) {
+  delegated[qid] = PRE_DELEGATED[qid];
 });
 const thread = document.getElementById('thread');
 const controls = document.getElementById('controls');
@@ -727,50 +721,7 @@ if (dropzone) {
   }));
   dropzone.addEventListener('drop', (e) => handleFiles(e.dataTransfer.files));
 
-  // ---- Doc discovery: find the SOW/contract/DPA in connected sources ------
-  document.getElementById('findDocs').onclick = async () => {
-    const box = document.getElementById('foundDocs');
-    box.innerHTML = '<div class="muted" style="margin-top:10px;">Searching connected sources…</div>';
-    const r = await (await fetch(`/intake/${CASE}/discover`, {method:'POST'})).json();
-    box.innerHTML = '';
-    if (!r.ok || !(r.hits || []).length) {
-      box.innerHTML = '<div class="muted" style="margin-top:10px;">No related documents found in connected sources.</div>';
-      return;
-    }
-    r.hits.forEach(h => {
-      const row = document.createElement('div');
-      row.className = 'found';
-      const badge = document.createElement('span');
-      badge.className = 'srcbadge';
-      badge.textContent = h.source === 'msgraph' ? 'SharePoint' : h.source;
-      const nm = document.createElement('span');
-      nm.className = 'nm mono';
-      nm.style.cssText = 'flex:1 1 auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
-      nm.textContent = h.name;
-      const attach = document.createElement('button');
-      attach.className = 'btn ghost sm';
-      attach.textContent = 'Attach';
-      attach.onclick = async () => {
-        attach.disabled = true; attach.textContent = 'Attaching…';
-        const rr = await (await fetch(`/intake/${CASE}/attach-found`, {
-          method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({source: h.source, doc_id: h.doc_id, name: h.name, ref: h.ref}),
-        })).json();
-        if (rr.ok) {
-          attach.textContent = 'Attached ✓';
-          const c = window._chip(h.name);
-          c.querySelector('.meta').textContent = 'from ' + badge.textContent + ' ✓';
-          c.querySelector('.bar').style.width = '100%';
-          if ((rr.prefilled || []).length) absorbPrefills(rr.prefilled, h.name);
-        } else {
-          attach.textContent = 'Failed';
-          attach.title = rr.error || '';
-        }
-      };
-      row.append(badge, nm, attach);
-      box.appendChild(row);
-    });
-  };
+
 }
 
 // ---- Mode toggle: the selectable chat / guided experience -----------------
@@ -917,7 +868,10 @@ if (autofillBtn) autofillBtn.onclick = async () => {
   ask();
 };
 
-{% if done %}
+{% if uncertain %}
+if (autofillBtn) autofillBtn.style.display = 'none';
+bubble('bot', "Submission could not be confirmed. Please contact the privacy team.");
+{% elif done %}
 if (autofillBtn) autofillBtn.style.display = 'none';
 bubble('bot', "This assessment has already been submitted — thank you!");
 {% elif delegation %}

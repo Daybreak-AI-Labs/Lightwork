@@ -95,7 +95,7 @@ def desk(demo, tmp_path, monkeypatch):
     reviewers, and the OneTrust client bound to the in-process mock."""
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.setenv("PIA_SEED_TENANT", "0")
-    monkeypatch.setenv("PIA_OPERATOR_USER", "reviewer")
+    monkeypatch.setenv("PIA_OPERATOR_USER", "A. Novak (Privacy)")
     monkeypatch.setenv("PIA_OPERATOR_TOKEN", "review-test-value")
     monkeypatch.setenv("PIA_BASE_URL", "http://testserver")
     app_mod = demo["app"]
@@ -109,7 +109,9 @@ def desk(demo, tmp_path, monkeypatch):
     STORE._paper_seq.clear()
     demo["paper_desk"]._REDLINES.clear()
 
-    client = TestClient(app_mod.app)
+    import base64
+    basic = base64.b64encode(b"A. Novak (Privacy):review-test-value").decode()
+    client = TestClient(app_mod.app, headers={"Authorization": f"Basic {basic}", "Origin": "http://testserver"})
     monkeypatch.setattr(
         app_mod.backend, "onetrust_client",
         lambda: demo["Client"](base_url="/ot-api", token="demo-bearer-token",

@@ -18,7 +18,7 @@ mock while piloting).
 
 | Component | Standalone agent | With Lightwork |
 |---|---|---|
-| Chat / voice / guided intake, risk scoring, OneTrust filing + in-OneTrust review, document append, vendor memory, speed metrics | ✅ | ✅ |
+| Chat / voice / guided intake, risk scoring, OneTrust filing + in-OneTrust review, operator document addenda, speed metrics | ✅ | ✅ |
 | Ed25519 signed audit chain, governed approval queue, privacy workspace, full framework catalog with control citations, cross-run learning, connectors, Art. 28 DPA clause review, model-assisted chat | — | ✅ |
 
 The running service shows its own capability matrix at **`/about`** — use it
@@ -42,7 +42,9 @@ instances over one data directory).
 | `PIA_ENABLE_ONETRUST_MOCK` | off | Set to `1` only when deliberately running the in-process demo tenant. |
 | `ONETRUST_TOKEN` | unset | OAuth/bearer token for OneTrust or the explicitly enabled mock. Store in a secret manager, never in shell history or unit files readable by all. |
 | `EMAIL_USER` / `EMAIL_SMTP_HOST` / `EMAIL_SMTP_PORT` | in-process inbox | Standalone delivers intake mail to the built-in inbox page by default; point at your SMTP relay to send real mail. |
-| `PIA_OPERATOR_USER` / `PIA_OPERATOR_TOKEN` | `reviewer` / unset | Set a unique reviewer name and a strong token before making OneTrust review decisions. The reviewer endpoint requires HTTP Basic authentication and a same-origin browser request. Store the token in a secret manager. |
+| `PIA_OPERATOR_USER` / `PIA_OPERATOR_TOKEN` | `reviewer` / unset | Set a unique operator name and a strong token before using operator, ticket, mailbox or reviewer routes. They require HTTP Basic authentication and a same-origin browser request for changes. Store the token in a secret manager. |
+| `PIA_EMAIL_ALLOWED_DOMAINS` | unset | Required in platform mode for requester and delegate email; comma-separated exact domains. |
+| `PIA_WEBHOOK_TOKEN` | unset | Dedicated strong Bearer token for ticketing integrations; keep it distinct from operator and provider credentials. |
 | `PIA_SEED_TENANT` | `0` | `1` seeds a year of demo history (demos only — never for a production tenant). |
 | `PIA_MANUAL_BASELINE_HOURS` | `6` | The stated manual-PIA baseline used by the speed metrics. |
 
@@ -204,9 +206,9 @@ Keep `PIA_HOST=127.0.0.1` and put nginx/Caddy on the same box in front (§8).
 
 ## 8. TLS, authentication, and exposure (read before any non-desktop install)
 
-- The agent itself speaks plain HTTP and has **no login screen**. Intake links
-  are reachable by case id **by design** (requesters click them from email).
-  Therefore in any networked deployment you MUST front it with:
+- The agent speaks plain HTTP internally. Operator surfaces require HTTP Basic
+  credentials, and emailed intake links carry scoped bearer capabilities.
+  In any networked deployment you MUST front it with:
   1. **TLS** (ALB/ACM, Cloud Run/Container Apps managed certs, or nginx+Let's
      Encrypt on a VM), and
   2. **an authenticating proxy for the operator surfaces** — SSO (IAP, ALB
@@ -302,3 +304,11 @@ With the Lightwork platform installed, the agent runs inside it:
 | Two instances corrupting state | Run exactly one instance per data directory (min/max instances = 1). |
 | Port 1025 bind warning at startup | The in-process SMTP capture couldn't bind; harmless unless you rely on the built-in inbox — set `EMAIL_SMTP_PORT` to a free port. |
 | Assessments vanish after container restart | `/data` wasn't a mounted volume — mount persistent storage (§3–§6). |
+
+Intake links carry short-lived bearer credentials. Use an HTTPS `PIA_BASE_URL`
+for exposed deployments, strip query strings from proxy logs, disable access logs in external ASGI
+launchers, disable ASGI proxy
+header rewriting unless the ingress independently establishes the true peer, and
+apply shared ingress and mail-service rate limits. In-process limits are not
+shared across workers. Requesters can ask an authenticated operator to reissue an
+expired link from the ticket page.
