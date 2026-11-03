@@ -125,6 +125,7 @@ nav:
       - A2A (Agent2Agent): a2a.md
       - External agents (BYOA): external-agents.md
       - External agent quickstart: clients/external-agent-quickstart.md
+      - Client languages: clients/README.md
       - Public website chat: public-chat.md
   - Performance:
       - Provider streaming support: performance/streaming-parity.md

@@ -12,8 +12,7 @@ kernel via the official [Rust MCP SDK](https://github.com/modelcontextprotocol/r
 ## Prereqs
 
 ```bash
-# PyPI publish pending: install from a source clone (pip install -e
-# packages/maverick-core packages/maverick-mcp) or the native installer for now.
+# From the root of a source clone (or install Lightwork with the native installer):
 python -m pip install -e ./packages/maverick-core -e ./packages/maverick-mcp
 # Official Rust MCP SDK; pin a published version for reproducible builds.
 # The client role and the child-process stdio transport are not on by default.
@@ -106,7 +105,7 @@ used by the runnable TypeScript example.
 
 Same reason there's no `maverick-go` or `maverick-ts`: the multi-agent kernel
 stays in Python, and a port would duplicate it without adding reach. See
-[Language bindings](../ROADMAP.md#language-bindings) in the roadmap.
+[Language bindings](./README.md#language-bindings).
 
 Rust is the natural language for *embedders* — CLI tools and
 infrastructure agents that need a small binary footprint and don't
@@ -129,4 +128,4 @@ drifts across releases, the wire protocol it speaks does not.
 - [Go client quickstart](./go-quickstart.md)
 - [C# / .NET client quickstart](./csharp-quickstart.md)
 - [Java / JVM client quickstart](./java-quickstart.md)
-- [Roadmap: language bindings](../ROADMAP.md#language-bindings)
+- [Language bindings](./README.md#language-bindings)
