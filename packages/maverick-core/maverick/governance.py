@@ -511,7 +511,7 @@ def evaluate(
     policy: Policy | None = None,
     amount: float | None = None,
     currency: str = "",
-    amount_unavailable: bool = False,
+    amount_unavailable: bool | None = None,
 ) -> Verdict:
     """Decide ALLOW / DENY / REQUIRE_HUMAN for ``action`` (a tool name).
 
@@ -526,12 +526,16 @@ def evaluate(
 
     ``risk`` overrides the classifier (``safety.tool_risk``) when given. ``amount``
     (in ``currency``) is the transaction value, checked against the policy's
-    dollar-threshold tiers — the finance delegation-of-authority gate. ``policy``
+    dollar-threshold tiers — the finance delegation-of-authority gate. An
+    omitted amount is unverifiable unless a trusted caller explicitly marks it
+    not applicable with ``amount_unavailable=False``. ``policy``
     defaults to :meth:`Policy.from_config`; ``capability`` is an optional
     :class:`maverick.capability.Capability`.
     """
     if policy is None:
         policy = Policy.from_config()
+    if amount_unavailable is None:
+        amount_unavailable = amount is None
     if amount is not None:
         import math
         if (isinstance(amount, bool) or not isinstance(amount, (int, float))

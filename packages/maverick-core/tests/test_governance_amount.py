@@ -52,10 +52,18 @@ def test_deny_above_beats_require_human_above():
     assert evaluate("a", amount=200, policy=pol).decision is Decision.DENY
 
 
-def test_no_amount_no_gating():
-    pol = Policy(require_human_above={"*": 1}, deny_above={"*": 1})
-    # amount omitted -> threshold gates don't fire (back-compat)
-    assert evaluate("anything", policy=pol).decision is Decision.ALLOW
+def test_missing_amount_fails_closed_unless_trusted_caller_marks_not_applicable():
+    deny = Policy(deny_above={"*": 1})
+    human = Policy(require_human_above={"*": 1})
+    assert evaluate("payment", policy=deny).decision is Decision.DENY
+    assert evaluate("payment", policy=human).decision is Decision.REQUIRE_HUMAN
+    assert evaluate("payment", amount=None, policy=Policy(
+        deny_above={"*": 1}, require_human_above={"*": 1},
+    )).decision is Decision.DENY
+    assert evaluate("read_file", policy=deny, amount_unavailable=False).decision is Decision.ALLOW
+    assert evaluate("other", policy=Policy(deny_above={"payment": 1})).decision is Decision.ALLOW
+    assert evaluate("payment", amount=float("nan"), amount_unavailable=False,
+                    policy=deny).decision is Decision.DENY
 
 
 def test_reason_includes_amount_and_currency():

@@ -1129,15 +1129,10 @@ def _capability_paths_for_tool(
 
 
 def _governance_amount(args: Any) -> float | None:
-    """Extract a transaction ``amount`` from tool args for the governance gate.
+    """Parse a legacy amount field; do not use as transaction authorization.
 
-    The org policy's dollar-tier thresholds (``deny_above`` /
-    ``require_human_above`` -- the finance delegation-of-authority gate) compare
-    a transaction value, so the chokepoint passes the tool's conventional
-    ``amount`` arg through to :func:`maverick.governance.evaluate`. Accepts a
-    number or a numeric string; anything else (missing, non-numeric, bool)
-    yields ``None`` so the gate stays inert -- exactly as before for tools that
-    carry no amount.
+    Actual dispatch uses governance.transaction_value to account for operation
+    contracts, currencies, and unverifiable amounts.
     """
     if not isinstance(args, dict):
         return None
