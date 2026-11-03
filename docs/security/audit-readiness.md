@@ -72,9 +72,9 @@ Each control, where it lives, and how to confirm it's active.
 | Env scrubbing for child shells | `sandbox/local.py` `scrub_env()` | `test_tool_subprocess_hardening.py` |
 | Shield injection detection | `maverick-shield/` | `test_builtin_rules.py`, `test_cascade.py`, `test_deobfuscation.py`, `test_injection_corpus.py` |
 | Audit Ed25519 hash-chain + anchors | `maverick/audit/` | `test_audit_anchor.py`, `test_audit_reanchor.py`, `test_audit_durability.py` |
-| Fail-closed auth (dashboard/MCP/A2A) | dashboard `app.py`, `mcp/http_transport.py`, `a2a_tasks.py` | `test_tier0_security.py`, MCP/A2A test suites |
+| Fail-closed auth (dashboard/MCP/A2A) | dashboard `app.py`, `mcp/http_transport.py`, `a2a_tasks.py` | dashboard, MCP and A2A authentication suites (for example `test_http_authorization.py`, `test_a2a_tasks.py`) |
 | Webhook HMAC + atomic dedup | `maverick/webhooks.py`, `maverick_channels/` | `test_security_invariants.py`, channel test suites |
-| Plugin default-deny | `maverick/plugins.py` | `test_tier0_security.py` |
+| Plugin default-deny | `maverick/plugins.py` | `test_plugins.py`, `test_plugin_permissions.py` |
 | Budget caps | `maverick/budget.py` | budget test suites |
 | Static-analysis gates (SAST, secrets, CVEs) | `.github/workflows/ci.yml` | see §4 |
 
@@ -127,8 +127,8 @@ cd ../maverick-shield && pytest tests/ -q        # shield detection + injection 
 ### ReDoS sweep (regex DoS)
 
 The redactors and detection rules run on attacker-influenced text, so every
-regex over untrusted input must be sub-quadratic. To re-run the dynamic sweep
-that found the fixed `url_credentials` and `env_secret` holes: collect every
+regex over untrusted input must be sub-quadratic. To run the dynamic sweep,
+collect every
 compiled `re.Pattern` from `maverick.safety`, `maverick_shield`,
 and `maverick.tools`, then time `pattern.search`
 on long single-character runs (`"a"`, `"A"`, `"\n"`, `"\t"`, `" "`, …) at N

@@ -7,7 +7,7 @@ page lists the canonical error classes so that:
 2. Retries are routed per class (implemented in `maverick/retry/classifier.py`).
 3. Failure patterns can be compared across releases.
 
-Tests: `packages/maverick-core/tests/test_q1_2026_batch3.py::test_retry_classifier_*`.
+Tests: the `test_retry_classifier_*` tests in `packages/maverick-core/tests/`.
 
 Retry delays grow exponentially up to the class's cap and are jittered to 50–100%
 of the computed value, so many callers retrying after the same outage do not
