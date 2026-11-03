@@ -416,10 +416,10 @@ system-specific shapes (e.g. `SERVICENOW_INSTANCE_URL`, `SNOWFLAKE_ACCOUNT`,
 
 ## Also settable in the dashboard
 
-These switches used to exist only as environment variables. Each now also has
-a config key that a global administrator can set on **Settings > All
-settings** (secrets are stored sealed and never shown again). The environment
-variable still wins; with neither set, behaviour is unchanged.
+Each of these environment variables also has a config key that a global
+administrator can set on **Settings > All settings** (secrets are stored sealed
+and never shown again). The environment variable wins over the config key; with
+neither set, the default applies.
 
 | Env var | Config key |
 | --- | --- |
@@ -440,7 +440,7 @@ variable still wins; with neither set, behaviour is unchanged.
 | `MAVERICK_PG_STATEMENT_TIMEOUT_MS` | `[world_model] statement_timeout_ms` |
 | `MAVERICK_PG_IDLE_TX_TIMEOUT_MS` | `[world_model] idle_tx_timeout_ms` |
 | `MAVERICK_ORPHAN_RECLAIM_SECONDS` | `[world_model] orphan_reclaim_seconds` |
-| `MAVERICK_PG_DSN` | `[world_model] dsn` (now also read by the Postgres record store itself) |
+| `MAVERICK_PG_DSN` | `[world_model] dsn` (also read by the Postgres record store) |
 | `MAVERICK_QUEUE_GOAL_ACQUIRE_TIMEOUT` | `[queue] goal_acquire_timeout_seconds` |
 | `MAVERICK_GRPC_BEARER_TOKEN` | `[grpc] token` |
 | `MAVERICK_GRPC_RATE_LIMIT` | `[grpc] rate_limit` |

@@ -1,13 +1,13 @@
 """Validate the cross-language MCP surface we promise in the README.
 
-The language-bindings decision in the roadmap commits us to:
+The language-bindings decision in docs/clients/README.md commits us to:
   1. The `maverick mcp` CLI command exists + advertises the
      cross-language surface in its docstring.
   2. The TS / Go / Rust quickstart docs are present, runnable-shaped
      (i.e. have a real fenced code block), and cross-link to the
-     language-bindings decision in the roadmap.
-  3. The roadmap records that decision under "Decisions" with the
-     top-5 language list + the 15% gate.
+     language-bindings decision.
+  3. The clients guide records that decision under "Language bindings"
+     with the top-5 language list.
   4. The main README points consumers at all three quickstarts.
 
 If anyone removes the cross-language surface, this test fails.
@@ -45,7 +45,7 @@ def test_typescript_quickstart_present():
     text = _quickstart("docs/clients/typescript-quickstart.md")
     assert "@modelcontextprotocol/sdk" in text
     assert "maverick mcp" in text or "[\"mcp\"]" in text
-    assert "ROADMAP.md#language-bindings" in text  # cross-link back
+    assert "README.md#language-bindings" in text  # cross-link back
 
 
 def test_go_quickstart_present():
@@ -60,11 +60,10 @@ def test_rust_quickstart_present():
     assert "Rust" in text or "tokio" in text
 
 
-def test_roadmap_records_the_language_bindings_decision():
-    text = (_REPO_ROOT / "docs/ROADMAP.md").read_text(encoding="utf-8")
-    assert "## Decisions" in text
-    assert "### Language bindings" in text
-    section = text.split("### Language bindings", 1)[1].split("\n#", 1)[0]
+def test_clients_guide_records_the_language_bindings_decision():
+    text = (_REPO_ROOT / "docs/clients/README.md").read_text(encoding="utf-8")
+    assert "## Language bindings" in text
+    section = text.split("## Language bindings", 1)[1].split("\n#", 1)[0]
     # Each top-5 language is named in the decision.
     for lang in ("TypeScript", "Go", "Rust", "C#", "Java"):
         assert lang in section, f"top-5 language {lang!r} not in the decision"

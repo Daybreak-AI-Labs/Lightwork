@@ -68,7 +68,7 @@ freeze externally rotated role credentials, credential files, machine trust
 stores or operating-system DNS. No live AWS/Azure authentication is established
 by constructor tests.
 
-Upgrading: provider fields that earlier versions ignored now fail visibly. For a required
+Upgrading: provider fields that an adapter does not support fail visibly instead of being ignored. For a required
 residency/retention header, choose a supported adapter and an explicitly reviewed
 endpoint; deleting the field means removing that requested control. Azure
 deployment/API version/region and SDK timeouts retain their documented

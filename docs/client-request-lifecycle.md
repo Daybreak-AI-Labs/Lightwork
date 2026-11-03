@@ -1,9 +1,9 @@
 # Companion and editor request lifecycle
 
 The browser extension, mobile companion, and IDE run viewers consume the
-dashboard's existing protected APIs. These changes do not enable extension CORS,
-change server authorization, add a hosted service, or make the native scaffolds
-production-qualified.
+dashboard's protected APIs. They use the dashboard's own authorization; the
+dashboard sends no CORS headers for extensions, no hosted service is involved,
+and the native scaffolds are not production-qualified.
 
 ## Event history and completion
 
@@ -69,7 +69,7 @@ server marks both success and lookup errors `no-store`. Changing the connection
 invalidates late results. A widget receipt under another signed-in user cannot
 be read; restore the original session to reconcile that request.
 
-The existing chat admission transaction and keyed REST admission now atomically
+The chat admission transaction and keyed REST admission atomically
 create the goal and durable receipt on SQLite/PostgreSQL. The same owner/tenant
 and key plus different reviewed payloads or effective execution caps return
 409. One winner claims dispatch; duplicates do not create cancelled loser goals.

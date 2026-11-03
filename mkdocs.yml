@@ -125,6 +125,7 @@ nav:
       - A2A (Agent2Agent): a2a.md
       - External agents (BYOA): external-agents.md
       - External agent quickstart: clients/external-agent-quickstart.md
+      - Client languages: clients/README.md
       - Public website chat: public-chat.md
   - Performance:
       - Provider streaming support: performance/streaming-parity.md
@@ -149,14 +150,12 @@ nav:
   - Architecture:
       - Governed agent control plane: enterprise/architecture.md
       - Security & compliance overview: enterprise/security-overview.md
-      - Security evidence map: enterprise/diligence.md
+      - Security evidence map: enterprise/security-evidence-map.md
+      - Interface contracts: contracts/README.md
   - Integrations:
       - Observability integrations: integrations/observability-partners.md
   - Project:
-      - Roadmap: ROADMAP.md
       - RFC process: rfcs/README.md
-      - "RFC 0001: Lightwork 2.0": rfcs/0001-maverick-2.0.md
-      - "RFC 0002: Plugin API v2": rfcs/0002-plugin-api-v2.md
   - Community:
       - Contributing: CONTRIBUTING.md
       - Governance: https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/GOVERNANCE.md

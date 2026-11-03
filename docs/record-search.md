@@ -87,14 +87,13 @@ the dates. Its native-screen link opens the finder in history mode. Returned
 cursors are sealed and bind exact filters/current context and are positions, never grants;
 opening a result performs its ordinary current authorization again.
 
-Migration 45 is additive and preserves encrypted values. Rollback means stop
+Migration 45 adds owner/date indexes and preserves encrypted values. Rollback means stop
 using historical discovery and roll forward to a compatible build, or use the
 ordinary reviewed pre-upgrade backup restore. Do not lower the schema version
 or rewrite released migrations; older binaries reject newer schemas.
 
-Local validation includes 10,050 tasks (250-row first window measured at
-0.172 seconds), 1,005 questionnaires, 501 vault heads and 501 executive reports,
-exact-owner and department/role exclusion, private-body exclusion, date
-narrowing, scan limits, stale cursors and native index query-plan checks.
+Each search window returns at most 250 rows and stops at its scan limit, so
+large histories are reached page by page through the continuation cursor. Owner, department and role exclusions and private-body
+exclusion apply to every window.
 PostgreSQL service execution and installed browser performance remain separate
 qualification work; these figures describe synthetic local SQLite fixtures.

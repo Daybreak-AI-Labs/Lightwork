@@ -44,5 +44,5 @@ director profile. `context` is the current authenticated draft workspace context
 owner after fresh source checks. `has_binding(goal_id, world)` also detects an atomic
 admission whose source sidecar was never completed.
 
-Validation uses temporary databases and fake models only. Real browser rendering,
-PostgreSQL concurrency and configured-provider execution remain installation checks.
+Real browser rendering, PostgreSQL concurrency and configured-provider execution
+are not qualified; check them in your installation.

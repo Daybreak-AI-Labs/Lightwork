@@ -431,7 +431,7 @@ and the completion label. Float/null arguments use typed copies only. Search and
 evaluation limits refuse rather than choosing a partial candidate set. Candidate
 counts describe expression alternatives, not probabilities or complete workflows.
 
-This release adds no new capture family. Independently reviewed complete
+No other capture family is supported. Independently reviewed complete
 straight-line native teacher executions may demonstrate different histories;
 arbitrary branching/loop capture and self-labeling from a learner's own predictions
 remain unavailable. Signed provenance, retention, grants and expiry have the same
@@ -867,8 +867,8 @@ dispatched effect. A failure after an earlier action preserves the completed
 prefix and stops further work without replay.
 
 The earliest source grant limits the admitted workflow. Capture is bounded to
-seven days, grants cannot exceed that deadline, and this release has no grant
-renewal route. Expiry or withdrawal stops later action proposals/dispatches; it
+seven days, grants cannot exceed that deadline, and there is no grant renewal
+route. Expiry or withdrawal stops later action proposals/dispatches; it
 does not undo completed work. Source capture expiry also does **not** erase
 downloaded bundles, CLI artifacts or derived Flow/history copies. Their retention
 requires the explicit copied-data consent and the owner's data-handling policy.

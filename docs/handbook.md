@@ -333,7 +333,7 @@ screened by the same shield/budget/sandbox machinery:
   LangChain/AutoGen/CrewAI adapters, and quickstarts for TypeScript, Go,
   Rust, C#, and Java (`docs/clients/`). Deliberately *not* a port: other
   languages drive Lightwork over the wire; the kernel stays Python (see the
-  language-bindings decision in [`ROADMAP.md`](./ROADMAP.md#decisions)).
+  [language-bindings decision](./clients/README.md#language-bindings)).
 - **Sandbox backends** — the entry-point contract from primitive #5;
   conformance-checked, refused if non-conformant.
 
@@ -352,26 +352,24 @@ haven't installed yet.
 |---|---|
 | Install + first run | [`source-install.md`](./source-install.md), [`getting-started.md`](./getting-started.md), README |
 | Every shipped feature | [`FEATURES.md`](./FEATURES.md) |
-| What's *not* built yet | [`ROADMAP.md`](./ROADMAP.md) |
-| The architecture argument | [`architecture.md`](./architecture.md), [`docs/specs/`](./specs/) decision memos |
+| The architecture argument | [`architecture.md`](./architecture.md), [`contracts/`](./contracts/README.md) (interface contracts), [`specs/`](./specs/) (formats and formal models) |
 | Config schema | [`configuration.md`](./configuration.md), [`env-vars.md`](./env-vars.md) |
 | Deploy targets | [`deployment.md`](./deployment.md), [`reference-architectures.md`](./reference-architectures.md), [`github-action.md`](./github-action.md) |
 | Run it day-2 | [`operations.md`](./operations.md), [`perf-sla.md`](./perf-sla.md) |
 | Safety & security | [`safety.md`](./safety.md), [`security-hardening.md`](./security-hardening.md), [`security/`](./security/), [`SECURITY.md`](SECURITY.md), [`threat-hunting.md`](./threat-hunting.md) |
 | Enterprise & compliance | [`enterprise/`](./enterprise/) (security overview, architecture, deployment playbook, evidence map), [`regulated-deployment.md`](./regulated-deployment.md), [`compliance/`](./compliance/), [`encryption.md`](./encryption.md) |
 | Extend it | [`plugins.md`](./plugins.md), [`plugin-api-v2.md`](./plugin-api-v2.md), [`self-learning.md`](./self-learning.md), [`embedding.md`](./embedding.md), [`connectors.md`](./connectors.md) |
-| Drive it from outside | [`api.md`](./api.md), [`grpc.md`](./grpc.md), [`a2a.md`](./a2a.md), [`clients/`](./clients/), [`integrations/`](./integrations/) |
+| Drive it from outside | [`api.md`](./api.md), [`grpc.md`](./grpc.md), [`a2a.md`](./a2a.md), [`clients/`](./clients/README.md), [`integrations/`](./integrations/) |
 | Task recipes | [`cookbook/`](./cookbook/) (30 recipes), [`starter-goals.md`](./starter-goals.md) |
 | Benchmarks | [`benchmarks/`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/benchmarks/) (`EVAL.md`, `RESULTS.md`) |
 | Naming | [`TRADEMARK.md`](TRADEMARK.md) |
 | Contribute | [`CONTRIBUTING.md`](CONTRIBUTING.md), [`CLA.md`](CLA.md), [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md), [`MAINTAINERS.md`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/MAINTAINERS.md) |
 | Licensing | [`LICENSE`](../LICENSE) |
 
-### The honest closing note
+### Scope and limits
 
-Lightwork is alpha. It installs from source today, runs its test suite in CI
-on Python 3.11–3.12, and the features in this handbook ship and run. Parts of
-the frontier are explicitly unfinished, and the roadmap and the decision memos
-in [`docs/specs/`](./specs/) say so, including the things that were considered
-and declined. Shipped, planned and declined are kept separate. Hold this handbook to it: if you find a claim here the
+Lightwork is alpha. It installs from source, runs its test suite in CI on
+Python 3.11–3.12, and the features in this handbook ship and run. Each guide
+states its own limits, and [`FEATURES.md`](./FEATURES.md) marks modules that
+are built but not wired. Hold this handbook to it: if you find a claim here the
 code can't back, that's a bug; file it.

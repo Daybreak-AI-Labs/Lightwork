@@ -1,7 +1,7 @@
 # Tree test: classic sidebar vs job-named areas
 
-Lightwork has two sidebars. **Classic** (the default) lists pages in today's
-groups. **Areas** puts every page in one of nine job-named areas (Home, Work,
+Lightwork has two sidebars. **Classic** (the default) lists pages in their
+functional groups. **Areas** puts every page in one of nine job-named areas (Home, Work,
 Agents, Rules & safety, Privacy, Risk & compliance, Evidence & audit, Costs &
 value, Settings), plus the Ask button and the account and help menus. Areas
 stays off (`[dashboard] navigation = "classic"`) until people have shown,
@@ -9,15 +9,15 @@ in a tree test, that they find things faster with it.
 
 A tree test shows people a bare text menu, without the product's design, and
 asks where they would go to do a task. It measures the structure and the
-labels alone. This kit has everything needed to run one. **It holds no
-results.** Nobody has taken the test yet.
+labels alone. This kit has everything needed to run one; it ships without
+results.
 
 ## What is in this folder
 
 | File | What it is |
 |---|---|
-| `classic-tree.txt`, `classic-tree.csv` | Today's tree, exported from the page registry |
-| `areas-tree.txt`, `areas-tree.csv` | The proposed tree, exported from the same registry |
+| `classic-tree.txt`, `classic-tree.csv` | The classic tree, exported from the page registry |
+| `areas-tree.txt`, `areas-tree.csv` | The areas tree, exported from the same registry |
 | `tasks.csv` | 61 tasks: 15 or 16 for each of Employee, Approver, Privacy officer and Admin, each with its correct page addresses |
 | `answers-classic.csv`, `answers-areas.csv` | Each task's correct node(s) in each tree |
 | `results-template.csv` | One row per task, tree and role, for the results |
@@ -30,19 +30,19 @@ for tools that import a spreadsheet.
 Regenerate everything after the registry changes (a test fails until you do):
 
 ```
-python -m maverick_dashboard.nav_tree --export classic > docs/research/tree-test/classic-tree.txt
-python -m maverick_dashboard.nav_tree --export classic --format csv > docs/research/tree-test/classic-tree.csv
-python -m maverick_dashboard.nav_tree --export areas > docs/research/tree-test/areas-tree.txt
-python -m maverick_dashboard.nav_tree --export areas --format csv > docs/research/tree-test/areas-tree.csv
-python -m maverick_dashboard.nav_tree --export classic --answers docs/research/tree-test/tasks.csv > docs/research/tree-test/answers-classic.csv
-python -m maverick_dashboard.nav_tree --export areas --answers docs/research/tree-test/tasks.csv > docs/research/tree-test/answers-areas.csv
+python -m maverick_dashboard.nav_tree --export classic > docs/tree-test/classic-tree.txt
+python -m maverick_dashboard.nav_tree --export classic --format csv > docs/tree-test/classic-tree.csv
+python -m maverick_dashboard.nav_tree --export areas > docs/tree-test/areas-tree.txt
+python -m maverick_dashboard.nav_tree --export areas --format csv > docs/tree-test/areas-tree.csv
+python -m maverick_dashboard.nav_tree --export classic --answers docs/tree-test/tasks.csv > docs/tree-test/answers-classic.csv
+python -m maverick_dashboard.nav_tree --export areas --answers docs/tree-test/tasks.csv > docs/tree-test/answers-areas.csv
 ```
 
 `--role admin|operator|auditor|viewer` exports the tree one built-in role
 sees out of the box, if you want each group to see only its own pages.
 
 **One bias to know about.** The classic export lists every page under its
-group, including pages that today's sidebar folds away (they are reachable
+group, including pages that the classic sidebar folds away (they are reachable
 only from other pages or by search). That makes the classic tree look
 easier than the product is. If areas still wins, the result is safe.
 
@@ -91,8 +91,7 @@ smaller than the intervals are not differences.
 
 ## Recommended bar for switching areas on
 
-This is a recommendation for the maintainers to accept or change, not a rule the
-product enforces:
+This is guidance for the decision, not a rule the product enforces:
 
 1. On the **areas** tree, overall task success is **at least 70%** for every
    role, and **no task is below 50%**.
@@ -112,5 +111,4 @@ preferences.
 
 Copy `results-template.csv`, add one row per study, tree, role and task, and
 keep the tool's raw export beside it. Write down the date, the tool, how
-people were recruited, and how many started and finished. Leave this folder
-without results until a study has actually run.
+people were recruited, and how many started and finished.

@@ -1,4 +1,4 @@
-"""Durable execution Phase 2 — rewind/fork (spec docs/specs/durable-execution.md §4).
+"""Durable execution Phase 2 — rewind/fork of a checkpointed run.
 
 Exercises the checkpoint-manipulation mechanics directly against the world model
 (no LLM): the continuation itself reuses the shipped Phase-1 resume path.

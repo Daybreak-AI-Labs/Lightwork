@@ -30,8 +30,7 @@ Private pending text, snapshots and attachment bytes are sealed with owner/threa
 
 These helpers do not themselves admit a privacy reviewer; the reviewed My Data adapter owns that authority. Task artifacts already admitted to execution retain their separate task-data governance. There is no additional automatic time-based inbox retention policy in this feature.
 
-## Local qualification
+## Limits
 
-The native suite uses real temporary encrypted governed records and HTTP routes with mocked runner dispatch, never a model/provider call. It covers exact replay, changed-payload refusal, file edit CAS, revocation, explicit guidance decisions and checkpoint replay, independent completion during an active task, idle queue admission, interrupted admission recovery, refusal to repeat an uncertain dispatch, reviewed snapshot freshness, typed Copilot/native parity, erasure barriers and closed-source cancellation. Browser-controller tests cover draft/file preservation, unknown outcomes, receipt lookup after reload, permission changes, file edits, guidance review, snapshot pinning and detail preferences.
-
-An HTTP regression test verifies that the inbox and project-workspace assets return JavaScript responses. Postgres multi-process fault injection and real browser visual/accessibility qualification are outside these tests, and no test calls a live provider.
+Multi-process failure handling on PostgreSQL, real-browser visual and
+accessibility behavior, and live provider calls are not qualified.

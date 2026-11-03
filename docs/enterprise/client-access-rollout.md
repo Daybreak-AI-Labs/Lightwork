@@ -12,8 +12,8 @@ support bundles, see [product-operations.md](product-operations.md).
 **Organizations with an identity provider** (Microsoft Entra ID, Okta, Google,
 an AWS-fronted proxy): Lightwork has built-in OIDC browser login
 (`[auth.oidc]`), SAML, reverse-proxy SSO, and SCIM provisioning. Invite links
-add the missing ergonomics: an administrator no longer has to type
-`user:<sub>` principals into the RBAC roster by hand.
+let an administrator add people without typing `user:<sub>` principals into the
+RBAC roster by hand.
 
 **Invite links.** `[dashboard] invites` (or `MAVERICK_DASHBOARD_INVITES`)
 turns them on or off explicitly. When it is unset, invites become available

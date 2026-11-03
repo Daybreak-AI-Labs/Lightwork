@@ -7,7 +7,7 @@ the host's retained result, not memory allocated internally by third-party code
 before it yields or returns. A larger result is an explicit indeterminate
 delivery outcome; it is never passed on as a successfully truncated value.
 
-`set_chunk_listener` now receives fixed byte-count progress while collection is
+`set_chunk_listener` receives fixed byte-count progress while collection is
 in flight. It receives no producer content or arguments at this stage. The agent
 checks the whole result with its configured Shield policy, redacts the whole
 result (including secrets split across chunks), and records terminal audit
@@ -54,6 +54,4 @@ state uncertain. Partial streams and cleanup timeouts are never automatically
 retried, even if their tool name is ordinarily safe to retry. Budget, halt and
 accounting stop signals continue to propagate.
 
-Local acceptance uses `test_tool_result_boundary.py`, the streaming/code-exec
-tests, agent lifecycle tests, connector retry/control-flow tests and flow payload
-recovery tests. Those are synthetic local tests, not live provider qualification.
+Live provider behavior is not qualified.

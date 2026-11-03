@@ -215,8 +215,7 @@ Notes:
   other durable stores remain file-backed; replace that replica against the
   same persistent data root instead of running active-active control-plane pods.
   The single-node `maverick backup` cold-standby model is for the SQLite default.
-- **Single-writer enforcement:** this is no longer a convention. On startup the
-  control plane takes an exclusive advisory lock on `control-plane.lock` in its
+- **Single-writer enforcement:** on startup the control plane takes an exclusive advisory lock on `control-plane.lock` in its
   data root and holds it for the process lifetime; a second process refuses to
   start and reports the pid, host and uptime from the atomically published
   `control-plane-holder.json` diagnostic record. This record is observability;

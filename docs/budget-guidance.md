@@ -8,4 +8,4 @@ Personal acknowledged usage, workspace allowance and provider authority have dif
 
 Employees can file a minimized accounting help case directly from a blocked provider. The case discloses the provider, period and their exact receipt references, never task text or a global ledger. Installation administrators explicitly claim cases, request final receipt evidence and use the existing governed Provider spending reconciliation. Case progress is CAS-versioned and audited. Verification rereads the original period and requires readable accounting without unresolved/pending reservations; changing the date or increasing a ceiling cannot masquerade as a refund or reconciliation. The UI exposes pending audit delivery. No action retries provider work.
 
-Focused budget, cost-provenance and billing-recovery regression tests cover these rules. Browser, concurrency, revocation, shared-store and provider-invoice behavior is not qualified.
+Browser, concurrency, revocation, shared-store and provider-invoice behavior is not qualified.

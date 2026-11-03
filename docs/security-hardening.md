@@ -826,10 +826,10 @@ because the IdP POST carries no bearer):
 
 - **Shares the session secret.** SAML mints the *same* `mvk_session` cookie as
   OIDC, so `[auth.oidc] session_secret` must be set or the ACS can't issue a session.
-- **Not yet certified against a live IdP in-tree** — the pysaml2 calls are
-  isolated and unit-tested with the library mocked; do an Okta/Entra round-trip in
-  staging before production. Single-logout (SLO) is not implemented yet (local
-  session clear only).
+- **Not certified against a live IdP** — the pysaml2 calls are isolated and
+  unit-tested with the library mocked; do an Okta/Entra round-trip in staging
+  before production. Single-logout (SLO) is not implemented (local session clear
+  only).
 - Failures are opaque (`401 SAML assertion did not verify`) and never log the
   assertion — like the OIDC callback.
 
@@ -1328,16 +1328,16 @@ validation and workbook parsing in a resource-limited child, with a 30-second
 timeout and two concurrent parser slots per service process. Edited workbooks
 are limited to 11 MiB and are published atomically only after the worker
 succeeds. These operations fail closed where the POSIX resource controls are
-unavailable. Recalculation has a separate parsing path and does not yet share
+unavailable. Recalculation has a separate parsing path and does not share
 this isolation; the same filesystem, network, descendant and cross-worker
 limits above apply.
 
 Direct flow and workflow tool actions are unavailable when capability
 enforcement is enabled, including in enterprise mode, or when they inherit an
-active agent grant during tool dispatch. These runners do not yet carry and
-enforce the originating agent's attenuated tool, path and host grant. Direct
-registry calls and independently started jobs need their own authorization.
-Use governed agent steps until that propagation is implemented.
+active agent grant during tool dispatch. These runners do not carry or enforce
+the originating agent's attenuated tool, path and host grant. Direct registry
+calls and independently started jobs need their own authorization. Use governed
+agent steps when an agent grant must apply.
 
 Teams sends require a fresh human decision in the live registry, including when
 the default operation is omitted.
@@ -1350,10 +1350,11 @@ through the registry's connector wrapper. Use destination controls and process
 isolation where untrusted content can influence outgoing requests.
 
 MCP catalog entries are available for discovery, but installing or probing a
-registry-provided server is unavailable until the complete server configuration
-can be authenticated against trusted publisher keys. Administrators can still
-independently configure servers. This change does not remove servers previously
-installed from a registry; review those configurations and their destinations.
+registry-provided server is unavailable, because the complete server
+configuration is not authenticated against trusted publisher keys.
+Administrators can independently configure servers. Servers already present in
+the configuration are not removed; review those configurations and their
+destinations.
 
 The interactive browser connects through the same DNS-pinning proxy used by the
 consent scanner. It refuses private addresses and permits outbound TCP only on
@@ -1374,7 +1375,7 @@ remain necessary for stronger enforcement.
 Earned-autonomy predictions are recorded by action type, so qualification is
 advisory and does not grant consent. Shadow execution still invokes its human
 approval callback. Historical unscoped standing-consent records cannot be
-attributed reliably to an operator or to earned autonomy and no longer grant
+attributed reliably to an operator or to earned autonomy and do not grant
 authority. Operators must explicitly reauthorize any unscoped standing consent
 they still need. Existing scoped records retain their prior authority binding;
 clearing prediction qualification does not revoke an explicit consent grant.

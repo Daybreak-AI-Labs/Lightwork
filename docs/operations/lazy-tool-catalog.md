@@ -6,9 +6,9 @@ search do not construct these REST or GraphQL executors. The first authorized
 invocation constructs only the selected connector and its governed wrapper.
 Subsequent invocations reuse that registry's executor.
 
-This internal refactor applies automatically to the bulk declarative catalog.
-Handwritten tools, context-dependent tools, plugins and MCP registrations keep
-their existing construction paths. The `deferred_tools` setting still controls
+Lazy construction applies automatically to the bulk declarative catalog.
+Handwritten tools, context-dependent tools, plugins and MCP registrations are
+constructed eagerly. The `deferred_tools` setting still controls
 which schemas the model sees; it does not control executor construction.
 An authorized hidden tool remains callable without activation.
 
@@ -22,14 +22,14 @@ An authorized hidden tool remains callable without activation.
   authority are not cached globally. Connectors still resolve live credentials at
   the request boundary, under the current tenant and invocation principal.
 - Discovery inspects descriptors. It never runs a connector or requests approval.
-  Current ACL restrictions apply to discovery, activation and dispatch. Existing
-  rate-limit, cache, retry, budget, killswitch and governance boundaries remain in
-  their original dispatch order.
-- Governance uses the existing wrapper around the real executor on first use.
-  Receipts retain the real connector's implementation provenance. Writes still
-  require approval and the existing conditional revision contract where applicable.
-  Explicitly configured rate-limit wrappers retain their current eager policy
-  wrapper setup, while their connector executor remains lazy.
+  Current ACL restrictions apply to discovery, activation and dispatch. Rate-limit,
+  cache, retry, budget, killswitch and governance boundaries apply in their usual
+  dispatch order.
+- Governance wraps the real executor on first use. Receipts retain the real
+  connector's implementation provenance. Writes require approval and the
+  conditional revision contract where applicable. Explicitly configured
+  rate-limit wrappers set up their policy wrapper eagerly, while their connector
+  executor stays lazy.
 
 ## Failure and recovery
 
@@ -41,20 +41,14 @@ initialization. Fix the installation and create a new registry, or explicitly
 replace the registered tool, to retry construction. No raw factory exception text
 is retained in that failure diagnostic.
 
-Budget and killswitch stop signals retain their control-flow behavior. Normal
-execution errors are still handled by the existing tool dispatch policy; they
-are not stored as construction failures. This does not change external-effect
+Budget and killswitch stop signals keep their control-flow behavior. Normal
+execution errors are handled by the tool dispatch policy; they are not stored as
+construction failures. Lazy construction does not change external-effect
 idempotency or authorize replay of writes.
 
-## Validation scope
+## Performance
 
-`test_lazy_tool_executors.py` checks the full declarative schema/order contract,
-metadata-only discovery, first-use construction, concurrent success and failure,
-current ACL denial, hidden invocation, streaming dispatch, rate limits,
-governance provenance and per-registry/per-tenant bindings. Existing connector,
-governance, discovery and tool-cache suites cover their unchanged behavior.
-
-Local construction measurements should include both the first registry, which
-compiles immutable metadata, and later registries that reuse it. A reduction in
-unused executor construction does not imply faster provider responses or lower
-customer request latency in every workload.
+Construction measurements should include both the first registry, which
+compiles immutable metadata, and later registries that reuse it. Skipping unused
+executor construction does not imply faster provider responses or lower customer
+request latency in every workload.

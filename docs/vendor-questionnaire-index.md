@@ -1,7 +1,7 @@
 # Vendor questionnaire lookup
 
-The existing `[vendor_management] enable = true` feature now maintains a
-versioned exact-token index. Tokens are hashed before indexing. A positive
+The `[vendor_management] enable = true` feature maintains a versioned
+exact-token index. Tokens are hashed before indexing. A positive
 lookup still reads the canonical vendor, verifies its current revision and
 exact token association, and resolves the current assessment template. A
 duplicate association is unavailable rather than selecting an arbitrary vendor.

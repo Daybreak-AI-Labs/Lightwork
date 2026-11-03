@@ -3,7 +3,7 @@
   "source_state": "local implementation; line references regenerated from current files",
   "singleton_required": true,
   "high_availability_qualified": false,
-  "scope": "521 initial Python source-seam candidates from parent AST scan of 1535 files plus a fresh production-seam scan and explicit A2A/batch/schema modules; includes explicitly excluded test/tooling false positives. Semantics classified from module purpose, write sites and selected owning contracts. Not every branch or native deployment tested. Consolidation follow-up explicitly classifies channel recovery, frozen Stripe collections and organization provider hold/history stores, including required markers and retained restore blockers.",
+  "scope": "Python persistence seams found by an AST scan of the source roots, plus the A2A, batch and schema modules; includes explicitly excluded test and tooling false positives. Semantics are classified from module purpose, write sites and the owning contracts; not every branch or native deployment is tested. Channel recovery, frozen Stripe collections and organization provider hold and history stores are classified explicitly, with their required markers and retained restore blockers.",
   "contracts": {
     "governed": {
       "owner": "Domain module owns namespace; GovernedRecordStore owns persistence",
@@ -13411,7 +13411,7 @@
       "owner": "packages/maverick-core/maverick/ux_store.py",
       "purpose": "Dashboard UX store: pins, saved views, trace annotations.",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested) Follow-up review: default/shared stores read and write tenant-resolved dashboard/ux_store-v2.json. Legacy ux_store.json is deliberately retained unread because the former singleton did not establish reliable workspace lineage; no automatic adoption or migration by principal/goal match.",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested) default/shared stores read and write tenant-resolved dashboard/ux_store-v2.json. Legacy ux_store.json is deliberately retained unread because the former singleton did not establish reliable workspace lineage; no automatic adoption or migration by principal/goal match.",
       "governed_namespaces": [],
       "literal_path_hints": [
         "ux_store-v2.json",
@@ -24280,7 +24280,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); test-case import request store classified in the October 7 Python 3.10 sweep",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); includes the test-case import request store",
       "governed_namespaces": [
         {
           "namespace": "learning-case-import-requests",
@@ -24900,7 +24900,7 @@
       "owner": "apps/jetbrains-plugin/build.py",
       "purpose": "Build an unsigned installable preview with the pinned Gradle wrapper.",
       "referenced_store_owners": [],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified.",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {},
@@ -24925,7 +24925,7 @@
       "owner": "apps/zed-extension/build.py",
       "purpose": "Build and bundle an unsigned, locked-source Zed preview; never install or publish.",
       "referenced_store_owners": [],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified.",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {},
@@ -24944,7 +24944,7 @@
       "owner": "packages/maverick-channels/maverick_channels/recovery_lookup.py",
       "purpose": "Bounded read-only checkpoint metadata from configured channel adapters.",
       "referenced_store_owners": [],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified.",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {},
@@ -24963,7 +24963,7 @@
       "owner": "packages/maverick-core/maverick/audit/preservation.py",
       "purpose": "Read-only preservation gates for broad retention, including disabled ledgers.",
       "referenced_store_owners": [],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified.",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {},
@@ -24990,7 +24990,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified.",
       "governed_namespaces": [
         {
           "namespace": "personal_budget_warnings",
@@ -25017,7 +25017,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified.",
       "governed_namespaces": [
         {
           "namespace": "conversation_inbox",
@@ -25051,7 +25051,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified.",
       "governed_namespaces": [
         {
           "namespace": "deliverable_bundles",
@@ -25083,7 +25083,7 @@
       "owner": "packages/maverick-core/maverick/employee_companion.py",
       "purpose": "Bounded, private employee companion policy and conversation storage.",
       "referenced_store_owners": [],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified.",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {},
@@ -25127,7 +25127,7 @@
       "owner": "packages/maverick-core/maverick/experience_preferences.py",
       "purpose": "Allowlisted personal/workspace/organization experience preferences.",
       "referenced_store_owners": [],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified.",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {},
@@ -25188,7 +25188,7 @@
       "owner": "packages/maverick-core/maverick/goal_archive.py",
       "purpose": "Bounded version-one archives from one native database read snapshot.",
       "referenced_store_owners": [],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified.",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {},
@@ -25207,7 +25207,7 @@
       "owner": "packages/maverick-core/maverick/installation_offline.py",
       "purpose": "Explicitly selected, exact-release offline repair using the online trust checks.",
       "referenced_store_owners": [],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified.",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {},
@@ -25226,7 +25226,7 @@
       "owner": "packages/maverick-core/maverick/knowledge_reindex_jobs.py",
       "purpose": "Durable, bounded knowledge-index rebuilds with no partial live publication.",
       "referenced_store_owners": [],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified.",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {},
@@ -25300,7 +25300,7 @@
       "owner": "packages/maverick-core/maverick/knowledge_task_context.py",
       "purpose": "Exact owner-bound source analysis; selection never copies or grants source ACLs.",
       "referenced_store_owners": [],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified.",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {},
@@ -25350,7 +25350,7 @@
       "owner": "packages/maverick-core/maverick/learning_content.py",
       "purpose": "Server-derived ownership for learned content and generated executable source.",
       "referenced_store_owners": [],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified.",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {},
@@ -25376,7 +25376,7 @@
       "owner": "packages/maverick-core/maverick/model_tests.py",
       "purpose": "One reviewed synthetic model call, with durable no-replay receipts.",
       "referenced_store_owners": [],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified.",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {},
@@ -25420,7 +25420,7 @@
       "owner": "packages/maverick-core/maverick/notification_receipts.py",
       "purpose": "Bounded, tenant-scoped delivery receipts containing no notification content.",
       "referenced_store_owners": [],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified.",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {},
@@ -25464,7 +25464,7 @@
       "owner": "packages/maverick-core/maverick/personal_identity.py",
       "purpose": "Explicit tenant-local links proven from a channel and a named dashboard.",
       "referenced_store_owners": [],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified.",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {},
@@ -25502,7 +25502,7 @@
       "owner": "packages/maverick-core/maverick/personal_learning.py",
       "purpose": "Current owned learning inventory with opaque independently reviewed targets.",
       "referenced_store_owners": [],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified.",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {},
@@ -25521,7 +25521,7 @@
       "owner": "packages/maverick-core/maverick/personal_memory.py",
       "purpose": "Owned preference corrections and durable suppression, separate from training.",
       "referenced_store_owners": [],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified.",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {},
@@ -25565,7 +25565,7 @@
       "owner": "packages/maverick-core/maverick/personal_notification_delivery.py",
       "purpose": "Private channel delivery uses verified recipients, never organization webhooks.",
       "referenced_store_owners": [],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified.",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {},
@@ -25633,7 +25633,7 @@
       "owner": "packages/maverick-core/maverick/personal_notification_recipients.py",
       "purpose": "Explicit recipient enrollment, scoped to the current tenant and encrypted.",
       "referenced_store_owners": [],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified.",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {},
@@ -25707,7 +25707,7 @@
       "owner": "packages/maverick-core/maverick/personal_notifications.py",
       "purpose": "Recipient-specific in-product alert policy and encrypted delivery state.",
       "referenced_store_owners": [],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified.",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {},
@@ -25745,7 +25745,7 @@
       "owner": "packages/maverick-core/maverick/plugin_execution_pins.py",
       "purpose": "Durable per-task and per-flow-run plugin bytes; no automatic migration.",
       "referenced_store_owners": [],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified.",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {},
@@ -25794,7 +25794,7 @@
       "owner": "packages/maverick-core/maverick/plugin_workbench.py",
       "purpose": "Version-bound plugin checks; no imports or external effects on the host.",
       "referenced_store_owners": [],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified.",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {},
@@ -25834,7 +25834,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified.",
       "governed_namespaces": [
         {
           "namespace": "project_workspaces",
@@ -25889,7 +25889,7 @@
       "owner": "packages/maverick-core/maverick/runtime_configuration.py",
       "purpose": "Startup configuration receipts for observed long-lived processes.",
       "referenced_store_owners": [],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified.",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {},
@@ -25908,7 +25908,7 @@
       "owner": "packages/maverick-core/maverick/task_execution_guard.py",
       "purpose": "A non-reentrant lease held through execution and finalization.",
       "referenced_store_owners": [],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified.",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {},
@@ -25929,7 +25929,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified.",
       "governed_namespaces": [
         {
           "namespace": "task_handoffs",
@@ -25961,7 +25961,7 @@
       "owner": "packages/maverick-core/maverick/workflow_versions.py",
       "purpose": "Immutable workflow snapshots, reviewed publication and local input fixtures.",
       "referenced_store_owners": [],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified.",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {},
@@ -26012,7 +26012,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified.",
       "governed_namespaces": [
         {
           "namespace": "billing_sync_reviews",
@@ -26046,7 +26046,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified.",
       "governed_namespaces": [
         {
           "namespace": "budget_accounting_cases",
@@ -26078,7 +26078,7 @@
       "owner": "packages/maverick-dashboard/maverick_dashboard/clarification_submission.py",
       "purpose": "Atomic clarification evidence admission, without a second task or provider retry.",
       "referenced_store_owners": [],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified.",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {},
@@ -26105,7 +26105,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified.",
       "governed_namespaces": [
         {
           "namespace": "employee_content_access",
@@ -26137,7 +26137,7 @@
       "owner": "packages/maverick-dashboard/maverick_dashboard/conversation_organization.py",
       "purpose": "Private organization over immutable conversation/task identities.",
       "referenced_store_owners": [],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed. The bounded conversation-organization-<authenticated-context> namespace contains private labels/pin/archive data only; restoring it grants no source access or execution.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified. The bounded conversation-organization-<authenticated-context> namespace contains private labels/pin/archive data only; restoring it grants no source access or execution.",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {},
@@ -26158,7 +26158,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified.",
       "governed_namespaces": [
         {
           "namespace": "deliverable-share-releases",
@@ -26190,7 +26190,7 @@
       "owner": "packages/maverick-dashboard/maverick_dashboard/device_pairing.py",
       "purpose": "Short-lived device codes and revocable own-work companion credentials.",
       "referenced_store_owners": [],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified.",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {},
@@ -26230,7 +26230,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified.",
       "governed_namespaces": [
         {
           "namespace": "employee_activation",
@@ -26264,7 +26264,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified.",
       "governed_namespaces": [
         {
           "namespace": "employee_departures",
@@ -26296,7 +26296,7 @@
       "owner": "packages/maverick-dashboard/maverick_dashboard/goal_share_previews.py",
       "purpose": "Exact-payload gist review and durable disclosure-attempt receipts.",
       "referenced_store_owners": [],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified.",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {},
@@ -26348,7 +26348,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified.",
       "governed_namespaces": [
         {
           "namespace": "permission_access_requests",
@@ -26382,7 +26382,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified.",
       "governed_namespaces": [
         {
           "namespace": "personal_data_requests",
@@ -26442,7 +26442,7 @@
       "owner": "packages/maverick-dashboard/maverick_dashboard/plugin_workbench_api.py",
       "purpose": "Administrator workbench for scoped plugin qualification; no install effects.",
       "referenced_store_owners": [],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified.",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {},
@@ -26497,7 +26497,7 @@
       "owner": "packages/maverick-dashboard/maverick_dashboard/retention_runs.py",
       "purpose": "Durable, policy-bound reviews and receipts for dashboard retention runs.",
       "referenced_store_owners": [],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified.",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {},
@@ -26535,7 +26535,7 @@
       "owner": "packages/maverick-dashboard/maverick_dashboard/settings_experience.py",
       "purpose": "Reviewed configuration portability and history over the existing catalog writer.",
       "referenced_store_owners": [],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified.",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {},
@@ -26554,7 +26554,7 @@
       "owner": "packages/maverick-dashboard/maverick_dashboard/setup_guide.py",
       "purpose": "The full setup guide (``maverick init``) inside the app.",
       "referenced_store_owners": [],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified.",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {},
@@ -26575,7 +26575,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "Customer-audit source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Local regression evidence is recorded separately; no distributed qualification claimed.",
+      "review": "Source purpose, path construction and persistence call sites reviewed; exact restore policy registered. Distributed deployment is not qualified.",
       "governed_namespaces": [
         {
           "namespace": "owned_task_diagnostics",
@@ -26708,7 +26708,7 @@
       "owner": "packages/maverick-core/maverick/approval_challenges.py",
       "purpose": "Closed, modeled approval-race challenges and a disposable native receiver.",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {},
@@ -26727,7 +26727,7 @@
       "owner": "packages/maverick-core/maverick/comments.py",
       "purpose": "Comments and @mentions on tasks, runs, approvals and policies (NOT-4).",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
       "literal_path_hints": [
         "comments.sqlite3"
@@ -26756,7 +26756,7 @@
       "owner": "packages/maverick-core/maverick/compliance_history.py",
       "purpose": "When each compliance protection was last checked, and its history (ADM-6).",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
       "literal_path_hints": [
         "control-history.json"
@@ -26792,7 +26792,7 @@
       "owner": "packages/maverick-core/maverick/departments.py",
       "purpose": "Department bundles: the specialist packs as deployable teams.",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {
@@ -26813,7 +26813,7 @@
       "owner": "packages/maverick-core/maverick/dsar_export_handoff.py",
       "purpose": "Officer-recorded handoff of an exact collected package; never remote delivery proof.",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {
@@ -26835,7 +26835,7 @@
       "owner": "packages/maverick-core/maverick/generated_tool_removal.py",
       "purpose": "Owned generated-source lifecycle inspection; never import generated code.",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {
@@ -26858,7 +26858,7 @@
       "referenced_store_owners": [
         ".governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "instruction-captures",
@@ -26923,7 +26923,7 @@
       "owner": "packages/maverick-core/maverick/knowledge_source_readers.py",
       "purpose": "Bounded remote document reads through the installed connection/SSRF gates.",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {
@@ -26946,7 +26946,7 @@
       "referenced_store_owners": [
         ".governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "knowledge-remote-sources",
@@ -27006,7 +27006,7 @@
       "owner": "packages/maverick-core/maverick/llm.py",
       "purpose": "Multi-provider LLM facade.",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {},
@@ -27025,7 +27025,7 @@
       "owner": "packages/maverick-core/maverick/notification_unsubscribe.py",
       "purpose": "One-action mute and unsubscribe from inside a notification (NOT-2).",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
       "literal_path_hints": [
         "notification-links/signing.key"
@@ -27069,7 +27069,7 @@
       "owner": "packages/maverick-core/maverick/policy_suggestions.py",
       "purpose": "Suggested edits to policy documents, accepted or rejected by a person (NOT-4).",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
       "literal_path_hints": [
         "policy_suggestions.sqlite3"
@@ -27098,7 +27098,7 @@
       "owner": "packages/maverick-core/maverick/practice.py",
       "purpose": "Practice mode: try agents, tasks and approvals without touching real systems.",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
       "literal_path_hints": [
         "world.db",
@@ -27134,7 +27134,7 @@
       "owner": "packages/maverick-core/maverick/provider_spend_sqlite.py",
       "purpose": "Transactional local provider accounting with a retained JSON migration source.",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {
@@ -27236,7 +27236,7 @@
       "owner": "packages/maverick-core/maverick/recovery_visibility.py",
       "purpose": "Complete bounded paired-history diagnostics on isolated native approvals.",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {},
@@ -27257,7 +27257,7 @@
       "referenced_store_owners": [
         ".governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "runtime-policy-copies",
@@ -27309,7 +27309,7 @@
       "owner": "packages/maverick-core/maverick/spending_alerts.py",
       "purpose": "In-app alerts as spending nears a workspace or per-person spending limit.",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
       "literal_path_hints": [
         "spending-limit-alerts.json"
@@ -27345,7 +27345,7 @@
       "owner": "packages/maverick-core/maverick/usability_survey.py",
       "purpose": "Optional in-product usability survey: SUS each quarter, one ease question after top tasks.",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {
@@ -27385,7 +27385,7 @@
       "owner": "packages/maverick-core/maverick/usage_measures.py",
       "purpose": "Optional, name-free usage measures for the research kit (ONB-1, AI-13).",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {
@@ -27419,7 +27419,7 @@
       "owner": "packages/maverick-core/maverick/web_vitals.py",
       "purpose": "Optional field Core Web Vitals: how fast pages load and respond for real visitors.",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {
@@ -27459,7 +27459,7 @@
       "owner": "packages/maverick-dashboard/maverick_dashboard/agent_changelog.py",
       "purpose": "A short record of changes to each agent, so people can see when the AI changed.",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
       "literal_path_hints": [
         "agent-changelog.ndjson"
@@ -27482,7 +27482,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "agent-override-removal-requests",
@@ -27511,7 +27511,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "local-rule-applicability",
@@ -27540,7 +27540,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "approval-challenges",
@@ -27593,7 +27593,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "audit-action-reviews",
@@ -27683,7 +27683,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "automation-import-requests",
@@ -27731,7 +27731,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "channel-test-requests",
@@ -27760,7 +27760,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "commitment-capability",
@@ -27796,7 +27796,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "commitment-economic-alternatives",
@@ -27850,7 +27850,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "company-saml-materials",
@@ -27885,7 +27885,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "company-saml-setups",
@@ -27914,7 +27914,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "company-signin-migrations",
@@ -27943,7 +27943,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "company-signin-tests",
@@ -27970,7 +27970,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "portable-competence-requests",
@@ -27997,7 +27997,7 @@
       "owner": "packages/maverick-dashboard/maverick_dashboard/compliance_owners.py",
       "purpose": "Who owns each compliance protection that needs action, and by when.",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
       "literal_path_hints": [
         "compliance-control-owners.json"
@@ -28035,7 +28035,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "consent-withdrawal-requests",
@@ -28062,7 +28062,7 @@
       "owner": "packages/maverick-dashboard/maverick_dashboard/department_team_updates.py",
       "purpose": "Exact saved-team previews and original-actor receipts; no work is dispatched.",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {
@@ -28090,7 +28090,7 @@
       "owner": "packages/maverick-dashboard/maverick_dashboard/design_tokens.py",
       "purpose": "The design tokens in lightwork.css, exported in the Design Tokens",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {},
@@ -28111,7 +28111,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "encryption-maintenance",
@@ -28154,7 +28154,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "local-rule-requalification",
@@ -28181,7 +28181,7 @@
       "owner": "packages/maverick-dashboard/maverick_dashboard/flow_run_feedback.py",
       "purpose": "One-tap feedback on flow run results.",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
       "literal_path_hints": [
         "flow-run-feedback.json"
@@ -28219,7 +28219,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "generated-tool-removals",
@@ -28273,7 +28273,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "governed-rule-evolution",
@@ -28321,7 +28321,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "installation-security-attempts",
@@ -28349,7 +28349,7 @@
       "owner": "packages/maverick-dashboard/maverick_dashboard/knowledge_request_browse.py",
       "purpose": "Current request batches with private, authority-bound positions.",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {},
@@ -28370,7 +28370,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "learned-skill-change-requests",
@@ -28399,7 +28399,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "learning-conflict-requests",
@@ -28428,7 +28428,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "learning-distinction-requests",
@@ -28457,7 +28457,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "learning-flywheel-requests",
@@ -28511,7 +28511,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "learning-holdout-requests",
@@ -28559,7 +28559,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "learning_job_observations",
@@ -28607,7 +28607,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "learning-pass-requests",
@@ -28649,7 +28649,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "learning-pending-requests",
@@ -28678,7 +28678,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "learning-case-setup-requests",
@@ -28726,7 +28726,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "local-flow-comparisons",
@@ -28755,7 +28755,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "local-flow-release-targets",
@@ -28793,7 +28793,7 @@
       "owner": "packages/maverick-dashboard/maverick_dashboard/local_passphrases.py",
       "purpose": "Passphrases for invited colleagues, so they can sign back in.",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
       "literal_path_hints": [
         "dashboard-passphrases.json"
@@ -28945,7 +28945,7 @@
       "owner": "packages/maverick-dashboard/maverick_dashboard/local_runtime_service.py",
       "purpose": "Reviewed operation of the existing local Launcher; no downloads or shell.",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
       "literal_path_hints": [
         "operations.json"
@@ -29020,7 +29020,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "manual-skill-removal-requests",
@@ -29049,7 +29049,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "model-answer-score-requests",
@@ -29078,7 +29078,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "operator-acquisition",
@@ -29126,7 +29126,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "personal-alert-tests",
@@ -29155,7 +29155,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "private-task-computation",
@@ -29192,7 +29192,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "procedure-interaction-requests",
@@ -29219,7 +29219,7 @@
       "owner": "packages/maverick-dashboard/maverick_dashboard/product_operations_personal_data.py",
       "purpose": "My Data native journeys through the same closed, reviewed Copilot registry.",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {
@@ -29242,7 +29242,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "recovery-visibility-practices",
@@ -29271,7 +29271,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "request-specific-programs",
@@ -29298,7 +29298,7 @@
       "owner": "packages/maverick-dashboard/maverick_dashboard/retention_maintenance.py",
       "purpose": "Ordinary retention review and read-only interruption recovery.",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {
@@ -29322,7 +29322,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "reward-training-requests",
@@ -29368,7 +29368,7 @@
       "owner": "packages/maverick-dashboard/maverick_dashboard/runtime_policy_recovery_ops.py",
       "purpose": "Protected full safety-settings review and actor-owned original outcomes.",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {
@@ -29390,7 +29390,7 @@
       "owner": "packages/maverick-dashboard/maverick_dashboard/saml.py",
       "purpose": "SAML 2.0 SP browser SSO (via pysaml2).",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {
@@ -29413,7 +29413,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "settings-catalog-requests",
@@ -29442,7 +29442,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "shared-decision-evidence",
@@ -29484,7 +29484,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "specialist-drafts",
@@ -29518,7 +29518,7 @@
       "owner": "packages/maverick-dashboard/maverick_dashboard/specialist_test_sets.py",
       "purpose": "Customer-owned, tool-free answer checks for the current specialist instructions.",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
       "literal_path_hints": [
         "cases-and-runs.json"
@@ -29555,7 +29555,7 @@
       "owner": "packages/maverick-dashboard/maverick_dashboard/trc_setup_api.py",
       "purpose": "Guided saved-account source setup and legacy configured-source controls.",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
       "literal_path_hints": [
         "continuous-evidence.sqlite3"
@@ -29579,7 +29579,7 @@
       "owner": "packages/maverick-dashboard/maverick_dashboard/trc_stock_evidence_composition.py",
       "purpose": "Production composition for stock continuous-evidence collectors.",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
       "literal_path_hints": [
         "continuous-evidence.sqlite3"
@@ -29604,7 +29604,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "vendor-profile-decisions",
@@ -29633,7 +29633,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "viewpoints-requests",
@@ -29660,7 +29660,7 @@
       "owner": "packages/maverick-dashboard/maverick_dashboard/webhook_settings_recovery.py",
       "purpose": "Private publication evidence for recovering one reviewed signing-key change.",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {
@@ -29684,7 +29684,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "local-work-restructuring",
@@ -29713,7 +29713,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "workflow-step-checks",
@@ -29740,7 +29740,7 @@
       "owner": "packages/maverick-dashboard/maverick_dashboard/workspace_erasure.py",
       "purpose": "One reviewed native retired-workspace erasure; UI and Copilot share it.",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {
@@ -29767,7 +29767,7 @@
       "owner": "packages/maverick-dashboard/maverick_dashboard/factory_guidance.py",
       "purpose": "Reviewed paired intake checks and one exact native factory adoption.",
       "referenced_store_owners": [],
-      "review": "October 7 G1 sweep: module purpose and persistence seam read; contract-family classification (not every operation tested)",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {},
@@ -29788,7 +29788,7 @@
       "referenced_store_owners": [
         ".governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 K1 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {
@@ -29823,7 +29823,7 @@
       "referenced_store_owners": [
         ".governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 K1 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "runtime-enforcement",
@@ -29852,7 +29852,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 K1 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "ai-governance-source-pins",
@@ -29879,7 +29879,7 @@
       "owner": "packages/maverick-dashboard/maverick_dashboard/consent_delivery_managed_api.py",
       "purpose": "Protected signing keys and one explicit future-only delivery subscription.",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 K1 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
       "literal_path_hints": [
         "consent-delivery.sqlite3"
@@ -29902,7 +29902,7 @@
       "owner": "packages/maverick-dashboard/maverick_dashboard/privacy_discovery_data_use_api.py",
       "purpose": "Review one complete approved scan before updating a named Data Use dataset.",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 K1 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
       "literal_path_hints": [
         "discovery-data-use-key.sealed",
@@ -29959,7 +29959,7 @@
       "owner": "packages/maverick-core/maverick/cli/run_result.py",
       "purpose": "Private, native single-run result for automation; never inferred from logs.",
       "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 M1 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [],
       "literal_path_hints": [],
       "observed_mechanism_markers": {},
@@ -29980,7 +29980,7 @@
       "referenced_store_owners": [
         ".governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 M1 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "work-record-details",
@@ -30023,7 +30023,7 @@
       "referenced_store_owners": [
         "maverick.governed_records"
       ],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested); added in the October 7 M1 store review",
+      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
       "governed_namespaces": [
         {
           "namespace": "audit-checkpoint-custody",
@@ -30775,6 +30775,6 @@
   ],
   "additional_review": {
     "module_count": 48,
-    "review": "Additional module review: source purpose, path construction and persistence call sites. Restore holds cover grants, identity links, dispatch receipts and pending work; warning/project-default records are explicitly non-authorizing data. No distributed or live-provider qualification. The Facts adapter follow-up adds metadata-only consumed-operation receipts under the same startup hold; it cannot reauthorize a restored mutation."
+    "review": "Additional module review: source purpose, path construction and persistence call sites. Restore holds cover grants, identity links, dispatch receipts and pending work; warning/project-default records are explicitly non-authorizing data. Distributed and live-provider deployment are not qualified. The Facts adapter keeps metadata-only consumed-operation receipts under the same startup hold; they cannot reauthorize a restored mutation."
   }
 }

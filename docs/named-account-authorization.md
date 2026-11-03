@@ -106,8 +106,5 @@ and bounded token responses. The app cannot waive a deployment-disabled
 Connections or OAuth vault setting. The installer exposes these existing knobs
 as **Named connections** and **OAuth token vault**.
 
-Synthetic tests cover app registration sealing, consent return, role/workspace/
-origin/version mismatches, actual saved-reference consumption, token renewal,
-single-flight refresh and lost-response refusal. They make no provider calls.
 Live provider registration, consent interoperability, account/scope verification
 and acceptance testing remain deployment-specific work.

@@ -6,9 +6,8 @@ Jira Task, verifies it, and records a separate customer acceptance decision.
 A renewal creates a linked case, assessment and ticket while retaining the
 previous evidence and decisions. Acceptance never releases a vendor or model.
 
-Offline synthetic tests establish the supported behavior. Google Drive, Jira,
-identity-provider and Kubernetes restore behavior have not been verified against
-live services.
+Google Drive, Jira, identity-provider and Kubernetes restore behavior are not
+verified against live services.
 
 ## Run the offline demonstration
 
@@ -275,9 +274,8 @@ for strict scanner failure, explicit tenant erasure and event replay semantics.
 
 Goal signoff also retains its existing public `updated_at` float contract while
 advancing the review version atomically against the stored value. Repeated or
-backward wall-clock readings can no longer reuse a reviewed version after result
-or artifact changes. SQLite behavior and PostgreSQL SQL-path parity are tested;
-actual PostgreSQL locking remains part of live acceptance.
+backward wall-clock readings cannot reuse a reviewed version after result or
+artifact changes. Locking on a live PostgreSQL deployment is not qualified.
 
 ## Reviewed deterministic renewal step
 

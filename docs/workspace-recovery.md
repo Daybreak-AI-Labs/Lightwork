@@ -249,61 +249,22 @@ tenant's roles or data. An isolated bootstrap keeps the exact historical bytes
 under a startup hold until current authority is reconciled; authenticated backup
 provenance alone is not permission to resume that tenant.
 
-## Reproduce local validation
+## Verification drills
 
-From the repository with its eight packages and test dependencies installed:
+Two scripts in a source checkout exercise recovery against synthetic data:
 
-```powershell
-.venv/Scripts/python3.exe -m pytest -q packages/maverick-core/tests/test_workspace_recovery.py packages/maverick-core/tests/test_backup.py packages/maverick-dashboard/tests/test_workspace_recovery_api.py
-.venv/Scripts/python3.exe -m pytest -q packages/maverick-core/tests/test_installation_recovery.py packages/maverick-core/tests/test_installation_recovery_retirement.py packages/maverick-core/tests/test_windows_installer_verification.py
-.venv/Scripts/python3.exe -m pytest -q packages/maverick-core/tests/test_backup_accounting_guard.py packages/maverick-core/tests/test_installation_accounting_recovery.py
-node --test packages/maverick-dashboard/tests/js/workspace_recovery.test.js apps/desktop/tests/*.test.js
-.venv/Scripts/python3.exe scripts/acceptance/workspace_recovery_drill.py
-```
+- `python scripts/acceptance/workspace_recovery_drill.py` creates an isolated
+  temporary home with an encrypted synthetic draft and SQLite fixture, performs
+  a real restore, checks the draft with its retained fixture key, prints
+  measurements and removes its state.
+- `python scripts/acceptance/workspace_application_recovery.py --output application-recovery.json`
+  restores an authenticated snapshot into a fresh target process and reads it
+  back through `DraftStore` and `WorldModel`. Writes acknowledged before the
+  snapshot must be recovered, later writes must be absent, and missing custody
+  or a wrong primary key must fail before application reads. The JSON output
+  records the application and archive identities, the checks and the observed
+  timings.
 
-The drill creates an isolated temporary home, encrypted synthetic draft and
-SQLite fixture, performs real restore, checks the draft with its retained
-fixture key, prints measurements, and removes its state. It does not restore
-a real workspace or contact providers. API tests separately exercise the full
-isolated application lifespan. The Windows desktop package workflow starts the
-frozen recovery entry point after stopping its own normal runtime.
-
-## Application-reader fixture acceptance
-
-With the same installed Python environment, run:
-
-```sh
-python scripts/acceptance/workspace_application_recovery.py --output application-recovery.json
-python -m pytest -q packages/maverick-core/tests/test_workspace_application_recovery.py
-```
-
-The portable acceptance script uses separate source and fresh-target processes
-from that exact installation. The source creates an encrypted recovery draft,
-a real world-model goal and its artifact through their application producers.
-After saving an authenticated snapshot and separately retained key copy, it
-acknowledges three later changes: a draft revision, an artifact revision and a
-second goal. It removes its original synthetic encryption key before testing
-the retained copy.
-
-The successful target restores the snapshot and reads it through `DraftStore`
-and `WorldModel`, checking draft context/slot/revision, goal fields and ownership,
-and the artifact's goal reference, content and version. All three known writes
-before the snapshot must be recovered; all three acknowledged later writes must
-be absent from that selected snapshot. Missing custody and a wrong primary key
-must fail before application reads. Source files and retained custody must stay
-unchanged throughout the target runs. No server, scheduler, agent or provider
-is started.
-
-JSON output records the exact application and archive identities, the seven
-application checks, known write counts, the observed monotonic interval from
-snapshot completion to the last later acknowledgement, and both child-work and
-process-launch durations. The script verifies signed snapshot bindings and its
-synthetic HMAC reports before deleting the disposable signing keys. Temporary
-state must be cleaned before JSON is printed or the optional output file is
-replaced; a failed run preserves an existing output file.
-
-These are observed bounds for this controlled fixture, not production RTO/RPO,
-an assertion that snapshot age equals data loss, or proof of every application
-invariant. They do not authorize a live restore, merge historical content with
-current accounting or action history, or establish external-store or native
-installer recovery. The ordinary restore guards remain unchanged.
+Neither drill restores a real workspace, starts a server or contacts providers.
+Their timings are bounds for the synthetic fixture, not production RTO/RPO, and
+they do not establish external-store or native installer recovery.

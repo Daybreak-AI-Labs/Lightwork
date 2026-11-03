@@ -276,8 +276,7 @@ addition with `--regen`), exactly as released world-model migrations are.
 
 On by default with governed self-improvement and a no-op when explicitly
 paused: it runs only under `[self_improvement] enable` **and** the
-`evaluator_evolution` sub-knob. Full design in
-[`docs/proposals/evaluator-co-evolution.md`](./proposals/evaluator-co-evolution.md).
+`evaluator_evolution` sub-knob.
 
 ## MCP-server acquisition
 

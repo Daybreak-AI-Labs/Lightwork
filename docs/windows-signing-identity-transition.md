@@ -184,11 +184,10 @@ must return to their pre-upgrade contents.
 
 After preparation, its first process exits and a separate retained helper must
 resume the same admitted operation with a renewed private authorization. This
-tests a process boundary **before MSI execution**; it is not a crash during an
-MSI transaction. The profile deliberately keeps one updater key and one frozen
-Python runtime while changing native package versions and actual publisher
-certificates. Distinct updater-key cryptographic tests remain separate; this
-profile does not establish a real installed key rotation or production release
+covers a process boundary **before MSI execution**, not a crash during an MSI
+transaction. The profile keeps one updater key and one frozen Python runtime
+while changing native package versions and actual publisher certificates, so it
+does not establish a real installed key rotation or production release
 compatibility.
 
 The machine-readable result is

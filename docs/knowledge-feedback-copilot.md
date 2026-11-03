@@ -6,4 +6,4 @@ This uses the existing Knowledge feature, native operate permission and existing
 
 The adapter always uses employee feedback intake, including for administrators. It cannot approve/apply a source change, grant deletion or training authority, or release a hold. Those remain separately governed native review workflows. Confirmation requires a durable matching request and its audit receipt; otherwise the outcome remains unconfirmed.
 
-Local validation used real local-owner cookies, workspace selection, exact registry references and the native request service with synthetic source/rights adapters. It proves source revocation before execution, workspace-switch refusal, duplicate identity, independent status ownership and unchanged approved source state. No external provider or production system was called.
+Source revocation before execution, workspace-switch refusal, duplicate-identity handling and independent status ownership apply, and the approved source state is never changed by this adapter. External providers and production systems are not qualified.

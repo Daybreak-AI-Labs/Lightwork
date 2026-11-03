@@ -10,7 +10,7 @@ record at a time. It selects the oldest accepted work before new work.
 Normal queueing stays in intake order. A definite delivery retry holds later
 work for that conversation until the earlier attempt can proceed.
 
-Readers no longer wait for agent execution. Current sender and configured
+Readers do not wait for agent execution. Current sender and configured
 account policy is rechecked at execution and delivery. These guarantees are
 per configured adapter instance; configure one active transport instance per
 account. The shared compare-and-swap execution claim additionally prevents
@@ -44,9 +44,5 @@ recovery scans are retained and joined separately from their waiting task.
 Signal terminates its owned child, then kills and awaits it if necessary.
 Failure to confirm an owned component's exit is reported explicitly.
 
-Validation uses real local journals and fake local streams/processes. It proves
-reader responsiveness with a blocked handler, queue overflow recovery,
-serialization, reply ordering after a definite rejection, RPC correlation,
-uncertain response handling, stderr draining, nickname revalidation and owned
-shutdown. It does not qualify an installed signal-cli version, a live Signal
-account, or a live IRC server's capabilities/delivery guarantees.
+Limits: a specific installed signal-cli version, a live Signal account and a
+live IRC server's capabilities and delivery guarantees are not qualified.

@@ -1,7 +1,7 @@
 # Customer workflows
 
-This page describes customer workflow surfaces and recovery behavior. Local and
-synthetic verification does not establish live-provider or customer acceptance.
+This page describes customer workflow surfaces and recovery behavior. Live
+provider behavior and customer acceptance are not qualified.
 
 ## Personal Action Center
 

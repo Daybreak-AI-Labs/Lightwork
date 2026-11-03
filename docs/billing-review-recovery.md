@@ -32,7 +32,5 @@ receipts and 5,000 provider dispatch entries per current attempt, then refuses n
 dispatch until governed archival is arranged. Native collection receipts remain
 immutable, and recovery modifies no credentials or billing settings.
 
-Regression cases cover stale fields/settings, duplicate submissions, partial
-customer/subscription completion, account mismatch, review expiry and expired
-provider retry windows. Live Stripe behavior, distributed fault injection and
-browser recovery are not qualified.
+Live Stripe behavior, distributed failures and browser recovery are not
+qualified.

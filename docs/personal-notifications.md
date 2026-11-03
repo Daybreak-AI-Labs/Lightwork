@@ -77,7 +77,7 @@ UI explains; the inbox is not a historical event audit.
 
 Current authorization is checked before projection/publication; revoked sources
 are removed and labels are hydrated anew, never stored in alert history. The
-inbox no longer silently truncates eligible sources or dedupe state at 1,000.
+inbox does not silently truncate eligible sources or dedupe state at 1,000.
 Deep links open ordinary authenticated pages. Fetching an alert does not mark it
 seen; the person uses **Mark seen**. Native and Copilot preference changes use the
 same current-source checks, exact revision and recoverable operation receipts.
@@ -94,8 +94,5 @@ binding. Background reads retain unsaved form edits; conflicts require an
 explicit reload before editing the latest values. Muting one task does not
 mute other tasks. Unsubscribed/off periods do not queue a later replay.
 
-Local regression tests cover policy, delivery, semantic generations, source
-paging, migration and Copilot recovery, including rollback, repeated blocked
-transitions, more than 1,000 eligible sources, owner isolation, result rewrites
-and separate seen status. Native PostgreSQL and installed delivery have not been
-qualified, and the tests send no live messages.
+Native PostgreSQL and installed delivery to live messaging services are not
+qualified.

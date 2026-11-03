@@ -12,8 +12,7 @@ from any language an MCP SDK exists in.
 ## Prereqs
 
 ```bash
-# PyPI publish pending: install from a source clone (pip install -e
-# packages/maverick-core packages/maverick-mcp) or the native installer for now.
+# From the root of a source clone (or install Lightwork with the native installer):
 python -m pip install -e ./packages/maverick-core -e ./packages/maverick-mcp
 npm i @modelcontextprotocol/sdk
 ```
@@ -168,7 +167,7 @@ Thin API clients port well; opinionated frameworks don't. The multi-agent
 kernel stays in Python, and every MCP-speaking language can drive it without
 giving up features. The decision, and when a thin TypeScript client package
 would be considered, are recorded under
-[Language bindings](../ROADMAP.md#language-bindings) in the roadmap.
+[Language bindings](./README.md#language-bindings).
 
 ## See also
 

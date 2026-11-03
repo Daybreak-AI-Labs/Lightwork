@@ -7,11 +7,10 @@ synthetic version fixtures remain useful packaging tests; they cannot satisfy
 this gate because it requires increasing real cohort versions and different
 frozen runtime hashes.
 
-The gate is implemented and has local contract tests. It has **not** established
-real release acceptance: an original previous production release, configured
-production identities and an owner-provisioned clean Windows VM are required
-inputs. Do not replace those inputs with the same runtime under two MSI version
-numbers. The absence of a previous release is an explicit first-release boundary,
+The gate requires an original previous production release, configured
+production identities and an owner-provisioned clean Windows VM as inputs. Do not
+replace those inputs with the same runtime under two MSI version numbers. A first
+release has no previous release to accept against; that is an explicit boundary,
 not a reason to manufacture upgrade evidence.
 
 ## Original inputs and authority

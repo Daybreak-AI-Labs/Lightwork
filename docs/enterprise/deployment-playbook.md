@@ -3,8 +3,8 @@
 A step-by-step runbook for standing up Lightwork for an organization:
 what to **collect from them**, what to **provision**, how to **install**, how to
 **harden**, how to **verify**, and how to **operate** day-2. Every command and
-config key below is real; anything not yet implemented is called out explicitly
-in [§10 Gap status](#10-gap-status).
+config key below is real; anything not implemented is called out explicitly
+in [§10 Enforced controls and known gaps](#10-enforced-controls-and-known-gaps).
 
 > TL;DR ordering: **decide the shape → collect inputs → provision deps →
 > install → harden (do not skip §6) → provision tenants → verify → operate.**
@@ -195,7 +195,7 @@ and capability enforcement.
   (admin/operator/viewer) + per-tenant role memberships gate the admin APIs.
 - **gRPC API** (if exposed): set `[grpc] tls = true` with cert/key, and
   `tls_client_ca` for **mTLS**. Set `MAVERICK_GRPC_BEARER_TOKEN`. A non-loopback
-  **plaintext bind is now refused** unless `MAVERICK_ALLOW_INSECURE_GRPC=1`.
+  **plaintext bind is refused** unless `MAVERICK_ALLOW_INSECURE_GRPC=1`.
   Per-caller rate limit via `MAVERICK_GRPC_RATE_LIMIT` (default 600/min).
 - **MCP server** (if exposed): set `MAVERICK_MCP_TOKEN`, restrict
   `MAVERICK_MCP_ALLOWED_ORIGINS` to your gateway, and prefer per-agent tokens via
@@ -336,24 +336,24 @@ maverick audit verify --all                                          # confirm c
 
 ---
 
-## 10. Gap status
+## 10. Enforced controls and known gaps
 
-Honest, current state — what's now enforced in code vs. what genuinely remains.
+What is enforced in code, and what remains the operator's responsibility.
 
-### Closed in code
-| Area | What changed |
+### Enforced in code
+| Area | Behavior |
 |---|---|
-| **Sandbox** | `build_sandbox` now **refuses the unsandboxed `local` backend fail-closed** under enterprise mode / `MAVERICK_REQUIRE_CONTAINER_BACKEND=1` / `[sandbox] require_container=true` (`SandboxPolicyError`). `maverick enterprise verify` reports a "Sandbox isolation" guarantee. Still set `[sandbox] backend=docker` explicitly. |
-| **gRPC TLS** | A **non-loopback plaintext bind is now refused** (`TlsConfigError`) unless TLS is configured or `MAVERICK_ALLOW_INSECURE_GRPC=1` is set. Set `[grpc] tls=true` + `tls_client_ca` for mTLS. |
+| **Sandbox** | `build_sandbox` **refuses the unsandboxed `local` backend fail-closed** under enterprise mode / `MAVERICK_REQUIRE_CONTAINER_BACKEND=1` / `[sandbox] require_container=true` (`SandboxPolicyError`). `maverick enterprise verify` reports a "Sandbox isolation" guarantee. Still set `[sandbox] backend=docker` explicitly. |
+| **gRPC TLS** | A **non-loopback plaintext bind is refused** (`TlsConfigError`) unless TLS is configured or `MAVERICK_ALLOW_INSECURE_GRPC=1` is set. Set `[grpc] tls=true` + `tls_client_ca` for mTLS. |
 | **MCP rate limiting** | Per-caller sliding-window limiter (bearer/IP), `MAVERICK_MCP_RATE_LIMIT` (default 600/min; 0 disables) → 429 over cap. |
 | **gRPC rate limiting** | Per-caller sliding-window limiter at the auth chokepoint (agent id / hashed peer), `MAVERICK_GRPC_RATE_LIMIT` (default 600/min; 0 disables) → RESOURCE_EXHAUSTED. Complements `maximum_concurrent_rpcs`. |
 | **Key rotation** | `maverick audit rotate-key` (signing) and `maverick encryption rotate` (at-rest) — both **additive**: a keyring/per-row key-id means new writes use the new key while prior keys keep decrypting old data. No flag-day re-encrypt. |
 | **Plugins** | Load-time **allowlist** (`[plugins] enabled` / `MAVERICK_PLUGINS_ALLOW`) **and permission-grant enforcement are default-deny** (`enforce_permissions=true`) — an ungranted permission *skips* the plugin. |
 
-### Remaining gaps
-| Area | Gap | Interim mitigation |
+### Known gaps
+| Area | Gap | Mitigation |
 |---|---|---|
-| Multi-replica control plane | Postgres centralizes the world model, but workflow releases/runs, A2A durable claims, audit/learning ledgers, and tenant-local policy files are not all transactionally shared yet. | Enforced at runtime: the control plane takes an exclusive lock on its data root at startup, and a second process refuses to serve and names the holder. Helm additionally refuses `replicaCount > 1` and control-plane HPA. Authenticated probe details report the replica-safety posture. Scale remote workers separately. |
+| Multi-replica control plane | Postgres centralizes the world model, but workflow releases/runs, A2A durable claims, audit/learning ledgers, and tenant-local policy files are not all transactionally shared. | Enforced at runtime: the control plane takes an exclusive lock on its data root at startup, and a second process refuses to serve and names the holder. Helm additionally refuses `replicaCount > 1` and control-plane HPA. Authenticated probe details report the replica-safety posture. Scale remote workers separately. |
 | MCP | Shared bearer grants full tool access; per-tenant gating only via Agent Trust Plane (opt-in). | `[agent_trust] enforce=true` with per-agent tokens. |
 | Plugins | Granted plugins run **in-process** — no runtime syscall/network sandbox (load-time grants only). | Vet + code-review allowlisted plugins. |
 | Local Firecracker | The local scaffold is unsupported; it does not qualify production execution and is not a silent Docker fallback. | Select and qualify a supported execution backend. Managed AWS requires the separate Kubernetes executor in [`deploy/aws/EXECUTOR.md`](../../deploy/aws/EXECUTOR.md). |

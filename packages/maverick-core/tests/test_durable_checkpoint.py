@@ -4,7 +4,7 @@ Covers checkpoint.py (the store + budget round-trip) and the Agent.run()
 integration: a run checkpointed mid-loop resumes from the last committed step
 instead of step 0, with spent budget preserved. Off-by-default is also asserted.
 
-See docs/specs/durable-execution.md.
+Configuration: `[durable]` in docs/configuration.md.
 """
 from __future__ import annotations
 

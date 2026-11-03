@@ -108,6 +108,53 @@ python benchmarks/security/latency_bench.py        # latency distribution
 No API key, no SDK, no network. The corpus (`benchmarks/security/corpus.py`)
 carries no encoded blobs — obfuscated variants are built at runtime.
 
+## Training a probe model
+
+The cheap-probe tier can load an operator-trained linear model
+(`[shield] probe_model` or `MAVERICK_SHIELD_PROBE_MODEL`). It is off by default
+and is combined with the heuristic by MAX, so a model can only raise recall.
+The offline trainer fits an L2 logistic regression over the same feature
+extractor that inference uses and exports the JSON artifact the shield loads
+(`{bias, weights, threshold, ngram_buckets, ngram_sizes}`):
+
+```bash
+python -m maverick_shield.probe_train --corpus data.jsonl --out model.json \
+    --ngram-buckets 256 --max-fp 0.01
+```
+
+The corpus is JSONL (`{"text", "label"}` or the red-team `{"text", "expected"}`
+shape) or plain text with one attack prompt per line. `--ngram-buckets` adds
+hashed character n-gram features so a model can carry lexical content; `0`
+keeps the seven fixed signals only. `--max-fp` sets the benign false-positive
+ceiling used to choose the threshold.
+
+Public datasets whose licences permit use in a model you distribute:
+
+| Dataset | Approximate size | Licence | Benign negatives |
+|---|---|---|---|
+| [guychuk/benign-malicious-prompt-classification](https://huggingface.co/datasets/guychuk/benign-malicious-prompt-classification) | 465K rows | Apache-2.0 | Yes |
+| [TrustAIRLab/in-the-wild-jailbreak-prompts](https://huggingface.co/datasets/TrustAIRLab/in-the-wild-jailbreak-prompts) | 1.4K jailbreak, 13.7K regular prompts | MIT | Yes |
+| [deepset/prompt-injections](https://huggingface.co/datasets/deepset/prompt-injections) | 662 rows | Apache-2.0 | Yes |
+| [jackhhao/jailbreak-classification](https://huggingface.co/datasets/jackhhao/jailbreak-classification) | 1.3K rows | Apache-2.0 | Yes |
+| [Lakera/gandalf_ignore_instructions](https://huggingface.co/datasets/Lakera/gandalf_ignore_instructions) | 1K rows | MIT | No (injections only) |
+
+Do not train a distributed model on non-commercial data such as
+`rogue-security/prompt-injections-benchmark` (CC-BY-NC-4.0) or on sets with no
+licence tag such as `JasperLS/prompt-injections`; `deepset/prompt-injections`
+carries the same rows under Apache-2.0. Record each dataset's name, licence and
+revision alongside the artifact.
+
+Before enabling a model by default for a deployment:
+
+- Split train and test sets by source and attack family, not by random rows,
+  and remove near-duplicate prompts first, so templated jailbreaks do not leak
+  into the test set.
+- Add hand-picked hard negatives: security documentation, CVE write-ups,
+  base64 and hex code snippets, and non-English or emoji-heavy text.
+- Measure the MAX ensemble (model or heuristic) on benign text the model never
+  saw. It should keep the benign false-positive rate at or below 1% while
+  raising recall over the heuristic alone.
+
 ## What a published recall number needs
 
 The credible public recall figure comes from scale and end-to-end measurement:

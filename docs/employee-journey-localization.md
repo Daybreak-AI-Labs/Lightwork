@@ -14,7 +14,7 @@ translations**. They have not received native-language or consequence-copy
 approval. Arabic's seed has not been machine-completed. `CONTENT_LANGS` remains
 `{"en"}`: the page's English fallback body is declared honestly, and each
 translated control declares its actual language. A visible notice describes
-partial coverage. These changes do not claim a fully localized product.
+partial coverage. The product is not fully localized.
 
 `ui(source, **values)` renders an escaped product-copy region; `ut(source)` and
 `ul(source)` supply text and actual language for options and attributes. The
@@ -42,10 +42,10 @@ shared includes, browser/API messages, linguistic quality or screen-reader
 behavior, so a count of zero literal fragments does not mean that a journey is
 fully localized.
 
-Local tests cover locale precedence and inheritance, unchanged response prompts,
-account-bound cookies and locks, Arabic fallback, escaped parameter/source text,
-explicit dialog/table regions, streamed content, date/number/plural formatting
-and required-field error recovery. Provider services are not called.
+Localization covers locale precedence and inheritance, account-bound cookies and
+locks, Arabic fallback, escaped parameter/source text, explicit dialog/table
+regions, streamed content, date/number/plural formatting and required-field error
+recovery. Response prompts are not translated.
 
 Workflow review binds publication/restoration effects, draft/version states,
 sample checks, schedules and triggers explicitly. Stored schema labels/choices,

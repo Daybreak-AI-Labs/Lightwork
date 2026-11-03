@@ -10,4 +10,4 @@ The `fact_operation_receipts` governed namespace records only actor, a review di
 
 These minimal replay barriers are disclosed as retained evidence in My Data and are not automatically erased or expired. The store is bounded to 10,000 receipts; capacity or unavailable storage refuses new admission rather than evicting replay protection. Restored authority must remain held under the installation recovery policy before admitting new actions. No source contents or credentials are added to audit events, and no provider call is required.
 
-Local tests cover native SQLite/CAS/receipt behavior and the form controller, including shared-token recovery after removal and completion-audit failure. PostgreSQL execution and installed-browser accessibility have not been qualified.
+PostgreSQL execution and installed-browser accessibility are not qualified.

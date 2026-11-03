@@ -41,8 +41,7 @@ learning exclusion policy; it is not model unlearning. Consolidated per-store
 erasure uses the reviewed request process below; authorized knowledge-lineage
 requests remain in Knowledge Access.
 
-Local tests cover personal-data, recall and deletion behavior. Installed-browser
-and live provider qualification have not been performed.
+Installed-browser and live provider behavior are not qualified.
 
 ## Recalled content isolation
 
@@ -67,4 +66,4 @@ Generated-tool reviews carry opaque name/digest keys, not private generated name
 
 My Data account-download links contain no copied bundle, expire after ten minutes, and require the same currently authorized named account/workspace at download. Conversation scope links also recheck verified ownership; actual publication requires acknowledged audit. Fourteen shared Copilot adapters use the native identity, memory, provenance, exclusion, export and deletion services with the same current context/revisions and separate review rules. All personal controls remain reachable directly at `/my-data`.
 
-Local Python and Node tests cover these controls. Installed cross-user browser scenarios have not been qualified.
+Installed cross-user browser scenarios are not qualified.

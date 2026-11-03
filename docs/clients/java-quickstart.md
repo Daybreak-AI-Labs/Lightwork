@@ -12,8 +12,7 @@ any language an MCP SDK exists in.
 ## Prereqs
 
 ```bash
-# PyPI publish pending: install from a source clone (pip install -e
-# packages/maverick-core packages/maverick-mcp) or the native installer for now.
+# From the root of a source clone (or install Lightwork with the native installer):
 python -m pip install -e ./packages/maverick-core -e ./packages/maverick-mcp
 ```
 
@@ -160,7 +159,7 @@ not — you can also implement the JSON-RPC handshake by hand.
 Thin API clients port well; opinionated frameworks don't. The multi-agent
 kernel stays in Python, and every MCP-speaking language, Java and Kotlin
 included, can drive it without giving up features. The decision is recorded
-under [Language bindings](../ROADMAP.md#language-bindings) in the roadmap.
+under [Language bindings](./README.md#language-bindings).
 
 ## See also
 
@@ -169,4 +168,4 @@ under [Language bindings](../ROADMAP.md#language-bindings) in the roadmap.
 - [TypeScript client quickstart](./typescript-quickstart.md)
 - [Go client quickstart](./go-quickstart.md)
 - [Rust client quickstart](./rust-quickstart.md)
-- [Roadmap: language bindings](../ROADMAP.md#language-bindings)
+- [Language bindings](./README.md#language-bindings)

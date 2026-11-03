@@ -140,10 +140,10 @@ air gap or OS/VPC deny policy when network-level non-egress is required.
 ## SSO and provisioning status
 
 OIDC SSO, **SAML SSO** (via pysaml2, off by default), and **SCIM 2.0**
-provisioning + deprovisioning all ship today; SCIM deprovision force-revokes live
+provisioning + deprovisioning all ship; SCIM deprovision force-revokes live
 sessions, including pairwise-`sub` IdPs (Entra) via a login-time subject directory.
-SAML and SCIM have been exercised against the protocol test suites in this
-repository, not yet certified against a live identity provider.
+SAML and SCIM are tested against the protocol test suites in this repository and
+are not certified against a live identity provider.
 
 ## Sign-in security: second factor, step-up, sessions, allowed addresses
 

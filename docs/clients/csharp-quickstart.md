@@ -12,8 +12,7 @@ it from any language an MCP SDK exists in.
 ## Prereqs
 
 ```bash
-# PyPI publish pending: install from a source clone (pip install -e
-# packages/maverick-core packages/maverick-mcp) or the native installer for now.
+# From the root of a source clone (or install Lightwork with the native installer):
 python -m pip install -e ./packages/maverick-core -e ./packages/maverick-mcp
 dotnet add package ModelContextProtocol           # official C# MCP SDK
 ```
@@ -123,7 +122,7 @@ used by the runnable TypeScript example.
 Thin API clients port well; opinionated frameworks don't. The multi-agent
 kernel stays in Python, and every MCP-speaking language, .NET included, can
 drive it without giving up features. The decision is recorded under
-[Language bindings](../ROADMAP.md#language-bindings) in the roadmap.
+[Language bindings](./README.md#language-bindings).
 
 ## SDK status
 

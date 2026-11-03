@@ -14,4 +14,4 @@ Recovered workflow/playbook edits retain their original saved-version tokens. Wo
 
 Consent publishing uses a tenant-scoped, paginated catalog for saved properties and immutable resource versions. Choosing a record fills an unsaved form and exposes the selected version for review. Selecting existing content to revise explicitly prepares a new version and a new request reference. Search and version responses never refresh the versions of an already prepared publication automatically. Structured validation errors identify fields, retain entries and exact retry references, and focus the first invalid control.
 
-Validation is local/mock and does not establish live-provider or customer acceptance. Focused tests cover ciphertext persistence, private context binding, concurrency, exact retries, tombstones, credential rejection, guarded editor restoration, record/version pagination, shared-database tenant isolation, and structured/nested field errors.
+Live provider behavior and customer acceptance are not qualified.

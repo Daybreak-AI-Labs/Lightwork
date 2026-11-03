@@ -32,7 +32,5 @@ connector source selection remains in the native picker; opaque fetch references
 are excluded from conversational result details. Copilot action families still
 require the installation's existing opt-in.
 
-Local activation and settings-catalog tests cover encrypted draft isolation,
-immutable submission recovery, current-result acceptance, unselected-source
-refusal and catalog attenuation. They make no live provider call or source
-fetch; browser and release qualification are separate.
+Live provider calls, source fetches and the installed browser journey are not
+qualified.

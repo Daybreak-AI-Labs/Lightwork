@@ -1,7 +1,7 @@
 # Review older flow credentials
 
 Flow parameters cannot read deployment environment variables or the server
-secret vault. Older action-parameter `secret(...)` expressions now stop a run before its actions
+secret vault. An action-parameter `secret(...)` expression stops a run before its actions
 start, including resumed runs and nested or saved subflows. Saved definitions,
 history and permissions are preserved. There is no automatic credential-name
 mapping, credential copy, grant expansion or deployment configuration change.

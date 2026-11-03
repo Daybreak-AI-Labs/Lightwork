@@ -10,6 +10,6 @@ A separate closure review reads a fresh inventory, rejects reactivated identitie
 
 Existing data and preservation holds are retained. Custodian assignment and closing a case never transfer private-content ACLs or erase preferences. The user must separately use the governed content-access/deletion processes where appropriate. Closure is a record of accountable retained obligations, not a claim that external systems were verified or all data erased.
 
-Local mocked regression tests cover incomplete/stale closure, new work, reactivation, inactive custodians, unknown dispatch, channel retirement despite feature disablement and all-kind queue high-water paging. The related local departure/identity/scheduler/dispatcher test group passed 45 tests. Installed authenticated browser and provider-side qualification remain unrun; no live provider calls were made.
+Departures handle incomplete or stale closure, new work, reactivation, inactive custodians, unknown dispatch, channel retirement while the feature is disabled and paging across every queue kind. Behavior in an installed browser session and on the provider side is not qualified.
 
 Native Copilot controls use the same departure service for inventory, beginning a reviewed departure, handoff, refresh, closure and audit retry. An existing admission dispatch is read back as unconfirmed rather than repeated. Large inventories require the complete native review; no omitted items are treated as approved.

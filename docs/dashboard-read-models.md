@@ -7,7 +7,7 @@ first; updating an old conversation does not reorder it. `before_id` provides
 stable keyset paging. Only title, status, owner, update time and ID are selected;
 only the visible titles are decrypted. Goal detail reads retain full bodies.
 
-SQLite and PostgreSQL schema 37 add partial root indexes. PostgreSQL preserves
+SQLite and PostgreSQL (schema 37 and later) use partial root indexes. PostgreSQL preserves
 its configured tenant predicate and transaction/RLS policy. These read projections
 do not change goal ownership or execution authority.
 

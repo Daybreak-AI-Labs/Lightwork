@@ -56,8 +56,5 @@ team/packet records per tenant namespace. Due dates must be within one year.
 Limits refuse an operation rather than silently trimming evidence or history.
 The owner retains responsibility for data minimization before sharing.
 
-Tests cover local governed records and fake task results, HTTP authorization,
-role/SCIM/tenant/suite denial, stale results, idempotency, immutable snapshots,
-local revocation concurrency, the PostgreSQL fence predicate, and actual DOM
-interaction. They do not establish live multi-host PostgreSQL acceptance,
-external identity-provider acceptance, or customer usability acceptance.
+Live multi-host PostgreSQL, external identity providers and customer usability
+are not qualified.

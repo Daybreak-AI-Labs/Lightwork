@@ -88,7 +88,6 @@ nav:
   - Community:
       - Contributing: CONTRIBUTING.md
       - Governance: https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/GOVERNANCE.md
-      - Roadmap: https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/ROADMAP.md
       - Contributor License Agreement: CLA.md
       - Code of Conduct: CODE_OF_CONDUCT.md
       - Security policy: security-policy.md

@@ -56,7 +56,5 @@ pairing proofs are excluded from audit events. Multi-node dashboards must share
 the same protected registry/key and authority fence; node-local registries are
 not a distributed enrollment service.
 
-Local mocked pairing and mobile lifecycle tests cover refusal, expiry,
-workspace boundaries, stale results, rotation recovery and failed secure saves.
-This remains preview source: real keychain, native transport, accessibility,
-signing and installed-host qualification require the appropriate platform hosts.
+Device pairing is a preview: real keychain, native transport, accessibility,
+signing and installed-host behavior are not qualified.

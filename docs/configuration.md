@@ -276,7 +276,7 @@ token = "${MAVERICK_DASHBOARD_TOKEN}"
 # agents, Permissions, Compliance and Knowledge access, and /flows/designer to
 # the workflow builder's Steps mode. Anyone the new address would not admit,
 # and classic mode, keeps the old address. Run the tree test in
-# docs/research/tree-test/ before switching everyone.
+# docs/tree-test/ before switching everyone.
 # navigation_personal = true lets each person choose for themselves in Your
 # preferences. Settings > All settings and the setup wizard set both.
 # navigation = "classic"
@@ -551,7 +551,7 @@ enable = true              # mine failures -> propose -> regression-validate ->
                            #   `forget` (roll a learned line back).
 # A clean install uses the conservative unattended profile below. Existing
 # partial [self_harness] tables retain their explicitly configured lifecycle
-# settings during upgrade. Details: docs/proposals/self-harness.md.
+# settings during upgrade. Details: docs/self-learning.md.
 risk_limited = true              # require >=8 held-out
 #                                cases, 2% effect floor, two-arm 95% confidence
 #                                floor, sealed best-of-3, 3 judge votes, recent

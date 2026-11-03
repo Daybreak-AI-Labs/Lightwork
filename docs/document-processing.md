@@ -75,10 +75,9 @@ both success and failure. Output and input are bounded at 64 MiB, individual
 command stdout/stderr at 2 MiB each, and OCR text at one million characters.
 
 These checks establish a verified artifact transfer, not the correctness of
-its business content or visual fidelity. Local tests use backend interface
-fakes and small local Python child processes; the CI `document-engines` job
-described below exercises native Calc recalculation and OCR in the document
-worker image. Fidelity for any particular customer document is not qualified.
+its business content or visual fidelity. The CI `document-engines` job described
+below exercises native Calc recalculation and OCR in the document worker image.
+Fidelity for any particular customer document is not qualified.
 
 For ingestion and attachment text coverage, see [Document extraction](document-extraction.md).
 

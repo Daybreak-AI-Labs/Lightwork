@@ -21,7 +21,7 @@ They must be decrypted completely before their plaintext can be returned; their
 receipt sets `legacy_whole_blob: true`. Existing sealed files are not silently
 rewritten. Whole-text compatibility consumers such as some checkpoint, WORM,
 erasure and chain-verification operations may still materialize the segment;
-this change does not claim that every forensic operation has bounded memory.
+not every forensic operation has bounded memory.
 Upgrade audit readers before producing framed history: older releases do not
 recognize `MVKASF1`. Retain existing encryption keys and signing public keys.
 

@@ -23,7 +23,7 @@ default-on governed learning. A client must complete all three gates:
 3. start a reviewed collector explicitly.
 
 An empty allowlist means observe nothing. The sensitive communication and
-system-of-record blocklist is an immutable floor in this release and wins over
+system-of-record blocklist is an immutable floor and wins over
 the allowlist. Pausing, stopping, revoking, or erasing is available without
 provider access.
 
@@ -44,7 +44,7 @@ days by default (hard maximum: 30 days). Opportunities are computed on demand.
 Separately, an owner can explicitly save task notes and pilot observations when
 private opportunity planning is enabled; this does not copy the raw events.
 Provider egress is reserved and
-unsupported in this release; it must remain false, and setting it true fails
+unsupported; it must remain false, and setting it true fails
 closed rather than opening a network path.
 
 ## Configure and enroll
@@ -177,7 +177,7 @@ Their intervals do not establish task duration or savings. The API returns
 positive recorded durations may show median step time, explicitly not savings.
 The legacy `confidence` field remains a recurrence ranking heuristic, labelled
 `confidence_kind: recurrence_heuristic`; it is not a calibrated probability and
-is no longer shown as “% sure.” Risk signals describe observed labels, not a
+is not shown as “% sure.” Risk signals describe observed labels, not a
 completed automation assessment.
 
 Choose **Review this opportunity** and describe the job, starting inputs,
@@ -287,7 +287,7 @@ Lightwork work-history source and Work value economic estimates. Several
 internal handoffs in one team run do not establish repeated customer requests.
 Their native goals, execution costs, and results remain available. Aggregating
 direct or scheduled team occurrences into discovery requires a separate
-team-occurrence adapter, which is not implemented in this release.
+team-occurrence adapter, which is not implemented.
 
 Existing workflows with the same exact normalized business title are offered
 for review. A stable source identity also preserves an earlier Ekko draft after
@@ -317,8 +317,8 @@ lifecycle. They remain until removed there; deleting or expiring an Ekko plan
 does not delete an explicitly saved workflow. Review sources and connections in
 the builder, test the task, then explicitly publish and run it. An automatically
 built graph is not proof that integrations, credentials or business outputs are
-ready. Connection readiness checks are shown, but this release does not crawl
-external business-system contents or discover all work across a company.
+ready. Connection readiness checks are shown, but Ekko does not crawl external
+business-system contents or discover all work across a company.
 
 Copilot's **Find and build my workflows** performs the same discovery and native
 build after its sealed review and confirmation. It requires the existing

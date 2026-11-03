@@ -58,11 +58,12 @@ ruleset; treat them as a coverage target, not as shipped coverage:
 - **Sybil attacks** — coordinated fake agents, voting collusion
 - **Side channels** — DNS exfiltration, timing-based encoding, beaconing
 
-> **Obfuscation is no longer SDK-only.** The built-in shield's decode/defang
-> pre-pass (above) covers base64/hex/percent/homoglyph/zero-width evasion on all
-> three surfaces, so an encoded payload is decoded and re-scanned against the
-> built-in rules even without the full SDK. The SDK still adds breadth (ROT13,
-> leetspeak, the wider pattern set); the *decoding* layer is now always present.
+> **Obfuscation handling does not need the SDK.** The built-in shield's
+> decode/defang pre-pass (above) covers base64/hex/percent/homoglyph/zero-width
+> evasion on all three surfaces, so an encoded payload is decoded and re-scanned
+> against the built-in rules even without the full SDK. The SDK adds breadth
+> (ROT13, leetspeak, the wider pattern set); the *decoding* layer is always
+> present.
 
 ## Checking your posture
 

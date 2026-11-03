@@ -1,7 +1,4 @@
-# RFC 0007: Supported supplier evidence journey, version 1
-
-- Status: **Implemented** as a local product contract. Qualification against live
-  providers and installed apps is separate.
+# Supported supplier evidence journey v1
 
 The normative retained outcome contract is
 `vendor_onboarding._JOURNEY_CONTRACT_V1`; its ID, version and content digest are
@@ -60,7 +57,9 @@ Every admitted case retains its admission identity through rejection, cancellati
 and uncertainty; these states must not disappear from an admitted cohort.
 Cancelling an uncertain attempted action keeps Needs reconciliation until its
 effect is checked. A verified cancelled action remains an external effect and
-cannot be accepted or dispatched again. See RFC 0006 for cancellation semantics.
+cannot be accepted or dispatched again. See
+[supplier request cancellation](./supplier-cancellation-v1.md) for cancellation
+semantics.
 
 Changing the default process contract does not migrate existing cases. Reopening
 uses each recorded contract reference and digest. Historical v1 records without
@@ -92,8 +91,8 @@ Readiness reads do not contact providers. Existing role, origin, workspace,
 configuration and record-revision checks still govern setup mutations.
 
 Workspace snapshots cover supported local state and validated references under
-the recovery contract in RFC 0005. Recovery requires application quiescence and
-does not reverse Drive or Jira changes. Unsupported sealed or additive governed
-store restores remain refused. Live provider access, native installation and
-acceptance testing with representative users require their separate
-qualification evidence.
+the [restore reference validation](./restore-reference-validation-v1.md)
+contract. Recovery requires application quiescence and does not reverse Drive or
+Jira changes. Unsupported sealed or additive governed store restores remain
+refused. This contract does not establish live provider access, native
+installation behavior or acceptance by representative users.

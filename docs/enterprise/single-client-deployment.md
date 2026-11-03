@@ -49,7 +49,7 @@ a wizard step.
   start and the federation client refuses to dial in the clear — sensitive data
   never silently falls back to plaintext.
 - Still document TLS termination for the dashboard + MCP HTTP surfaces (reverse
-  proxy or native). The federation shared token never crosses plaintext now.
+  proxy or native). The federation shared token never crosses in plaintext.
 
 ### Trust-plane and key administration (`maverick trust` CLI)
 - `maverick trust status / list / show / add / rm / revoke / unrevoke / verify`
@@ -60,7 +60,7 @@ a wizard step.
 - `revoke` flips `revoked` (denied immediately via `is_active`); rotation is
   `add --pubkey <new>` (overlay overrides config), with `expires_at` /
   `not_before` available for zero-downtime overlap.
-- Not yet available: a dashboard view of the trust registry.
+- The dashboard has no view of the trust registry; use the CLI.
 
 ### Backup, restore and failover (single node)
 - `maverick backup create` snapshots the **client-scoped data root** — world DB

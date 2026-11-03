@@ -11,8 +11,7 @@ Python kernel via the standard MCP SDK for Go.
 ## Prereqs
 
 ```bash
-# PyPI publish pending: install from a source clone (pip install -e
-# packages/maverick-core packages/maverick-mcp) or the native installer for now.
+# From the root of a source clone (or install Lightwork with the native installer):
 python -m pip install -e ./packages/maverick-core -e ./packages/maverick-mcp
 go get github.com/modelcontextprotocol/go-sdk@v1.6.1
 ```
@@ -117,4 +116,4 @@ does not — you can also implement the JSON-RPC handshake by hand in
 - [Rust client quickstart](./rust-quickstart.md)
 - [C# / .NET client quickstart](./csharp-quickstart.md)
 - [Java / JVM client quickstart](./java-quickstart.md)
-- [Roadmap: language bindings](../ROADMAP.md#language-bindings)
+- [Language bindings](./README.md#language-bindings)

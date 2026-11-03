@@ -24,7 +24,7 @@ billing. A smaller configured cap wins; unknown billable pricing is never invent
 
 One physical attempt is admitted through the ordinary LLM facade. Automatic retries,
 hedging and model failover are disabled. The tool-free boundary is deliberate: tool
-compatibility resends are not yet individually observed by every provider adapter.
+compatibility resends are not individually observed by every provider adapter.
 Tool support remains **provider-reported and untested**. A text or image match is evidence
 for that one synthetic sample, not a tool qualification, model quality assessment,
 context-size measurement, reliable latency forecast or customer acceptance.
@@ -44,7 +44,4 @@ pending tests. Native controls remain usable when AI conversation is unavailable
 cannot choose execution arguments or confirmation on the user's behalf; the shared typed
 operation requires the same current authority, review and receipt recovery.
 
-Local validation uses mocked SDK/transport and accounting seams, trusted synthetic PNGs,
-FastAPI route fixtures, installer serialization and DOM fixtures. No provider generation
-or production call was made during implementation. Real provider suitability and rendered
-customer acceptance remain separate qualification work.
+Real provider suitability and rendered customer acceptance are not qualified.

@@ -6,9 +6,9 @@ exists, the command that **verifies** the claim on a live install — so a "yes"
 can be exercised, not just asserted.
 
 This page separates status explicitly: **code-enforced** controls ship and are
-testable today; **organizational** controls belong to the operating
-organization, outside this repository; items **not yet verified against live
-services** are named, not implied.
+testable; **organizational** controls belong to the operating organization,
+outside this repository; items **not verified against live services** are
+named, not implied.
 
 ## Posture in one paragraph
 
@@ -35,15 +35,15 @@ Apache License 2.0 ([LICENSE](../../LICENSE)).
 | **Roster governance invariants** | Do the safety rails hold across *every* agent? | Roster-wide governance invariant test suite — six invariants verified across all 2,031 built-in specialist packs (tool-reachability, autonomy dial, capability attenuation, compartment isolation, hard refusals, budget caps), each fault-injected with a non-vacuous control, plus hostile-argument fuzzing of all connectors/tools | governance invariant suite in CI (each invariant has a fault-injection control proving it is non-vacuous) |
 | **Vulnerability mgmt** | Deps, SAST, secrets? | [audit-readiness.md §Static-analysis gates](../security/audit-readiness.md#4-reproducible-verification-harness) | `pip-audit`; `bandit`; detect-secrets baseline; all blocking in CI |
 | **Supply chain** | SBOM, provenance, third-party code? | SBOM produced in CI (CycloneDX); plugin tool-call isolation under enterprise + **content-hash lockfile** checks (drift refused after a lockfile exists; plugin import/discovery still runs in-process) | CI `audit` job artifact; `[plugins] isolation` / `lock_policy` |
-| **SOC 2 readiness** | Control coverage + gaps? | [soc2-controls.md](../compliance/soc2-controls.md) (CC1–CC9, A/PI/C/P mapping + honest gap list) | `python -c "from maverick.soc2 import collect_soc2_evidence as c; print(c())"` |
+| **SOC 2 readiness** | Control coverage + gaps? | [soc2-controls.md](../compliance/soc2-controls.md) (CC1–CC9, A/PI/C/P mapping + gap list) | `python -c "from maverick.soc2 import collect_soc2_evidence as c; print(c())"` |
 | **Deployment / topology** | How does it run in our env? | [security-overview.md §Reference architecture](security-overview.md#reference-architecture-self-host--air-gap) (laptop / VPC / k8s / air-gap) | `maverick enterprise verify` on the target host |
 | **Regulatory mapping** | GDPR / EU AI Act / DSAR? | [regulated-deployment.md](../regulated-deployment.md); `ai_act.py`; DSAR via `dsar.py` | `maverick compliance --strict` |
 | **Licensing** | Under what terms is the code available? | [LICENSE](../../LICENSE) (Apache-2.0), dependency licenses | CI license gate (denies strong-copyleft) |
 | **Data grounding / outbound connectors** | What primary-source data do agents reach, and can it leak? | Primary-source data grounding — 37 read-only, GET-only public-data connectors (SEC EDGAR, FRED, Treasury, World Bank, FDIC, Census, BLS, EIA, openFDA, NPPES, ClinicalTrials, USAspending, SAM.gov, CourtListener, Federal Register, GLEIF, OpenCorporates, NWS/NOAA, EPA, Climatiq, …) auto-granted per analyst pack by suite (`SUITE_DATA_CONNECTORS`, layered in `domain_capability`); low-risk, deferred, ON by default; separate from the 2,877 write-capable long-tail enterprise connectors | kill-switch `[workforce] data_grounding = false` / `MAVERICK_WORKFORCE_DATA_GROUNDING=off`; installer wizard step; hostile-argument connector fuzzing in the governance invariant suite |
 
-## Honest status
+## Status
 
-**Code-enforced and verifiable today:** egress lock, fail-closed consent,
+**Code-enforced and verifiable:** egress lock, fail-closed consent,
 capability scoping, encryption at rest, OIDC SSO, per-tenant isolation,
 hash-chained signed audit, SBOM + dependency/secret/SAST CI gates, the shield's
 layered detection + obfuscation-decoding pre-pass + action-layer containment,
@@ -70,10 +70,10 @@ program, HR controls, physical/environmental security (inherited from the
 hosting provider's SOC 2), and a documented risk-assessment program. These are
 enumerated in [soc2-controls.md §Gap summary](../compliance/soc2-controls.md).
 
-**Not yet verified against live services:** SAML SSO and SCIM provisioning ship
-today alongside OIDC (see [security-overview.md](security-overview.md)), but
-they have been tested only against the protocol test suites in this
-repository, not certified against a live identity provider. SOC 2 and
+**Not verified against live services:** SAML SSO and SCIM provisioning ship
+alongside OIDC (see [security-overview.md](security-overview.md)) and are tested
+against the protocol test suites in this repository; they are not certified
+against a live identity provider. SOC 2 and
 penetration-test attestations require external auditors and are the operating
 organization's responsibility.
 

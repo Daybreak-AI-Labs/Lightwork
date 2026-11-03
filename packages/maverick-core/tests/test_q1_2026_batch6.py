@@ -42,7 +42,7 @@ def test_docs_index_landing_exists():
     assert p.is_file()
     body = p.read_text(encoding="utf-8")
     # The landing page must carry its core sections.
-    for keyword in ("Lightwork", "Quick start", "Pricing", "Roadmap"):
+    for keyword in ("Lightwork", "Quick start", "Pricing"):
         assert keyword in body, f"index.md missing section: {keyword}"
 
 
