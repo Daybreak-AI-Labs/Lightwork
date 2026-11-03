@@ -407,3 +407,21 @@ html.modal-open{overflow:hidden}
 .marks .wrap{display:grid;grid-template-columns:repeat(3,auto);justify-content:space-between;row-gap:14px}
 @media (max-width:1000px){.marks .wrap{grid-template-columns:repeat(2,auto)}}
 @media (max-width:600px){.marks .wrap{grid-template-columns:1fr}}
+
+/* ---- live layer: ambient stage behind inner heroes, pointer spotlight, hover borders (lab.js sets --mx/--my) ---- */
+.hero.inner canvas.neon{position:absolute;inset:0;width:100%;height:100%;display:block;opacity:.55;
+  -webkit-mask-image:linear-gradient(90deg,rgba(0,0,0,.3) 0%,rgba(0,0,0,.55) 35%,#000 62%);mask-image:linear-gradient(90deg,rgba(0,0,0,.3) 0%,rgba(0,0,0,.55) 35%,#000 62%)}
+.card:hover,.card.prod:hover,.gate .stage:hover,.term:hover,.instrument:hover{background-image:radial-gradient(380px circle at var(--mx) var(--my),rgba(139,92,246,.13),transparent 65%)}
+.desk .item:hover{background-image:radial-gradient(320px circle at var(--mx) var(--my),rgba(121,172,255,.08),transparent 65%)}
+.cap-i,.rows .r{position:relative}
+.cap-i::after,.rows .r::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:1px;background:var(--grad-line);transform:scaleX(0);transform-origin:left;transition:transform .45s ease;pointer-events:none}
+.cap-i:hover::after,.rows .r:hover::after{transform:scaleX(1)}
+.cap-i .k,.rows .r .k{transition:color .25s ease}.cap-i:hover .k,.rows .r:hover .k{color:#fff}
+.instrument,.term,.shot{transition:border-color .25s ease,box-shadow .25s ease}
+.instrument:hover,.term:hover{border-color:rgba(139,92,246,.5);box-shadow:0 30px 90px -55px rgba(139,92,246,.75)}
+.shot:hover{border-color:rgba(139,92,246,.5);box-shadow:0 40px 120px -50px rgba(139,92,246,.8)}
+.gate .stage{transition:transform .25s ease,border-color .25s ease}
+.gate .stage:hover{transform:translateY(-3px);border-color:var(--line-2)}
+@media (prefers-reduced-motion:no-preference){canvas.lattice{cursor:crosshair}}
+@media (max-width:900px){.hero.inner canvas.neon{opacity:.4;-webkit-mask-image:linear-gradient(180deg,#000 0%,rgba(0,0,0,.45) 60%);mask-image:linear-gradient(180deg,#000 0%,rgba(0,0,0,.45) 60%)}}
+@media (prefers-reduced-motion:reduce){.gate .stage:hover{transform:none}.cap-i::after,.rows .r::after{transition:none}}
