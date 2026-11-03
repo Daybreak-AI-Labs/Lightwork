@@ -353,15 +353,14 @@ def entries(S, C, Column) -> tuple:  # noqa: ARG001 -- Column is C
           "secret", "Integrations", "", "maverick.github_app", subgroup="GitHub",
           max_length=500, env=("MAVERICK_GH_APP_WEBHOOK_SECRET",),
           aliases="github webhook signing secret"),
-        S("github", "trigger_labels", "Issue labels that start a task",
-          "When the Lightwork GitHub app sees an issue with one of these labels, it starts a "
-          "task to fix it and opens a pull request. Leave empty to use maverick, automate "
-          "and ai-fix.",
+        S("github", "trigger_labels", "GitHub issue trigger labels",
+          "Issue-to-PR automation is currently unavailable until checkout isolation is "
+          "implemented. These labels identify events; leave empty to use maverick, "
+          "automate and ai-fix.",
           "list", "Integrations", [], "maverick.github_app", subgroup="GitHub",
           item_label="Label", item_hint="automate", pattern=r"[^\s,<>\"'{}]{1,50}",
           item_error="a label without spaces or commas", empty_unset=True, max_items=20,
-          max_length=50, env=("MAVERICK_GH_TRIGGER_LABELS",), weaker="grow",
-          warning="Issues with the new labels will start paid tasks."),
+          max_length=50, env=("MAVERICK_GH_TRIGGER_LABELS",)),
 
         # ----------------------------------------------------- issue trackers
         S("webhooks", "linear_bot_id", "Linear account that gets the work",

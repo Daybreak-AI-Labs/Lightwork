@@ -5170,9 +5170,9 @@ tested without spawning py-spy.
   sections/keys + obvious type mistakes with closest-match suggestions;
   `config_lint.py`), and `maverick costs` (cross-run per-day spend from the
   recorded episode ledger; `cost_report.py`).
-- **GitHub App** — `/webhook/github` (dashboard): a labeled or `/maverick`-mentioned
-  issue drives a swarm that clones the repo, fixes it, and opens a PR
-  (`github_app.py`, HMAC-verified). **GitLab Issues** — `/webhook/gitlab`:
+- **GitHub App** — `/webhook/github` verifies event signatures, but automated
+  issue-to-PR execution is unavailable until agent checkout and publication
+  are isolated. **GitLab Issues** — `/webhook/gitlab`:
   assign an issue to the bot, get a goal (`X-Gitlab-Token` constant-time
   verify, `X-Gitlab-Event-UUID` replay dedup), completing the
   Linear/Jira/GitHub/GitLab issue-trigger family (`issue_webhooks.py`).

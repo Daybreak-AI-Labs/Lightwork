@@ -12918,21 +12918,14 @@ async def webhook_jira(request: Request, bg: BackgroundTasks) -> JSONResponse:
 
 @app.post("/webhook/github")
 async def webhook_github(request: Request, bg: BackgroundTasks) -> JSONResponse:
-    """GitHub App webhook -> issue→PR. A labeled/`/maverick`-commented issue
-    drives a swarm that clones the repo, fixes it, and opens a PR
-    (``maverick.github_app``). HMAC-verified via ``X-Hub-Signature-256`` against
-    ``MAVERICK_GH_APP_WEBHOOK_SECRET`` or the sealed secret saved in All
-    settings (fails closed)."""
+    """Verify GitHub events and report that issue automation is unavailable."""
     import json as _json
 
     from maverick.github_app import (
         parse_webhook,
-        process_issue,
         verify_signature,
         webhook_secret,
     )
-    from maverick.issue_webhooks import canonical_signature, replay_window_seconds
-
     signature = request.headers.get("X-Hub-Signature-256")
     body = await _read_limited_webhook_body(request)
     secret = await run_in_threadpool(webhook_secret)
@@ -12948,28 +12941,15 @@ async def webhook_github(request: Request, bg: BackgroundTasks) -> JSONResponse:
     if payload is None:
         return JSONResponse({"status": "ignored"})
 
-    # GitHub signs only the raw body, not a freshness timestamp.  Require its
-    # delivery id for operator traceability, but key replay rejection on the
-    # canonical body HMAC so a captured delivery cannot be resent with a
-    # different X-GitHub-Delivery value to re-run the paid issue→PR workflow.
+    # Preserve delivery validation, but do not consume replay or goal quotas
+    # for a workflow that cannot start.
     if not (request.headers.get("X-GitHub-Delivery") or "").strip():
         return JSONResponse({"detail": "missing delivery id"}, status_code=403)
-    dedup_signature = canonical_signature(signature)
-    if not dedup_signature:
-        return JSONResponse({"detail": "bad webhook signature"}, status_code=403)
-    if _issue_webhook_replay_seen(dedup_signature, replay_window_seconds()):
-        return JSONResponse({"detail": "duplicate webhook delivery"}, status_code=409)
 
-    check_goal_rate_limit(request, source="webhook:github")
-
-    async def _run() -> None:
-        try:
-            await process_issue(payload)
-        except Exception:  # pragma: no cover -- never crash the worker
-            log.exception("github_app: issue→PR run failed")
-
-    bg.add_task(_run)
-    return JSONResponse({"status": "accepted", "issue": payload.issue_number})
+    return JSONResponse(
+        {"detail": "GitHub issue automation is unavailable until checkout isolation is implemented"},
+        status_code=503,
+    )
 
 
 @app.post("/webhook/gitlab")
