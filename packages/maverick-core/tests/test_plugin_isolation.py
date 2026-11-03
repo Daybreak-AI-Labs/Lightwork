@@ -56,7 +56,40 @@ def test_mode_default_none(monkeypatch):
     monkeypatch.setenv("MAVERICK_PLUGIN_ISOLATION", "subprocess")
     assert isolation_mode() == "subprocess"
     monkeypatch.setenv("MAVERICK_PLUGIN_ISOLATION", "bogus")
-    assert isolation_mode() == "none"
+    with pytest.raises(ValueError, match="invalid plugin isolation"):
+        isolation_mode()
+    assert "isolation policy" in run_isolated("example:tool", {})
+
+
+@pytest.mark.parametrize("bad_config", [[], {"plugins": []}, {"plugins": {"isolation": "unknown"}}])
+def test_invalid_plugin_policy_refuses_direct_execution(monkeypatch, bad_config):
+    import maverick.config as config_mod
+    monkeypatch.delenv("MAVERICK_PLUGIN_ISOLATION", raising=False)
+    monkeypatch.setattr(config_mod, "load_config", lambda: bad_config)
+    assert "isolation policy" in run_isolated("example:tool", {})
+    assert "isolation policy" in run_isolated("example:tool", {}, mode="invalid")
+
+
+def test_plugin_policy_lookup_failure_is_not_a_direct_fallback(monkeypatch):
+    import maverick.config as config_mod
+    monkeypatch.delenv("MAVERICK_PLUGIN_ISOLATION", raising=False)
+    def unavailable():
+        raise OSError("unavailable")
+    monkeypatch.setattr(config_mod, "load_config", unavailable)
+    assert "isolation policy" in run_isolated("example:tool", {})
+
+
+def test_corrupt_plugin_config_does_not_enable_direct_execution(monkeypatch, tmp_path):
+    from maverick import config
+    bad = tmp_path / "config.toml"
+    bad.write_text("[plugins\nisolation = 'subprocess'\n", encoding="utf-8")
+    monkeypatch.delenv("MAVERICK_PLUGIN_ISOLATION", raising=False)
+    monkeypatch.setenv("MAVERICK_CONFIG", str(bad))
+    config.reset_config_cache()
+    try:
+        assert "isolation policy" in run_isolated("example:tool", {})
+    finally:
+        config.reset_config_cache()
 
 
 def test_none_mode_runs_in_process(plugin_on_path):

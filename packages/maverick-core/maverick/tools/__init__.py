@@ -1960,8 +1960,9 @@ def _apply_python_plugins(reg: ToolRegistry) -> None:
                 logging.getLogger(__name__).warning(
                     "plugin tool %s factory raised: %s", name, e
                 )
-    except Exception:  # pragma: no cover -- importlib quirks
-        pass
+    except Exception as exc:  # pragma: no cover -- discovery/policy failure
+        import logging
+        logging.getLogger(__name__).warning("plugin discovery refused: %s", exc)
 
 
 def _apply_ts_plugins(reg: ToolRegistry) -> None:
