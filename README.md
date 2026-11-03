@@ -208,7 +208,7 @@ with the SDK in [`sdks/plugin-ts`](sdks/plugin-ts).
 packages/        The eight Python distributions (see the table above)
 apps/            Setup wizard, desktop shells, editor extensions and companion apps
 sdks/            TypeScript plugin SDK, Python REST client, native consent SDK
-extensions/      Browser extension, embeddable widget and WebGPU vision helper
+extensions/      Browser extension, embeddable widget and JavaScript perceptual hash
 rust/            Native scanning core and a standalone audit-log verifier
 go/              Out-of-process model proxy that keeps provider keys out of the agent
 deploy/          Docker, Helm, VPS and cloud recipes; GitHub Actions and GitLab CI integrations

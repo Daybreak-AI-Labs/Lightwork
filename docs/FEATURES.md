@@ -5379,15 +5379,14 @@ tested without spawning py-spy.
   = true` (default OFF, wizard-exposed). I2C is a pure protocol layer over
   an injected bus seam (`smbus2` via the `[i2c]` extra). Every op names its
   explicit target — no autodetect-and-flash; failures are `ERROR:` strings.
-- **WebGPU local vision + perceptual hashing** (`extensions/webgpu-vision/`
-  + `perceptual_hash.py`): a no-CDN WebGPU page running real hand-written
-  WGSL compute shaders (grayscale, Sobel) over a user-chosen local file
-  that never leaves the browser, plus an 8×8 average-hash specified in
-  integer-only arithmetic so the JS and the Python twin
+- **Perceptual hashing** (`perceptual_hash.py` +
+  `extensions/webgpu-vision/ahash.js`): an 8×8 average-hash specified in
+  integer-only arithmetic so the Python implementation
   (`average_hash_from_pixels`/`average_hash_file`, `[computer-use]` Pillow)
-  produce a **bit-identical** hash — a cross-language "are these two
-  screenshots the same screen?" primitive (Hamming distance). Honest scope:
-  GPU image primitives + perceptual hashing, not a trained vision model.
+  and its JavaScript twin produce a **bit-identical** hash — a
+  cross-language "are these two screenshots the same screen?" primitive
+  (Hamming distance). It knows coarse luminance layout only; it is not a
+  trained vision model.
 - **Mobile companion v1 + offline cache** (`apps/mobile-companion/` +
   `offline_bundle.py`, `GET /api/v1/offline/bundle`): a read-only Expo
   scaffold (Runs list, Run detail, Glance, Settings) that consumes only

@@ -12,8 +12,8 @@
  *   4. pack      = row-major (cy outer), MSB first; render as 16 hex chars
  *
  * Both sides assert GRADIENT_HASH over the same synthetic gradient. This file
- * has no DOM dependency: it runs in the browser (used by index.html) and
- * under Node (`node ahash.js --selftest`, used by the Python test suite).
+ * has no DOM dependency: it runs in a browser and under Node
+ * (`node ahash.js --selftest`, used by the Python test suite).
  * Not a neural classifier — coarse luminance layout only.
  */
 "use strict";
