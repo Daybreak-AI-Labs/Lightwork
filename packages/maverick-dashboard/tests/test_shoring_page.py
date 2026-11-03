@@ -107,6 +107,30 @@ def test_page_exception_desk_lists_department_approvals():
     assert f"/goals/{goal}/trajectory" in html
 
 
+def test_page_exception_desk_shows_written_actions_as_written():
+    # Written actions lost their full stops, hyphens and capitals on the desk
+    # ("$48,210 00", "inv 20419 from northwind supply"); only an action name
+    # such as ``wire.transfer`` is made readable, as on /approvals.
+    from maverick import world_model
+    from maverick.logging_config import reset_goal_context, set_goal_context
+    w = world_model.WorldModel(world_model.DEFAULT_DB)
+    goal = w.create_goal("Payment run", domain="finance_ap")
+    tokens = set_goal_context(goal_id=goal)
+    try:
+        w.create_approval("Release payment run of $48,210.00 to 37 vendors", risk="high", scope="payment")
+        w.create_approval("Pay invoice INV-20419 from Northwind Supply ($6,150.00)", risk="medium", scope="invoice")
+        w.create_approval("Refund <b>R&D</b> deposit", risk="low", scope="refund")
+    finally:
+        reset_goal_context(tokens)
+    _add_function()
+    html = client.get("/shoring").text
+    assert "<td>Release payment run of $48,210.00 to 37 vendors</td>" in html
+    assert "<td>Pay invoice INV-20419 from Northwind Supply ($6,150.00)</td>" in html
+    # Escaped, not rewritten.
+    assert "<td>Refund &lt;b&gt;R&amp;D&lt;/b&gt; deposit</td>" in html
+    assert "<b>R&D</b>" not in html
+
+
 def test_page_empty_state():
     html = client.get("/shoring").text
     assert "No functions in the book of work yet" in html

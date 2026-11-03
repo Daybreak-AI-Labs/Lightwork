@@ -376,6 +376,30 @@ def test_binder_json_response_is_no_store_attachment(
     assert response.json()["window_days"] == 30
 
 
+def test_binder_shows_written_approval_actions_as_written(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from maverick import world_model
+    from maverick.world_model import WorldModel
+
+    monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    world = WorldModel(tmp_path / "world.db")
+    monkeypatch.setattr(dashboard_api, "_world", lambda: world)
+    world.create_approval("Pay invoice INV-20419 from Northwind Supply ($6,150.00)", risk="medium")
+    world.create_approval("wire.transfer", risk="high")
+
+    html = client.get("/audit/binder", params={"days": 30}).text
+
+    # The cell reads as the request was written (its title attribute already
+    # did); only an action name such as ``wire.transfer`` is made readable.
+    assert ">Pay invoice INV-20419 from Northwind Supply ($6,150.00)</td>" in html
+    assert "inv 20419" not in html
+    assert ">Wire transfer</td>" in html
+    world.close()
+
+
 def test_binder_quorum_state_is_read_in_one_batch_and_matches_per_approval_reads(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

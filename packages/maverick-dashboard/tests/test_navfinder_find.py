@@ -82,13 +82,25 @@ def test_waiting_approvals_follow_the_approvals_permission(client, monkeypatch):
     approval = world.create_approval("shell", risk="high", detail="rm -rf build", requested_by="user:customer")
     _as("operator")
     rows = [row for row in _find(client, "shell") if row["kind"] == "approval"]
-    assert rows == [{"kind": "approval", "title": "Shell", "labels": ["Shell"], "context": "High risk",
+    # Titled as the Approvals page names it; the action name is still searched.
+    assert rows == [{"kind": "approval", "title": "Run a command", "labels": ["Run a command"], "context": "High risk",
                      "href": f"/approvals#approval-{approval}"}]
     # The request's own detail (it may carry another person's task) is never searched.
     assert not [row for row in _find(client, "build") if row["kind"] == "approval"]
     monkeypatch.setattr(content_access, "can_read_approval", lambda request, item, world=None: False)
     assert not [row for row in _find(client, "shell") if row["kind"] == "approval"]
     monkeypatch.undo()
+
+
+def test_waiting_approvals_are_titled_as_written(client):
+    from maverick_dashboard import api
+
+    api._world().create_approval("Pay invoice INV-20419 from Northwind Supply ($6,150.00)",
+                                 risk="medium", requested_by="user:customer")
+    _as("operator")
+    (row,) = [row for row in _find(client, "northwind") if row["kind"] == "approval"]
+    assert row["title"] == "Pay invoice INV-20419 from Northwind Supply ($6,150.00)"
+    assert row["labels"] == [row["title"]]
 
 
 def test_viewers_do_not_find_approvals(client):

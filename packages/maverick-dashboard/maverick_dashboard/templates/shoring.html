@@ -221,7 +221,8 @@
           <tbody>
           {% for e in f.exceptions %}
             <tr>
-              <td>{{ e.action | replace('.', ' ') | humanize }}</td>
+              {#- The name the Approvals page shows: written text as written (approval_labels.py). -#}
+              <td>{{ approval_action_label(e.action) }}</td>
               <td><span class="badge {{ 'breach' if e.risk in ('high', 'critical') else 'pending' }}">{{ e.risk | humanize }}</span></td>
               <td>{{ e.scope or '—' }}</td>
               <td>
