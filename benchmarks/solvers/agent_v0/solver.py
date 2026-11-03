@@ -3,8 +3,8 @@
 The naive single-shot ``baseline_v0`` resolves 0/6 real SWE-bench Verified bugs,
 so the governed DGM loop has nothing to measurably improve (you can't show uplift
 from zero). This solver instead drives the PROVEN maverick coding agent
-(``swebench_governed.llm_proposer`` -- opaque anti-cheat, worktree-diff capture,
-per-instance sandbox), so it actually resolves some real instances: a NONZERO
+(``swebench_governed.llm_proposer`` -- worktree-diff capture and per-instance
+sandbox), so it can resolve instances without hidden test patches: a NONZERO
 baseline with room to grow.
 
 What the DGM improves is the AGENT-BUDGET POLICY below -- the self-improving

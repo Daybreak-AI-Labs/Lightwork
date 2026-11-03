@@ -85,7 +85,7 @@ def _instance_payload(inst, repo_path: Path) -> dict:
     # the canonical SWE-bench keys below don't cover, and the sandboxed solver
     # only sees this payload.
     for key, val in (getattr(inst, "__dict__", {}) or {}).items():
-        if key.startswith("_"):
+        if key.startswith("_") or key in {"gold_patch", "test_patch"}:
             continue
         if isinstance(val, (str, int, float, bool)) or val is None:
             payload[key] = val
@@ -97,7 +97,6 @@ def _instance_payload(inst, repo_path: Path) -> dict:
         "repo_path": str(repo_path),
         "fail_to_pass": list(getattr(inst, "fail_to_pass", []) or []),
         "pass_to_pass": list(getattr(inst, "pass_to_pass", []) or []),
-        "gold_patch": getattr(inst, "gold_patch", ""),
         "brief": getattr(inst, "brief", ""),
         "language": getattr(inst, "language", "python"),
         "total_tests": getattr(inst, "total_tests", 0),
@@ -173,6 +172,10 @@ def _solve_in_sandbox(solver_path: Path, inst, workroot: Path, sb, *,
     so side effects performed while deciding what patch to emit cannot tamper
     with the source tree later materialized by ``score_instance``.
     """
+    if (getattr(inst, "test_patch", "") or "").strip():
+        raise RuntimeError(
+            "hidden-test solver runs require a separate trusted grader boundary"
+        )
     from maverick.self_modify_eval import _default_materialize
 
     work = Path(workroot)
@@ -325,6 +328,12 @@ def run_solver(solver_dir: Path, instances: list, workroot: Path,
     The solver itself is LLM-authored and untrusted, so it is never imported in
     this controller process: :func:`_solve_in_sandbox` executes it in the eval
     sandbox against a throwaway repo copy before any patch is graded."""
+    # Refuse before loading checkpoints or scoring, so an unsupported run is
+    # never recorded as an ordinary unresolved benchmark result.
+    if any((getattr(inst, "test_patch", "") or "").strip() for inst in instances):
+        raise RuntimeError(
+            "hidden-test solver runs require a separate trusted grader boundary"
+        )
     from maverick.self_modify_eval import resolve_eval_sandbox
 
     solver_path = load_solver(solver_dir)

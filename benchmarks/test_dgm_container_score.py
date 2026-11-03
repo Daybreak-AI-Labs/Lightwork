@@ -178,7 +178,7 @@ _SOLVER_PATCH = (
     "@@ -1,2 +1,2 @@\n"
     " def solve(instance):\n"
     '-    return ""\n'
-    "+    return instance.gold_patch\n")
+    "+    return instance.brief\n")
 
 
 def test_govern_solver_change_promotes_real_uplift_measured_in_containers(tmp_path):
@@ -194,6 +194,11 @@ def test_govern_solver_change_promotes_real_uplift_measured_in_containers(tmp_pa
     raws = {f"astropy__astropy-1290{i}": _raw(f"astropy__astropy-1290{i}")
             for i in (7, 8)}
     instances = [_inst(r, tmp_path) for r in raws.values()]
+    # The fake scorer exercises the promotion pipeline with a public candidate;
+    # it must not supply grader fixtures or gold patches to the solver.
+    for inst in instances:
+        inst.test_patch = ""
+        inst.brief = "--- a/example.py\n+++ b/example.py\n@@ -1 +1 @@\n-old\n+new\n"
     runner = _runner(raws)
     score = dgm_uplift.container_score_fn(runner, verified=raws)
 
@@ -291,6 +296,8 @@ def test_run_solver_defaults_to_host_scoring_unchanged(tmp_path, monkeypatch):
     solver.mkdir()
     (solver / "solver.py").write_text(_SOLVER_V0)
     raw = _raw()
-    out = dgm_uplift.run_solver(solver, [_inst(raw, tmp_path)], tmp_path / "w")
+    inst = _inst(raw, tmp_path)
+    inst.test_patch = ""
+    out = dgm_uplift.run_solver(solver, [inst], tmp_path / "w")
     assert out == {raw["instance_id"]: False}
     assert seen.get("called") is True

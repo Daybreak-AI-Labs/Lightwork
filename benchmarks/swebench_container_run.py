@@ -150,10 +150,12 @@ def _materialize_repo(instance: dict, dst: Path) -> None:
 def agent_patch(instance: dict) -> str:
     """Run the maverick coding agent against a fresh checkout of the instance at
     base_commit and return its proposed fix, reusing the proven
-    ``swebench_governed.llm_proposer`` (best-of-N, retry-on-empty, opaque-mode
-    anti-cheat, forensics sidecar). The agent produces the patch; the official
+    ``swebench_governed.llm_proposer`` (best-of-N, retry-on-empty and a
+    forensics sidecar). The agent produces the patch; the official
     container grades it -- so the agent's local era never matters. Needs a
     provider key (llm_proposer fails loud without one)."""
+    if (instance.get("test_patch", "") or "").strip():
+        raise RuntimeError("hidden-test agent runs require a separate trusted grader boundary")
     import shutil
     import tempfile
 
@@ -299,6 +301,10 @@ class RunReport:
 def run(instances: dict[str, dict], ids: list[str], run_in_image, *, proposer: str,
         keys_dir: Path, ledger, namespace: str, timeout: float,
         check_baseline: bool, abort_at_dollars: float = 0.0) -> RunReport:
+    if proposer == "agent" and any(
+        (instances.get(iid, {}).get("test_patch", "") or "").strip() for iid in ids
+    ):
+        raise RuntimeError("hidden-test agent runs require a separate trusted grader boundary")
     propose = PROPOSERS[proposer]
     rep = RunReport(proposer=proposer, seed=-1, n_requested=len(ids))
     spend = 0.0

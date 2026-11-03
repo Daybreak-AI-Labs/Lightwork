@@ -1780,6 +1780,11 @@ def main() -> int:
         print(f"manifest not found: {args.instances}", file=sys.stderr)
         return 2
 
+    instances = load_instances(args.instances)
+    if any((inst.get("test_patch", "") or "").strip() for inst in instances):
+        print("hidden-test runs require a separate trusted grader boundary", file=sys.stderr)
+        return 2
+
     if args.instance_hard_cap is not None:
         os.environ["MAVERICK_INSTANCE_HARD_CAP"] = str(args.instance_hard_cap)
 
@@ -1792,7 +1797,6 @@ def main() -> int:
             print(f"unknown pipeline: {p}", file=sys.stderr)
             return 2
 
-    instances = load_instances(args.instances)
     sharded = _shard_instances(instances, args)
     if isinstance(sharded, int):
         return sharded

@@ -101,6 +101,17 @@ def _load_governed():
     return _load("benchmarks_swebench_governed", "swebench_governed.py")
 
 
+def test_hidden_test_patch_refused_before_agent_or_checkout(tmp_path, monkeypatch):
+    gov = _load_governed()
+    monkeypatch.setenv("MAVERICK_PROVIDER_READY", "1")
+    monkeypatch.setattr(gov, "_ensure_untrusted_agent_sandbox", lambda: pytest.fail("agent started"))
+    inst = gov.Instance(instance_id="hidden", repo_path=tmp_path,
+                        fail_to_pass=[], pass_to_pass=[], test_patch="secret fixture")
+    with pytest.raises(RuntimeError, match="hidden test patch"):
+        gov.llm_proposer(inst)
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_retry_on_empty_uses_second_attempt_and_sums_cost(tmp_path, monkeypatch):
     gov = _load_governed()
 
