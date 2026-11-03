@@ -2960,17 +2960,9 @@ def runs(ctx, as_json: bool, limit: int, goal_id) -> None:
 @main.command()
 @click.option("--host", default="127.0.0.1")
 @click.option("--port", default=8765, type=int)
-@click.option("--token", default=None,
-              help="Bearer token for non-/healthz requests.")
 @click.option("--recovery-mode", is_flag=True, help="Local isolated recovery: no normal jobs or schedulers.")
-def dashboard(host: str, port: int, token, recovery_mode: bool = False) -> None:
+def dashboard(host: str, port: int, recovery_mode: bool = False) -> None:
     """Start the local web dashboard + REST API."""
-    if token:
-        os.environ["MAVERICK_DASHBOARD_TOKEN"] = token
-        click.echo(click.style(
-            "Bearer auth enabled. Authenticate with the Authorization: Bearer header.",
-            fg="yellow",
-        ))
     # Mirror the module entrypoint's safety contract (app.main): refuse to bind a
     # non-loopback host without a token, so this CLI path can't expose an
     # unauthenticated admin surface even though the middleware would also 401.
@@ -2979,7 +2971,7 @@ def dashboard(host: str, port: int, token, recovery_mode: bool = False) -> None:
     ):
         click.echo(
             "Refusing to bind dashboard to a non-loopback host without "
-            "MAVERICK_DASHBOARD_TOKEN set (pass --token or set the env var).",
+            "MAVERICK_DASHBOARD_TOKEN set in the server environment.",
             err=True,
         )
         sys.exit(2)
@@ -3724,12 +3716,12 @@ def diag_cost_by_tag(as_json: bool) -> None:
 
 @main.group("mcp-registry")
 def mcp_registry_group() -> None:
-    """Discover + install external MCP servers from a registry.
+    """Discover external MCP servers from a registry.
 
     A registry is a self-hostable `<base>/mcp/index.json` (point
-    `[mcp_registries] indexes` at your own). `add` writes the chosen server into
-    `[mcp_servers.<name>]` in ~/.maverick/config.toml; the kernel loads it on the
-    next run. (`maverick mcp` — without `-registry` — starts Lightwork's own MCP
+    `[mcp_registries] indexes` at your own). Registry installation is disabled
+    until publisher authentication is available. (`maverick mcp` — without
+    `-registry` — starts Lightwork's own MCP
     server; this group manages the servers Lightwork *consumes*.)
     """
 
@@ -3749,13 +3741,13 @@ def mcp_registry_browse() -> None:
         if e.summary:
             click.echo(f"    {e.summary}")
     click.echo("")
-    click.echo("install one with:  maverick mcp-registry add <name>")
+    click.echo("Registry installation is unavailable; independently review and configure servers.")
 
 
 @mcp_registry_group.command("add")
 @click.argument("name")
 def mcp_registry_add(name: str) -> None:
-    """Install a registry MCP server by name into config."""
+    """Explain why registry-supplied servers cannot currently be installed."""
     from ..mcp_registry import add_mcp_server_to_config, install_mcp_from_registry
     try:
         spec = install_mcp_from_registry(name)

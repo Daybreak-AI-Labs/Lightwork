@@ -4,7 +4,9 @@ state."""
 from __future__ import annotations
 
 import html as _html
+import os
 import re
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -38,7 +40,7 @@ def workspace(tmp_path, monkeypatch):
     dash_app._world_cache.clear()
 
     class Workspace:
-        client = TestClient(dash_app.app, headers={"Origin": "http://testserver"})
+        client = TestClient(dash_app.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
         @staticmethod
         def write(text: str) -> None:
@@ -62,11 +64,14 @@ def _pages(client) -> dict[str, str]:
 
 
 def _api(client) -> dict:
+    with patch.dict(os.environ, {"MAVERICK_DASHBOARD_TOKEN": "diagnostic-test-token"}):
+        health = client.get("/api/v1/admin/system/probe-details",
+                            headers={"Authorization": "Bearer diagnostic-test-token"}).json()["checks"]["provider"]
     return {
         "providers": client.get("/api/v1/providers").json()["workspace"],
         "system": next(r for r in client.get("/api/v1/admin/system/readiness").json()["checks"]
                        if r["key"] == "provider"),
-        "healthz": client.get("/healthz").json()["checks"]["provider"],
+        "healthz": health,
         "copilot": client.get("/api/v1/copilot/context", params={"page": "/chat"}).json()["workspace_readiness"],
     }
 

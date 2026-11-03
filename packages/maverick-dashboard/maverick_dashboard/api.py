@@ -243,16 +243,15 @@ from .auth import (
     caller_principal,
     caller_suites,
     can_access_goal,
-    durable_automation_owner,
     execution_user_id_from_request,
     goal_owner_filter,
     has_global_permission,
     has_permission,
     is_dashboard_admin,
+    require_durable_automation_creator,
     require_global_permission,
     require_page_permission,
     require_permission,
-    require_personal_write,
     require_suite,
     require_unscoped_board,
     stored_automation_identity,
@@ -465,7 +464,9 @@ async def get_active_tenant(request: Request) -> dict:
     and the persisted local-operator selection introduced by the self-service
     workspace picker.
     """
-    require_permission(request, "view")
+    from .auth import require_workspace_picker_access
+
+    require_workspace_picker_access(request)
     import os
 
     from maverick_dashboard import settings_store, workspace_tenants
@@ -493,7 +494,9 @@ def select_active_tenant(request: Request, tenant_id: str | None) -> dict:
     from maverick.authority_effects import authority_effect_fence
 
     with authority_effect_fence():
-        require_personal_write(request)
+        from .auth import require_workspace_picker_access
+
+        require_workspace_picker_access(request, write=True)
         import os
 
         if os.environ.get("MAVERICK_TENANT", "").strip():
@@ -9117,9 +9120,9 @@ def _require_triggers() -> None:
 
 
 def _inbound_secret_set() -> bool:
-    from maverick.webhooks import inbound_secret
+    from maverick.webhooks import inbound_secret, separate_webhook_credential
 
-    return bool(inbound_secret())
+    return separate_webhook_credential(inbound_secret(), "control")
 
 
 @router.get("/triggers")
@@ -9197,6 +9200,7 @@ def create_trigger(request: Request, payload: TriggerIn) -> TriggerOut:
     existing = triggers_store.get_trigger(triggers_store.slugify(default_name))
     if existing is not None and existing.get("owner", "") not in _event_trigger_allowed_owners(request):
         raise HTTPException(status_code=409, detail="a trigger with that name already exists")
+    durable_owner = require_durable_automation_creator(request)
     try:
         from maverick.paths import current_tenant_id
 
@@ -9204,7 +9208,7 @@ def create_trigger(request: Request, payload: TriggerIn) -> TriggerOut:
             default_name,
             payload.template,
             payload.params or {},
-            owner=durable_automation_owner(request),
+            owner=durable_owner,
             flow=payload.flow,
             tenant=current_tenant_id() or "",
             flow_owner=(target_flow.owner if target_flow is not None else ""),
@@ -9467,7 +9471,7 @@ def create_event_trigger(request: Request, payload: EventTriggerIn) -> EventTrig
         raise HTTPException(
             status_code=409, detail="an event trigger with that name already exists"
         )
-    durable_owner = durable_automation_owner(request)
+    durable_owner = require_durable_automation_creator(request)
     from maverick.automation_connected_events import SOURCES as connected_sources
 
     try:
@@ -14090,14 +14094,13 @@ async def benchmarks_api(request: Request) -> dict:
 def _walkthroughs_dir():
     """Where the dashboard's exported walkthrough videos live.
 
-    ``maverick.replay.video.render`` writes wherever the caller points it
-    (there is no fixed dir in core), so the dashboard standardises on
-    ``<maverick home>/walkthroughs`` for everything the /walkthroughs page
-    lists and serves.
+    Exports, listings and media reads share the active workspace namespace.
+    Existing unscoped artifacts remain available only in unbound installations;
+    their filenames alone cannot safely identify their original workspace.
     """
-    from maverick.paths import maverick_home
+    from maverick.paths import data_dir
 
-    return maverick_home() / "walkthroughs"
+    return data_dir("walkthroughs")
 
 
 def _vtt_for_frames(frames) -> str:
@@ -14152,7 +14155,7 @@ async def export_walkthrough(request: Request, goal_id: int) -> dict:
     from maverick.replay.video import render, storyboard
 
     out_dir = _walkthroughs_dir()
-    out_dir.mkdir(parents=True, exist_ok=True)
+    out_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     frames = storyboard(goal_id, events=events)
     vtt_name = f"goal-{goal_id}.vtt"
     (out_dir / vtt_name).write_text(_vtt_for_frames(frames), encoding="utf-8")

@@ -195,7 +195,60 @@ def _plain(text: str, limit: int = 150) -> dict[str, Any]:
 
 
 def _mrkdwn(text: str, limit: int = 3000) -> dict[str, Any]:
-    return {"type": "mrkdwn", "text": str(text)[:limit]}
+    # Slack's angle-bracket syntax creates mentions and labelled links even
+    # when embedded in otherwise innocuous agent-supplied text. Escape before
+    # truncating; verbatim also prevents automatic linkification.
+    return {"type": "mrkdwn", "text": _slack_literal(text, limit), "verbatim": True}
+
+
+def _slack_literal(text: object, limit: int = 4000) -> str:
+    out = []
+    used = 0
+    for char in str(text):
+        part = {"&": "&amp;", "<": "&lt;", ">": "&gt;"}.get(char, char)
+        if used + len(part) > limit:
+            break
+        out.append(part)
+        used += len(part)
+    return "".join(out)
+
+
+def _slack_literal_chunks(text: object, limit: int = 2900) -> list[str]:
+    chunks: list[str] = []
+    parts: list[str] = []
+    size = 0
+    for char in str(text):
+        part = {"&": "&amp;", "<": "&lt;", ">": "&gt;"}.get(char, char)
+        if size + len(part) > limit:
+            chunks.append("".join(parts))
+            parts, size = [], 0
+        parts.append(part)
+        size += len(part)
+    if parts:
+        chunks.append("".join(parts))
+    return chunks
+
+
+def _trusted_mrkdwn(text: str, limit: int = 3000) -> dict[str, Any]:
+    """Render markup assembled solely from literals and escaped values."""
+    return {"type": "mrkdwn", "text": text[:limit], "verbatim": True}
+
+
+def _dashboard_link(base: str, href: str, label: str) -> str:
+    from urllib.parse import quote, urlsplit
+
+    try:
+        parsed = urlsplit(base)
+        if (parsed.scheme not in {"http", "https"} or not parsed.hostname
+                or parsed.username or parsed.password or parsed.query or parsed.fragment
+                or not href.startswith("/") or href.startswith("//")
+                or any(ord(ch) < 32 or ch == "\\" for ch in base + href)):
+            return ""
+        _ = parsed.port
+    except ValueError:
+        return ""
+    target = quote(base.rstrip("/") + href, safe=":/#?=&%+@-._~")
+    return f" <{target}|{label}>"
 
 
 def _when(ts: float | None) -> str:
@@ -221,35 +274,35 @@ def _confirm_dialog(content: dict[str, Any], decision: str) -> dict[str, Any]:
 def approval_blocks(content: dict[str, Any], *, dashboard_url: str = "",
                     include_actions: bool = True) -> list[dict[str, Any]]:
     """The approval card: what it will do, risk, spending, undo, decide-by, buttons."""
-    lines = [f"*{content['summary']}*"] if content.get("summary") else []
+    lines = [str(content['summary'])] if content.get("summary") else []
     if content.get("what_it_will_do"):
-        lines.append("*What it will do*\n" + "\n".join(
+        lines.append("What it will do\n" + "\n".join(
             f"• {item}" for item in content["what_it_will_do"][:12]))
     if content.get("known_effects"):
-        lines.append("*What happens next*\n" + "\n".join(
+        lines.append("What happens next\n" + "\n".join(
             f"• {item}" for item in content["known_effects"][:8]))
     fields = [
-        _mrkdwn(f"*Risk*\n{content['risk_label']}", 2000),
-        _mrkdwn(f"*Spending*\n{content['spending']}", 2000),
-        _mrkdwn(f"*Applies to*\n{content['scope']}", 2000),
-        _mrkdwn(f"*Decide by*\n{_when(content.get('decide_by'))}", 2000),
+        _plain(f"Risk\n{content['risk_label']}", 2000),
+        _plain(f"Spending\n{content['spending']}", 2000),
+        _plain(f"Applies to\n{content['scope']}", 2000),
+        _plain(f"Decide by\n{_when(content.get('decide_by'))}", 2000),
     ]
     if content.get("irreversible"):
         fields.append(_mrkdwn("*Can't be undone*\nYes — there is no automatic way back.", 2000))
     if content.get("requested_by"):
-        fields.append(_mrkdwn(f"*Requested by*\n{content['requested_by']}", 2000))
+        fields.append(_plain(f"Requested by\n{content['requested_by']}", 2000))
     blocks: list[dict[str, Any]] = [
         {"type": "header", "text": _plain(f"Approval needed: {content['action']}")},
     ]
     if lines:
-        blocks.append({"type": "section", "text": _mrkdwn("\n\n".join(lines))})
+        blocks.append({"type": "section", "text": _plain("\n\n".join(lines), 3000)})
     blocks.append({"type": "section", "fields": fields[:10]})
     note = (f"Request #{content['id']} · Posted here because this channel receives Lightwork "
             "approval requests. This is Lightwork's suggestion — the decision is "
             "yours, and it applies only to exactly what is described here.")
     if dashboard_url:
-        note += f" <{dashboard_url.rstrip('/')}/approvals#approval-{content['id']}|Open on the dashboard>"
-    blocks.append({"type": "context", "elements": [_mrkdwn(note)]})
+        note += _dashboard_link(dashboard_url, f"/approvals#approval-{int(content['id'])}", "Open on the dashboard")
+    blocks.append({"type": "context", "elements": [_trusted_mrkdwn(note)]})
     status = content.get("status")
     if status == "expired":
         blocks.append({"type": "section", "text": _mrkdwn(
@@ -292,7 +345,7 @@ def decided_blocks(content: dict[str, Any], *, decision: str, decided_by: str,
         outcome += " Recorded; it takes effect once the audit record is confirmed."
     if undo_seconds and status != "pending":
         outcome += f" You can undo this for {int(undo_seconds)} seconds."
-    blocks.append({"type": "section", "text": _mrkdwn(outcome)})
+    blocks.append({"type": "section", "text": _plain(outcome.replace("*", ""), 3000)})
     if undo_seconds and status != "pending":
         blocks.append({"type": "actions", "block_id": f"lightwork_undo_{content['id']}", "elements": [
             {"type": "button", "action_id": ACTION_UNDO, "value": encode_button_value(content["id"], None),
@@ -305,7 +358,7 @@ def text_blocks(title: str, body: str) -> list[dict[str, Any]]:
     blocks: list[dict[str, Any]] = [{"type": "header", "text": _plain(title)}]
     text = str(body or "")
     for start in range(0, max(1, len(text)), 2900):
-        blocks.append({"type": "section", "text": _mrkdwn(text[start:start + 2900] or "(no text)")})
+        blocks.append({"type": "section", "text": _plain(text[start:start + 2900] or "(no text)", 3000)})
         if len(blocks) > 40:
             break
     return blocks
@@ -331,30 +384,39 @@ def digest_blocks(digest: dict[str, Any], *, dashboard_url: str = "") -> list[di
     spend = digest.get("spending") or {}
     zone = str(digest.get("time_zone") or "UTC")
 
-    def opened(href: str) -> str:
-        return f" <{dashboard_url.rstrip('/')}{href}|Open>" if dashboard_url else ""
+    def opened(href: str, index: int, count: int) -> str:
+        label = "Open" if count == 1 else f"Open {index}"
+        return _dashboard_link(dashboard_url, str(href), label) if dashboard_url else ""
 
     if approvals:
-        blocks.append({"type": "section", "text": _mrkdwn(
-            f"*{len(approvals)} waiting for your decision*\n" + "\n".join(
-                f"• {approval_line(a, zone)}{opened('/approvals#approval-' + str(a['id']))}"
-                for a in approvals[:10]))})
+        blocks.append({"type": "section", "text": _plain(
+            f"{len(approvals)} waiting for your decision\n" + "\n".join(
+                f"{i}. {approval_line(a, zone)}" for i, a in enumerate(approvals[:10], 1)), 3000)})
+        links = "".join(opened('/approvals#approval-' + str(a['id']), i, len(approvals[:10])) for i, a in enumerate(approvals[:10], 1))
+        if links:
+            blocks.append({"type": "context", "elements": [_trusted_mrkdwn(links)]})
     if questions:
-        blocks.append({"type": "section", "text": _mrkdwn(
-            f"*{len(questions)} question{'s' if len(questions) != 1 else ''} an agent is waiting on*\n"
-            + "\n".join(f"• {question_line(q)}{opened(question_href(q))}"
-                         for q in questions[:10]))})
+        blocks.append({"type": "section", "text": _plain(
+            f"{len(questions)} question{'s' if len(questions) != 1 else ''} an agent is waiting on\n"
+            + "\n".join(f"{i}. {question_line(q)}" for i, q in enumerate(questions[:10], 1)), 3000)})
+        links = "".join(opened(question_href(q), i, len(questions[:10])) for i, q in enumerate(questions[:10], 1))
+        if links:
+            blocks.append({"type": "context", "elements": [_trusted_mrkdwn(links)]})
     if results:
-        blocks.append({"type": "section", "text": _mrkdwn(
-            f"*{len(results)} recent result{'s' if len(results) != 1 else ''}*\n"
-            + "\n".join(f"• {result_line(r)}{opened(r.get('href') or '/goals')}"
-                         for r in results[:10]))})
+        blocks.append({"type": "section", "text": _plain(
+            f"{len(results)} recent result{'s' if len(results) != 1 else ''}\n"
+            + "\n".join(f"{i}. {result_line(r)}" for i, r in enumerate(results[:10], 1)), 3000)})
+        links = "".join(opened(r.get('href') or '/goals', i, len(results[:10])) for i, r in enumerate(results[:10], 1))
+        if links:
+            blocks.append({"type": "context", "elements": [_trusted_mrkdwn(links)]})
     keys = digest.get("expiring_keys") or []
     if keys:
-        blocks.append({"type": "section", "text": _mrkdwn(
-            f"*{len(keys)} access key{'s' if len(keys) != 1 else ''} stop working within 7 days*\n"
-            + "\n".join(f"• {key_line(k)}{opened(k.get('href') or '/api-keys')}"
-                        for k in keys[:10]))})
+        blocks.append({"type": "section", "text": _plain(
+            f"{len(keys)} access key{'s' if len(keys) != 1 else ''} stop working within 7 days\n"
+            + "\n".join(f"{i}. {key_line(k)}" for i, k in enumerate(keys[:10], 1)), 3000)})
+        links = "".join(opened(k.get('href') or '/api-keys', i, len(keys[:10])) for i, k in enumerate(keys[:10], 1))
+        if links:
+            blocks.append({"type": "context", "elements": [_trusted_mrkdwn(links)]})
     if not (approvals or questions or results or keys):
         blocks.append({"type": "section", "text": _mrkdwn("Nothing is waiting for you today.")})
     quiet = _quiet_buttons(digest, results)
@@ -363,11 +425,11 @@ def digest_blocks(digest: dict[str, Any], *, dashboard_url: str = "") -> list[di
     limit = spend.get("limit_dollars") or 0
     spent = f"${float(spend.get('dollars') or 0):.2f}"
     against = f" of your ${float(limit):.2f} monthly limit" if limit else ""
-    blocks.append({"type": "context", "elements": [_mrkdwn(
+    blocks.append({"type": "context", "elements": [_trusted_mrkdwn(
         f"Spending this month: {spent}{against}."
-        + (f" <{dashboard_url.rstrip('/')}/me|Open My work>" if dashboard_url else "")
+        + (_dashboard_link(dashboard_url, "/me", "Open My work") if dashboard_url else "")
         + f" {WHY}"
-        + (f" <{dashboard_url.rstrip('/')}/me#daily-summary|Change or stop this summary>"
+        + (_dashboard_link(dashboard_url, "/me#daily-summary", "Change or stop this summary")
            if dashboard_url else ""))]})
     return blocks
 
@@ -443,10 +505,10 @@ def confirm_view(content: dict[str, Any], *, binding: str | None, response_url: 
         "submit": _plain("Approve", 24),
         "close": _plain("Go back", 24),
         "blocks": [
-            {"type": "section", "text": _mrkdwn(
-                f"*Request #{content['id']}: {content['action']}*\n{content['summary']}\n\n"
-                "This is a *critical-risk* action"
-                + (" that *can't be undone*" if content.get("irreversible") else "") + ".")},
+            {"type": "section", "text": _plain(
+                f"Request #{content['id']}: {content['action']}\n{content['summary']}\n\n"
+                "This is a critical-risk action"
+                + (" that can't be undone" if content.get("irreversible") else "") + ".", 3000)},
             {"type": "input", "block_id": CONFIRM_BLOCK,
              "label": _plain("Type APPROVE to confirm", 2000),
              "element": {"type": "plain_text_input", "action_id": CONFIRM_INPUT,
@@ -460,7 +522,8 @@ def confirm_view(content: dict[str, Any], *, binding: str | None, response_url: 
 # ----------------------------------------------------------------------------
 
 def _ephemeral(text: str) -> dict[str, Any]:
-    return {"response_type": "ephemeral", "replace_original": False, "text": text[:3000]}
+    return {"response_type": "ephemeral", "replace_original": False,
+            "text": _slack_literal(text, 3000), "mrkdwn": False}
 
 
 def _unlinked_note(user_id: str) -> dict[str, Any]:
@@ -518,8 +581,8 @@ def _undo_message(world, approval_id: int, *, principal: str,
         return _ephemeral(exc.message)
     content = card_content(world.get_approval(approval_id))
     blocks = approval_blocks(content)
-    blocks.append({"type": "context", "elements": [_mrkdwn(
-        f"{principal} took back their decision; the request is waiting again.")]})
+    blocks.append({"type": "context", "elements": [_plain(
+        f"{principal} took back their decision; the request is waiting again.", 3000)]})
     return {"replace_original": True,
             "text": f"Request #{approval_id} is waiting for a decision again", "blocks": blocks}
 
@@ -810,7 +873,8 @@ def post_message(bot_token: str, channel: str, text: str,
                  blocks: list[dict[str, Any]] | None = None,
                  thread_ts: str | None = None) -> str | None:
     """``chat.postMessage``; returns the message ``ts`` or ``None``."""
-    payload: dict[str, Any] = {"channel": channel, "text": str(text)[:4000]}
+    payload: dict[str, Any] = {"channel": channel, "text": _slack_literal(text),
+                               "mrkdwn": False, "parse": "none", "link_names": False}
     if blocks:
         payload["blocks"] = blocks[:50]
     if thread_ts:

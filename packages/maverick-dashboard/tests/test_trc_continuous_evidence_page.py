@@ -28,7 +28,7 @@ def page_client() -> TestClient:
             {"trc_continuous_evidence_enabled": enabled},
         )
 
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def test_page_lists_sources_and_names_all_stock_collectors(page_client):

@@ -61,7 +61,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setattr(page, "require_permission", lambda _request, _permission: None)
     app = FastAPI()
     app.include_router(page.create_autonomous_compliance_page_router(_templates()))
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def test_page_renders_with_one_h1_and_every_suite(client: TestClient) -> None:

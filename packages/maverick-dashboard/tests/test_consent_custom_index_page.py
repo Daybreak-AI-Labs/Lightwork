@@ -38,7 +38,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     )
     app = FastAPI()
     app.include_router(page.create_consent_custom_index_page_router(templates))
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def test_workbench_is_store_free_closed_and_liquid_glass(client: TestClient) -> None:

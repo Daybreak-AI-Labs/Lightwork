@@ -20,12 +20,32 @@ _SCHEMA = {
     "type": "object",
     "properties": {
         "url": {"type": "string", "description": "ws:// or wss:// URL"},
-        "message": {"type": "string", "description": "text to send after connect"},
+        "message": {"type": "string", "description": "Unsupported until human approval is available"},
         "timeout": {"type": "number", "description": "seconds to await a reply (default 30)"},
         "recv": {"type": "boolean", "description": "wait for one reply (default true)"},
     },
     "required": ["url"],
 }
+
+
+def _safe_connector():
+    """Use a direct connector that never follows an HTTP redirect."""
+    from importlib.metadata import version
+
+    from websockets.legacy.client import Connect
+
+    try:
+        major = int(version("websockets").split(".", 1)[0])
+    except (ValueError, TypeError):
+        raise RuntimeError("installed websockets version is unsupported") from None
+    if not 12 <= major < 17 or not hasattr(Connect, "handle_redirect"):
+        raise RuntimeError("installed websockets version cannot enforce redirect policy")
+
+    class NoRedirectConnect(Connect):
+        def handle_redirect(self, uri):
+            raise ValueError("websocket redirects are not allowed")
+
+    return NoRedirectConnect
 
 
 def _check_url(url: str) -> str | None:
@@ -74,6 +94,8 @@ def _preflight_egress(url: str, parsed: Any) -> str | None:
 
 
 async def _run(args: dict[str, Any]) -> str:
+    if args.get("message") is not None:
+        return "ERROR: websocket message sending is unavailable until exact human approval is supported"
     url = str(args.get("url") or "").strip()
     if not url:
         return "ERROR: url is required"
@@ -84,11 +106,12 @@ async def _run(args: dict[str, Any]) -> str:
     if bad:
         return bad
     try:
-        import websockets
+        connect = _safe_connector()
     except ImportError:
         return ("ERROR: websockets not installed. "
                 "Run: python -m pip install -e './packages/maverick-core[websocket]'")
-    message = args.get("message")
+    except Exception:
+        return "ERROR: installed websockets cannot enforce the connection safety policy"
     timeout = float(args.get("timeout") or 30)
     want_recv = args.get("recv", True)
     # SSRF: _check_url resolved the host once to validate it, but
@@ -114,11 +137,9 @@ async def _run(args: dict[str, Any]) -> str:
         # Connect to the pinned IP but validate the cert against the real name.
         connect_kwargs["server_hostname"] = parsed.hostname
     try:
-        async with websockets.connect(url, **connect_kwargs) as ws:
-            if message is not None:
-                await ws.send(str(message))
+        async with connect(url, **connect_kwargs) as ws:
             if not want_recv:
-                return "sent (no reply requested)"
+                return "connected (no reply requested)"
             reply = await asyncio.wait_for(ws.recv(), timeout=timeout)
             if isinstance(reply, bytes):
                 reply = reply.decode("utf-8", errors="replace")
@@ -133,8 +154,8 @@ def websocket_tool() -> Tool:
     return Tool(
         name="websocket",
         description=(
-            "Connect to a ws:// or wss:// endpoint, optionally send a message, "
-            "and read one reply. Input: url, message (optional), timeout, recv. "
+            "Connect to a ws:// or wss:// endpoint and read one reply. "
+            "Message sending is unavailable pending human approval support. "
             "Refuses private/loopback hosts (SSRF guard)."
         ),
         input_schema=_SCHEMA,

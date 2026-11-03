@@ -339,6 +339,14 @@ def run(args, *, workdir: Path | None = None) -> DriverOutcome:
     solver_dir = Path(args.solver)
     out = DriverOutcome(ledger_path=str(args.ledger))
 
+    # Check the whole corpus before locks, resets, pre-gates or paid authoring.
+    # Filtering first could hide a held-out fixture until after an agent ran.
+    instances = swg._load_manifest(args.manifest)
+    if any((getattr(inst, "test_patch", "") or "").strip() for inst in instances):
+        out.verdict, out.reason = "NO-RUN", (
+            "hidden-test solver runs require a separate trusted grader boundary")
+        return out
+
     # Exclusive single-run lock (next to the ledger). Refuses to start if a live
     # run holds it -- prevents the concurrent double-run that double-spent.
     ckpt_dir_early = getattr(args, "checkpoint_dir", None) or args.ledger.resolve().parent / "checkpoints"

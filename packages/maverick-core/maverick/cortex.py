@@ -143,11 +143,16 @@ def _audit(kind_name: str, **payload: Any) -> bool:
 
 def _gate(caller: Caller, domain: str | None) -> str | None:
     """The Agent Trust Plane decision for an external caller, or ``None``."""
+    from . import fleet_memory
+
+    bound = fleet_memory.current_caller()
+    if bound and (not caller.external or caller.agent_id != bound):
+        return "The authenticated fleet identity does not match."
     if not caller.external:
         return None
     try:
         from . import agent_trust
-        decision = agent_trust.decide_memory_access(caller.agent_id, domain)
+        decision = agent_trust.decide_memory_access(caller.agent_id, domain, enforced=True)
     except Exception as e:  # pragma: no cover -- a broken gate fails closed
         return f"trust plane unavailable: {e}"
     if getattr(decision, "allowed", False):
@@ -234,9 +239,10 @@ def _recall_fleet(query: str, *, caller: Caller, domain: str | None,
         return [], ("fleet memory answers enrolled external agents; internal runs "
                     "recall lessons through the orchestrator")
     from . import fleet_memory
-    context, reason = fleet_memory.recall(query, agent_id=caller.agent_id,
-                                          vendor=caller.vendor, domain=domain,
-                                          shield=shield)
+    with fleet_memory.bind_verified_caller(caller.agent_id):
+        context, reason = fleet_memory.recall(query, agent_id=caller.agent_id,
+                                              vendor=caller.vendor, domain=domain,
+                                              shield=shield)
     if not context:
         return [], reason or "no fleet context"
     return [Hit("fleet", "lessons", context, f"fleet memory · {caller.vendor}", 1.0,
@@ -287,6 +293,9 @@ def recall(
             res.denied[s] = denial
     else:
         for s in wanted:
+            if caller.external and s != "fleet":
+                res.denied[s] = "This source is not available to external agents."
+                continue
             try:
                 if s == "knowledge":
                     if knowledge_reader is None:
@@ -386,7 +395,14 @@ def deposit(
                    "goal_text": text, "reflection": text, "domain": domain or "",
                    "kind": "lesson"}
         payload.update(record or {})
-        ok, reason = fleet_memory.ingest(payload, shield=shield)
+        if caller.external:
+            try:
+                with fleet_memory.bind_verified_caller(caller.agent_id):
+                    ok, reason = fleet_memory.ingest(payload, shield=shield)
+            except PermissionError:
+                return _done(False, "The authenticated fleet identity does not match.")
+        else:
+            ok, reason = fleet_memory.ingest(payload, shield=shield)
         return _done(bool(ok), reason)
     return _done(False, f"unknown deposit kind {kind!r}")
 

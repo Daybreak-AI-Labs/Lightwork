@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import stat
 from pathlib import Path
+from types import SimpleNamespace
 
 import maverick.tools as tools_pkg
 import maverick.tools.voice as voice_mod
@@ -213,7 +214,7 @@ def test_auto_falls_through_to_whisper_cpp(monkeypatch, tmp_path):
     monkeypatch.setattr(voice_mod, "_whisper_cpp", lambda p, lang: "built-in works")
     audio = tmp_path / "clip.webm"
     audio.write_bytes(b"fake")
-    assert voice_mod._run_transcribe({"source": str(audio)}) == "built-in works"
+    assert voice_mod._run_transcribe({"source": str(audio)}, sandbox=SimpleNamespace(workdir=tmp_path)) == "built-in works"
 
 
 def test_stt_backend_env_pins_local(monkeypatch, tmp_path):
@@ -231,7 +232,7 @@ def test_stt_backend_env_pins_local(monkeypatch, tmp_path):
     monkeypatch.setattr(voice_mod, "_whisper_cpp", lambda p, lang: "local only")
     audio = tmp_path / "clip.wav"
     audio.write_bytes(b"RIFFfake")
-    assert voice_mod._run_transcribe({"source": str(audio)}) == "local only"
+    assert voice_mod._run_transcribe({"source": str(audio)}, sandbox=SimpleNamespace(workdir=tmp_path)) == "local only"
 
 
 def test_explicit_arg_backend_beats_env_default(monkeypatch, tmp_path):
@@ -242,7 +243,7 @@ def test_explicit_arg_backend_beats_env_default(monkeypatch, tmp_path):
     monkeypatch.setattr(voice_mod, "_whisper_cpp", lambda p, lang: "forced local")
     audio = tmp_path / "clip.wav"
     audio.write_bytes(b"RIFFfake")
-    out = voice_mod._run_transcribe({"source": str(audio), "backend": "local"})
+    out = voice_mod._run_transcribe({"source": str(audio), "backend": "local"}, sandbox=SimpleNamespace(workdir=tmp_path))
     assert out == "forced local"
 
 
@@ -259,7 +260,7 @@ def test_local_error_mentions_voice_setup(monkeypatch, tmp_path):
     monkeypatch.setattr(voice_mod, "_whisper_cpp", lambda p, lang: None)
     audio = tmp_path / "clip.wav"
     audio.write_bytes(b"RIFFfake")
-    out = voice_mod._run_transcribe({"source": str(audio), "backend": "local"})
+    out = voice_mod._run_transcribe({"source": str(audio), "backend": "local"}, sandbox=SimpleNamespace(workdir=tmp_path))
     assert out.startswith("ERROR:") and "maverick voice setup" in out
 
 
@@ -272,7 +273,7 @@ def test_no_backend_error_mentions_builtin_path(monkeypatch, tmp_path):
     monkeypatch.setattr(voice_mod, "_whisper_cpp", lambda p, lang: None)
     audio = tmp_path / "clip.wav"
     audio.write_bytes(b"RIFFfake")
-    out = voice_mod._run_transcribe({"source": str(audio)})
+    out = voice_mod._run_transcribe({"source": str(audio)}, sandbox=SimpleNamespace(workdir=tmp_path))
     assert out.startswith("ERROR: no voice backend available")
     assert "maverick voice setup" in out
 
@@ -317,7 +318,7 @@ def test_run_transcribe_local_end_to_end(monkeypatch, tmp_path):
     audio = tmp_path / "clip.wav"
     audio.write_bytes(b"RIFFfake")
     out = voice_mod._run_transcribe(
-        {"source": str(audio), "backend": "local", "language": "en"})
+        {"source": str(audio), "backend": "local", "language": "en"}, sandbox=SimpleNamespace(workdir=tmp_path))
     assert out == "end to end"
     assert seen["argv"][seen["argv"].index("-l") + 1] == "en"
     assert os.path.basename(seen["argv"][0]) == "whisper-cli"
@@ -331,7 +332,7 @@ def test_transcript_starting_with_error_marker_remains_successful_data(monkeypat
     monkeypatch.setattr(voice_mod, "_whisper_local", lambda _path, _lang: "ERROR: this is a spoken sentence")
     audio = tmp_path / "clip.wav"
     audio.write_bytes(b"RIFFfake")
-    output = voice_mod._run_transcribe({"source": str(audio), "backend": "local"})
+    output = voice_mod._run_transcribe({"source": str(audio), "backend": "local"}, sandbox=SimpleNamespace(workdir=tmp_path))
     assert output == "ERROR: this is a spoken sentence"
     assert classify_tool_result(output) is ToolResultState.SUCCEEDED
     monkeypatch.setattr(voice_mod, "_default_stt_backend", lambda: "local")
@@ -422,7 +423,7 @@ def test_run_transcribe_prefers_pywhispercpp_over_cli(monkeypatch, tmp_path):
     monkeypatch.setattr(voice_mod, "_whisper_cpp", _cli_not_reached)
     audio = tmp_path / "clip.wav"
     audio.write_bytes(b"RIFFfake")
-    assert voice_mod._run_transcribe({"source": str(audio)}) == "wheel engine"
+    assert voice_mod._run_transcribe({"source": str(audio)}, sandbox=SimpleNamespace(workdir=tmp_path)) == "wheel engine"
 
 
 # ---- warm_up_local_stt / stt_warming -------------------------------------------
@@ -479,3 +480,16 @@ def test_warm_up_never_raises(monkeypatch, tmp_path):
     monkeypatch.setattr("maverick.voice_models.locate_model", _explode)
     assert voice_mod.warm_up_local_stt() is False
     assert voice_mod.stt_warming() is False
+
+
+def test_voice_cli_transcribes_operator_selected_file(monkeypatch, tmp_path):
+    from click.testing import CliRunner
+    from maverick.cli import main
+
+    _isolate(monkeypatch, tmp_path)
+    audio = tmp_path / "clip.wav"
+    audio.write_bytes(b"RIFFfake")
+    monkeypatch.setattr(voice_mod, "_whisper_local", lambda path, _lang: path.read_bytes().decode())
+    result = CliRunner().invoke(main, ["voice", "transcribe", str(audio), "--backend", "local"])
+    assert result.exit_code == 0, result.output
+    assert "RIFFfake" in result.output

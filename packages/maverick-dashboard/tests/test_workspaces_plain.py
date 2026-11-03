@@ -27,7 +27,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     from maverick_dashboard import app as dash_app
     dash_app._world_cache.clear()
-    return TestClient(dash_app.app, headers={"Origin": "http://testserver"})
+    return TestClient(dash_app.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def test_create_workspace_by_name_rejects_indistinguishable_names(client):

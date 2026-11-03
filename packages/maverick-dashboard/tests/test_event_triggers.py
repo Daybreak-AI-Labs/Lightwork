@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 def _client():
     from maverick_dashboard.app import app
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def _isolate(monkeypatch, tmp_path):
@@ -269,6 +269,9 @@ def test_poll_and_fire_attributes_goal_to_trigger_owner(monkeypatch, tmp_path):
     # No request principal (the background path); the fired goal must still be
     # owned by the trigger's owner, so owner-scoped views see it.
     _isolate(monkeypatch, tmp_path)
+    from maverick_dashboard import rbac
+
+    rbac.set_role("user:alice", "operator")
     import maverick.automation_events as ev
     from maverick.world_model import WorldModel
     from maverick_dashboard import event_poll
@@ -321,6 +324,9 @@ def test_tick_runs_owned_trigger_with_owner_execution_identity(monkeypatch, tmp_
     # quota-scoped to) the trigger owner instead of falling back to
     # `user:local`. An unowned trigger keeps the legacy bare payload.
     _isolate(monkeypatch, tmp_path)
+    from maverick_dashboard import rbac
+
+    rbac.set_role("user:alice", "operator")
     import maverick.automation_events as ev
     from maverick_dashboard import automation_queue as aq
     from maverick_dashboard import event_triggers_store as s

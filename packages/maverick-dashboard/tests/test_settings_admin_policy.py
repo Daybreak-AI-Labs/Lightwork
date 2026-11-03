@@ -18,7 +18,7 @@ from maverick_dashboard.app import app
 
 from test_support.settings_pages import every_group, save_catalog
 
-client = TestClient(app, headers={"Origin": "http://testserver"})
+client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 API = "/api/v1/settings/catalog"
 
 
@@ -102,7 +102,7 @@ def test_page_shows_the_new_controls_in_plain_language(monkeypatch):
     _installer('[channels.slack]\nenabled = true\n')
     page = every_group(client)
     for text in ("Tools allowed in each chat app", "Most to spend with each AI service",
-                 "Pause for a review after spending", "Who reviews which approvals",
+                 "Pause for a review after spending", "Suggest reviewers for approvals",
                  "Apps Ekko may notice", "Use the careful improvement profile",
                  "People who decide serious AI incident reports", "Backup AI models",
                  "How Lightwork signs in to Amazon Bedrock", "Departments turned off",

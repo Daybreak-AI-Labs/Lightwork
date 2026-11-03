@@ -4,7 +4,7 @@ from __future__ import annotations
 from collections import deque
 
 import pytest
-from maverick.ekko_daemon import EkkoDaemon, WindowsForegroundObserver
+from maverick.ekko_daemon import EkkoDaemon, GuidedJsonlObserver, WindowsForegroundObserver
 from maverick.work_discovery import CapturePolicy, ObservedActivity, SessionState
 from maverick.work_discovery_store import CollectorLeaseError, WorkDiscoveryStore
 
@@ -92,6 +92,68 @@ def test_daemon_attaches_to_dashboard_approved_session_and_persists_event(
     assert attached.session_id == approved.session_id
     assert inserted is True
     assert store.list_events()[0].session_id == approved.session_id
+
+
+def test_guided_rejected_lines_and_eof_do_not_sleep(tmp_path, monkeypatch):
+    from dataclasses import replace
+
+    store = _store(tmp_path, monkeypatch)
+    policy = replace(_policy(), allowed_apps=frozenset({"excel"}))
+    store.enroll(policy)
+    observer = GuidedJsonlObserver.from_text(
+        '{"app":"chrome","action":"switch"}\n' * 4
+        + '{"app":"excel","action":"switch"}\n'
+    )
+    daemon = _daemon(store, observer, policy)
+    sleeps = []
+    daemon._sleep = sleeps.append
+    assert daemon.run() == 1
+    assert daemon.blocked_events == 4
+    assert observer.exhausted
+    assert sleeps == []
+    daemon.stop()
+
+
+def test_guided_follow_idle_poll_still_sleeps(tmp_path, monkeypatch):
+    store = _store(tmp_path, monkeypatch)
+    policy = _policy()
+    store.enroll(policy)
+    path = tmp_path / "events.jsonl"
+    path.write_text("")
+    observer = GuidedJsonlObserver(path, follow=True)
+    daemon = _daemon(store, observer, policy)
+    sleeps = []
+    daemon._sleep = sleeps.append
+    daemon.run(stop_when=lambda: len(sleeps) == 1, max_idle_sleep=0.25)
+    assert sleeps == [0.25]
+    daemon.stop()
+    observer.close()
+
+
+def test_guided_line_limit_includes_blank_lines():
+    observer = GuidedJsonlObserver.from_text('\n\n{"app":"excel","action":"switch"}\n')
+    observer.max_lines = 2
+    assert observer.observe() is None
+    assert observer.line_number == 2
+    assert not observer.exhausted
+    observer.close()
+
+
+def test_paused_guided_import_waits_without_consuming_input(tmp_path, monkeypatch):
+    store = _store(tmp_path, monkeypatch)
+    policy = _policy()
+    store.enroll(policy)
+    observer = GuidedJsonlObserver.from_text('{"app":"excel","action":"switch"}\n')
+    daemon = _daemon(store, observer, policy)
+    session = daemon.start()
+    store.transition_session(session.session_id, SessionState.PAUSED)
+    sleeps = []
+    daemon._sleep = sleeps.append
+    daemon.run(stop_when=lambda: bool(sleeps), max_idle_sleep=0.25)
+    assert sleeps == [0.25]
+    assert observer.line_number == 0
+    daemon.stop()
+    observer.close()
 
 
 def test_concurrent_dashboard_pause_and_stop_prevent_capture(tmp_path, monkeypatch):

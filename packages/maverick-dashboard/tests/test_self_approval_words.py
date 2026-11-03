@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-ORIGIN = {"Origin": "http://testserver"}
+ORIGIN = {"Origin": "http://127.0.0.1"}
 SAM = "user:sam.lee@northwind.example"
 TEMPLATES = Path(__file__).resolve().parents[1] / "maverick_dashboard" / "templates"
 
@@ -32,13 +32,14 @@ def env(monkeypatch, tmp_path):
     world = WorldModel(tmp_path / "world.db")
     from maverick_dashboard.app import app
 
-    yield TestClient(app, headers=ORIGIN), world
+    yield TestClient(app, base_url="http://127.0.0.1", headers=ORIGIN), world
     world.close()
 
 
 def _as(monkeypatch, principal):
-    from maverick_dashboard import api, auth, content_access
+    from maverick_dashboard import api, auth, content_access, rbac
 
+    rbac.set_role(principal, "operator")
     monkeypatch.setattr(api, "_supervisor", lambda request: principal)
     monkeypatch.setattr(auth, "caller_principal", lambda request: principal)
     # The requester owns the request's content, so they may read the card.

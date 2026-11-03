@@ -28,7 +28,7 @@ def page_client() -> TestClient:
             {"consent_experiments_enabled": enabled},
         )
 
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def test_page_renders_full_governed_experiment_workflow(page_client: TestClient) -> None:

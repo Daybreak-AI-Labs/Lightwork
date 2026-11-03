@@ -1,8 +1,8 @@
 """The Rust ``maverick_native`` secret/PII scanners must equal pure Python.
 
 ``rust/mvk-scan`` ports ``secret_detector.scan`` and ``pii_detector.scan`` (the
-latter needs ``fancy-regex`` for the phone/SSN look-around the ``regex`` crate
-can't do) so the SAME detection logic can run in the TypeScript / edge runtimes,
+latter checks phone/SSN boundaries outside its linear regex candidates)
+so the SAME detection logic can run in the TypeScript / edge runtimes,
 which have no ``re``. The native port is deliberately NOT wired into this Python
 hot path -- CPython's compiled ``re`` is faster here (see rust/README.md) -- so
 these tests compare the native extension's output DIRECTLY against the
@@ -162,3 +162,15 @@ def test_pure_python_sanity_unchanged():
 
     red2, m2 = pd.redact("ssn 123-45-6789 email a@b.com")
     assert "[REDACTED:ssn]" in red2 and "[REDACTED:email]" in red2
+
+
+@pytest.mark.skipif(not NATIVE, reason="native scanner not built")
+def test_native_large_input_and_overlapping_boundary_candidates():
+    token = "lw-rest-" + "a" * 24
+    data = ("ordinary " * 140_000) + " " + token + " 123-45-6789"
+    assert _secret(data) == _secret_py(data)
+    assert _pii(data) == _pii_py(data)
+    for text in ("١(555) 123-4567", "²(555) 123-4567",
+                 "x" + token, token + "_suffix", "666-12-3456"):
+        assert _secret(text) == _secret_py(text)
+        assert _pii(text) == _pii_py(text)

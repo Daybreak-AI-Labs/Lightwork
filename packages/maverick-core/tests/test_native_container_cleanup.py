@@ -13,6 +13,28 @@ _IMAGE = os.environ.get("MAVERICK_TEST_CLEANUP_IMAGE") or os.environ.get("MAVERI
 pytestmark = pytest.mark.skipif(not _IMAGE, reason="requires an explicitly selected local container image")
 
 
+@pytest.fixture(autouse=True)
+def _separate_container_test_home(tmp_path, monkeypatch, _isolate_dynamic_maverick_home):
+    operator_home = tmp_path.parent / (tmp_path.name + "-operator")
+    monkeypatch.setenv("HOME", str(operator_home))
+    monkeypatch.setenv("USERPROFILE", str(operator_home))
+    monkeypatch.setenv("MAVERICK_HOME", str(operator_home / ".maverick"))
+
+
+def test_real_document_stage_mount_is_limited_to_the_private_job(tmp_path, monkeypatch):
+    from maverick import config
+    from maverick.tools import document_processing
+
+    monkeypatch.setattr(config, "load_config", lambda: {"documents": {
+        "engine_image": _IMAGE, "timeout": 60,
+    }})
+    backend = DockerBackend(workdir=tmp_path, image=_IMAGE)
+    with document_processing._worker(backend, {"operation": "ocr"}) as (stage, worker):
+        result = worker.exec("test -f /workspace/engine.py && test -f /workspace/request.json && printf ready", timeout=30)
+        assert result.ok and result.stdout == "ready", result.stderr
+    assert not stage.exists()
+
+
 @pytest.mark.parametrize("reuse", [False, True], ids=["fresh-container", "reused-container"])
 def test_real_timed_out_container_is_removed_and_not_reused(tmp_path, reuse, monkeypatch):
     # Resolve an already present image before any run. This test does not build

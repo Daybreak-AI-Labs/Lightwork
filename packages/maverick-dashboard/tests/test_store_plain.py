@@ -24,7 +24,7 @@ def _isolate(tmp_path, monkeypatch):
 def _client() -> TestClient:
     from maverick_dashboard.app import app
 
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def _visible(html: str) -> str:
@@ -70,7 +70,7 @@ def test_admin_adds_removes_and_resets_catalogs():
 def test_catalog_changes_need_same_origin():
     from maverick_dashboard.app import app
 
-    r = TestClient(app, headers={"Origin": "https://evil.example"}).post(
+    r = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "https://evil.example"}).post(
         "/store/catalogs", data={"action": "reset"}, follow_redirects=False)
     assert r.status_code == 403
 
@@ -84,7 +84,8 @@ def test_add_button_is_disabled_without_the_install_opt_in(monkeypatch):
     monkeypatch.setattr("maverick.catalog.load_catalog", lambda kind, **_k: [entry])
     monkeypatch.delenv("MAVERICK_ALLOW_SKILL_INSTALL", raising=False)
     html = _client().get("/store").text
-    assert "Weekly report" in html and "Checked author" in html
+    assert "Weekly report" in html and "Checked author" not in html
+    assert "catalog-provided" in html
     assert re.search(r'aria-label="Add to workspace: Weekly report"\s+disabled', html)
     assert "switched off on this server" in html
 

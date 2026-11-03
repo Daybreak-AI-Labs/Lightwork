@@ -36,7 +36,7 @@ def _isolated(tmp_path, monkeypatch):
 def _page(path: str) -> str:
     from maverick_dashboard.app import app
 
-    response = TestClient(app, headers={"Origin": "http://testserver"}).get(path)
+    response = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}).get(path)
     assert response.status_code == 200, path
     return response.text
 

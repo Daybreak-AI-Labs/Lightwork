@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 
 def _client(host="testclient"):
     from maverick_dashboard.app import app
-    return TestClient(app, headers={"Origin": "http://testserver"}, client=(host, 50000))
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}, client=(host, 50000))
 
 
 def _isolate(monkeypatch, tmp_path, triggers="1"):
@@ -81,20 +81,44 @@ def test_new_form_api_mints_a_server_secret_and_returns_the_link(monkeypatch, tm
     assert client.post(f"/form/{token}", json={"message": "Hello"}).status_code == 201
 
 
-def test_static_token_can_manage_new_and_legacy_local_forms(monkeypatch, tmp_path):
+def test_static_token_cannot_create_unrunnable_forms_but_can_remove_legacy(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     _register_form("legacy-link", name="legacy")
     monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "static-form-operator-token")  # pragma: allowlist secret
     from maverick_dashboard import event_triggers_store
 
     client = _client()
-    auth = {"Authorization": "Bearer static-form-operator-token"}
+    auth = {"Authorization": "Bearer static-form-operator-token"}  # pragma: allowlist secret
+    refused = client.post("/api/v1/event-triggers", headers=auth, json={
+        "name": "new-intake", "source": "form", "flow": "published-form-flow", "config": {},
+    })
+    assert refused.status_code == 409
+    assert "named account" in refused.json()["detail"]
+    assert event_triggers_store.get_trigger("new-intake", tenant="") is None
+    changed = client.post("/api/v1/event-triggers", headers=auth, json={
+        "name": "legacy", "source": "form", "flow": "published-form-flow", "config": {},
+    })
+    assert changed.status_code == 409
+    assert event_triggers_store.get_trigger("legacy", tenant="")["owner"] == ""
+    listed = client.get("/api/v1/event-triggers", headers=auth)
+    assert listed.status_code == 200
+    assert any(row["name"] == "legacy" for row in listed.json()["triggers"])
+    assert client.delete("/api/v1/event-triggers/legacy", headers=auth).status_code == 200
+
+
+def test_local_operator_manages_new_and_legacy_local_forms(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _register_form("legacy-link", name="legacy")
+    from maverick_dashboard import event_triggers_store
+
+    client = _client()
+    auth = {}
     created = client.post("/api/v1/event-triggers", headers=auth, json={
         "name": "new-intake", "source": "form", "flow": "published-form-flow", "config": {},
     })
     assert created.status_code == 201
     original_token = created.json()["config"]["token"]
-    assert event_triggers_store.get_trigger("new-intake", tenant="")["owner"] == "user:local"
+    assert event_triggers_store.get_trigger("new-intake", tenant="")["owner"] == ""
 
     listed = client.get("/api/v1/event-triggers", headers=auth)
     assert listed.status_code == 200
@@ -120,7 +144,7 @@ def test_static_token_can_manage_new_and_legacy_local_forms(monkeypatch, tmp_pat
     assert polled.json()["polled"] == 1
     history = client.get("/api/v1/event-triggers/history?name=new-intake", headers=auth)
     assert history.status_code == 200
-    assert history.json()["history"][0]["owner"] == "user:local"
+    assert history.json()["history"][0]["owner"] == ""
 
     legacy_rotated = client.post(
         "/api/v1/event-triggers/legacy/rotate-form-link", headers=auth,
@@ -132,7 +156,7 @@ def test_static_token_can_manage_new_and_legacy_local_forms(monkeypatch, tmp_pat
     })
     assert legacy_updated.status_code == 201
     assert legacy_updated.json()["config"]["token"] == legacy_rotated.json()["config"]["token"]
-    assert event_triggers_store.get_trigger("legacy", tenant="")["owner"] == "user:local"
+    assert event_triggers_store.get_trigger("legacy", tenant="")["owner"] == ""
     assert client.delete("/api/v1/event-triggers/new-intake", headers=auth).status_code == 200
     assert client.delete("/api/v1/event-triggers/legacy", headers=auth).status_code == 200
 

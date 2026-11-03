@@ -249,7 +249,7 @@ def test_shutdown_refuses_new_http_work_and_readiness_but_keeps_liveness(monkeyp
     from maverick_dashboard.app import app
 
     monkeypatch.setattr(app.state, "lifecycle_supervisor", SimpleNamespace(phase="stopping"), raising=False)
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     assert client.get("/readyz").status_code == 503
     assert client.get("/api/v1/facts").status_code == 503
     assert client.get("/livez").status_code == 200
@@ -259,7 +259,7 @@ def test_actual_composed_dashboard_registers_all_default_components():
     from fastapi.testclient import TestClient
     from maverick_dashboard.app import app
 
-    with TestClient(app, headers={"Origin": "http://testserver"}):
+    with TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}):
         supervisor = app.state.lifecycle_supervisor
         assert set(supervisor.components) == {
             "automation", "orphan_recovery", "security", "finance", "red_team", "shield_updates", "ai_inventory",
@@ -288,7 +288,7 @@ def test_optional_drop_lifespan_joins_the_same_supervisor(monkeypatch, tmp_path)
     monkeypatch.setattr(app.state, "privacy_drop_management_scheduler", None, raising=False)
     runtime = DROPManagedMaintenanceScheduler(tmp_path / "drop.sqlite3", cycle_runner=lambda: None, enabled=False)
     attach_drop_managed_scheduler(app, runtime)
-    with TestClient(app, headers={"Origin": "http://testserver"}):
+    with TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}):
         supervisor = app.state.lifecycle_supervisor
         assert "drop_management" in supervisor.components
     assert supervisor.phase == "stopped" and not supervisor.errors

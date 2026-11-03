@@ -76,7 +76,7 @@ def _client(monkeypatch, *, ready: bool = True):
         return await call_next(request)
 
     app.include_router(api.create_consent_web_publish_settings_router(deps))
-    return TestClient(app, headers={"Origin": "http://testserver"}), service
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}), service
 
 
 def test_status_is_candid_and_store_free(monkeypatch) -> None:
@@ -199,7 +199,7 @@ def test_public_router_returns_only_validated_projection(monkeypatch) -> None:
     )
     app = FastAPI()
     app.include_router(api.create_consent_web_publish_settings_public_router(deps))
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     response = client.get("/consent/publish-settings/website-main")
     assert response.status_code == 200
     assert response.json() == projection
@@ -222,7 +222,7 @@ def test_public_router_rejects_expanded_or_nonce_bearing_projection(monkeypatch)
     )
     app = FastAPI()
     app.include_router(api.create_consent_web_publish_settings_public_router(deps))
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     response = client.get("/consent/publish-settings/website-main")
     assert response.status_code == 503
     assert "must-not-escape" not in response.text

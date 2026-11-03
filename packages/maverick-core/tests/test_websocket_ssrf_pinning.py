@@ -11,8 +11,6 @@ assert the SSRF-critical contract.
 from __future__ import annotations
 
 import asyncio
-import sys
-import types
 
 import maverick.tools.websocket_tool as wst
 
@@ -32,20 +30,17 @@ class _FakeWS:
 
 
 def _install_fake_websockets(captured: dict):
-    mod = types.ModuleType("websockets")
-
     def connect(url, **kwargs):
         captured["url"] = url
         captured["kwargs"] = kwargs
         return _FakeWS()
 
-    mod.connect = connect
-    return mod
+    return connect
 
 
 def test_connects_to_pinned_ip_not_hostname(monkeypatch):
     captured: dict = {}
-    monkeypatch.setitem(sys.modules, "websockets", _install_fake_websockets(captured))
+    monkeypatch.setattr(wst, "_safe_connector", lambda: _install_fake_websockets(captured))
     # The validated/pinned IP the resolver returns.
     monkeypatch.setattr(wst, "urlparse", wst.urlparse)  # keep real urlparse
     import maverick.tools._ssrf as ssrf
@@ -62,7 +57,7 @@ def test_connects_to_pinned_ip_not_hostname(monkeypatch):
 
 def test_rebind_to_private_ip_is_refused(monkeypatch):
     captured: dict = {}
-    monkeypatch.setitem(sys.modules, "websockets", _install_fake_websockets(captured))
+    monkeypatch.setattr(wst, "_safe_connector", lambda: _install_fake_websockets(captured))
     import maverick.tools._ssrf as ssrf
 
     def _blocked(host):
@@ -76,7 +71,7 @@ def test_rebind_to_private_ip_is_refused(monkeypatch):
 
 def test_default_port_for_ws(monkeypatch):
     captured: dict = {}
-    monkeypatch.setitem(sys.modules, "websockets", _install_fake_websockets(captured))
+    monkeypatch.setattr(wst, "_safe_connector", lambda: _install_fake_websockets(captured))
     import maverick.tools._ssrf as ssrf
     monkeypatch.setattr(ssrf, "resolve_pinned_ip", lambda host: "203.0.113.7")
     # This test exercises default-port selection, not the SSRF guard. The host

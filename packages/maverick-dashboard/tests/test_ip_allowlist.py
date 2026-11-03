@@ -89,14 +89,14 @@ def test_forwarded_chain_is_walked_past_trusted_hops(tmp_path):
 
 
 def test_middleware_lets_everyone_in_when_the_list_is_empty():
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     assert client.get("/healthz").status_code in {200, 503}
     assert client.get("/api/v1/sessions").status_code == 200
 
 
 def test_middleware_blocks_an_address_outside_the_list(monkeypatch):
     monkeypatch.setenv("MAVERICK_IP_ALLOWLIST", "10.0.0.0/8")
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     api = client.get("/api/v1/sessions")
     assert api.status_code == 403
     assert api.json()["detail"] == ip_allowlist.BLOCKED_MESSAGE
@@ -112,7 +112,7 @@ def test_middleware_blocks_an_address_outside_the_list(monkeypatch):
 
 def test_middleware_allows_a_listed_address(monkeypatch):
     monkeypatch.setenv("MAVERICK_IP_ALLOWLIST", "127.0.0.1/32, 10.0.0.0/8")
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     assert client.get("/api/v1/sessions").status_code == 200
 
 
@@ -127,19 +127,19 @@ def test_installation_list_also_gates_the_websocket(monkeypatch):
     gid = app_mod._world().create_goal("t", "d")
     app_mod._world().set_goal_status(gid, "done", result="ok")
     monkeypatch.setenv("MAVERICK_IP_ALLOWLIST", "10.0.0.0/8")
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     assert client.get("/api/v1/sessions").status_code == 403
     with pytest.raises(WebSocketDisconnect):
-        with client.websocket_connect(f"/ws/v1/runs/{gid}/events") as ws:
+        with client.websocket_connect("ws://127.0.0.1" + f"/ws/v1/runs/{gid}/events") as ws:
             ws.receive_json()
     monkeypatch.setenv("MAVERICK_IP_ALLOWLIST", "127.0.0.0/8")
-    with client.websocket_connect(f"/ws/v1/runs/{gid}/events") as ws:
+    with client.websocket_connect("ws://127.0.0.1" + f"/ws/v1/runs/{gid}/events") as ws:
         assert ws.receive_json()["kind"] == "status"
 
 
 def test_config_list_is_read_and_env_wins(tmp_path, monkeypatch):
     _write_config(tmp_path, "[auth.ip_allowlist]\ncidrs = [\"192.0.2.0/24\"]\n")
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     assert client.get("/api/v1/sessions").status_code == 403
     monkeypatch.setenv("MAVERICK_IP_ALLOWLIST", "127.0.0.0/8")
     assert client.get("/api/v1/sessions").status_code == 200
@@ -300,7 +300,7 @@ def test_saving_an_unparsable_entry_is_refused():
 
 
 def test_lockout_rail_runs_through_the_settings_api():
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     revision = client.get("/api/v1/settings/catalog").json()["revision"]
     resp = client.post("/api/v1/settings/catalog", json={"expected_revision": revision, "changes": [
         {"id": "auth.ip_allowlist.cidrs", "value": ["10.0.0.0/8"]}]})

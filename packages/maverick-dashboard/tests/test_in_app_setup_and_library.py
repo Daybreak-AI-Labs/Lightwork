@@ -20,7 +20,7 @@ def client(monkeypatch, tmp_path):
 
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     dashboard._world_cache.clear()
-    return TestClient(dashboard.app, headers={"Origin": "http://testserver"})
+    return TestClient(dashboard.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def test_initial_settings_create_once_and_preserve_private_configuration(client, tmp_path):

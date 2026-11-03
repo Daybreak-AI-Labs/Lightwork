@@ -23,7 +23,7 @@ def isolated(monkeypatch, tmp_path):
         runs.append((goal_id, args, kwargs))
 
     monkeypatch.setattr("maverick.runner.run_goal_in_background_async", run)
-    client = TestClient(dashboard.app, headers={"Origin": "http://testserver"},
+    client = TestClient(dashboard.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"},
                         raise_server_exceptions=False)
     yield client, world, runs
     world.close()

@@ -219,7 +219,7 @@ def environment(tmp_path, monkeypatch):
     from maverick_dashboard import product_operations
 
     app.include_router(product_operations.router)
-    with TestClient(app, headers={"Origin": "http://testserver"}) as client:
+    with TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}) as client:
         yield Environment(client, worlds, features, memberships, active, suites)
     for world in worlds.values():
         world.close()

@@ -78,6 +78,61 @@ def test_verified_handoff_round_trips_and_returns_the_grant():
 
 
 @crypto
+def test_redelegation_preserves_verified_handoff_scope(monkeypatch):
+    from maverick.agent import Agent
+    from maverick.swarm import SwarmContext
+    from maverick.tools.agent_bus_tool import delegate_to_agent
+
+    ctx = SwarmContext(None, None, None, None, None, 7, 5, False)
+    for name in ("lead", "alice", "bob"):
+        ctx.register_bus_agent(name)
+    authority = HandoffAuthority.for_run()
+    monkeypatch.setattr("maverick.bus_handoff.authority_for", lambda _: authority)
+    expires = time.time() + 300
+    narrow = Capability(principal="alice", allow_tools=frozenset({"read_file"}),
+                        allow_paths=frozenset({"allowed/*"}),
+                        allow_hosts=frozenset({"example.com"}), expires_at=expires,
+                        max_risk="low", ancestors=("lead",))
+    send_handoff(authority, sender="lead", recipient="alice", grant=narrow,
+                 task="read", namespace=ctx.bus_namespace)
+    received = receive_handoff(authority, "alice", namespace=ctx.bus_namespace)
+    assert received and received.ok
+
+    class Sender:
+        _effective_capability = Agent._effective_capability
+        name = "alice"
+        capability = Capability(principal="alice", allow_tools=frozenset({"read_file", "shell"}))
+        _handoff_capability = received.grant
+
+    sender = Sender()
+    sender.ctx = ctx
+    tool = delegate_to_agent(sender)
+    assert tool.fn({"to_id": "bob", "task": "shell", "tools": ["shell"]}).startswith("ERROR:")
+    assert agent_bus.peek("bob", namespace=ctx.bus_namespace) == 0
+    for tools in (["read_file"], []):
+        assert "SIGNED handoff" in tool.fn({"to_id": "bob", "task": "read", "tools": tools})
+        delivery = receive_handoff(authority, "bob", namespace=ctx.bus_namespace)
+        assert delivery and delivery.ok
+        grant = delivery.grant
+        assert grant.permits("read_file") and not grant.permits("shell")
+        assert grant.allow_paths == frozenset({"allowed/*"})
+        assert grant.allow_hosts == frozenset({"example.com"})
+        assert grant.expires_at == expires
+        assert grant.max_risk == "low"
+        assert "lead" in grant.revocation_principals()
+
+    sender._handoff_capability = Capability(principal="alice", expires_at=time.time() - 1)
+    assert tool.fn({"to_id": "bob", "task": "read"}).startswith("ERROR:")
+    sender._handoff_capability = Capability(principal="alice", deny_tools=frozenset({"delegate_to_agent"}))
+    assert tool.fn({"to_id": "bob", "task": "read"}).startswith("ERROR:")
+    assert agent_bus.peek("bob", namespace=ctx.bus_namespace) == 0
+    sender._handoff_capability = None
+    assert "SIGNED handoff" in tool.fn({"to_id": "bob", "task": "shell", "tools": ["shell"]})
+    delivery = receive_handoff(authority, "bob", namespace=ctx.bus_namespace)
+    assert delivery and delivery.ok and delivery.grant.permits("shell")
+
+
+@crypto
 def test_signed_handoff_redirected_to_another_inbox_is_rejected():
     """A valid signature for worker A is not authority for worker B."""
     auth = HandoffAuthority.for_run()

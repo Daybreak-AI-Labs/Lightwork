@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from contextlib import closing, nullcontext
+from types import SimpleNamespace
 
 import pytest
 from maverick.query_results import MAX_OUTPUT, QueryResult, render_effect
@@ -31,7 +32,7 @@ def query(request, monkeypatch, tmp_path):
 
     def run(statement, *, limit=50, write=False, response_format="json"):
         if request.param == "sqlite":
-            return sql_query().fn({"database": str(path), "query": statement, "max_rows": limit,
+            return sql_query(SimpleNamespace(workdir=tmp_path)).fn({"database": str(path), "query": statement, "max_rows": limit,
                                    "read_only": not write, "response_format": response_format})
         pytest.importorskip("sqlalchemy")
         return database_tool().fn({"op": "query", "sql": statement, "limit": limit,

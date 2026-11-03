@@ -9,7 +9,7 @@ import re
 import pytest
 from fastapi.testclient import TestClient
 
-ORIGIN = {"Origin": "http://testserver"}
+ORIGIN = {"Origin": "http://127.0.0.1"}
 
 # Words a person must never see on these pages (config keys, env vars, CLI,
 # raw ids and developer terms).
@@ -46,7 +46,7 @@ def client(tmp_path, monkeypatch):
     bound_client.reset_client_cache()
     from maverick_dashboard import app as dash_app
     dash_app._world_cache.clear()
-    yield TestClient(dash_app.app, headers=ORIGIN)
+    yield TestClient(dash_app.app, base_url="http://127.0.0.1", headers=ORIGIN)
     config.reset_config_cache()
     # The process-wide client binding was read under this test's organisation;
     # forget it so later tests resolve their own (unbound) installation.
@@ -205,7 +205,7 @@ def test_queue_lists_stopped_jobs_and_refuses_the_old_resume_shortcut(client, mo
     assert stopped["what"] == "Run a task" and stopped["needs_decision"] is True
     # A stale view (wrong attempt count) is refused, never resumed blind.
     assert client.post(f"/api/v1/admin/system/queue/{job_id}/resume", json={"attempts": 1}).status_code == 409
-    assert TestClient(client.app).post(f"/api/v1/admin/system/queue/{job_id}/resume",
+    assert TestClient(client.app, base_url="http://127.0.0.1").post(f"/api/v1/admin/system/queue/{job_id}/resume",
                                        json={"attempts": 2}).status_code == 403
 
 
@@ -479,7 +479,7 @@ def test_organisation_data_download_and_erase(client, monkeypatch, tmp_path, aud
         assert exported.status_code == 200, exported.text
         assert "attachment" in exported.headers["content-disposition"] and exported.content
         assert client.get("/api/v1/admin/system/client/export/" + "0" * 32).status_code == 404
-        assert TestClient(client.app).post("/api/v1/admin/system/client/export").status_code == 403
+        assert TestClient(client.app, base_url="http://127.0.0.1").post("/api/v1/admin/system/client/export").status_code == 403
         preview = client.get("/api/v1/admin/system/client/erase/preview").json()
         assert preview["organisation"] == "acme" and preview["files"] >= 1
         assert preview["keeps_activity_record"] is True
@@ -584,7 +584,7 @@ def test_tidy_up_previews_then_removes_in_this_workspace_only(client, monkeypatc
     assert client.get("/api/v1/admin/system/cleanup/preview?days=90&activity_days=30").json()["conversations"] == 0
     rows = [row for row in audit_rows if row.get("verb") == "records_cleanup"]
     assert len(rows) == 1 and rows[0]["actor"] and rows[0]["conversations"] == 1
-    assert TestClient(client.app).post("/api/v1/admin/system/cleanup",
+    assert TestClient(client.app, base_url="http://127.0.0.1").post("/api/v1/admin/system/cleanup",
                                        json={"days": 90, "activity_days": 30, "confirm": True}).status_code == 403
     _as_viewer(monkeypatch)
     assert client.get("/api/v1/admin/system/cleanup/preview?days=90&activity_days=30").status_code == 403

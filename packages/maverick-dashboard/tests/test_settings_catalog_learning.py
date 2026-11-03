@@ -19,7 +19,7 @@ from maverick_dashboard.app import app
 
 from test_support.settings_pages import save_catalog
 
-client = TestClient(app, headers={"Origin": "http://testserver"})
+client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 API = "/api/v1/settings/catalog"
 
 ROWS = learning_rows.entries(catalog.Setting, catalog.Column, catalog.Column)
@@ -31,7 +31,6 @@ SAMPLE: dict[str, object] = {
     "self_improvement.prm_api_key": "prm-key-do-not-show-123",  # pragma: allowlist secret
     "self_improvement.prm_path": "/srv/lightwork/prm",
     "self_harness.holdout_container_image": "sha256:" + "a" * 64,
-    "self_improvement.approver_keys_dir": "/srv/lightwork/approvers",
     "flows.action_evidence_issuer": "lightwork.prod",
     "flows.action_evidence_revoked_keys": ["0123456789abcdef"],
     "self_modify.editable_paths": ["packages/example/*.py"],
@@ -42,7 +41,6 @@ SAMPLE: dict[str, object] = {
     "ai_benchmark_exchange.coordinator.origin": "https://bench.example.org",
     "paper_review.playbook_path": "/srv/lightwork/playbook.json",
     "dreaming.trusted_insight_pubkeys": [KEY_HEX],
-    "self_improvement.approver_keys": [KEY_HEX],
 }
 
 INVALID: dict[str, list[object]] = {
@@ -51,7 +49,6 @@ INVALID: dict[str, list[object]] = {
     "self_harness.eval_corpus": ["corpus.json", "/srv/../../etc"],
     "self_harness.holdout_ledger": ["~/../x"],
     "self_harness.holdout_container_image": ["sha256:xyz", "python:3.12"],
-    "self_improvement.approver_keys_dir": ["keys"],
     "flows.action_evidence_issuer": ["https://issuer.example", "-bad"],
     "flows.action_evidence_revoked_keys": [["XYZ"], ["0123456789ABCDEF"]],
     "self_modify.editable_paths": [["/etc/passwd"], ["../outside/*.py"]],
@@ -63,7 +60,6 @@ INVALID: dict[str, list[object]] = {
         "http://bench.example.org", "https://bench.example.org/submit", "https://localhost"],
     "paper_review.playbook_path": ["playbook.json"],
     "dreaming.trusted_insight_pubkeys": [["not a key"]],
-    "self_improvement.approver_keys": [["abc"]],
 }
 
 
@@ -198,7 +194,7 @@ def test_defaults_match_the_kernel():
         assert catalog.BY_ID[f"self_harness.{key}"].default == harness[key], key
     improvement = config.get_self_improvement()
     for key in ("max_auto_rung", "min_improvement", "evaluator_eps",
-                "require_signed_approval", "capture", "causal_promotion"):
+                "capture", "causal_promotion"):
         assert catalog.BY_ID[f"self_improvement.{key}"].default == improvement[key], key
     flows = config.get_flows()
     for setting in ROWS:

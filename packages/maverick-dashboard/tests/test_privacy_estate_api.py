@@ -9,7 +9,28 @@ import pytest
 from fastapi.testclient import TestClient
 from maverick_dashboard.app import app
 
-client = TestClient(app, headers={"Origin": "http://testserver"})
+client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
+
+
+def test_dsar_response_rate_is_separate_per_client(monkeypatch):
+    import importlib
+    from types import SimpleNamespace
+
+    from fastapi import HTTPException
+    from maverick_dashboard import ip_allowlist
+
+    app_module = importlib.import_module("maverick_dashboard.app")
+    app_module._dsar_response_times.clear()
+    monkeypatch.setattr(ip_allowlist, "client_ip", lambda request: request.client.host)
+    first = SimpleNamespace(client=SimpleNamespace(host="192.0.2.1"))
+    second = SimpleNamespace(client=SimpleNamespace(host="192.0.2.2"))
+    for _ in range(30):
+        app_module._check_dsar_response_rate(first)
+    with pytest.raises(HTTPException) as denied:
+        app_module._check_dsar_response_rate(first)
+    assert denied.value.status_code == 429
+    app_module._check_dsar_response_rate(second)
+    app_module._dsar_response_times.clear()
 
 _CONFIG = (
     "[vendor_management]\nenable = true\n\n"

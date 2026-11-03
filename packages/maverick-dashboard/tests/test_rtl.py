@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from maverick_dashboard import i18n
 from maverick_dashboard.app import app
 
-client = TestClient(app)
+client = TestClient(app, base_url="http://127.0.0.1")
 
 
 def test_rtl_lang_set_covers_the_four_scripts():
@@ -31,7 +31,7 @@ def test_direction_flips_once_the_body_is_translated(monkeypatch):
     """``dir`` follows the body language: when a right-to-left language enters
     CONTENT_LANGS (its templates exist), the page flips with it."""
     monkeypatch.setattr(i18n, "CONTENT_LANGS", frozenset({"en", "ar"}))
-    fresh = TestClient(app)
+    fresh = TestClient(app, base_url="http://127.0.0.1")
     r = fresh.get("/goals", params={"lang": "ar"})
     assert '<html lang="ar" dir="rtl">' in r.text
     r2 = fresh.get("/goals", params={"lang": "fr"})
@@ -39,7 +39,7 @@ def test_direction_flips_once_the_body_is_translated(monkeypatch):
 
 
 def test_ltr_languages_keep_dir_ltr():
-    fresh = TestClient(app)
+    fresh = TestClient(app, base_url="http://127.0.0.1")
     r = fresh.get("/goals", params={"lang": "fr"})
     assert 'lang="fr"' in r.text and 'dir="ltr"' in r.text
     r2 = fresh.get("/goals", params={"lang": "en"})
@@ -47,7 +47,7 @@ def test_ltr_languages_keep_dir_ltr():
 
 
 def test_rtl_cookie_persists_the_chrome_language_not_the_direction():
-    fresh = TestClient(app)
+    fresh = TestClient(app, base_url="http://127.0.0.1")
     fresh.get("/", params={"lang": "ar"})  # sets the cookie
     r = fresh.get("/goals")                # no param: cookie drives the chrome
     assert 'lang="ar"' in r.text           # the translated chrome strings

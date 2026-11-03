@@ -221,11 +221,14 @@ class TestBaselineSolver:
 # --- stub-mode end-to-end -----------------------------------------------------
 
 class TestStubEndToEnd:
-    def test_full_chain_promotes(self, tmp_path):
+    def test_full_chain_promotes(self, tmp_path, monkeypatch):
         pytest.importorskip("cryptography")  # Ed25519 signing
         drv = _load_driver()
         manifest, solver_dir = _seed_corpus(tmp_path)
         keys = _write_keys(tmp_path)
+        # Test-only simulated operator, pinned as a startup trust root.
+        monkeypatch.setattr("maverick._STARTUP_APPROVER_KEYS",
+                            (keys / "operator.pub").read_bytes().hex())
         ledger = tmp_path / "ledger.json"
 
         args = drv._parse_args([

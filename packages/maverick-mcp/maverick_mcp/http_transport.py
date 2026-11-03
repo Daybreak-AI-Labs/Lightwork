@@ -264,6 +264,34 @@ _RATE_HITS: dict[str, deque] = {}
 # distinct IPs/tokens can't grow this map without bound. When exceeded, idle
 # buckets (no hits inside the window) are swept; memory stays ~O(active callers).
 _RATE_MAX_KEYS = 8192
+_AUTH_FAILURE_LOCK = threading.Lock()
+_AUTH_FAILURES: dict[str, deque] = {}
+_AUTH_FAILURE_LIMIT = 30
+
+
+def _auth_failure_budget(host: str, *, failed: bool = False) -> bool:
+    """Bound failed bearer attempts independently of authenticated quotas."""
+    now = time.monotonic()
+    cutoff = now - 60.0
+    with _AUTH_FAILURE_LOCK:
+        events = _AUTH_FAILURES.get(host)
+        if events is None:
+            if len(_AUTH_FAILURES) >= _RATE_MAX_KEYS:
+                for key, hits in list(_AUTH_FAILURES.items()):
+                    if not hits or hits[-1] <= cutoff:
+                        del _AUTH_FAILURES[key]
+                if len(_AUTH_FAILURES) >= _RATE_MAX_KEYS:
+                    return False
+            if not failed:
+                return True
+            events = _AUTH_FAILURES.setdefault(host, deque())
+        while events and events[0] <= cutoff:
+            events.popleft()
+        if len(events) >= _AUTH_FAILURE_LIMIT:
+            return False
+        if failed:
+            events.append(now)
+        return True
 
 
 def _rate_limit_per_min() -> int:
@@ -656,8 +684,15 @@ def build_app(server) -> FastAPI:
                 status_code=403,
                 detail="cross-origin request blocked (set MAVERICK_MCP_ALLOWED_ORIGINS to allow)",
             )
+        # Use the connection peer, never an untrusted forwarded header. An
+        # exhausted failure bucket blocks further guesses before verification.
+        peer = str(getattr(getattr(request, "client", None), "host", None) or "unknown")
+        if not _auth_failure_budget(peer):
+            raise HTTPException(status_code=429, detail="authentication rate limit exceeded",
+                                headers={"Retry-After": "60"})
         caller = _authorization_for_bearer(authorization)
         if caller is None:
+            _auth_failure_budget(peer, failed=True)
             raise HTTPException(status_code=401, detail="invalid bearer")
         caller_identity = caller.caller_identity
         caller_scope = _caller_scope(caller)
@@ -1019,4 +1054,4 @@ def serve(host: str = "127.0.0.1", port: int = 8771) -> None:
             "the streamable HTTP transport"
         ) from e
     log.info("MCP Streamable HTTP transport on http://%s:%d/mcp", host, port)
-    uvicorn.run(app, host=host, port=port, log_level="info")
+    uvicorn.run(app, host=host, port=port, log_level="info", proxy_headers=False)

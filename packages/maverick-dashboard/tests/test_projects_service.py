@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 from maverick_dashboard.app import app
 
-client = TestClient(app, headers={"Origin": "http://testserver"})
+client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def _world(tmp_path, monkeypatch):
@@ -75,9 +75,10 @@ def test_file_goal_under_project_from_goal_page(tmp_path, monkeypatch):
 
 def test_project_filing_and_detail_do_not_expose_other_owners(tmp_path, monkeypatch):
     from maverick_dashboard import app as dashboard
-    from maverick_dashboard import auth
+    from maverick_dashboard import auth, rbac
 
     world = _world(tmp_path, monkeypatch)
+    rbac.set_role("user:alice", "operator")
     monkeypatch.setattr(auth, "_authorization_principal", lambda request: "user:alice")
     monkeypatch.setattr(dashboard, "caller_principal", lambda request: "user:alice")
     monkeypatch.setattr(auth, "is_dashboard_admin", lambda principal: False)

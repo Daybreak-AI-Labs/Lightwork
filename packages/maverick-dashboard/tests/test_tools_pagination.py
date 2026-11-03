@@ -42,7 +42,7 @@ def _prepare(monkeypatch, tmp_path: Path, tools) -> TestClient:
         "base_registry",
         lambda **_kwargs: _Registry(tools),
     )
-    return TestClient(dashboard_app.app)
+    return TestClient(dashboard_app.app, base_url="http://127.0.0.1")
 
 
 def _large_catalog():

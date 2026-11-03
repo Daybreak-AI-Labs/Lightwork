@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 
 def _client():
     from maverick_dashboard.app import app
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def _env(monkeypatch, tmp_path):
@@ -81,7 +81,7 @@ def test_wrong_content_type_returns_422_not_500(monkeypatch, tmp_path):
     # serialize it, turning the 422 into an opaque 500 (user-testing finding).
     _env(monkeypatch, tmp_path)
     from maverick_dashboard.app import app
-    c = TestClient(app, headers={"Origin": "http://testserver"},
+    c = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"},
                    raise_server_exceptions=False)
     r = c.post("/api/v1/goals", content=b"hello world",
                headers={"Content-Type": "text/garbage"})
@@ -93,7 +93,7 @@ def test_overflow_goal_id_returns_404_not_500(monkeypatch, tmp_path):
     # uncaught -> 500. It can't be a real row, so it must be 404.
     _env(monkeypatch, tmp_path)
     from maverick_dashboard.app import app
-    c = TestClient(app, raise_server_exceptions=False)
+    c = TestClient(app, base_url="http://127.0.0.1", raise_server_exceptions=False)
     big = 2 ** 63 + 1
     for path in (f"/api/v1/goals/{big}", f"/api/v1/goals/{big}/events"):
         r = c.get(path)

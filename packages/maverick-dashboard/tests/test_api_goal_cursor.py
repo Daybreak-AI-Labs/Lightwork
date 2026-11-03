@@ -26,7 +26,7 @@ def world(tmp_path, monkeypatch):
 @pytest.fixture
 def client():
     # Like the existing REST tests, do not start service/worker lifespan jobs.
-    instance = TestClient(app, headers={"Origin": "http://testserver", "Authorization": "Bearer alice"})
+    instance = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1", "Authorization": "Bearer alice"})
     try:
         yield instance
     finally:

@@ -34,7 +34,7 @@ def seeded(monkeypatch, tmp_path):
                               payload={"name": "read_file", "model": "model-x",
                                        "resources": [f"reports/q{i}.csv"]}))
     from maverick_dashboard.app import app
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def test_each_seeded_event_is_found_by_its_actor_kind_and_words(seeded):

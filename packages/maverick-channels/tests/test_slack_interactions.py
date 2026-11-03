@@ -74,7 +74,9 @@ def test_button_press_is_acked_decided_and_card_updated(monkeypatch, tmp_path):
     from maverick import channel_identities, slack_interactive
     from maverick.approval_cards import encode_approval_detail
     from maverick.slack_interactive import ACTION_APPROVE, encode_button_value
+    from maverick_dashboard import rbac
 
+    rbac.set_role("user:alice", "operator")
     ch = _channel(monkeypatch, tmp_path)
     card = _card()
     aid = ch._world.create_approval("wire_funds", risk="medium", detail=encode_approval_detail(card))
@@ -102,7 +104,9 @@ def test_critical_button_opens_modal_and_submission_is_answered_in_the_ack(monke
         CONFIRM_VIEW_CALLBACK,
         encode_button_value,
     )
+    from maverick_dashboard import rbac
 
+    rbac.set_role("user:alice", "operator")
     ch = _channel(monkeypatch, tmp_path)
     ch._web.views_open = AsyncMock(return_value={"ok": True})
     card = _card()

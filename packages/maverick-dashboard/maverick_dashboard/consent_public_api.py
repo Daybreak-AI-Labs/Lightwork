@@ -2850,6 +2850,13 @@ def _public_experiment_response(
     }
 
 
+def _browser_rate_key(request: Request, identifier: str) -> str:
+    from .ip_allowlist import client_ip
+
+    client = client_ip(request)
+    return hashlib.sha256(f"{identifier}\0{client or 'unknown'}".encode()).hexdigest()
+
+
 def create_consent_public_router(  # noqa: C901 - closure wires one isolated router
     dependencies: PublicConsentDependencies | None = None,
 ) -> APIRouter:
@@ -2967,7 +2974,7 @@ def create_consent_public_router(  # noqa: C901 - closure wires one isolated rou
             ):
                 raise PublicConsentCredentialError(_AUTH_DETAIL)
             origin_sha = hashlib.sha256(origin.encode("utf-8")).hexdigest()
-            deps.rate_limit(origin_sha, "preflight")
+            deps.rate_limit(_browser_rate_key(request, origin_sha), "preflight")
         except PublicConsentRateLimitExceeded as exc:
             raise HTTPException(
                 status_code=429,
@@ -3023,7 +3030,10 @@ def create_consent_public_router(  # noqa: C901 - closure wires one isolated rou
                 raise PublicConsentCredentialError(_AUTH_DETAIL)
             if binding.client_kind == "browser":
                 request.state.public_consent_allowed_origin = binding.browser_origin
-            deps.rate_limit(binding.credential_sha256, request.url.path)
+            rate_key = (_browser_rate_key(request, binding.credential_sha256)
+                        if binding.client_kind == "browser" else binding.credential_sha256)
+            # Caller-controlled path identifiers must not create fresh buckets.
+            deps.rate_limit(rate_key, "request")
             if session_required:
                 await require_public_session(request, deps, binding)
             await _cache_limited_body(request)

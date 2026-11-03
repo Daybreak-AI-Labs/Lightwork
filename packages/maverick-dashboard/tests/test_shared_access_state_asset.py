@@ -17,7 +17,7 @@ def test_connection_setup_serves_shared_access_state_dependency(tmp_path, monkey
     from maverick import connections
     monkeypatch.setattr(connections, "enabled", lambda: True)  # the form is hidden while off
     try:
-        with TestClient(app, headers={"Origin": "http://testserver"}) as client:
+        with TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}) as client:
             page = client.get("/connections")
             assert page.status_code == 200
             dependency = "/static/lightwork-access-state.js"
@@ -43,7 +43,7 @@ def test_literal_dashboard_assets_have_registered_http_routes():
                 assets.update(pattern.findall(source.read_text(encoding="utf-8")))
     assert "/static/lightwork-access-state.js" in assets
     # No lifespan or app data are needed to retrieve public, immutable source assets.
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     failures = []
     try:
         for asset in sorted(assets):

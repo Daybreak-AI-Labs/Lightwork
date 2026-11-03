@@ -332,3 +332,14 @@ and resolve approver fingerprints only through deployment-owned global trust
 policy. Keep retired approver public keys in that trust history while historical
 receipts must remain verifiable; removing one deliberately revokes its receipts
 as future promotion authority.
+
+Configure approver public keys with `MAVERICK_APPROVER_KEYS` in the trusted
+server startup environment, supplied by a supervisor whose configuration the
+service account cannot write. The value is captured at process startup; restart
+to change it. The service-writable wizard `.env` file is not a trust source.
+Mutable `approver_keys` configuration and files in
+`approver_keys_dir` no longer establish trust: migrate intended keys into that
+environment variable before upgrading. Human-gated promotions always require
+signed approvals, so a deployment without environment keys fails closed. This
+can also prevent existing promotion receipts from being verified until their
+historical approver keys are included.

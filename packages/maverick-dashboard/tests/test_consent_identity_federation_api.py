@@ -362,7 +362,7 @@ def test_narrow_browser_to_tv_pairing_flow_has_no_consumer_selectors(tmp_path):
     app = FastAPI()
     app.include_router(create_consent_public_router(public))
     app.include_router(create_consent_identity_federation_router(deps))
-    http = TestClient(app)
+    http = TestClient(app, base_url="http://127.0.0.1")
     identity_paths = {
         path
         for path in app.openapi()["paths"]

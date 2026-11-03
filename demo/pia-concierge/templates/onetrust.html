@@ -340,11 +340,6 @@ function openRecord(r) {
   // The decision happens HERE, in the tenant the customer already lives in.
   if (r.status === 'Under Review') {
     const bar = el('div', 'otd__decide');
-    const who = document.createElement('input');
-    who.type = 'text';
-    who.placeholder = 'Reviewer name';
-    who.value = 'Privacy Reviewer';
-    who.setAttribute('aria-label', 'Reviewer name');
     const ok = el('button', 'otd__approve', '✓ Approve');
     ok.type = 'button';
     const back = el('button', 'otd__reject', 'Send back');
@@ -355,8 +350,7 @@ function openRecord(r) {
       msg.textContent = action === 'approve' ? 'Approving…' : 'Sending back…';
       fetch('/onetrust/decide', {
         method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({assessment_id: r.assessment_id, decision: action,
-                              reviewer: who.value.trim()}),
+        body: JSON.stringify({assessment_id: r.assessment_id, decision: action}),
       }).then(function (resp) { return resp.json().then(function (j) { return {s: resp.status, j: j}; }); })
         .then(function (x) {
           if (!x.j.ok) {
@@ -371,7 +365,9 @@ function openRecord(r) {
     }
     ok.onclick = function () { decide('approve'); };
     back.onclick = function () { decide('send_back'); };
-    bar.append(who, ok, back, msg);
+    const signIn = el('a', 'otd__signin', 'Sign in to review');
+    signIn.href = '/onetrust/reviewer-session';
+    bar.append(signIn, ok, back, msg);
     b.appendChild(bar);
   }
   dlg.showModal();

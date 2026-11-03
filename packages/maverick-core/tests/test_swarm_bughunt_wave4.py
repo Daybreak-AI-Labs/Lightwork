@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import subprocess
 
+import pytest as _workspace_guard_pytest
+
 
 def _docker_ok(args, **kwargs):
     if args[:2] == ["docker", "version"]:
@@ -74,3 +76,12 @@ class TestCalendarAllDayEvent:
         out = calendar_tool._find_slot({"duration_minutes": 30, "search_days": 1})
         assert isinstance(out, str)
         assert not out.startswith("ERROR")
+
+
+# Container argv tests use a workspace separate from the operator's state.
+@_workspace_guard_pytest.fixture(autouse=True)
+def _separate_container_test_home(tmp_path, monkeypatch, _isolate_dynamic_maverick_home):
+    operator_home = tmp_path.parent / (tmp_path.name + "-operator")
+    monkeypatch.setenv("HOME", str(operator_home))
+    monkeypatch.setenv("USERPROFILE", str(operator_home))
+    monkeypatch.setenv("MAVERICK_HOME", str(operator_home / ".maverick"))

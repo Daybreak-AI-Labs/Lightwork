@@ -18,7 +18,7 @@ from maverick.oidc import VerifiedPrincipal
 
 def _client():
     from maverick_dashboard.app import app
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def _save_team(client, key):
@@ -56,6 +56,10 @@ def _save_fleet(owner=""):
 
 def _enable_oidc_principal_map(monkeypatch):
     import maverick_dashboard.auth as auth
+    from maverick_dashboard import rbac
+
+    rbac.set_role("user:dana", "operator")
+    rbac.set_role("user:eve", "operator")
 
     monkeypatch.setattr(auth, "oidc_enabled", lambda: True)
     monkeypatch.setattr(
@@ -159,7 +163,7 @@ def test_authenticated_owner_can_observe_real_principal_bound_fleet_run(
     client = _client()
     owner_headers = {
         "Authorization": "Bearer dana",
-        "Origin": "http://testserver",
+        "Origin": "http://127.0.0.1",
     }
     response = client.post(
         "/api/v1/fleets/acme/run",

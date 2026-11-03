@@ -40,7 +40,7 @@ def test_public_demo_uses_the_shared_font_token(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     dashboard._world_cache.clear()
     try:
-        page = TestClient(dashboard.app).get("/demo").text
+        page = TestClient(dashboard.app, base_url="http://127.0.0.1").get("/demo").text
     finally:
         dashboard._world_cache.clear()
     assert "Inter" not in page

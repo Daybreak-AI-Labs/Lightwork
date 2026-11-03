@@ -18,7 +18,7 @@ def _client(monkeypatch, tmp_path):
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     from maverick_dashboard import app as dash_app
     dash_app._world_cache.clear()
-    return TestClient(dash_app.app)
+    return TestClient(dash_app.app, base_url="http://127.0.0.1")
 
 
 def test_overview_has_no_consumer_tour(monkeypatch, tmp_path):

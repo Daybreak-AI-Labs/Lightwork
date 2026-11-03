@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 from maverick_dashboard import themes as themes_mod
 from maverick_dashboard.app import app, resolve_density
 
-client = TestClient(app)
+client = TestClient(app, base_url="http://127.0.0.1")
 
 
 class _Req:
@@ -39,7 +39,7 @@ def test_density_param_sets_body_class_and_cookie():
     assert "density-compact" in r.text
     assert "mvk_density=compact" in r.headers.get("set-cookie", "")
     # Bogus values: no cookie, default class.
-    fresh = TestClient(app)
+    fresh = TestClient(app, base_url="http://127.0.0.1")
     r2 = fresh.get("/overview", params={"density": "supertight"})
     assert "mvk_density" not in r2.headers.get("set-cookie", "")
     assert "density-comfortable" in r2.text
@@ -99,7 +99,7 @@ def test_custom_theme_selectable_like_builtins(monkeypatch):
 
 def test_unknown_theme_still_falls_back_to_dark(monkeypatch):
     _with_themes(monkeypatch, {"midnight": _GOOD})
-    fresh = TestClient(app)
+    fresh = TestClient(app, base_url="http://127.0.0.1")
     r = fresh.get("/", params={"theme": "nope"})
     assert "theme-dark" in r.text
     assert "mvk_theme" not in r.headers.get("set-cookie", "")
@@ -109,6 +109,6 @@ def test_no_config_themes_is_default_off(monkeypatch):
     import maverick.config as cfg
     monkeypatch.setattr(cfg, "load_config", dict)
     assert themes_mod.custom_themes() == {}
-    fresh = TestClient(app)
+    fresh = TestClient(app, base_url="http://127.0.0.1")
     r = fresh.get("/")
     assert "body.theme-midnight" not in r.text

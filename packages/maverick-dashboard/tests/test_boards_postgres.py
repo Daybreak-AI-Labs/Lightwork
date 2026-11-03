@@ -53,7 +53,7 @@ def _seed(pg):
 
 def test_overview_and_plan_pages_render_on_postgres(pg):
     gid, title = _seed(pg)
-    client = TestClient(pg.app, headers={"Origin": "http://testserver"})
+    client = TestClient(pg.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     r = client.get("/overview")
     assert r.status_code == 200, r.text[:300]
     # Error copy also occurs in the shell's inert translation catalog.
@@ -68,7 +68,7 @@ def test_overview_and_plan_pages_render_on_postgres(pg):
 @pytest.mark.parametrize("board", ["overview", "spend", "workforce", "savings", "oversight"])
 def test_every_board_api_answers_on_postgres(pg, board):
     _seed(pg)
-    client = TestClient(pg.app, headers={"Origin": "http://testserver"})
+    client = TestClient(pg.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     r = client.get(f"/api/v1/dashboards/{board}?days=30")
     assert r.status_code == 200, r.text[:300]
     body = r.json()
@@ -80,7 +80,7 @@ def test_every_board_api_answers_on_postgres(pg, board):
 
 def test_cost_csv_export_streams_on_postgres(pg):
     gid, _ = _seed(pg)
-    client = TestClient(pg.app, headers={"Origin": "http://testserver"})
+    client = TestClient(pg.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     r = client.get("/api/v1/cost.csv")
     assert r.status_code == 200, r.text[:300]
     assert f",{gid}," in r.text

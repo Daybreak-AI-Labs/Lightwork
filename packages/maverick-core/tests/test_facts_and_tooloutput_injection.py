@@ -100,6 +100,7 @@ def test_facts_block_value_collapses_newlines():
     from maverick.world_model import WorldModel
 
     w = WorldModel(Path(tempfile.mkdtemp()) / "w.db")
+    w.create_goal("local", "")
     # An attacker-writable fact whose value tries to inject a forged section.
     w.upsert_fact(
         "note",
@@ -131,6 +132,7 @@ def test_multiline_fact_env_secret_is_redacted_before_newline_collapse():
 
     env_token = "abcdefghijklmnopqrstuvwxyz1234567890"
     w = WorldModel(Path(tempfile.mkdtemp()) / "w.db")
+    w.create_goal("local", "")
     w.upsert_fact("note", f"remember this\nAPI_TOKEN={env_token}")
 
     block = _brief_facts_block(w, goal_id=1, shield=None)

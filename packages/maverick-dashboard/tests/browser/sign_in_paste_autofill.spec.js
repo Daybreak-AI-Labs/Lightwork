@@ -80,6 +80,7 @@ test('every sign-in field takes a paste and a password manager fill',async({brow
 
     // Signed out: paste works on the sign-in page, and a manager's fill signs in.
     await page.goto(origin+'/auth/logout');
+    await page.getByRole('button',{name:'Sign out',exact:true}).click();
     await page.goto(origin+'/auth/local-login');
     await expect(page.locator('input[name="password"]')).toHaveAttribute('autocomplete','current-password');
     await paste(page,page.locator('input[name="email"]'),'paste-colleague@example.test',log);

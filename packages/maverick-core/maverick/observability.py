@@ -599,8 +599,13 @@ def _inbound_context(carrier: Mapping[str, str] | None) -> Any:
     try:
         from opentelemetry import propagate
 
-        return propagate.extract({
-            key: carrier[key] for key in ("traceparent", "tracestate") if key in carrier})
+        selected = {key: carrier[key] for key in ("traceparent", "tracestate") if key in carrier}
+        state = selected.get("tracestate")
+        if state is not None and len(state.encode("utf-8")) > 512:
+            # W3C Trace Context caps tracestate at 512 bytes. Ignore the
+            # oversized vendor state while preserving the parent trace.
+            del selected["tracestate"]
+        return propagate.extract(selected)
     except Exception:  # pragma: no cover -- a malformed header never breaks a request
         log.debug("inbound trace context not read", exc_info=True)
         return None

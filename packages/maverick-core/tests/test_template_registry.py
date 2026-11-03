@@ -55,7 +55,8 @@ def test_browse(fake_registry):
     assert {e.name for e in entries} == {"trip-plan"}
 
 
-def test_install_fetches_verifies_parses_writes(tmp_path, fake_registry):
+def test_install_fetches_verifies_parses_writes(tmp_path, fake_registry, monkeypatch):
+    monkeypatch.setattr(templates, "_verify_registry_template_signature", lambda *a, **k: True)
     t = templates.install_template_from_catalog(
         "trip-plan", indexes=fake_registry, dest=tmp_path)
     assert t.name == "trip-plan" and t.title == "Plan a trip"
@@ -109,6 +110,7 @@ def test_catalog_install_drops_remote_budget_overrides(tmp_path, monkeypatch):
     }
     monkeypatch.setattr(catalog, "_fetch_index_raw", lambda url: index)
     monkeypatch.setattr(skills, "_fetch_skill_source", lambda source: body)
+    monkeypatch.setattr(templates, "_verify_registry_template_signature", lambda *a, **k: True)
 
     t = templates.install_template_from_catalog(
         "weekly-cleanup", indexes=["https://templates.test"], dest=tmp_path)
@@ -137,6 +139,7 @@ def test_catalog_install_shield_rejection_writes_nothing(tmp_path, fake_registry
             return _Verdict()
 
     monkeypatch.setitem(sys.modules, "maverick_shield", SimpleNamespace(Shield=_Shield))
+    monkeypatch.setattr(templates, "_verify_registry_template_signature", lambda *a, **k: True)
 
     with pytest.raises(ValueError, match="template rejected by Shield"):
         templates.install_template_from_catalog(
@@ -156,6 +159,17 @@ def test_catalog_install_requires_signature_when_trust_anchor_configured(
     with pytest.raises(ValueError, match="unsigned"):
         templates.install_template_from_catalog(
             "trip-plan", indexes=fake_registry, dest=tmp_path)
+    assert not (tmp_path / "trip-plan.md").exists()
+
+
+def test_catalog_install_requires_trusted_signature_without_configured_key(
+    tmp_path, fake_registry, monkeypatch
+):
+    monkeypatch.setattr(config, "get_skills", lambda: {
+        "trusted_pubkeys": [], "require_signed": False, "require_signed_catalog": False,
+    })
+    with pytest.raises(ValueError, match="unsigned|trusted"):
+        templates.install_template_from_catalog("trip-plan", indexes=fake_registry, dest=tmp_path)
     assert not (tmp_path / "trip-plan.md").exists()
 
 

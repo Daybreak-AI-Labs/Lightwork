@@ -78,3 +78,34 @@ def test_shell_target_drift_after_approval_never_executes(tmp_path: Path, monkey
 
     assert "target, command, or approval authority changed" in out
     assert calls == []
+
+
+def test_shell_never_requests_approval_for_hidden_command_content(tmp_path, monkeypatch):
+    import maverick.safety as safety
+
+    calls = []
+    monkeypatch.setattr(safety, "require_operation_consent", lambda *a, **kw: calls.append(kw))
+    tool = shell(LocalBackend(workdir=tmp_path))
+    for cmd in (
+        "x" * 3801,
+        "echo safe\u202e; touch hidden",
+        "echo safe\u2028; touch hidden",
+        "echo safe\u00a0; touch hidden",
+        "printf '-----BEGIN PRIVATE KEY-----'; touch hidden; printf '-----END PRIVATE KEY-----'",  # pragma: allowlist secret
+    ):
+        assert "ERROR:" in tool.fn({"cmd": cmd})
+    assert calls == []
+    assert not (tmp_path / "hidden").exists()
+
+
+def test_shell_full_length_command_is_supplied_to_review(tmp_path, monkeypatch):
+    import maverick.safety as safety
+
+    calls = []
+    def deny(*args, **kwargs):
+        calls.append(kwargs)
+        raise safety.ConsentDenied("shell")
+    monkeypatch.setattr(safety, "require_operation_consent", deny)
+    cmd = "echo " + "x" * 3795
+    assert "not approved" in shell(LocalBackend(workdir=tmp_path)).fn({"cmd": cmd})
+    assert calls[0]["display_command"] == cmd

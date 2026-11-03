@@ -247,7 +247,7 @@ def access_for(cfg: dict) -> Access:
             json.dumps(cfg.get("auth"), sort_keys=True, default=str).encode("utf-8")
         ).hexdigest(),
         require_auth=bool(require), client_enforced=_client_enforced(cfg), claimed=claimed,
-        admins=_admins(cfg), default_role=str(dashboard.get("default_role") or "operator"),
+        admins=_admins(cfg), default_role=str(dashboard.get("default_role") or "viewer"),
         group_roles={str(k).strip().casefold(): str(v).strip().lower()
                      for k, v in (dashboard.get("group_roles") or {}).items()
                      if isinstance(v, str)} if isinstance(dashboard.get("group_roles"), dict)

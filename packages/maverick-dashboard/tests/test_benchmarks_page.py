@@ -11,7 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 from maverick_dashboard.app import app
 
-client = TestClient(app)
+client = TestClient(app, base_url="http://127.0.0.1")
 
 
 @pytest.fixture
@@ -46,7 +46,7 @@ def test_page_empty_state_is_plain_and_offers_a_form(store):
 
 def test_record_score_appends_to_the_same_history(store):
     cb = store
-    c = TestClient(app, headers={"Origin": "http://testserver"})
+    c = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     r = c.post("/api/v1/benchmarks/scores", json={"name": "support_quality", "score": 0.8, "note": "march"})
     assert r.status_code == 200, r.text
     assert r.json() == {"name": "support_quality", "runs": 1}
@@ -63,7 +63,7 @@ def test_record_score_appends_to_the_same_history(store):
     {"name": "", "score": 1},
 ])
 def test_record_score_rejects_bad_input(store, body):
-    c = TestClient(app, headers={"Origin": "http://testserver"})
+    c = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     assert c.post("/api/v1/benchmarks/scores", json=body).status_code == 422
     assert store.load_history(store._store_path()) == []
 

@@ -13,7 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 from maverick_dashboard.app import static_url
 
-ORIGIN = {"Origin": "http://testserver"}
+ORIGIN = {"Origin": "http://127.0.0.1"}
 API = "/api/v1/admin/license"
 PAGE = "/settings/license"
 
@@ -46,7 +46,7 @@ def client(tmp_path, monkeypatch):
     entitlements.reset_cache()
     from maverick_dashboard import app as dash_app
     dash_app._world_cache.clear()
-    yield TestClient(dash_app.app, headers=ORIGIN)
+    yield TestClient(dash_app.app, base_url="http://127.0.0.1", headers=ORIGIN)
     config.reset_config_cache()
     entitlements.reset_cache()
 

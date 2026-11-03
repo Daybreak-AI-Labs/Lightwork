@@ -73,7 +73,7 @@ def _harness(monkeypatch):
     monkeypatch.setattr(ops, "adapters", lambda: {entry.id: entry for entry in workflows.entries()})
     app = FastAPI()
     app.include_router(ops.router)
-    return TestClient(app), state
+    return TestClient(app, base_url="http://127.0.0.1"), state
 
 
 def test_published_learned_run_is_catalogued_and_prepared_without_execution(monkeypatch):

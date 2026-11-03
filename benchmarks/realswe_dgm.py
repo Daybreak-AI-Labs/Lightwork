@@ -116,6 +116,9 @@ def main(argv: list[str] | None = None) -> int:
     else:
         ids = [s.strip() for s in args.ids.split(",") if s.strip()]
         instances = load_verified(ids)
+    if any((instances[iid].get("test_patch", "") or "").strip() for iid in ids):
+        print("[ABORT] hidden-test agent runs require a separate trusted grader boundary")
+        return 2
     args.out_dir.mkdir(parents=True, exist_ok=True)
     ckpt_path = args.out_dir / "verdicts.json"
     verdicts = _load_ckpt(ckpt_path)          # {"<arm>:<iid>": {"resolved": bool, "cost": float}}

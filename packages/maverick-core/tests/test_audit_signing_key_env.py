@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 
+import pytest
 from maverick.audit import signing
 
 
@@ -13,6 +14,8 @@ def test_injected_key_env_is_consumed_even_without_crypto(monkeypatch):
     monkeypatch.setattr(signing, "_have_crypto", lambda: False)
     monkeypatch.setenv(signing._SIGNING_KEY_ENV, "00" * 32)
 
-    assert signing._injected_keypair() is None
+    with pytest.raises(ValueError):
+        signing._injected_keypair()
     assert signing._SIGNING_KEY_ENV not in os.environ
-    assert signing._INJECTED_KEYPAIR_CACHE is None
+    with pytest.raises(ValueError):
+        signing._injected_keypair()

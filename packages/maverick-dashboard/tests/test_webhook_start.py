@@ -19,7 +19,7 @@ from maverick_dashboard.app import app
 
 # /webhook/start authenticates via HMAC, not the dashboard bearer / Origin,
 # so no Origin header is needed (it's in _AUTH_EXEMPT).
-client = TestClient(app)
+client = TestClient(app, base_url="http://127.0.0.1")
 
 SECRET = "test-webhook-secret"
 
@@ -69,7 +69,7 @@ def _no_real_run(monkeypatch):
 
 @pytest.fixture
 def _configured(monkeypatch):
-    monkeypatch.setenv("MAVERICK_WEBHOOK_SECRET", SECRET)
+    monkeypatch.setenv("MAVERICK_INBOUND_WEBHOOK_SECRET", SECRET)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
 
 
@@ -150,7 +150,7 @@ def test_missing_signature_rejected(_configured, _no_real_run):
 
 
 def test_no_secret_configured_fails_closed(monkeypatch, _no_real_run):
-    monkeypatch.delenv("MAVERICK_WEBHOOK_SECRET", raising=False)
+    monkeypatch.delenv("MAVERICK_INBOUND_WEBHOOK_SECRET", raising=False)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
     # Make config-based secret resolution return nothing too.
     import maverick.webhooks as wh

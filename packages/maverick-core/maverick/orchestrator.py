@@ -908,23 +908,28 @@ def _brief_facts_block(world: WorldModel, goal_id: int, shield: Any | None) -> s
         _wm_memory_on = get_features()["world_model"]
     except Exception:
         _wm_memory_on = True
-    # Memory Guard (OWASP ASI06) trust-aware retrieval: when enabled, drop
-    # facts below the trust floor so low-trust/poisoned memory never enters
-    # the standing brief (these become standing instructions), and audit how
-    # many were filtered. No-op -- the full fact set -- when the guard is off.
-    if not _wm_memory_on:
+    # Standing context is shared across principals and can steer every goal.
+    # Never promote tool/external facts into it, even when the optional Memory
+    # Guard is off or configured with a lower floor.
+    from .connections import current_principal
+    principal = current_principal() or ""
+    goal = world.get_goal(goal_id)
+    owner = (getattr(goal, "owner", "") or "") if goal else ""
+    execution_principal = (getattr(goal, "execution_principal", "") or "") if goal else ""
+    if (not goal or not _wm_memory_on or principal.startswith("agent:") or owner.startswith("agent:")
+            or execution_principal.startswith("agent:")):
         facts = {}
     else:
         from . import memory_guard as _mg
-        if _mg.enabled():
-            _facts_meta = world.get_facts_with_trust()
-            facts = _mg.filter_facts(_facts_meta)
-            _mg.audit_recall(
-                kept=len(facts), dropped=max(0, len(_facts_meta) - len(facts)),
-                min_trust=_mg.min_recall_trust(), goal_id=goal_id,
-            )
-        else:
-            facts = world.get_facts()
+        _facts_meta = world.get_facts_with_trust()
+        floor = max(int(_mg.TrustTier.LEARNED), _mg.min_recall_trust() if _mg.enabled() else 0)
+        facts = {key: value for key, (value, trust) in _facts_meta.items()
+                 if int(_mg.TrustTier.EXTERNAL) <= trust <= int(_mg.TrustTier.FIRST_PARTY)
+                 and trust >= floor}
+        _mg.audit_recall(
+            kept=len(facts), dropped=max(0, len(_facts_meta) - len(facts)),
+            min_trust=floor, goal_id=goal_id,
+        )
         from .fact_revision import is_private_fact_key
         facts = {key: value for key, value in facts.items() if not is_private_fact_key(key)}
     # Bound the block: facts are a standing brief section on EVERY goal, and

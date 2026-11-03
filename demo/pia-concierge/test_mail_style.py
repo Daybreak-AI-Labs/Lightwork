@@ -151,12 +151,14 @@ def test_standalone_send_email_delivers_branded_html_to_inbox(sa_app):
     assert '<a href="http://127.0.0.1:8890/intake/i-42"' in cap.html
 
 
-def test_mail_page_renders_html_in_sandboxed_iframe(sa_app):
+def test_mail_page_renders_html_in_sandboxed_iframe(sa_app, monkeypatch):
     from starlette.testclient import TestClient
     sa_app.INBOX.clear()
     body = "Hello,\n\nOpen http://127.0.0.1:8890/intake/i-7 to begin."
     sa_app.backend.send_email("alice@example.test", "Privacy intake", body)
-    page = TestClient(sa_app.app).get("/mail")
+    monkeypatch.setenv("PIA_OPERATOR_USER", "reviewer")
+    monkeypatch.setenv("PIA_OPERATOR_TOKEN", "review-test-value")
+    page = TestClient(sa_app.app).get("/mail", auth=("reviewer", "review-test-value"))
     assert page.status_code == 200
     text = page.text
     assert 'sandbox=""' in text and 'id="r-html"' in text   # inert frame

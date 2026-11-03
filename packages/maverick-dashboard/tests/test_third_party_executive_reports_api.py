@@ -103,7 +103,7 @@ def client(monkeypatch):
     app.state.third_party_executive_reports_enabled_probe = lambda _tenant: True
     app.state.third_party_executive_reports_readiness_probe = lambda _tenant: True
     app.include_router(api.create_third_party_executive_reports_router())
-    return TestClient(app, headers={"Origin": "http://testserver"}), runtime
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}), runtime
 
 
 def test_status_is_store_free_and_truthful(monkeypatch) -> None:

@@ -25,7 +25,7 @@ def client(monkeypatch, tmp_path):
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     dash_app._world_cache.clear()
-    return TestClient(dash_app.app, headers={"Origin": "http://testserver"})
+    return TestClient(dash_app.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def _as(monkeypatch, principal, role=None):
@@ -134,7 +134,7 @@ def test_endpoint_is_scoped_to_the_callers_departments(client, monkeypatch):
     from maverick_dashboard import suite_grants
 
     suite_grants.set_suites("user:fin", ["finance"])
-    _as(monkeypatch, "user:fin")
+    _as(monkeypatch, "user:fin", role="operator")
     items = client.get("/agents/picker", params={"setup": "1", "limit": 50, "q": "finance_ap"}).json()["items"]
     assert "finance_ap" in [item["name"] for item in items]
     legal = client.get("/agents/picker", params={"setup": "1", "limit": 50, "q": "legal_contracts"}).json()

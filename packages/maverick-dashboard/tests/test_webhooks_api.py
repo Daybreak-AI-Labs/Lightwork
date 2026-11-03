@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 from maverick_dashboard.app import app
 
-client = TestClient(app, headers={"Origin": "http://testserver"})
+client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 OK = (200, 4, "ok", "")
 DOWN = (500, 9, "boom", "HTTP 500")

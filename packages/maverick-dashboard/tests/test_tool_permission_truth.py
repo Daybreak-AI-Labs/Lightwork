@@ -115,7 +115,7 @@ def test_permissions_api_and_page_never_claim_blocked_tools_are_usable(
     }
     monkeypatch.setattr(dashboard_app, "_permissions_snapshot", lambda: snapshot)
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
-    client = TestClient(dashboard_app.app)
+    client = TestClient(dashboard_app.app, base_url="http://127.0.0.1")
 
     api_response = client.get("/api/v1/permissions")
     page_response = client.get("/permissions")

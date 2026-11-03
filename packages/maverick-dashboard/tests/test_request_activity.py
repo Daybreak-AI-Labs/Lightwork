@@ -69,7 +69,7 @@ def test_ordinary_requests_count_while_event_streams_and_sockets_do_not(monkeypa
     monkeypatch.setattr(request_activity, "_in_flight", 1)
     monkeypatch.setattr(request_activity, "_last_start", 0.0)
     seen = []
-    client = TestClient(_app(seen))
+    client = TestClient(_app(seen), base_url="http://127.0.0.1")
     assert client.get("/work").json() == {"ok": True}
     # A browser's EventSource asks for the stream, so it is never counted, even
     # while GZip holds the response start until the first event.
@@ -80,7 +80,7 @@ def test_ordinary_requests_count_while_event_streams_and_sockets_do_not(monkeypa
     # first event (Starlette before 1.8), the first event is still counted;
     # from 1.8 the start passes through at once and neither event is.
     assert client.get("/stream").text == "data: one\n\ndata: two\n\n"
-    with client.websocket_connect("/socket"):
+    with client.websocket_connect("ws://127.0.0.1" + "/socket"):
         pass
     first_event = 2 if _gzip_holds_the_response_start() else 1
     assert seen == [

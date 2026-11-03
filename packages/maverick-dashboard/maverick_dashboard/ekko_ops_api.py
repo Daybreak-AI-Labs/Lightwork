@@ -1,8 +1,8 @@
 """Run an Ekko recorder from the app (``maverick ekko run``).
 
-Two recorders: an optional uploaded guided activity file, and the explicit
-content-free desktop recorder for Windows, Mac or local Linux X11 (not
-Wayland). Either feeds :class:`maverick.ekko_daemon.EkkoDaemon`, which keeps
+The dashboard supports an uploaded guided activity file. The desktop recorder
+must be started locally with the CLI until the dashboard can authenticate the
+owner of the observed desktop. Both feed :class:`maverick.ekko_daemon.EkkoDaemon`, which keeps
 every existing check: the device's current enrollment, the administrator's
 limits, the exclusive recorder lease and the emergency stop.
 
@@ -89,12 +89,32 @@ def _prepare(request: Request, device_id: str, acknowledged: bool, observer: str
 
 
 def _record(store, policy, observer) -> dict:
-    from maverick.ekko_daemon import EkkoDaemon
+    import time
+
+    from maverick.ekko_daemon import EkkoDaemon, GuidedJsonlObserver
     from maverick.ekko_foreground import ForegroundUnavailable
 
     daemon = EkkoDaemon(store=store, observer=observer, policy=policy)
+    is_file = isinstance(observer, GuidedJsonlObserver) and observer.path is None
+    deadline = time.monotonic() + 60 if is_file else None
+    if is_file:
+        observer.max_lines = 10_000
+    limit_reached = False
+
+    def stop_when() -> bool:
+        nonlocal limit_reached
+        if getattr(observer, "exhausted", False):
+            return True
+        if is_file and (observer.line_number >= observer.max_lines or time.monotonic() >= deadline):
+            limit_reached = True
+            return True
+        return False
+
     try:
-        daemon.run(stop_when=lambda: bool(getattr(observer, "exhausted", False)))
+        daemon.run(
+            stop_when=stop_when,
+            max_idle_sleep=1.0 if is_file else None,
+        )
     except ValueError as exc:
         line = getattr(observer, "line_number", 0)
         message = (f"Line {line} of the file isn't an activity Ekko can use. Activities recorded before it were kept."
@@ -115,7 +135,10 @@ def _record(store, policy, observer) -> dict:
             close = getattr(observer, "close", None)
             if callable(close):
                 close()
-    return {"recorded": daemon.accepted_events, "skipped": daemon.blocked_events}
+    result = {"recorded": daemon.accepted_events, "skipped": daemon.blocked_events}
+    if limit_reached:
+        result["message"] = "Import stopped at its time or activity limit. Activities already recorded were kept."
+    return result
 
 
 @router.get("/api/v1/ekko/recording/options")
@@ -127,7 +150,12 @@ def recording_options(request: Request) -> dict:
     options = foreground_options()
     if _access(request) != authority or foreground_options() != options:
         raise HTTPException(409, "Your account, workspace or recording settings changed. Open the current recording controls again.")
-    return {"activity_file": True, "windows_active_app": options["observer"] == "windows_foreground",
+    # A dashboard request cannot establish that its requester owns the server's
+    # desktop, especially behind a reverse proxy. Start this observer locally
+    # through the CLI until a device-bound agent can prove that relationship.
+    options = dict(options, active_app=False,
+                   availability_message="Start desktop recording locally with `maverick ekko run`.")
+    return {"activity_file": True, "windows_active_app": False,
             "max_file_chars": MAX_FILE_CHARS, **options, "context": digest([authority, options])}
 
 

@@ -166,7 +166,7 @@ def test_release_readiness_route_explains_missing_setup_without_exposing_candida
     monkeypatch.setattr(releases, "_service", lambda _request, required=False: None)
     monkeypatch.setattr(api, "context_for", lambda _request: "alice")
     monkeypatch.setattr(api, "require_permission", lambda *_args: None)
-    response = TestClient(app, headers={"Origin": "http://testserver"}).get(
+    response = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}).get(
         "/api/v1/outcome-pilots/release-candidates",
     )
     assert response.status_code == 200
@@ -180,7 +180,7 @@ def test_release_readiness_route_explains_missing_setup_without_exposing_candida
 def test_non_ascii_pilot_context_header_is_refused_as_changed_context(monkeypatch):
     monkeypatch.setattr(api, "context_for", lambda _request: "alice")
     monkeypatch.setattr(api, "require_permission", lambda *_args: None)
-    response = TestClient(app, headers={"Origin": "http://testserver"}).get(
+    response = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}).get(
         "/api/v1/outcome-pilots/release-candidates",
         headers={"X-Lightwork-Pilot-Context": "alicé".encode()},
     )
@@ -285,7 +285,7 @@ def test_improvement_routes_bind_server_observed_release_and_scope_status(record
     monkeypatch.setattr(api, "caller_principal", lambda request: "user:alice")
     monkeypatch.setattr(api, "require_permission", lambda *args: None)
     monkeypatch.setattr(api, "_resolver", lambda request: lambda _kind, reference: records[reference])
-    client = TestClient(app, headers={"Origin": "http://testserver",
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1",
         "X-Lightwork-Pilot-Context": "alice"})
     choices = client.get("/api/v1/outcome-pilots/release-candidates")
     assert choices.status_code == 200
@@ -600,7 +600,7 @@ def test_goal_resume_api_blocks_pending_pilot_without_state_change_and_allows_ex
     from maverick_dashboard import _shared
     monkeypatch.setattr(_shared, "_world", lambda: world)
     monkeypatch.setattr("maverick.runner.run_goal_in_background_async", run)
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     refused = client.post(f"/api/v1/goals/{goal_id}/resume")
     assert refused.status_code == 409, refused.text
     assert refused.json()["detail"]["code"] == "admission_hold"
@@ -707,7 +707,7 @@ def test_independent_review_api_requires_global_admin_and_reauthorizes_every_sou
     # replacing it with a mock that silently omits the authority mode.
     monkeypatch.setattr(sources, "resolve", resolve_source)
     route = "/api/v1/outcome-pilots/independent-review/" + record["id"]
-    client = TestClient(app, headers={"Origin": "http://testserver", "X-Lightwork-Pilot-Context": "bob"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1", "X-Lightwork-Pilot-Context": "bob"})
     def denied(*_a):
         raise HTTPException(403, "Global administrator required")
     monkeypatch.setattr(api, "require_global_permission", denied)
@@ -869,7 +869,7 @@ def test_api_context_validation_and_rendered_page(records, monkeypatch):
     monkeypatch.setattr(api, "context_for", lambda request: "alice")
     monkeypatch.setattr(api, "require_permission", lambda *a: None)
     monkeypatch.setattr(api, "_resolver", lambda request: lambda k, r: records[r])
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     assert client.get("/outcome-pilots").status_code == 200
     assert client.post("/api/v1/outcome-pilots", json=plan()).status_code == 409
     response = client.post("/api/v1/outcome-pilots", json=plan(), headers={"X-Lightwork-Pilot-Context": "alice"})
@@ -905,8 +905,8 @@ def test_observation_api_refuses_pending_manifest_before_mutating_pilot(records,
         plan(), context="alice", actor="user:alice",
         resolve=lambda _kind, reference: records[reference],
     )
-    client = TestClient(app, headers={
-        "Origin": "http://testserver", "X-Lightwork-Pilot-Context": "alice",
+    client = TestClient(app, base_url="http://127.0.0.1", headers={
+        "Origin": "http://127.0.0.1", "X-Lightwork-Pilot-Context": "alice",
     })
     response = client.put(
         f"/api/v1/outcome-pilots/{record['id']}/cases/1",
@@ -927,8 +927,8 @@ def test_report_api_resumes_a_pending_all_case_admission_inside_the_app(records,
         plan(), context="alice", actor="user:alice",
         resolve=lambda _kind, reference: records[reference],
     )
-    client = TestClient(app, headers={
-        "Origin": "http://testserver", "X-Lightwork-Pilot-Context": "alice",
+    client = TestClient(app, base_url="http://127.0.0.1", headers={
+        "Origin": "http://127.0.0.1", "X-Lightwork-Pilot-Context": "alice",
     })
     response = client.get(f"/api/v1/outcome-pilots/{pending['id']}")
     assert response.status_code == 200, response.text
@@ -953,8 +953,8 @@ def test_create_api_exact_retry_repairs_interrupted_all_case_admission(records, 
         return saved
 
     monkeypatch.setattr(accounting_bridge, "_admit", interrupt)
-    client = TestClient(app, headers={
-        "Origin": "http://testserver", "X-Lightwork-Pilot-Context": "alice",
+    client = TestClient(app, base_url="http://127.0.0.1", headers={
+        "Origin": "http://127.0.0.1", "X-Lightwork-Pilot-Context": "alice",
     })
     failed = client.post("/api/v1/outcome-pilots", json=plan())
     assert failed.status_code == 503
@@ -1072,7 +1072,7 @@ def test_review_queue_lists_other_peoples_protected_pilots_in_this_workspace_onl
     monkeypatch.setattr(api, "context_for", lambda request: "bob")
     monkeypatch.setattr(api, "caller_principal", lambda request: "user:bob")
     monkeypatch.setattr(api, "require_permission", lambda *a: None)
-    client = TestClient(app, headers={"Origin": "http://testserver", "X-Lightwork-Pilot-Context": "bob"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1", "X-Lightwork-Pilot-Context": "bob"})
     route = "/api/v1/outcome-pilots/independent-review"
 
     def denied(*_a):

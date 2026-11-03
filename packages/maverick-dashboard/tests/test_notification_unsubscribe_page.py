@@ -25,7 +25,7 @@ def client(tmp_path, monkeypatch):
     (tmp_path / "config.toml").write_text("[features]\npersonal_preferences = true\n", encoding="utf-8")
     config.reset_config_cache()
     from maverick_dashboard.app import app
-    yield TestClient(app)
+    yield TestClient(app, base_url="http://127.0.0.1")
     config.reset_config_cache()
 
 

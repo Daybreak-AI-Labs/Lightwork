@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 def _client():
     # Mutating /api/v1 requests in no-token mode must pass the same-origin CSRF check.
     from maverick_dashboard.app import app
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def _isolate(monkeypatch, tmp_path):
@@ -60,6 +60,9 @@ def test_create_list_cancel_text_schedule(monkeypatch, tmp_path):
 def test_create_schedule_preserves_proxy_identity(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     import maverick_dashboard.auth as auth
+    from maverick_dashboard import rbac
+
+    rbac.set_role("user:alice", "operator")
 
     monkeypatch.setattr(auth, "proxy_auth_enabled", lambda: True)
     monkeypatch.setattr(auth, "proxy_trusts", lambda _host: True)
@@ -136,6 +139,10 @@ def _enable_oidc_principal_map(monkeypatch):
     """
     import maverick_dashboard.auth as auth
     from maverick.oidc import VerifiedPrincipal
+    from maverick_dashboard import rbac
+
+    rbac.set_role("user:alice", "operator")
+    rbac.set_role("user:mallory", "operator")
 
     monkeypatch.setattr(auth, "oidc_enabled", lambda: True)
 

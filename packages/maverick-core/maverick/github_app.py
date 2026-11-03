@@ -1,32 +1,10 @@
-"""GitHub App mode — assign an issue, get a PR back.
+"""Parse and authenticate GitHub App events.
 
-OpenHands and Copilot Agent ship this pattern in 2026: maintainer labels
-or @-mentions a GitHub issue, the agent clones the repo, attempts a fix,
-pushes a branch, opens a PR. Lightwork now supports the same flow.
-
-This module is the WEBHOOK RECEIVER + PR FACTORY. The actual coding
-work runs in a Lightwork swarm with the GitHub issue body as the brief.
-
-Modes:
-  - `maverick gh-app webhook`  : run a FastAPI listener on a public port,
-    accept GitHub `issues.labeled` + `issue_comment.created` events.
-  - `maverick gh-app process <issue-url>` : one-shot run against a
-    specific issue URL (useful for CLI / cron / debugging without a
-    webhook).
-
-Trigger conditions (any of):
-  1. issue labeled with one of MAVERICK_TRIGGER_LABELS (default
-     "maverick", "automate")
-  2. issue comment containing "/maverick" by a user with write access
-
-Output:
-  - new branch `maverick/issue-<n>-<slug>`
-  - PR linked to the issue with the agent's FINAL as body
-  - opened as a draft by default (`draft=True`)
+Automated issue-to-PR processing is unavailable until an agent-controlled
+checkout can be safely separated from host Git and publication credentials.
 """
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import hashlib
 import hmac
@@ -271,99 +249,11 @@ def create_pr_via_gh(
     *,
     draft: bool = True,
 ) -> str | None:
-    """Use the `gh` CLI to push + open a draft PR. Returns the PR URL or None.
-
-    The PR is opened as a draft unless ``draft=False`` is passed. The
-    caller is expected to have a `gh auth login` set up in the
-    environment (or GH_TOKEN set), since we can't reasonably ship a
-    token-mint flow inside Lightwork.
-    """
-    try:
-        # The cloned origin no longer embeds the token (see clone_repo), so
-        # feed it to the push via the same askpass helper.
-        push_token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
-        with _git_token_env(push_token) as env:
-            subprocess.run(
-                ["git", "-C", str(workdir), "push", "-u", "origin", branch_name],
-                check=True, capture_output=True, timeout=60, env=env,
-            )
-        args = [
-            "gh", "pr", "create",
-            "--head", branch_name,
-            "--title", pr_title,
-            "--body", pr_body,
-            "--repo", _origin_full_name(workdir),
-        ]
-        if draft:
-            args.append("--draft")
-        out = subprocess.run(
-            args, check=True, capture_output=True, timeout=60, text=True,
-        )
-        url = (out.stdout or "").strip().splitlines()[-1] if out.stdout else ""
-        return url or None
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
-        log.warning("PR creation via gh failed: %s", e)
-        return None
-
-
-def _origin_full_name(workdir: Path) -> str:
-    """Get `owner/repo` from the origin URL."""
-    try:
-        out = subprocess.run(
-            ["git", "-C", str(workdir), "remote", "get-url", "origin"],
-            check=True, capture_output=True, text=True, timeout=5,
-        ).stdout.strip()
-    except subprocess.CalledProcessError:
-        return ""
-    m = re.search(r"github\.com[:/]([^/]+/[^/.]+?)(?:\.git)?/?$", out)
-    return m.group(1) if m else ""
-
-
-# Per-call timeout for the local git plumbing below. Matches the timeouts the
-# clone/push helpers already use; without it a hung git (stalled NFS, wedged
-# index.lock, hung credential helper) blocks the webhook handler indefinitely.
-_GIT_TIMEOUT = 60
-
-
-def _checkout_branch(workdir: Path, branch_name: str) -> None:
-    subprocess.run(
-        ["git", "-C", str(workdir), "checkout", "-b", branch_name],
-        check=True, capture_output=True, timeout=_GIT_TIMEOUT,
-    )
-
-
-def _stage_and_commit(workdir: Path, issue_number: int) -> bool:
-    """Stage any uncommitted changes and commit them.
-
-    Returns False if there was nothing to commit (the agent made no changes).
-    """
-    diff_out = subprocess.run(
-        ["git", "-C", str(workdir), "diff", "--cached", "--quiet"],
-        capture_output=True, timeout=_GIT_TIMEOUT,
-    )
-    # Returncode 1 = changes staged; 0 = nothing staged.
-    has_staged = diff_out.returncode == 1
-    if not has_staged:
-        # Auto-add everything modified so a sloppy agent run still
-        # produces a PR (operator can review the diff).
-        subprocess.run(
-            ["git", "-C", str(workdir), "add", "-A"],
-            check=False, capture_output=True, timeout=_GIT_TIMEOUT,
-        )
-        # Empty changeset -> no PR.
-        check = subprocess.run(
-            ["git", "-C", str(workdir), "diff", "--cached", "--quiet"],
-            capture_output=True, timeout=_GIT_TIMEOUT,
-        )
-        if check.returncode == 0:
-            return False
-
-    subprocess.run(
-        ["git", "-C", str(workdir), "commit", "-m",
-         f"Lightwork: address #{issue_number}"],
-        check=False, capture_output=True, timeout=_GIT_TIMEOUT,
-    )
-    return True
+    """Refuse publication from an agent-controlled Git checkout."""
+    # Keep the public call signature for existing integrations while this
+    # unsafe publication path is disabled.
+    _ = (workdir, branch_name, issue_number, pr_title, pr_body, draft)
+    raise RuntimeError("GitHub issue automation is unavailable until checkout isolation is implemented")
 
 
 async def process_issue(
@@ -374,105 +264,8 @@ async def process_issue(
     max_wall_seconds: float | None = None,
     draft: bool = True,
 ) -> PRResult:
-    """End-to-end: clone, run swarm, push branch, open PR.
-
-    Requires:
-      - GH_TOKEN env (or `token` arg): GitHub PAT with repo write
-      - ANTHROPIC_API_KEY in env
-      - git + gh on PATH
-    """
-    token = token or os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
-    if not token:
-        return PRResult(
-            branch_name="", pr_url=None, workdir=Path(),
-            summary="", error="GH_TOKEN not set",
-        )
-
-    branch_name = f"maverick/issue-{payload.issue_number}-{slugify(payload.issue_title)}"
-    workdir = Path(tempfile.mkdtemp(prefix="maverick-gh-"))
-    try:
-        # This coroutine is awaited directly on the dashboard's shared
-        # event loop (Starlette's async BackgroundTask awaits it inline), so
-        # every blocking git/gh subprocess call below must run off-thread via
-        # to_thread -- otherwise a slow clone/push/PR-create stalls every
-        # other concurrent request for its full timeout (up to 120s).
-        await asyncio.to_thread(clone_repo, payload.repo_full_name, token, workdir)
-    except subprocess.CalledProcessError as e:
-        # Defense in depth: scrub in case any git output still echoes a
-        # credential-shaped string into the error we hand back.
-        from .secrets import scrub
-        return PRResult(
-            branch_name=branch_name, pr_url=None, workdir=workdir,
-            summary="", error=scrub(f"clone failed: {e}"),
-        )
-
-    # Create the branch in the clone before the agent starts so its
-    # commits land where we expect.
-    try:
-        await asyncio.to_thread(_checkout_branch, workdir, branch_name)
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
-        from .secrets import scrub
-        return PRResult(
-            branch_name=branch_name, pr_url=None, workdir=workdir,
-            summary="", error=scrub(f"branch checkout failed: {e}"),
-        )
-
-    from .budget import Budget
-    from .llm import LLM
-    from .orchestrator import run_goal
-    from .sandbox import build_sandbox
-    from .world_model import close_world_if_owned, open_world
-
-    world = open_world()
-    try:
-        llm = LLM()
-        sandbox = build_sandbox(workdir=str(workdir))
-        gid = world.create_goal(
-            f"gh:{payload.repo_full_name}#{payload.issue_number}",
-            build_brief(payload),
-        )
-        summary = await run_goal(
-            llm, world, Budget(
-                max_dollars=max_dollars, max_wall_seconds=max_wall_seconds,
-            ),
-            gid, sandbox=sandbox, max_depth=3,
-        )
-    finally:
-        close_world_if_owned(world)
-
-    # If the agent committed anything, push + open PR. A hung git here must not
-    # wedge the handler forever -- time-box each call and surface a timeout as a
-    # clean result (the run's work is preserved in the summary).
-    try:
-        has_changes = await asyncio.to_thread(
-            _stage_and_commit, workdir, payload.issue_number,
-        )
-    except subprocess.TimeoutExpired as e:
-        from .secrets import scrub
-        return PRResult(
-            branch_name=branch_name, pr_url=None, workdir=workdir,
-            summary=summary, error=scrub(f"git timed out staging changes: {e}"),
-        )
-    if not has_changes:
-        return PRResult(
-            branch_name=branch_name, pr_url=None, workdir=workdir,
-            summary=summary,
-            error="agent finished but produced no changes",
-        )
-
-    pr_title = f"Lightwork: {payload.issue_title[:60]}"
-    pr_body = (
-        f"Closes #{payload.issue_number}\n\n"
-        f"## Lightwork summary\n\n{summary}\n\n"
-        f"_Triggered by {payload.sender_login} via "
-        f"{'label ' + payload.trigger_label if payload.trigger_label else SLASH_TRIGGER}._"
-    )
-    pr_url = await asyncio.to_thread(
-        create_pr_via_gh,
-        workdir, branch_name,
-        payload.issue_number, pr_title, pr_body, draft=draft,
-    )
+    """Fail closed before cloning or running an agent in an unsafe checkout."""
     return PRResult(
-        branch_name=branch_name, pr_url=pr_url,
-        workdir=workdir, summary=summary,
+        branch_name="", pr_url=None, workdir=Path(), summary="",
+        error="GitHub issue automation is unavailable until checkout isolation is implemented",
     )

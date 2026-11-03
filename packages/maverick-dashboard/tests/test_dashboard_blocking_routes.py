@@ -45,8 +45,8 @@ def test_slow_storage_yields_to_other_requests_and_keeps_scope(monkeypatch, hand
 
     async def exercise():
         async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://testserver",
-            headers={"Origin": "http://testserver", "X-Owner": "alice"},
+            transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1",
+            headers={"Origin": "http://127.0.0.1", "X-Owner": "alice"},
         ) as client:
             with tenant_scope(tenant="client-a"):
                 # The timer also lets the pre-fix, event-loop-blocking handler

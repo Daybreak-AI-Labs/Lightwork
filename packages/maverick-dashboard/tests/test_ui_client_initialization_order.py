@@ -22,7 +22,7 @@ def test_page_initializers_follow_shared_helpers(monkeypatch, tmp_path, path, he
     if "{goal_id}" in path:
         goal_id = world_model.WorldModel(db).create_goal("Review the result", "Test")
         path = path.format(goal_id=goal_id)
-    client = TestClient(dashboard.app, headers={"Origin": "http://testserver"})
+    client = TestClient(dashboard.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     page = client.get(path)
     assert page.status_code == 200
     dependency = page.text.index('<script src="/static/lightwork-ui.js')
@@ -40,6 +40,6 @@ def test_page_initializers_follow_shared_helpers(monkeypatch, tmp_path, path, he
 
 def test_answer_controller_asset_uses_shared_helpers():
     from maverick_dashboard.app import app
-    response = TestClient(app).get("/static/lightwork-answer-panel.js")
+    response = TestClient(app, base_url="http://127.0.0.1").get("/static/lightwork-answer-panel.js")
     assert response.status_code == 200
     assert "window.mvWhen" in response.text

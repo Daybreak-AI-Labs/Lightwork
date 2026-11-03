@@ -23,6 +23,25 @@ from maverick_mcp.server import MCPServer  # noqa: E402
 from maverick_mcp.tasks import TaskStore  # noqa: E402
 
 
+def test_failed_authentication_budget_is_per_peer(monkeypatch):
+    from maverick_mcp import http_transport
+
+    monkeypatch.setattr(http_transport, "_AUTH_FAILURES", {})
+    for _ in range(http_transport._AUTH_FAILURE_LIMIT):
+        assert http_transport._auth_failure_budget("192.0.2.1", failed=True)
+    assert not http_transport._auth_failure_budget("192.0.2.1")
+    assert http_transport._auth_failure_budget("192.0.2.2")
+
+
+def test_auth_failure_capacity_does_not_leave_new_peers_unlimited(monkeypatch):
+    from maverick_mcp import http_transport
+
+    monkeypatch.setattr(http_transport, "_AUTH_FAILURES", {})
+    monkeypatch.setattr(http_transport, "_RATE_MAX_KEYS", 1)
+    assert http_transport._auth_failure_budget("192.0.2.1", failed=True)
+    assert not http_transport._auth_failure_budget("192.0.2.2")
+
+
 def _client(
     monkeypatch,
     *,
@@ -67,6 +86,45 @@ def _rpc(client: TestClient, headers: dict[str, str], method: str, params=None):
 
 def _tool_names(body: dict) -> set[str]:
     return {tool["name"] for tool in body["result"]["tools"]}
+
+
+def test_failed_bearer_attempts_are_throttled_before_authentication(monkeypatch):
+    from maverick_mcp import http_transport
+
+    monkeypatch.setattr(http_transport, "_AUTH_FAILURES", {})
+    client, _, _ = _client(monkeypatch, registry={}, token="known", shared=True)
+    for _ in range(http_transport._AUTH_FAILURE_LIMIT):
+        assert client.post("/mcp", headers={"Authorization": "Bearer wrong"}, json={}).status_code == 401
+    assert client.post("/mcp", headers={"Authorization": "Bearer wrong"}, json={}).status_code == 429
+
+
+def test_per_agent_fleet_recall_enforces_scope_when_global_trust_is_off(monkeypatch, tmp_path):
+    from maverick import dreaming, fleet_memory, reflexion
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_FLEET_MEMORY", "1")
+    assert fleet_memory.register_agent("reader", "copilot")
+    reader = TrustedAgent(id="reader", mcp_token="reader-token", direction="inbound",
+                          data_scopes=frozenset({"sales"}))
+    client, _, headers = _client(monkeypatch, registry={"reader": reader},
+                                 token="reader-token", enforced=False)
+    monkeypatch.setattr(reflexion, "recall", lambda *args, **kwargs: [
+        (1.0, SimpleNamespace(domain="finance", reflection="finance secret")),
+        (1.0, SimpleNamespace(domain="sales", reflection="sales lesson")),
+    ])
+    monkeypatch.setattr(reflexion, "format_context", lambda hits, **kwargs: " ".join(
+        item.reflection for _, item in hits))
+    monkeypatch.setattr(dreaming, "recall_insights", lambda *args, **kwargs: [])
+    params = {"name": "maverick_fleet_recall", "arguments": {
+        "agent_id": "reader", "vendor": "copilot", "query": "work", "domain": "sales",
+    }}
+    allowed = _rpc(client, headers, "tools/call", params)
+    assert "sales lesson" in json.dumps(allowed)
+    assert "finance secret" not in json.dumps(allowed)
+    params["arguments"]["domain"] = "finance"
+    denied = _rpc(client, headers, "tools/call", params)
+    assert "finance secret" not in json.dumps(denied)
+    assert "scope" in json.dumps(denied).lower()
 
 
 def test_low_risk_agent_cannot_list_or_invoke_mutating_tools(monkeypatch):

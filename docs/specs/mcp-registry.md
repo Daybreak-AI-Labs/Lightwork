@@ -1,15 +1,15 @@
 # Design Spec: MCP Server Registry
 
-**Status:** Shipped (discovery + install + config write + CLI; OAuth deferred) · **Related:** [`catalog.md`](./catalog.md), [`skill-index.md`](./skill-index.md) · **Date:** June 2026
+**Status:** Discovery is available; all registry-supplied installation and probing are disabled pending publisher authentication. · **Related:** [`catalog.md`](./catalog.md), [`skill-index.md`](./skill-index.md)
 
 ## 1. Problem
 
 Lightwork can *consume* external MCP servers once they're in
 `[mcp_servers.<name>]` (stdio via `MCPClient`, remote HTTP via
 `StreamableHttpMCPClient`). What was missing is **discovery +
-install**: a user shouldn't have to hand-write a server's command/args/url. A
-registry gives `maverick mcp-registry browse` / `add <name>` so servers install
-by name, the same way `maverick skill add` works for skills.
+install**: `maverick mcp-registry browse` supports discovery, but adding a
+registry entry is unavailable. Servers require independently reviewed
+administrator configuration because the index does not authenticate its publisher.
 
 OAuth 2.1 (the other half of B2) is out of scope here — it needs real accounts
 to validate. Static-bearer remote servers already work via `auth_token`.
@@ -73,16 +73,13 @@ leave it empty and keep fetching `source`.
   served over **https** through the SSRF guard.
 - `verified` is **self-asserted by the index** and is NOT a trust signal (the
   index host is unauthenticated), exactly as in `catalog.md`.
-- The real supply-chain defense for an MCP server is **`pin_sha256`** in the
-  spec: `MCPClient.start()` hashes the resolved executable and refuses to spawn
-  on mismatch (the CVE-2026-30615 STDIO-trifecta class). A registry curator
-  SHOULD pin `pin_sha256` for stdio servers.
-- On install, the spec is validated through `MCPServerSpec.from_config` — the
-  same subprocess-injection / shell-metacharacter / url-scheme checks the kernel
-  applies to hand-written config — so a hostile entry (`command` with a shell
-  metacharacter, a non-http url) is rejected, not written.
-- Installing never executes anything: it writes config. Code runs only when the
-  agent later spawns the server, behind `pin_sha256`.
+- `pin_sha256` checks the selected executable's bytes. It does not authenticate
+  arguments, loaded files, child executables, or an untrusted registry's choice
+  of executable. Registry-supplied local commands are therefore refused.
+- Registry entries cannot be installed or probed; schema validation alone does
+  not authenticate their endpoint or executable.
+- A directly configured local server still needs independent review and a
+  suitable OS isolation boundary before it runs.
 
 ## 5. Code
 
@@ -90,9 +87,8 @@ leave it empty and keep fetching `source`.
 
 - `load_mcp_registry()` / `resolve_mcp(name)` → `catalog.load_catalog("mcp", …)`
   with the `[mcp_registries] indexes`.
-- `spec_from_entry(entry)` → a validated `MCPServerSpec` from `entry.spec`.
-- `install_mcp_from_registry(name)` → resolve + validate, returns the spec (pure;
-  the caller writes config, so a preview/dry-run is possible).
+- `spec_from_entry(entry)` and `install_mcp_from_registry(name)` refuse
+  unauthenticated registry-provided configuration.
 - `add_mcp_server_to_config(name, spec_dict)` / `remove_mcp_server_from_config(name)`
   — dependency-free TOML mutation (append the one table on add; text-scan removal
   on remove) so the rest of a hand-edited `config.toml` — comments, ordering,
@@ -108,8 +104,7 @@ used to serialize a resolved spec into config.
 Lightwork's *own* server):
 
 - `browse` — list registry servers (name, version, transport, verified badge).
-- `add <name>` — resolve + validate + write `[mcp_servers.<name>]`; loads on the
-  next run. Refuses to overwrite an existing entry.
+- `add <name>` — currently refuses unauthenticated registry entries.
 - `remove <name>` — drop the table from config.
 - `list` — show the MCP servers currently configured (via the kernel's loader).
 
@@ -126,7 +121,15 @@ Lightwork's *own* server):
 
 - **OAuth 2.1** for remote servers (the other half of B2) — needs real accounts.
 - **Signed registry entries** (Ed25519, mirroring the skills `trusted_pubkeys`
-  path) — the inline-spec + `pin_sha256` model already gives integrity for the
-  high-risk (stdio) case; entry signing is a future hardening for authenticity.
+  path) — authenticity and complete workload authorization remain future work.
 - **`install_count` / ranking** — the schema carries the field; surfacing it is
   cosmetic.
+
+## Local command trust
+
+The registry may describe local stdio servers for discovery, but installation
+and probing of registry-supplied local commands are disabled: pinning an
+executable does not authenticate its arguments or additional programs it may
+run. An administrator can independently review and configure a local MCP
+server directly. HTTP registry entries are also unavailable for installation
+or probing until their publisher and full configuration can be authenticated.

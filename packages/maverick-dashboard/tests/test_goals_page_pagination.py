@@ -15,7 +15,7 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     dashboard_app._world_cache.clear()
-    return TestClient(dashboard_app.app, headers={"Origin": "http://testserver"})
+    return TestClient(dashboard_app.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def _seed(n: int) -> None:

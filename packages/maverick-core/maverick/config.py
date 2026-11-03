@@ -29,6 +29,7 @@ Schema overview::
 """
 from __future__ import annotations
 
+import copy
 import errno
 import hashlib
 import io
@@ -228,6 +229,11 @@ def reset_config_cache() -> None:
 # world_read perf SLA. A wizard-written key still lands within a second.
 _ENV_FILE_BASENAME = ".env"
 _ENV_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+_WIZARD_FORBIDDEN_AUTHORITY_ENV = frozenset({
+    "MAVERICK_APPROVER_KEYS", "MAVERICK_REQUIRE_SIGNED_APPROVAL",
+    "MAVERICK_AUDIT_TRUSTED_PUBLIC_KEYS", "MAVERICK_AUDIT_SIGNING_KEY",
+    "MAVERICK_AUDIT_SIGNING_KEY_WRAPPED", "MAVERICK_AUDIT_REQUIRE_OFFHOST_KEY",
+})
 _ENV_RECHECK_SECONDS = 1.0
 _env_file_cache: dict[str, tuple[int, int, bytes | None]] = {}
 _env_last_check: float | None = None
@@ -270,7 +276,9 @@ def _load_env_file(path: Path) -> None:
             continue
         name, sep, value = line.partition("=")
         name = name.strip()
-        if not sep or not _ENV_NAME_RE.match(name):
+        canonical = ("MAVERICK_" + name[len("LIGHTWORK_"):]
+                     if name.startswith("LIGHTWORK_") else name)
+        if not sep or not _ENV_NAME_RE.match(name) or canonical in _WIZARD_FORBIDDEN_AUTHORITY_ENV:
             continue
         value = value.strip()
         # Tolerate hand-edited quoting (systemd EnvironmentFile strips it too).
@@ -426,14 +434,30 @@ def _unseal_config_tree(value: object) -> object:
         _UNSEALING.reset(token)
 
 
-def _load_config_file(path: Path) -> dict:
-    # _interp returns a fresh dict tree on every call, so the cached raw dict is
-    # never mutated by callers; env substitution stays live.  Only the fixed
-    # dashboard overlay accepts encrypted scalar tokens.  Hand-authored base or
-    # tenant configs retain their literal values and existing interpolation
-    # contract.
+def _is_tenant_config_path(path: Path) -> bool:
+    from .paths import maverick_home
+    try:
+        root = maverick_home() / "tenants"
+        for candidate, parent in ((Path(os.path.abspath(path)), Path(os.path.abspath(root))),
+                                  (Path(path).resolve(strict=False), root.resolve(strict=False))):
+            try:
+                relative = candidate.relative_to(parent)
+            except ValueError:
+                continue
+            if len(relative.parts) == 2 and relative.name == "config.toml":
+                return True
+        return False
+    except (OSError, RuntimeError):
+        return True  # ambiguous paths must not gain env access
+
+
+def _load_config_file(path: Path, *, interpolate: bool = True) -> dict:
+    # Dashboard and tenant authors do not have authority to read process
+    # secrets. Only operator-owned configuration layers can interpolate env.
     raw = _read_toml_raw(path)
-    loaded = _interp(raw)
+    loaded = (_interp(raw) if (interpolate and path.name != DASHBOARD_OVERRIDES_BASENAME
+                               and not _is_tenant_config_path(path))
+              else copy.deepcopy(raw))
     if path.name == DASHBOARD_OVERRIDES_BASENAME:
         key = str(path)
         since = _toml_gen.get(key, 0)
@@ -933,9 +957,9 @@ def load_config(path: Path | None = None) -> dict:
     if tcfg is not None and _present(tcfg):
         shared = _SINGLE_READ.get()
         if shared is None or not shared.open:
-            return _deep_merge_config(cfg, _load_config_file(tcfg))
+            return _deep_merge_config(cfg, _load_config_file(tcfg, interpolate=False))
         with _collecting_read_errors() as noted:
-            tenant = _load_config_file(tcfg)
+            tenant = _load_config_file(tcfg, interpolate=False)
         shared.noted.update(noted)  # reported for the rest of the decision
         cfg = _deep_merge_config(cfg, tenant)
     return cfg
@@ -1035,7 +1059,8 @@ def provider_configuration_state(provider: str) -> dict[str, Any]:
     for source, path in layers:
         if path is None or not path.exists():
             continue
-        loaded = dashboard_layer if source == "dashboard" else _load_config_file(path)
+        loaded = (dashboard_layer if source == "dashboard" else
+                  _load_config_file(path, interpolate=source != "tenant config"))
         if source == "config.toml" and dashboard_layer:
             # A dashboard reset masks the installer's value before the normal
             # merge. Reflect that same effective source in Settings and health.
@@ -1813,25 +1838,16 @@ def get_skills() -> dict:
     ``trusted_pubkeys`` is a list of hex-encoded Ed25519 publisher keys; a
     signed skill is only accepted if its ``pubkey`` is in this list (when
     the list is non-empty). ``require_signed`` rejects unsigned skills.
-    ``require_signed_catalog`` forces a verified Ed25519 signature from a
-    trusted publisher for ANY catalog install, even when ``trusted_pubkeys``
-    is empty (in which case the install fails for lack of a trust anchor) --
-    it hardens the catalog path without flipping the global ``require_signed``
-    default. The ``MAVERICK_REQUIRE_SIGNED_CATALOG`` env var overrides it.
-    All default off so the kernel keeps current behavior out of the box.
+    Catalog skills and templates always require a trusted publisher signature;
+    ``require_signed_catalog`` reports that effective policy for compatibility.
+    It cannot be disabled through configuration or environment variables.
     """
     cfg = load_config().get("skills", {})
     pubkeys = cfg.get("trusted_pubkeys", [])
-    env_catalog = os.environ.get("MAVERICK_REQUIRE_SIGNED_CATALOG")
-    require_catalog = (
-        env_catalog.strip().lower() in ("1", "true", "yes", "on")
-        if env_catalog is not None
-        else bool(cfg.get("require_signed_catalog", False))
-    )
     return {
         "trusted_pubkeys": [str(k) for k in pubkeys] if isinstance(pubkeys, list) else [],
         "require_signed": bool(cfg.get("require_signed", False)),
-        "require_signed_catalog": require_catalog,
+        "require_signed_catalog": True,
         # Recall the shipped first-party skills library at runtime (opt-out).
         "builtin": bool(cfg.get("builtin", True)),
         # Relevance GATES on skill recall. Precision >> recall for agent memory:
@@ -3699,7 +3715,7 @@ def _model_improvement_policy_sources() -> tuple[dict, dict | None]:
         paths.append(tenant_path)
         # Missing is a valid empty tenant policy. It therefore cannot provide
         # the explicit opt-in required by the resolver below.
-        tenant_snapshot = _load_config_file(tenant_path)
+        tenant_snapshot = _load_config_file(tenant_path, interpolate=False)
 
     errors = _source_errors(paths)
     if errors:

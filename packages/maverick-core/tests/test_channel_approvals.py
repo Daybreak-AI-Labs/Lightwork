@@ -36,7 +36,8 @@ def _world(tmp_path):
     return WorldModel(tmp_path / "world.db")
 
 
-def _card(action="browser.click", *, expires_in=300.0, irreversible=True, maximum=0.25):
+def _card(action="browser.click", *, expires_in=300.0, irreversible=True, maximum=0.25,
+          display_command=None):
     from maverick.approval_cards import build_approval_card
 
     return build_approval_card(
@@ -49,6 +50,7 @@ def _card(action="browser.click", *, expires_in=300.0, irreversible=True, maximu
         expires_at=time.time() + expires_in, known_effects=["The setting changes."],
         unresolved_assumptions=[], before="Unchanged.", after="Saved.",
         irreversible=irreversible,
+        display_command=display_command,
     )
 
 
@@ -96,6 +98,39 @@ def test_card_content_marks_expired_legacy_and_invalid(tmp_path):
 
 
 # ------------------------------------------------------------------ decisions
+
+@pytest.mark.parametrize("channel", ["slack", "teams", "email"])
+def test_private_command_cannot_be_approved_in_shared_channel(tmp_path, recorded, channel):
+    from maverick.channel_approvals import ChannelApprovalRefused, decide_from_channel
+
+    world = _world(tmp_path)
+    card = _card(display_command="echo reviewed")
+    aid = _park(world, card=card)
+    with pytest.raises(ChannelApprovalRefused, match="Approvals page") as exc:
+        decide_from_channel(world, aid, "approved", principal="user:alice", channel=channel,
+                            binding=card["binding_sha256"])
+    assert exc.value.reason == "dashboard_only"
+    assert world.get_approval(aid).status == "pending"
+
+
+def test_private_command_can_be_rejected_from_channel(tmp_path, recorded):
+    from maverick.channel_approvals import decide_from_channel
+
+    world = _world(tmp_path)
+    card = _card(display_command="echo reviewed")
+    aid = _park(world, card=card)
+    result = decide_from_channel(world, aid, "denied", principal="user:alice", channel="slack",
+                                 binding=card["binding_sha256"])
+    assert result["status"] == "denied"
+
+
+def test_full_length_command_survives_card_round_trip():
+    from maverick.approval_cards import decode_approval_detail, encode_approval_detail
+
+    command = "echo " + "x" * 3795
+    card = _card(display_command=command)
+    assert decode_approval_detail(encode_approval_detail(card))["display"]["command"] == command
+
 
 def test_approve_from_slack_records_signed_audit_and_channel(tmp_path, recorded):
     from maverick.channel_approvals import decide_from_channel

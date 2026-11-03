@@ -21,7 +21,7 @@ def client(monkeypatch, tmp_path):
     (tmp_path / "config.toml").write_text("", encoding="utf-8")
     config.reset_config_cache()
     dash_app._world_cache.clear()
-    yield TestClient(dash_app.app, headers={"Origin": "http://testserver"}), tmp_path
+    yield TestClient(dash_app.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}), tmp_path
     config.reset_config_cache()
     dash_app._world_cache.clear()
 

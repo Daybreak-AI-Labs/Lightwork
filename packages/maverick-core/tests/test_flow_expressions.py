@@ -39,16 +39,16 @@ class TestStringAndCollectionTransforms:
         assert render("{{regex(email, \"@(.+)$\")}}", {"email": "a@example.com"}) == "example.com"
         assert render("{{regex(s, \"[0-9]+\")}}", {"s": "order 42 ok"}) == "42"    # whole match
         assert render("{{regex(s, \"zzz\")}}", {"s": "abc"}) == ""                 # no match
-        assert render("{{regex(s, \"(\")}}", {"s": "abc"}) == ""                   # bad pattern -> safe
+        from maverick.flow.runner import FlowRegexRefused
+        with pytest.raises(FlowRegexRefused):
+            render("{{regex(s, \"(\")}}", {"s": "abc"})
 
     def test_regex_rejects_redos_patterns(self):
-        # a nested unbounded quantifier (catastrophic backtracking) is refused
-        # outright -> "" rather than pinning a worker (re has no timeout).
-        assert render("{{regex(s, \"(a+)+$\")}}", {"s": "aaaaaaaaaaaaaaaaX"}) == ""
-        assert render("{{regex(s, \"(.*)*\")}}", {"s": "abc"}) == ""
-        assert render("{{regex(s, \"(a?)+$\")}}", {"s": "aaaaaaaaaaaaaaaaX"}) == ""
-        assert render("{{regex(s, \"(a|aa)+$\")}}", {"s": "aaaaaaaaaaaaaaaaX"}) == ""
-        assert render("{{regex(s, \"(a+)\\1\")}}", {"s": "aa"}) == ""
+        from maverick.flow.runner import FlowRegexRefused, _regex_is_safe
+        for pattern in ("(a+)+$", "(.*)*", "(a?)+$", "(a|aa)+$", r"(a+)\1", "a*a*a*a*b"):
+            with pytest.raises(FlowRegexRefused):
+                render('{{regex(s, "' + pattern + '")}}', {"s": "a" * 2000})
+        assert not _regex_is_safe("a{100000000}")
         # a normal capture with a single '+' inside a group still works
         assert render("{{regex(email, \"([a-z]+)@\")}}", {"email": "bob@x.com"}) == "bob"
 
@@ -154,6 +154,18 @@ class TestOrderingComparisons:
 
 
 class TestSecretFunction:
+    def test_unsafe_regex_fails_flow_before_action(self):
+        seen = []
+        flow = Flow(id="f", name="f", start="a", nodes={
+            "a": FlowNode(id="a", kind="action", tool="t",
+                          params={"value": '{{regex(input, "a*a*b")}}'})
+        })
+        result = run_flow(flow, agent_fn=lambda *a: ("", None),
+                          action_fn=lambda *a: seen.append(a), data={"input": "aaa"})
+        assert result.status == "failed"
+        assert "safe subset" in result.error
+        assert not seen
+
     def test_legacy_allow_flag_never_grants_deployment_secret_access(self, monkeypatch):
         monkeypatch.setenv("STRIPE_KEY", "sk_test_123")
         assert render("{{secret('STRIPE_KEY')}}", {}) == "{{secret('STRIPE_KEY')}}"

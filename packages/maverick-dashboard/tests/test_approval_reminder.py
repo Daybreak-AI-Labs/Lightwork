@@ -13,7 +13,7 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-ORIGIN = {"Origin": "http://testserver"}
+ORIGIN = {"Origin": "http://127.0.0.1"}
 SAM = "user:sam.lee@northwind.example"
 DANA = "user:dana.admin@northwind.example"
 ROLES = {SAM: "operator", DANA: "operator"}
@@ -39,7 +39,7 @@ def env(monkeypatch, tmp_path):
     monkeypatch.setattr(auth, "global_role_for_principal", lambda p: ROLES.get(p, "operator"))
     monkeypatch.setattr(rbac, "list_users", lambda: dict(ROLES))
     monkeypatch.setattr(scim_groups, "active_for_principal", lambda p: True)
-    yield TestClient(app, headers=ORIGIN), world
+    yield TestClient(app, base_url="http://127.0.0.1", headers=ORIGIN), world
     world.close()
     config.reset_config_cache()
 

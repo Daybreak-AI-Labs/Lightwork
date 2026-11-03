@@ -30,7 +30,7 @@ def client(monkeypatch, tmp_path):
     config.reset_config_cache()
     dash_app._world_cache.clear()
     learning_jobs.clear_for_tests()
-    yield TestClient(dash_app.app, headers={"Origin": "http://testserver"}), tmp_path
+    yield TestClient(dash_app.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}), tmp_path
     learning_jobs.clear_for_tests()
     config.reset_config_cache()
     dash_app._world_cache.clear()
@@ -357,7 +357,7 @@ def _approve(app, approval_id, who, monkeypatch):
         patch.setattr(auth, "caller_principal", lambda request: who)
         patch.setattr(api, "_supervisor", lambda request: who)
         return app.post(f"/api/v1/approvals/{approval_id}/approve", json={"acknowledged": True, "confirmation": "approve"},
-                        headers={"Origin": "http://testserver", "X-Lightwork-Approval-Binding": binding})
+                        headers={"Origin": "http://127.0.0.1", "X-Lightwork-Approval-Binding": binding})
 
 
 def test_a_reasoned_bypass_needs_another_administrator_when_switched_on(client, monkeypatch, audit_rows):

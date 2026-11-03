@@ -14,6 +14,7 @@ from maverick_channels.threads import ThreadsChannel
 
 SELF_ID = "17841400000000000"
 OWNER = "ownerhandle"
+OWNER_ID = "999000111"
 REPLY_ID = "18010000000000001"
 ACCESS_TOKEN = "THQVJ-token"
 
@@ -23,7 +24,7 @@ def _channel(**overrides):
         handler=AsyncMock(return_value="the reply"),
         access_token=ACCESS_TOKEN,
         user_id=SELF_ID,
-        allowed_user_ids=[OWNER],
+        allowed_user_ids=[OWNER_ID],
     )
     kw.update(overrides)
     return ThreadsChannel(**kw)
@@ -127,7 +128,7 @@ def test_poll_cycle_processes_allowed_reply_once(monkeypatch):
     ch.handler.assert_awaited_once()
     msg = ch.handler.await_args.args[0]
     assert msg.user_id == REPLY_ID and msg.message_id == REPLY_ID
-    assert msg.sender_id == OWNER and msg.channel == "threads"
+    assert msg.sender_id == OWNER_ID and msg.channel == "threads"
     assert msg.text == "hello agent"
     assert wm.mark_message_processed.call_count == 1
     assert wm.mark_message_processed.call_args.args[0] == "delivery:threads"
@@ -144,7 +145,7 @@ def test_unlisted_author_ignored(monkeypatch):
     ch = _channel()
     ch.send = AsyncMock()
     wm = _fake_wm(monkeypatch)
-    _install_httpx(monkeypatch, [], _responder_with([_reply(username="stranger")]))
+    _install_httpx(monkeypatch, [], _responder_with([_reply(username=OWNER, from_id="999000222")]))
 
     asyncio.run(_cycle(ch))
 

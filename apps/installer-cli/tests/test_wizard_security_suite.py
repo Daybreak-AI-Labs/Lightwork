@@ -1232,3 +1232,42 @@ def test_vendor_onboarding_writer_retains_disabled_default(tmp_path, monkeypatch
         "vendor_management", "connections", "evidence_graph", "model_risk_assurance", "ai_vendor_risk",
     ):
         assert parsed.get(dependency, {}).get("enable", False) is False
+
+
+def test_partial_progress_never_persists_oidc_secrets(tmp_path, monkeypatch):
+    import json
+    import os
+    import stat
+
+    from maverick_installer import wizard
+
+    path = tmp_path / "wizard-partial.json"
+    monkeypatch.setattr(wizard, "PARTIAL_STATE_PATH", path)
+    state = {"deployment": "desktop", "advanced": {"oidc": {
+        "client_secret": "private-client-value", "session_secret": "private-session-value"}}}  # pragma: allowlist secret
+    wizard._save_partial(state)
+    assert json.loads(path.read_text()) == {"deployment": "desktop"}
+    assert state["advanced"]["oidc"]["client_secret"] == "private-client-value"  # pragma: allowlist secret
+    if os.name != "nt":
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    # Resume from a legacy file sanitizes it before returning the state.
+    path.write_text(json.dumps(state))
+    assert wizard._load_partial() == {"deployment": "desktop"}
+    assert "private-client-value" not in path.read_text()
+    assert "private-session-value" not in path.read_text()
+
+
+def test_resume_refuses_when_legacy_secret_cleanup_fails(tmp_path, monkeypatch):
+    import json
+
+    from maverick import file_lock
+    from maverick_installer import wizard
+
+    path = tmp_path / "wizard-partial.json"
+    path.write_text(json.dumps({"advanced": {"oidc": {"session_secret": "old-private-value"}}}))  # pragma: allowlist secret
+    monkeypatch.setattr(wizard, "PARTIAL_STATE_PATH", path)
+    def cannot_write(*args, **kwargs):
+        raise OSError("not writable")
+    monkeypatch.setattr(file_lock, "atomic_write_text", cannot_write)
+    with pytest.raises(RuntimeError, match="Cannot securely remove old OIDC secrets"):
+        wizard._load_partial()

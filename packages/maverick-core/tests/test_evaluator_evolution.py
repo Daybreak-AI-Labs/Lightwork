@@ -334,13 +334,14 @@ def test_consider_promotion_needs_human_above_default_ceiling(tmp_path, monkeypa
         controller=ctrl,
     )
     assert refused.promoted is False
-    # With explicit human approval the same swap goes through.
+    # A bare boolean cannot stand in for a trusted signed approval.
     approved = ee.consider_promotion(
         slot, _verdicts(anchor, agree=8), {"new": _verdicts(anchor, agree=14)},
         anchor, [], lock=ee.anchor_fingerprint({"reviewer": anchor}),
         controller=ctrl, approved=True,
     )
-    assert approved.promoted is True
+    assert approved.promoted is False
+    assert "signature" in approved.reason.lower()
 
 
 def test_consider_promotion_refuses_tampered_anchor(monkeypatch):

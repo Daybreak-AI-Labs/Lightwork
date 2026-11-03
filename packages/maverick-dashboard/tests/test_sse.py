@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 
 def _client():
     from maverick_dashboard.app import app
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def test_sse_404_for_unknown_goal(monkeypatch, tmp_path):

@@ -898,6 +898,16 @@ def _extraction_request_sha256(
     )
 
 
+_EVIDENCE_PDF_SLOTS = threading.BoundedSemaphore(2)
+
+
+def _isolated_evidence_pdf_text(content: bytes, *, maximum_characters: int) -> str:
+    """Child-process entry point for bounded evidence PDF extraction."""
+    return BoundedLocalExtractionAdapter(
+        maximum_characters=maximum_characters,
+    )._pdf_text_in_process(content)
+
+
 class BoundedLocalExtractionAdapter:
     """Offline bounded parser with exact-code matching and no raw-text output.
 
@@ -955,6 +965,25 @@ class BoundedLocalExtractionAdapter:
         return text
 
     def _pdf_text(self, content: bytes) -> str:
+        from .parser_isolation import parse_isolated
+
+        if not _EVIDENCE_PDF_SLOTS.acquire(timeout=0.25):
+            raise EvidenceAnalysisConfigError("PDF extraction is busy; retry later")
+        try:
+            try:
+                result = parse_isolated(
+                    "evidence_pdf_text", content, timeout=30.0,
+                    maximum_characters=self.maximum_characters,
+                )
+            except (RuntimeError, ValueError, OSError) as exc:
+                raise EvidenceAnalysisValidationError("PDF extraction failed closed") from exc
+        finally:
+            _EVIDENCE_PDF_SLOTS.release()
+        if not isinstance(result, str):
+            raise EvidenceAnalysisValidationError("PDF extraction returned an invalid result")
+        return self._bounded(result)
+
+    def _pdf_text_in_process(self, content: bytes) -> str:
         if any(token in content for token in (b"/JavaScript", b"/EmbeddedFiles", b"/Launch")):
             raise EvidenceAnalysisValidationError("active or embedded PDF content is unsupported")
         try:

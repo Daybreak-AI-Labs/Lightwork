@@ -1,7 +1,8 @@
 <#
   Lightwork desktop bootstrap (Windows).
 
-  Zero prerequisites. It installs Python 3.12 if missing, checks out an exact
+  It installs Python 3.12 if missing, requires a trusted pipx installation,
+  checks out an exact
   Lightwork commit into an isolated pipx environment, and launches the wizard
   (`maverick init`). There is deliberately no public-package-index fallback.
 
@@ -150,8 +151,7 @@ function Resolve-Python {
   $parents = @(
     (Join-Path $env:LOCALAPPDATA 'Programs\Python'),
     $env:ProgramFiles,
-    (Join-Path $env:ProgramFiles 'Python'),
-    'C:\'
+    (Join-Path $env:ProgramFiles 'Python')
   )
   if (${env:ProgramFiles(x86)}) { $parents += ${env:ProgramFiles(x86)} }
   foreach ($p in $parents) {
@@ -186,7 +186,14 @@ Write-Step ("Using " + ((Py --version | Out-String).Trim()))
 
 # 2. pipx
 Write-Step "Ensuring pipx ..."
-Py -m pip install --user --upgrade pip pipx | Out-Null
+$pipxAvailable = $false
+try {
+  Py -m pipx --version 2>$null | Out-Null
+  $pipxAvailable = ($LASTEXITCODE -eq 0)
+} catch { $pipxAvailable = $false }
+if (-not $pipxAvailable) {
+  Die "Install pipx for the selected Python from a trusted source, then re-run."
+}
 Py -m pipx ensurepath | Out-Null
 
 function Ensure-GitForSource {

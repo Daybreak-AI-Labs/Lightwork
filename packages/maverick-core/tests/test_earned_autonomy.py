@@ -218,9 +218,9 @@ def test_streak_graduates_and_grants(tmp_path):
     engine = _engine(tmp_path, grants=grants, audits=audits)
     report = _graduate(engine)
     assert report.graduated == ("wire_transfer",)
-    assert grants == ["wire_transfer"]
+    assert grants == []
     assert engine.ledger.state("wire_transfer").graduated is True
-    assert engine.decide("wire_transfer", risk="high").auto is True
+    assert engine.decide("wire_transfer", risk="high").auto is False
     decisions = [p.get("decision") for k, p in audits
                  if k == "autonomy_graduation"]
     assert decisions == ["graduate"]
@@ -233,7 +233,7 @@ def test_one_miss_demotes_instantly_and_revokes(tmp_path):
     _card(engine, episode_id=9, predicted=0.9)
     report = engine.reconcile(resolve=lambda g, e: 0.0 if e == 9 else 1.0)
     assert report.demoted == ("wire_transfer",)
-    assert "wire_transfer" in revokes
+    assert revokes == []
     s = engine.ledger.state("wire_transfer")
     assert s.graduated is False and s.streak == 0 and s.ever_graduated is True
     assert engine.decide("wire_transfer", risk="high").auto is False
@@ -330,27 +330,26 @@ def test_calibration_freeze_blocks_graduation(tmp_path):
     assert _graduate(engine2).graduated == ()
 
 
-def test_grant_failure_means_no_graduation_record(tmp_path):
+def test_legacy_grant_callback_is_not_invoked(tmp_path):
     def _refuse(action):
         raise RuntimeError("ledger sealed")
 
     engine = _engine(tmp_path)
     engine.grant_fn = _refuse
     report = _graduate(engine)
-    assert report.graduated == ()
-    assert engine.ledger.state("wire_transfer").graduated is False
+    assert report.graduated == ("wire_transfer",)
+    assert engine.ledger.state("wire_transfer").graduated is True
 
 
-def test_grant_is_compensated_when_evidence_write_fails(tmp_path):
-    """Authority must never outlive its evidence: grant succeeded, the
-    graduate row could not persist (ledger at capacity) -> revoke runs."""
+def test_evidence_write_failure_does_not_create_or_revoke_grant(tmp_path):
+    """A failed evidence write does not touch independent consent grants."""
     grants, revokes = [], []
     engine = _engine(tmp_path, grants=grants, revokes=revokes)
     engine.ledger = ea.TrustLedger(path=tmp_path / "t.ndjson", max_rows=3)
     report = _graduate(engine)  # 3 hit rows fill the ledger; graduate drops
     assert report.graduated == ()
-    assert grants == ["wire_transfer"]
-    assert "wire_transfer" in revokes  # the compensating withdrawal
+    assert grants == []
+    assert revokes == []
     assert engine.ledger.state("wire_transfer").graduated is False
     assert engine.decide("wire_transfer", risk="high").auto is False
 
@@ -362,32 +361,24 @@ def test_miss_at_ledger_capacity_still_demotes(tmp_path):
     engine = _engine(tmp_path, revokes=revokes)
     engine.ledger = ea.TrustLedger(path=tmp_path / "t.ndjson", max_rows=4)
     _graduate(engine)  # 3 hits + 1 graduate = at capacity, graduated
-    assert engine.decide("wire_transfer", risk="high").auto is True
+    assert engine.decide("wire_transfer", risk="high").auto is False
     _card(engine, episode_id=9)
     engine.reconcile(resolve=lambda g, e: 0.0 if e == 9 else 1.0)
-    assert "wire_transfer" in revokes
+    assert revokes == []
     assert engine.ledger.state("wire_transfer").graduated is False
     assert engine.decide("wire_transfer", risk="high").auto is False
 
 
-def test_stale_grant_sweep_retries_failed_revoke(tmp_path):
-    """A revoke that failed at demote time is retried by the next reconcile."""
+def test_evidence_demotion_does_not_call_legacy_revocation_callback(tmp_path):
     calls = []
-
-    def _flaky(action):
-        calls.append(action)
-        if len(calls) == 1:
-            raise RuntimeError("consent ledger unavailable")
-
     engine = _engine(tmp_path)
-    engine.revoke_fn = _flaky
+    engine.revoke_fn = calls.append
     _graduate(engine)
     _card(engine, episode_id=9)
     engine.reconcile(resolve=lambda g, e: 0.0 if e == 9 else 1.0)
-    assert len(calls) >= 1  # first withdrawal attempt failed
-    before = len(calls)
-    engine.reconcile(resolve=lambda g, e: None)  # nothing to score
-    assert len(calls) > before  # the sweep re-ran the withdrawal
+    engine.reconcile(resolve=lambda g, e: None)
+    assert calls == []
+    assert engine.ledger.state("wire_transfer").graduated is False
 
 
 def test_operator_revoke(tmp_path):
@@ -395,7 +386,7 @@ def test_operator_revoke(tmp_path):
     engine = _engine(tmp_path, revokes=revokes)
     _graduate(engine)
     assert engine.revoke("wire_transfer", reason="quarter close") is True
-    assert revokes[-1] == "wire_transfer"
+    assert revokes == []
     assert engine.ledger.state("wire_transfer").graduated is False
 
 
@@ -405,7 +396,7 @@ def test_operator_revoke(tmp_path):
 def test_decide_fails_toward_human(tmp_path, monkeypatch):
     engine = _engine(tmp_path)
     _graduate(engine)
-    assert engine.decide("wire_transfer", risk="high").auto is True
+    assert engine.decide("wire_transfer", risk="high").auto is False
     # Frozen verifier suspends the dial.
     engine.frozen_fn = lambda: True
     assert engine.decide("wire_transfer", risk="high").auto is False
@@ -427,7 +418,7 @@ def test_decide_default_risk_uses_live_classification(tmp_path, monkeypatch):
 
     trm = importlib.import_module("maverick.safety.tool_risk")
     monkeypatch.setattr(trm, "tool_risk", lambda n, overrides=None: "high")
-    assert engine.decide("wire_transfer").auto is True  # ceiling is 'high'
+    assert engine.decide("wire_transfer").auto is False  # evidence is advisory
     monkeypatch.setattr(
         trm, "tool_risk",
         lambda n, overrides=None: (_ for _ in ()).throw(RuntimeError("gone")))
@@ -619,11 +610,11 @@ def test_cli_disabled_message_and_revoke(tmp_path, monkeypatch):
     res = _cli(tmp_path, monkeypatch, ["--revoke", "wire_transfer"],
                env={"MAVERICK_EARNED_AUTONOMY": "0"})
     assert res.exit_code == 0, res.output
-    assert "Withdrawal recorded for 'wire_transfer' under the current identity and policy" in res.output
-    assert "Other identities' standing grants are not withdrawn" in res.output
+    assert "Evidence qualification cleared for 'wire_transfer'" in res.output
+    assert "Explicit standing consent grants are unchanged" in res.output
     assert "disabled" in res.output
     # The revoke event landed even while the feature is off.
-    assert "wire_transfer: human approves" in res.output
+    assert "wire_transfer: no approval granted by evidence" in res.output
 
 
 # -- agent integration: the rehearsal verdict lands as a card --------------
@@ -769,19 +760,19 @@ def test_shadow_approval_error_is_a_denial(tmp_path):
     assert res.approved is False and trail == []
 
 
-def test_shadow_auto_approves_a_graduated_action_type(tmp_path):
+def test_shadow_still_requires_approval_for_a_graduated_action_type(tmp_path):
     trail = []
     engine = _engine(tmp_path)
-    _graduate(engine)  # wire_transfer earns auto-approval
-    assert engine.decide("wire_transfer", risk="high").auto is True
+    _graduate(engine)  # action-wide evidence does not authorize this effect
+    assert engine.decide("wire_transfer", risk="high").auto is False
     consulted = []
     res = ea.shadow_execute(
         _preview(), _steps(trail), principal="cfo-bot", goal_id=1,
         episode_id=9, approve=lambda view: consulted.append(view) or False,
         engine=engine)
-    assert res.auto_approved is True and res.executed and res.committed
-    assert consulted == []  # the human gate was skipped -- trust was earned
-    assert trail == ["do"]
+    assert res.auto_approved is False and not res.executed and not res.committed
+    assert len(consulted) == 1
+    assert trail == []
 
 
 def test_shadow_refuses_irreversible_without_undo_before_any_effect(tmp_path):
@@ -835,7 +826,7 @@ def test_shadow_card_view_bounds_content_and_omits_raw_params(tmp_path):
 
 def test_shadow_end_to_end_earns_autonomy_from_real_outcomes(tmp_path):
     """The compounding loop: human-approved shadow executions get graded by
-    reality, and after a proven streak the action graduates to auto."""
+    reality, and after a proven streak the evidence is marked qualified."""
     engine = _engine(tmp_path)
     for ep in (1, 2, 3):
         res = ea.shadow_execute(
@@ -846,7 +837,7 @@ def test_shadow_end_to_end_earns_autonomy_from_real_outcomes(tmp_path):
     # Reality confirms every prediction -> the streak graduates the action.
     report = engine.reconcile(resolve=lambda g, e: 1.0)
     assert report.graduated == ("wire_transfer",)
-    assert engine.decide("wire_transfer", risk="high").auto is True
+    assert engine.decide("wire_transfer", risk="high").auto is False
 
 
 @pytest.mark.parametrize("source", ["rehearsal", "declared", "", "adapter"])

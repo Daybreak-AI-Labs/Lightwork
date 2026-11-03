@@ -34,6 +34,31 @@ def test_unaligned_missing_or_untrusted_results_are_refused(result):
     assert authenticated_from(_msg(result), "mx.example.com") == ""
 
 
+@pytest.mark.parametrize("result", [
+    "mx.example.com; dmarc=fail (attacker; dmarc=pass header.from=example.com)",
+    'mx.example.com; spf=pass (google.com: domain of "x; dmarc=pass '
+    'header.from=example.com"@evil.com designates 203.0.113.1) '
+    'smtp.mailfrom=evil.com; dmarc=fail header.from=example.com',
+    'mx.example.com; dmarc=fail reason="fake; dmarc=pass header.from=example.com"',
+    "mx.example.com; dmarc=pass (header.from=example.com) header.from=evil.com",
+    "mx.example.com; dmarc=pass header.from=example.com@evil.com",
+    "mx.example.com; dmarc=pass header.from=example.com/evil",
+    "mx.example.com; dmarc=pass header.from=example.com; dmarc=fail header.from=example.com",
+    "mx.example.com; dmarc=pass header.from=example.com header.from=evil.com",
+    "mx.example.com; dmarc=pass header.from=example.com (unclosed",
+    'mx.example.com; dmarc=pass header.from="example.com"',
+    "mx.example.com extra; dmarc=pass header.from=example.com",
+])
+def test_comments_quotes_malformed_and_conflicting_results_do_not_grant_access(result):
+    assert authenticated_from(_msg(result), "mx.example.com") == ""
+
+
+def test_nested_comments_and_folded_results_allow_normal_aligned_pass():
+    message = _msg("mx.example.com 1; dmarc=pass (outer (inner \\) text))\r\n"
+                   "\theader.from=example.com")
+    assert authenticated_from(message, "mx.example.com") == "alice@example.com"
+
+
 def test_no_result_or_no_configured_server_is_refused():
     assert authenticated_from(_msg(), "mx.example.com") == ""
     assert authenticated_from(

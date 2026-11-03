@@ -98,7 +98,7 @@ def env(tmp_path, monkeypatch):
     application.include_router(api_module.router)
     application.include_router(viewpoints_api.router)
     application.include_router(cli_ops_api.router)
-    with TestClient(application, headers={"Origin": "http://testserver"}) as client:
+    with TestClient(application, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}) as client:
         yield SimpleNamespace(client=client, goal=goal, work=work, world=world, audit=rows, tmp=tmp_path, cfg=cfg)
     JOBS.clear()
     config.reset_config_cache()
@@ -475,15 +475,15 @@ def test_ekko_recording_needs_consent_enrollment_and_guided_capture(env, monkeyp
     too_big = {**body, "events": "x" * 1_000_001}
     assert env.client.post("/api/v1/ekko/recording/import", json=too_big).status_code == 422
     options = env.client.get("/api/v1/ekko/recording/options").json()
-    assert options["activity_file"] is True and options["windows_active_app"] is (os.name == "nt")
+    assert options["activity_file"] is True and options["windows_active_app"] is False
     if not options["active_app"]:
         # This computer has no supported desktop recorder: nothing starts, and
         # the reply says why in the platform's own words.
         watch = env.client.post("/api/v1/ekko/recording/watch", json={"acknowledge_capture_scope": True})
         assert watch.status_code == 409
         assert watch.json()["detail"] == {"message": options["availability_message"], "not_started": True}
-    # Where a recorder is available, watching still needs the capture-scope
-    # acknowledgement and an enabled, enrolled Ekko before anything records.
+    # Even when a supported server desktop is present, a dashboard client
+    # cannot establish that it owns that desktop.
     import maverick.ekko_foreground as foreground
 
     monkeypatch.setattr(foreground, "foreground_options", lambda: {
@@ -491,7 +491,7 @@ def test_ekko_recording_needs_consent_enrollment_and_guided_capture(env, monkeyp
         "availability_message": "Record recognized apps on the local Linux X11 desktop where Lightwork is installed."})
     monkeypatch.setattr(foreground, "foreground_observer", lambda: pytest.fail("no recorder may open before consent"))
     unacknowledged = env.client.post("/api/v1/ekko/recording/watch", json={"acknowledge_capture_scope": False})
-    assert unacknowledged.status_code == 400 and unacknowledged.json()["detail"]["not_started"] is True
+    assert unacknowledged.status_code == 409 and unacknowledged.json()["detail"]["not_started"] is True
     off = env.client.post("/api/v1/ekko/recording/watch", json={"acknowledge_capture_scope": True})
     assert off.status_code == 409 and off.json()["detail"]["not_started"] is True  # Ekko is off
 
@@ -508,7 +508,8 @@ def test_ekko_recording_runs_the_daemon_over_the_uploaded_file(env, monkeypatch)
             ran["observer"] = observer
             self.accepted_events, self.blocked_events = 0, 0
 
-        def run(self, *, stop_when):
+        def run(self, *, stop_when, max_idle_sleep):
+            assert max_idle_sleep == 1.0
             while ran["observer"].observe() is not None:
                 self.accepted_events += 1
             assert stop_when()

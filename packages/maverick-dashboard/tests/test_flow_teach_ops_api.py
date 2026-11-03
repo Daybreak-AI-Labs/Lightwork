@@ -84,7 +84,7 @@ def env(tmp_path, monkeypatch):
 
     application.include_router(api_module.router)
     application.include_router(cli_ops_api.router)
-    with TestClient(application, headers={"Origin": "http://testserver"}) as client:
+    with TestClient(application, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}) as client:
         yield SimpleNamespace(client=client, flow=saved, exported=exported)
     config.reset_config_cache()
 

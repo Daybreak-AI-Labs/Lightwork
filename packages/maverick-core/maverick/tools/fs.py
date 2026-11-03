@@ -26,6 +26,9 @@ def _safe_resolve(sandbox, user_path: str) -> Path:
 
     Raises ValueError if the resolved path escapes the workspace.
     """
+    from ..sandbox.ssh import SSHBackend
+    if isinstance(sandbox, SSHBackend):
+        raise ValueError("host filesystem tools cannot access an SSH workspace")
     workdir = Path(sandbox.workdir).resolve()
     candidate = (workdir / user_path).resolve()
     try:
@@ -135,7 +138,7 @@ def _write_text_contained(sandbox, target: Path, content: str, *, legacy_journal
         rel = target.relative_to(workdir)
     except ValueError:
         rel = target
-    if ".git" in rel.parts:
+    if any(part.rstrip(" .").casefold() == ".git" for part in rel.parts):
         raise ValueError(f"refusing to write under .git/: {rel}")
     # Workspace journal chokepoint: every file-tool write (write_file, the
     # str_replace editors, ast_edit) funnels through here, so the pre-image is

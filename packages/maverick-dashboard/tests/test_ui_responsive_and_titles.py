@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 def _client():
     from maverick_dashboard.app import app
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def _reset_rate_limit():
@@ -99,11 +99,11 @@ def test_chat_send_rate_limited(monkeypatch, tmp_path):
 
     client = _client()
     ok1 = client.post("/chat/send", data={"title": "a"},
-                      headers={"Origin": "http://testserver"}, follow_redirects=False)
+                      headers={"Origin": "http://127.0.0.1"}, follow_redirects=False)
     ok2 = client.post("/chat/send", data={"title": "b"},
-                      headers={"Origin": "http://testserver"}, follow_redirects=False)
+                      headers={"Origin": "http://127.0.0.1"}, follow_redirects=False)
     blocked = client.post("/chat/send", data={"title": "c"},
-                          headers={"Origin": "http://testserver"}, follow_redirects=False)
+                          headers={"Origin": "http://127.0.0.1"}, follow_redirects=False)
     assert ok1.status_code == 303
     assert ok2.status_code == 303
     assert blocked.status_code == 429
@@ -126,11 +126,11 @@ def test_api_goals_shares_the_same_cap(monkeypatch, tmp_path):
     client = _client()
     # One goal via chat consumes the single slot...
     r1 = client.post("/chat/send", data={"title": "a"},
-                     headers={"Origin": "http://testserver"}, follow_redirects=False)
+                     headers={"Origin": "http://127.0.0.1"}, follow_redirects=False)
     assert r1.status_code == 303
     # ...so the API route is now over the shared cap.
     r2 = client.post("/api/v1/goals", json={"title": "b"},
-                     headers={"Origin": "http://testserver"})
+                     headers={"Origin": "http://127.0.0.1"})
     assert r2.status_code == 429
 
 
@@ -144,7 +144,7 @@ def test_chat_send_empty_title_rejected(monkeypatch, tmp_path):
     dash_app._world_cache.clear()
     _reset_rate_limit()
     r = _client().post("/chat/send", data={"title": "   "},
-                       headers={"Origin": "http://testserver"})
+                       headers={"Origin": "http://127.0.0.1"})
     assert r.status_code == 400
 
 

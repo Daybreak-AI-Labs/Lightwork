@@ -7,8 +7,6 @@ description = "Lightwork native safety scanners (pure logic; shared by the Pytho
 
 [dependencies]
 unicode-normalization = "0.1"
-# Backtracking engine: needed for the PII phone/SSN patterns' lookbehind /
-# lookahead (the `regex` crate can't do those). For patterns WITHOUT fancy
-# features fancy-regex delegates to `regex` (linear), so this is also the safest
-# single engine for byte-for-byte parity with Python's backtracking `re`.
+# All current detector patterns avoid lookaround and delegate to the engine's
+# linear regex backend. Boundaries are checked explicitly against the input.
 fancy-regex = "0.20"

@@ -7,7 +7,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-ORIGIN = {"Origin": "http://testserver"}
+ORIGIN = {"Origin": "http://127.0.0.1"}
 
 
 @pytest.fixture(autouse=True)
@@ -41,7 +41,7 @@ def _as(monkeypatch, principal, role="operator"):
 def _client():
     from maverick_dashboard.app import app
 
-    return TestClient(app, headers=ORIGIN, follow_redirects=False)
+    return TestClient(app, base_url="http://127.0.0.1", headers=ORIGIN, follow_redirects=False)
 
 
 def _off(tmp_path):
@@ -94,7 +94,7 @@ def test_answers_need_the_same_origin(isolated, monkeypatch):
     from maverick_dashboard.app import app
 
     _as(monkeypatch, "user:kim")
-    foreign = TestClient(app, headers={"Origin": "https://elsewhere.example"})
+    foreign = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "https://elsewhere.example"})
     assert foreign.post("/api/v1/usability-survey/sus", json={"answers": [3] * 10}).status_code == 403
 
 
@@ -166,6 +166,6 @@ def test_suggestion_counts_and_first_results_reach_the_results_page(isolated, mo
     main = page.split("<main", 1)[-1].split("</main>", 1)[0]
     assert "First result in the first session" in main and "Copilot suggested questions" in main
     assert "Shown again after dismissal" in main and "user:kim" not in main and "How do I invite" not in main
-    foreign = TestClient(_client().app, headers={"Origin": "https://elsewhere.example"})
+    foreign = TestClient(_client().app, base_url="http://127.0.0.1", headers={"Origin": "https://elsewhere.example"})
     assert foreign.post("/api/v1/usage-measures/suggestion",
                         json={"kind": "copilot-question", "event": "shown"}).status_code == 403

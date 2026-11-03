@@ -478,7 +478,7 @@ def test_http_financial_authority_owner_context_and_confirmation_precede_source_
     original = costs.sources
     calls = []
     monkeypatch.setattr(costs, "sources", lambda *a: calls.append(True) or original(*a))
-    with TestClient(app, headers={"Origin": "http://testserver", "X-Lightwork-Pilot-Context": "alice"}) as client:
+    with TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1", "X-Lightwork-Pilot-Context": "alice"}) as client:
         assert client.get(path, headers={"X-Test-User": "operator", "X-Lightwork-Pilot-Context": "operator"}).status_code == 403
         assert client.get(path, headers={"X-Lightwork-Pilot-Context": "old"}).status_code == 409
         assert client.get(path.replace(record["id"], "OPL-missing")).status_code == 404

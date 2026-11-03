@@ -44,7 +44,7 @@ def registry(monkeypatch):
     monkeypatch.setattr(ops, "adapters", lambda: {adapter.id: state["adapter"]})
     app = FastAPI()
     app.include_router(ops.router)
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         yield client, state
 
 

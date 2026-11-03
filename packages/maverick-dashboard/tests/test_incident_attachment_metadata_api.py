@@ -146,11 +146,11 @@ def _create_body() -> dict[str, object]:
 
 def test_status_is_explicit_about_default_off_and_external_gaps():
     app, _store = _app(enabled=False, ready=False)
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1")
     with tenant_scope(tenant="alpha"):
         response = client.get(
             "/api/v1/incident-attachments/status",
-            headers={"Origin": "http://testserver"},
+            headers={"Origin": "http://127.0.0.1"},
         )
     assert response.status_code == 200
     assert response.json() == {
@@ -167,12 +167,12 @@ def test_status_is_explicit_about_default_off_and_external_gaps():
 
 def test_enabled_but_unready_mutation_fails_closed():
     app, _store = _app(enabled=True, ready=False)
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1")
     with tenant_scope(tenant="alpha"):
         response = client.post(
             "/api/v1/incident-attachments/privacy/INC-one",
             json=_create_body(),
-            headers={"Origin": "http://testserver"},
+            headers={"Origin": "http://127.0.0.1"},
         )
     assert response.status_code == 503
     assert "readiness" in response.json()["detail"]
@@ -180,17 +180,17 @@ def test_enabled_but_unready_mutation_fails_closed():
 
 def test_create_accepts_only_closed_references_and_returns_projection():
     app, store = _app()
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1")
     with tenant_scope(tenant="alpha"):
         rejected = client.post(
             "/api/v1/incident-attachments/privacy/INC-one",
             json={**_create_body(), "safe_display_name": "caller-name.pdf"},
-            headers={"Origin": "http://testserver"},
+            headers={"Origin": "http://127.0.0.1"},
         )
         response = client.post(
             "/api/v1/incident-attachments/privacy/INC-one",
             json=_create_body(),
-            headers={"Origin": "http://testserver"},
+            headers={"Origin": "http://127.0.0.1"},
         )
     assert rejected.status_code == 422
     assert response.status_code == 201
@@ -207,16 +207,16 @@ def test_create_accepts_only_closed_references_and_returns_projection():
 
 def test_get_path_binding_and_history_are_strict():
     app, store = _app()
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1")
     attachment_id = store.record.attachment_id
     with tenant_scope(tenant="alpha"):
         wrong = client.get(
             f"/api/v1/incident-attachments/security/INC-one/{attachment_id}",
-            headers={"Origin": "http://testserver"},
+            headers={"Origin": "http://127.0.0.1"},
         )
         history = client.get(
             f"/api/v1/incident-attachments/privacy/INC-one/{attachment_id}/history",
-            headers={"Origin": "http://testserver"},
+            headers={"Origin": "http://127.0.0.1"},
         )
     assert wrong.status_code == 404
     assert history.status_code == 200
@@ -230,12 +230,12 @@ def test_core_conflicts_map_to_http_409():
             raise iam.IncidentAttachmentConflict("incident revision or digest changed")
 
     app, _store = _app(store=ConflictStore())
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1")
     with tenant_scope(tenant="alpha"):
         response = client.post(
             "/api/v1/incident-attachments/privacy/INC-one",
             json=_create_body(),
-            headers={"Origin": "http://testserver"},
+            headers={"Origin": "http://127.0.0.1"},
         )
     assert response.status_code == 409
     assert response.json()["detail"] == "incident revision or digest changed"

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+from pathlib import Path
 
 from maverick.github_app import (
     SLASH_TRIGGER,
@@ -167,122 +168,23 @@ class TestSlugify:
         assert slugify("!!!") == "issue"
 
 
-class TestProcessIssueGitTimeout:
-    """A hung local git call must surface as a clean PRResult, not a hang/crash."""
+def test_issue_automation_refuses_before_clone_or_subprocess(monkeypatch):
+    import asyncio
 
-    def _payload(self):
-        from maverick.github_app import WebhookPayload
-        return WebhookPayload(
-            event="issues", action="labeled", repo_full_name="octocat/spoon",
-            issue_number=7, issue_title="t", issue_body="b",
-            trigger_label="maverick", sender_login="alice",
-        )
+    from maverick import github_app as ga
 
-    def test_checkout_timeout_returns_error(self, monkeypatch, tmp_path):
-        import asyncio
-        import subprocess
-
-        from maverick import github_app as ga
-
-        monkeypatch.setattr(ga, "clone_repo", lambda *a, **k: tmp_path)
-
-        def _boom(*a, **k):
-            raise subprocess.TimeoutExpired(cmd="git", timeout=ga._GIT_TIMEOUT)
-
-        monkeypatch.setattr(ga.subprocess, "run", _boom)
-
-        res = asyncio.run(ga.process_issue(self._payload(), token="x"))
-        assert res.pr_url is None
-        assert "checkout failed" in (res.error or "")
-
-    def test_checkout_calls_are_time_boxed(self, monkeypatch, tmp_path):
-        # Every git call in the post-clone path passes a timeout (regression:
-        # they previously had none and could hang the webhook handler).
-        import asyncio
-        import subprocess
-
-        from maverick import github_app as ga
-
-        monkeypatch.setattr(ga, "clone_repo", lambda *a, **k: tmp_path)
-        seen_timeouts = []
-        real = subprocess.CompletedProcess(args=[], returncode=0, stdout=b"", stderr=b"")
-
-        def _spy(*a, **k):
-            seen_timeouts.append(k.get("timeout"))
-            return real
-
-        monkeypatch.setattr(ga.subprocess, "run", _spy)
-        # Stop after the checkout by making the branch-create the only call we
-        # need to observe: force an early "no changes" return path.
-        monkeypatch.setattr(ga, "build_sandbox", lambda **k: object(), raising=False)
-
-        async def _fake_run_goal(*a, **k):
-            return "did nothing"
-
-        monkeypatch.setattr(ga, "run_goal", _fake_run_goal, raising=False)
-        monkeypatch.setattr("maverick.world_model.WorldModel.create_goal",
-                            lambda self, *a, **k: 1, raising=False)
-        monkeypatch.setattr("maverick.llm.LLM.__init__", lambda self, *a, **k: None)
-
-        asyncio.run(ga.process_issue(self._payload(), token="x"))
-        # At least the checkout ran, and every observed call carried a timeout.
-        assert seen_timeouts
-        assert all(t is not None for t in seen_timeouts)
-
-
-class TestProcessIssueDoesNotBlockEventLoop:
-    """Process_issue is `async def` but is awaited directly on the
-    dashboard's shared event loop (Starlette awaits an async BackgroundTask
-    inline). Its git subprocess calls must therefore run off-thread --
-    otherwise a slow clone/checkout/push/PR-create stalls every other
-    concurrent request on the dashboard for that call's full duration."""
-
-    def _payload(self):
-        from maverick.github_app import WebhookPayload
-        return WebhookPayload(
-            event="issues", action="labeled", repo_full_name="octocat/spoon",
-            issue_number=7, issue_title="t", issue_body="b",
-            trigger_label="maverick", sender_login="alice",
-        )
-
-    def test_slow_clone_does_not_stall_concurrent_coroutines(self, monkeypatch, tmp_path):
-        import asyncio
-        import subprocess
-        import time
-
-        from maverick import github_app as ga
-
-        sleep_seconds = 0.3
-
-        def _slow_clone(*a, **k):
-            time.sleep(sleep_seconds)  # simulates a slow real `git clone`
-            return tmp_path
-
-        monkeypatch.setattr(ga, "clone_repo", _slow_clone)
-
-        def _boom(*a, **k):
-            # Fail the branch checkout so process_issue returns right after
-            # the clone -- only the clone's blocking window needs observing.
-            raise subprocess.TimeoutExpired(cmd="git", timeout=ga._GIT_TIMEOUT)
-
-        monkeypatch.setattr(ga.subprocess, "run", _boom)
-
-        async def scenario() -> int:
-            ticks = 0
-
-            async def heartbeat() -> None:
-                nonlocal ticks
-                while True:
-                    await asyncio.sleep(0.01)
-                    ticks += 1
-
-            hb = asyncio.create_task(heartbeat())
-            await ga.process_issue(self._payload(), token="x")
-            hb.cancel()
-            return ticks
-
-        ticks = asyncio.run(scenario())
-        # A fully blocked loop ticks ~0 times during a 0.3s sleep; a healthy
-        # one ticks ~30. A generous floor avoids flakiness while still
-        # failing hard on a regression back to an inline blocking call.
-        assert ticks >= 10, f"event loop appears blocked (only {ticks} tick(s))"
+    payload = ga.WebhookPayload(
+        event="issues", action="labeled", repo_full_name="octocat/spoon",
+        issue_number=7, issue_title="t", issue_body="b",
+        trigger_label="maverick", sender_login="alice",
+    )
+    def forbidden(*args, **kwargs):
+        raise AssertionError("unsafe checkout or subprocess started")
+    monkeypatch.setattr(ga, "clone_repo", forbidden)
+    monkeypatch.setattr(ga.subprocess, "run", forbidden)
+    result = asyncio.run(ga.process_issue(payload, token="secret"))
+    assert result.pr_url is None
+    assert "unavailable" in result.error
+    import pytest
+    with pytest.raises(RuntimeError, match="unavailable"):
+        ga.create_pr_via_gh(Path("."), "branch", 7, "title", "body")

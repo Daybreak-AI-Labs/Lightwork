@@ -90,7 +90,7 @@ def test_exact_auth_task_source_and_api_history_dates(monkeypatch):
         monkeypatch.setattr(auth, "caller_role", lambda request: "admin")
         monkeypatch.setattr(search_api, "context_for", lambda request: "a" * 64)
         monkeypatch.setattr(history, "context_for", lambda request: "a" * 64)
-        with TestClient(app, headers={"Origin":"http://testserver", "X-Lightwork-Search-Context":"a" * 64}) as client:
+        with TestClient(app, base_url="http://127.0.0.1", headers={"Origin":"http://127.0.0.1", "X-Lightwork-Search-Context":"a" * 64}) as client:
             value = client.post("/api/v1/records/search", json={"mode":"history", "source":"tasks", "query":"", "oldest":True})
             assert value.status_code == 200, value.text
             assert [row["id"] for row in value.json()["items"]] == [str(mine)]
@@ -211,7 +211,7 @@ def test_history_cursor_is_tenant_bound_and_contains_no_plain_scan_position(monk
 def test_established_principal_drives_exact_owner_without_auth_patches(monkeypatch):
     from fastapi import Request
     from maverick.oidc import VerifiedPrincipal
-    request = Request({"type":"http", "method":"GET", "path":"/goals", "headers":[], "query_string":b"", "client":("127.0.0.1",1), "server":("testserver",80), "scheme":"http"})
+    request = Request({"type":"http", "method":"GET", "path":"/goals", "headers":[], "query_string":b"", "client":("127.0.0.1",1), "server":("127.0.0.1",80), "scheme":"http"})
     request.state.principal = VerifiedPrincipal(sub="alice", issuer="https://issuer.test", audience="fixture")
     with world_model.WorldModel() as world:
         mine = world.create_goal("My visible record", owner="user:alice")

@@ -5,10 +5,11 @@ from pathlib import Path
 
 from fastapi import APIRouter, Request
 from fastapi.openapi.docs import (
+    get_redoc_html,
     get_swagger_ui_html,
     get_swagger_ui_oauth2_redirect_html,
 )
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 router = APIRouter()
 _STATIC = Path(__file__).parent / "static"
@@ -32,7 +33,7 @@ def documentation(request: Request) -> HTMLResponse:
     parameters["validatorUrl"] = None
     redirect = app.swagger_ui_oauth2_redirect_url
     return _with_script_nonce(get_swagger_ui_html(
-        openapi_url=root + app.openapi_url,
+        openapi_url=root + "/openapi.json",
         title=app.title + " - Swagger UI",
         swagger_js_url=root + "/static/swagger-ui-5.33.1-bundle.js",
         swagger_css_url=root + "/static/swagger-ui-5.33.1.css",
@@ -41,6 +42,23 @@ def documentation(request: Request) -> HTMLResponse:
         init_oauth=app.swagger_ui_init_oauth,
         swagger_ui_parameters=parameters,
     ), request)
+
+
+@router.get("/openapi.json", include_in_schema=False)
+def openapi_schema(request: Request) -> JSONResponse:
+    schema = request.app.openapi()
+    root = request.scope.get("root_path", "").rstrip("/")
+    if root and request.app.root_path_in_servers:
+        servers = schema.get("servers", [])
+        if root not in {server.get("url") for server in servers}:
+            schema = {**schema, "servers": [{"url": root}, *servers]}
+    return JSONResponse(schema, headers={"Cache-Control": "private, no-store"})
+
+
+@router.get("/redoc", include_in_schema=False)
+def redoc(request: Request) -> HTMLResponse:
+    root = request.scope.get("root_path", "").rstrip("/")
+    return get_redoc_html(openapi_url=root + "/openapi.json", title=request.app.title + " - ReDoc")
 
 
 @router.get("/docs/oauth2-redirect", include_in_schema=False)
@@ -62,7 +80,7 @@ def _asset(name: str, media_type: str):
         return FileResponse(
             _STATIC / name,
             media_type=media_type,
-            headers={"Cache-Control": "public, max-age=300"},
+            headers={"Cache-Control": "private, no-store"},
         )
 
     serve.__name__ = "documentation_" + name.replace("-", "_").replace(".", "_")

@@ -50,6 +50,7 @@ def request_execution_consent(
     timeout: float | None = None,
     parameters_provider: Callable[[], object] | None = None,
     input_versions_provider: Callable[[], Mapping[str, Any]] | None = None,
+    integrity_note: str = "Exact inputs are committed by SHA-256.",
 ):
     """Request one fresh, exact, one-use permit; standing grants never apply."""
     target = target_provider()
@@ -61,7 +62,7 @@ def request_execution_consent(
         provenance=action,
         target=target,
         parameters=parameters,
-        parameter_summary=review_items + ["Exact inputs are committed by SHA-256."],
+        parameter_summary=review_items + [integrity_note],
         known_effects=[effect],
         unresolved_assumptions=[
             "The operation may modify files or contact services allowed by this environment."

@@ -27,9 +27,30 @@ def identity(monkeypatch, tmp_path):
 
 def _connection(websocket=False):
     scope = {"type": "websocket" if websocket else "http", "path": "/metrics", "scheme": "http",
-             "headers": [(b"authorization", b"Bearer synthetic"), (b"host", b"testserver")],
-             "query_string": b"", "server": ("testserver", 80), "client": ("127.0.0.1", 1234)}
+             "headers": [(b"authorization", b"Bearer synthetic"), (b"host", b"127.0.0.1")],
+             "query_string": b"", "server": ("127.0.0.1", 80), "client": ("127.0.0.1", 1234)}
     return WebSocket(scope, receive=None, send=None) if websocket else Request(scope)
+
+
+@pytest.mark.parametrize("path", ["/openapi.json", "/redoc", "/docs", "/docs/oauth2-redirect",
+                                  "/static/swagger-ui-5.33.1.css"])
+def test_oidc_docs_routes_require_identity(identity, path):
+    from fastapi.testclient import TestClient
+    from maverick_dashboard.app import app
+
+    client = TestClient(app, base_url="http://127.0.0.1", client=("198.51.100.12", 1234))
+    assert client.get(path, follow_redirects=False).status_code in (401, 403, 307)
+    assert client.get(path, headers={"Authorization": "Bearer synthetic"}).status_code == 200
+
+
+def test_authenticated_schema_preserves_mount_root(identity):
+    from fastapi.testclient import TestClient
+    from maverick_dashboard.app import app
+
+    client = TestClient(app, base_url="http://127.0.0.1", root_path="/lightwork")
+    response = client.get("/openapi.json", headers={"Authorization": "Bearer synthetic"})
+    assert response.status_code == 200
+    assert {server["url"] for server in response.json()["servers"]} >= {"/lightwork"}
 
 
 def test_blocked_verification_does_not_block_actual_asgi_probe_and_preserves_child_tenant(identity, monkeypatch):
@@ -55,8 +76,8 @@ def test_blocked_verification_does_not_block_actual_asgi_probe_and_preserves_chi
 
     async def run():
         loop_thread = threading.get_ident()
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver",
-                                     headers={"Origin": "http://testserver"}) as client:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1",
+                                     headers={"Origin": "http://127.0.0.1"}) as client:
             # A served dashboard has built its routes during startup warm-up
             # (app._warm_goal_runtime); FastAPI builds included routes lazily
             # on first match, which this in-process client would otherwise pay

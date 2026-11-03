@@ -74,9 +74,9 @@ def test_suite_status_route_accepts_a_valid_static_bearer(
 ) -> None:
     monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", STATIC_TOKEN)
     client = TestClient(
-        app,
+        app, base_url="http://127.0.0.1",
         headers={
-            "Origin": "http://testserver",
+            "Origin": "http://127.0.0.1",
             "Authorization": f"Bearer {STATIC_TOKEN}",
         },
     )
@@ -94,7 +94,7 @@ def test_suite_status_route_accepts_genuine_local_auth_off(
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     monkeypatch.setattr("maverick_dashboard.auth.anonymous_local_access_allowed", lambda: True)
     monkeypatch.setattr("maverick_dashboard.auth._dashboard_token_authenticated", lambda _r: False)
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     response = client.get(route)
     assert response.status_code != 401, (
         f"{module} {route}: genuine local auth-off mode must not 401 "
@@ -114,7 +114,7 @@ def test_suite_status_route_still_401s_with_no_authentication_at_all(
     monkeypatch.setattr("maverick_dashboard.auth.anonymous_local_access_allowed", lambda: False)
     monkeypatch.setattr("maverick_dashboard.auth._dashboard_token_authenticated", lambda _r: False)
     monkeypatch.setattr("maverick_dashboard.auth.oidc_enabled", lambda: False)
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     response = client.get(route)
     assert response.status_code == 401, (
         f"{module} {route}: a genuinely unauthenticated caller must still 401 "

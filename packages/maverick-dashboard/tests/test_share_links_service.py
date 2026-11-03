@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 from maverick_dashboard.app import app
 
-client = TestClient(app, headers={"Origin": "http://testserver"})
+client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def _world(tmp_path, monkeypatch):
@@ -48,7 +48,7 @@ def test_create_and_view_then_revoke(tmp_path, monkeypatch):
     token = body["url"].split("/share/")[1]
 
     # public view works WITHOUT auth headers (the token is the credential)
-    anon = TestClient(app)  # no Origin / no bearer
+    anon = TestClient(app, base_url="http://127.0.0.1")  # no Origin / no bearer
     page = anon.get(f"/share/{token}")
     assert page.status_code == 200
     assert "Refresh forecast" in page.text
@@ -63,7 +63,7 @@ def test_create_and_view_then_revoke(tmp_path, monkeypatch):
 
 def test_bad_token_404(tmp_path, monkeypatch):
     _world(tmp_path, monkeypatch)
-    assert TestClient(app).get("/share/not-a-real-token").status_code == 404
+    assert TestClient(app, base_url="http://127.0.0.1").get("/share/not-a-real-token").status_code == 404
 
 
 def test_empty_finished_answer_cannot_be_shared(tmp_path, monkeypatch):
@@ -72,7 +72,7 @@ def test_empty_finished_answer_cannot_be_shared(tmp_path, monkeypatch):
     w.set_goal_status(gid, "done", result="")
     assert _create(gid).status_code == 409
     _, token = w.create_share_link(gid, created_by="operator")
-    assert TestClient(app).get(f"/share/{token}").status_code == 404
+    assert TestClient(app, base_url="http://127.0.0.1").get(f"/share/{token}").status_code == 404
 
 
 def test_existing_token_fails_closed_when_domain_policy_is_missing(
@@ -83,7 +83,7 @@ def test_existing_token_fails_closed_when_domain_policy_is_missing(
     w.set_goal_status(gid, "done", result="must stay private")
     _, token = w.create_share_link(gid, created_by="operator")
 
-    page = TestClient(app).get(f"/share/{token}")
+    page = TestClient(app, base_url="http://127.0.0.1").get(f"/share/{token}")
 
     assert page.status_code == 404
     assert "must stay private" not in page.text
@@ -98,13 +98,13 @@ def test_gated_share_requires_current_approval(tmp_path, monkeypatch):
     created = _create(gid)
     assert created.status_code == 201
     token = created.json()["url"].split("/share/")[1]
-    assert TestClient(app).get(f"/share/{token}").status_code == 200
+    assert TestClient(app, base_url="http://127.0.0.1").get(f"/share/{token}").status_code == 200
 
     # A later edit atomically revokes the approval. Existing copied tokens are
     # checked again at view time, so they cannot expose the replacement bytes.
     w.set_goal_status(gid, "done", result="replacement")
     assert w.signoff_for(gid) is None
-    assert TestClient(app).get(f"/share/{token}").status_code == 404
+    assert TestClient(app, base_url="http://127.0.0.1").get(f"/share/{token}").status_code == 404
     assert _create(gid).status_code == 409
 
 
@@ -123,7 +123,7 @@ def test_revoke_is_goal_scoped(tmp_path, monkeypatch):
     lid = w.share_links_for_goal(g1)[0]["id"]
     # try to revoke g1's link via g2's path -> no-op, link stays live
     client.post(f"/api/v1/goals/{g2}/share/{lid}/revoke")
-    assert TestClient(app).get(f"/share/{token}").status_code == 200
+    assert TestClient(app, base_url="http://127.0.0.1").get(f"/share/{token}").status_code == 200
 
 
 def test_foreign_operator_with_task_access_cannot_revoke_owner_link(tmp_path, monkeypatch):
@@ -141,7 +141,7 @@ def test_foreign_operator_with_task_access_cannot_revoke_owner_link(tmp_path, mo
     response = client.post(f"/api/v1/goals/{gid}/share/{link_id}/revoke")
 
     assert response.status_code == 403
-    assert TestClient(app).get(f"/share/{token}").status_code == 200
+    assert TestClient(app, base_url="http://127.0.0.1").get(f"/share/{token}").status_code == 200
 
 
 def test_preview_does_not_mint_and_changed_result_requires_a_new_preview(tmp_path, monkeypatch):
@@ -174,7 +174,7 @@ def test_new_link_does_not_release_changed_ungated_content(tmp_path, monkeypatch
     assert response.status_code == 201
     token = response.json()["url"].split("/share/")[1]
     w.set_goal_status(gid, "done", result="Unreviewed replacement")
-    assert TestClient(app).get(f"/share/{token}").status_code == 404
+    assert TestClient(app, base_url="http://127.0.0.1").get(f"/share/{token}").status_code == 404
     listing = client.get(f"/api/v1/goals/{gid}/share").json()["links"]
     assert listing[0]["label"] == "Forecast review"
     assert listing[0]["state"] == "source changed"

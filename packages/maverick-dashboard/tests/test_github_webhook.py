@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 def _client():
     from maverick_dashboard.app import app
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def _sig(body: bytes, secret: str) -> str:
@@ -46,7 +46,7 @@ def test_rejects_bad_signature():
     assert r.status_code == 401
 
 
-def test_accepts_trigger_and_schedules(monkeypatch):
+def test_trigger_reports_unavailable_without_scheduling(monkeypatch):
     ran = {}
 
     async def _fake_process(payload, **kw):
@@ -58,10 +58,9 @@ def test_accepts_trigger_and_schedules(monkeypatch):
                        headers={"X-GitHub-Event": "issues",
                                 "X-GitHub-Delivery": "delivery-1",
                                 "X-Hub-Signature-256": _sig(body, "shh")})
-    assert r.status_code == 200
-    assert r.json()["status"] == "accepted"
-    assert r.json()["issue"] == 7
-    assert ran.get("issue") == 7  # background task ran (TestClient runs them)
+    assert r.status_code == 503
+    assert "unavailable" in r.json()["detail"]
+    assert not ran
 
 
 def test_ignores_non_trigger_label():
@@ -96,7 +95,7 @@ def test_rejects_missing_delivery_id(monkeypatch):
     assert ran == []
 
 
-def test_rejects_replayed_delivery_even_if_delivery_id_changes(monkeypatch):
+def test_disabled_retries_remain_unavailable(monkeypatch):
     ran = []
 
     async def _fake_process(payload, **kw):
@@ -108,15 +107,15 @@ def test_rejects_replayed_delivery_even_if_delivery_id_changes(monkeypatch):
                "X-GitHub-Delivery": "delivery-1",
                "X-Hub-Signature-256": _sig(body, "shh")}
     first = _client().post("/webhook/github", content=body, headers=headers)
-    assert first.status_code == 200
+    assert first.status_code == 503
     replay = _client().post("/webhook/github", content=body,
                             headers={**headers, "X-GitHub-Delivery": "delivery-2"})
-    assert replay.status_code == 409
-    assert replay.json()["detail"] == "duplicate webhook delivery"
-    assert ran == [7]
+    assert replay.status_code == 503
+    assert "unavailable" in replay.json()["detail"]
+    assert ran == []
 
 
-def test_github_webhook_goal_rate_limited(monkeypatch):
+def test_disabled_github_webhook_does_not_consume_goal_quota(monkeypatch):
     ran = []
 
     async def _fake_process(payload, **kw):
@@ -131,7 +130,7 @@ def test_github_webhook_goal_rate_limited(monkeypatch):
                            headers={"X-GitHub-Event": "issues",
                                     "X-GitHub-Delivery": "delivery-1",
                                     "X-Hub-Signature-256": _sig(body1, "shh")})
-    assert first.status_code == 200
+    assert first.status_code == 503
 
     payload2 = _labeled_issue()
     payload2["issue"] = {**payload2["issue"], "number": 8, "title": "Fix another bug"}
@@ -140,5 +139,5 @@ def test_github_webhook_goal_rate_limited(monkeypatch):
                             headers={"X-GitHub-Event": "issues",
                                      "X-GitHub-Delivery": "delivery-2",
                                      "X-Hub-Signature-256": _sig(body2, "shh")})
-    assert second.status_code == 429
-    assert ran == [7]
+    assert second.status_code == 503
+    assert ran == []

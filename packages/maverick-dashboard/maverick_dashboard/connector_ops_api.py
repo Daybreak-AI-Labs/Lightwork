@@ -57,8 +57,8 @@ def _registry_spec(name: str):
     try:
         return install_mcp_from_registry(name)
     except Exception as exc:  # noqa: BLE001 -- missing or unsafe entries read the same
-        raise HTTPException(409, "That tool server cannot be added. It may have been removed "
-                                 "from the list, or it does not meet Lightwork's safety rules.") from exc
+        raise HTTPException(409, "Registry server installation is unavailable until publisher "
+                                 "authentication is implemented. Independently review and configure the server.") from exc
 
 
 @router.post("/mcp-registry/preview")

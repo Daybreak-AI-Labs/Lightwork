@@ -56,10 +56,10 @@ def _isolate(monkeypatch, tmp_path: Path):
 def _client(*, auth_token: str = "") -> TestClient:
     from maverick_dashboard.app import app
 
-    headers = {"Origin": "http://testserver"}
+    headers = {"Origin": "http://127.0.0.1"}
     if auth_token:
         headers["Authorization"] = f"Bearer {auth_token}"
-    return TestClient(app, headers=headers)
+    return TestClient(app, base_url="http://127.0.0.1", headers=headers)
 
 
 def test_settings_renders_readiness_for_every_provider_row():

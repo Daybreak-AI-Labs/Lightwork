@@ -7,8 +7,8 @@ compact token::
     LW1.<base64url(payload JSON)>.<base64url(Ed25519 signature)>
 
 with payload ``{customer, sku, capabilities, issued_at, expires_at}``. The
-agent ships only the PUBLIC key (env ``LIGHTWORK_LICENSE_PUBKEY``) and the
-token (``LIGHTWORK_LICENSE``); the private key stays with the issuer. A
+deployment owner supplies the PUBLIC key (env ``LIGHTWORK_LICENSE_PUBKEY``)
+and the token (``LIGHTWORK_LICENSE``); the private key stays with that issuer. A
 new license is a token swap, not a reinstall. No license -> the agent runs in
 evaluation mode (bounded, honest, never crippled mid-flight).
 
@@ -132,7 +132,7 @@ def _cli() -> int:
                                  description=__doc__.splitlines()[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
     kg = sub.add_parser("keygen", help="mint an Ed25519 signing pair")
-    kg.add_argument("--out-dir", default=".")
+    kg.add_argument("--out-dir", default="license-keys")
     mk = sub.add_parser("make", help="mint a signed license token")
     mk.add_argument("--key", required=True,
                     help="path to the private PEM from keygen")
@@ -147,9 +147,24 @@ def _cli() -> int:
     if args.cmd == "keygen":
         private_pem, public_pem = generate_keypair()
         out = Path(args.out_dir)
-        out.mkdir(parents=True, exist_ok=True)
-        (out / "license_signing.pem").write_text(private_pem)
-        (out / "license_pubkey.pem").write_text(public_pem)
+        from .file_lock import atomic_create_text, prepare_private_directory
+
+        # The publisher must control the parent directory; otherwise another
+        # user can replace the temporary key or destination while it is made.
+        prepare_private_directory(out)
+
+        private_path = out / "license_signing.pem"
+        public_path = out / "license_pubkey.pem"
+        # Refuse existing files and links. Atomic exclusive creation gives the
+        # secret a private mode (and protected Windows ACL) before publication.
+        if private_path.exists() or private_path.is_symlink() or public_path.exists() or public_path.is_symlink():
+            raise FileExistsError("license signing or public key already exists")
+        atomic_create_text(private_path, private_pem, mode=0o600)
+        try:
+            atomic_create_text(public_path, public_pem, mode=0o644)
+        except BaseException:
+            private_path.unlink(missing_ok=True)
+            raise
         print(f"wrote {out / 'license_signing.pem'} (KEEP PRIVATE) and "
               f"{out / 'license_pubkey.pem'} (ship with the agent)")
         return 0

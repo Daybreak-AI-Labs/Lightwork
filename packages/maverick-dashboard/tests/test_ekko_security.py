@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from maverick.oidc import VerifiedPrincipal
 from maverick_dashboard.app import app
 
-client = TestClient(app, headers={"Origin": "http://testserver"})
+client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def _isolate(tmp_path, monkeypatch, text: str = ""):
@@ -203,6 +203,10 @@ def test_authenticated_sessions_are_owner_scoped_and_cross_owner_is_404(
     _enable_oidc(monkeypatch)
     from maverick.config import get_ekko_policy
     from maverick.work_discovery_store import WorkDiscoveryStore
+    from maverick_dashboard import rbac
+
+    rbac.set_role("user:alice", "operator")
+    rbac.set_role("user:bob", "operator")
 
     WorkDiscoveryStore("user:alice", "desk").enroll(get_ekko_policy())
     alice_headers = {"Authorization": "Bearer alice"}
@@ -227,7 +231,7 @@ def test_authenticated_sessions_are_owner_scoped_and_cross_owner_is_404(
 
 def test_ekko_mutation_requires_same_origin(tmp_path, monkeypatch):
     _isolate(tmp_path, monkeypatch)
-    no_origin = TestClient(app)
+    no_origin = TestClient(app, base_url="http://127.0.0.1")
     response = no_origin.post(
         "/api/v1/ekko/candidates/mine",
         json={"device_id": "desk"},

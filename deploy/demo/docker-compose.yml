@@ -26,7 +26,7 @@ services:
     # actually reaches your browser).
     command: ["dashboard", "--host", "0.0.0.0", "--port", "8765"]
     ports:
-      - "${MAVERICK_DEMO_PORT:-8765}:8765"
+      - "127.0.0.1:${MAVERICK_DEMO_PORT:-8765}:8765"
     environment:
       # Non-loopback access REQUIRES a token: the dashboard refuses to serve an
       # unauthenticated admin surface off localhost. run-demo.sh generates one.

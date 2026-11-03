@@ -18,7 +18,7 @@ BASE = "/api/v1/intent-value"
 
 
 def headers(user="alice"):
-    return {"Authorization": "Bearer " + user, "Origin": "http://testserver"}
+    return {"Authorization": "Bearer " + user, "Origin": "http://127.0.0.1"}
 
 
 @pytest.fixture
@@ -37,8 +37,12 @@ def context(tmp_path, monkeypatch):
     monkeypatch.setattr(auth, "oidc_enabled", lambda: True)
     monkeypatch.setattr(auth, "verify_oidc_token", lambda token, **kwargs: VerifiedPrincipal(
         sub=token, issuer="https://issuer.test", audience="maverick", claims={"sub": token}))
+    from maverick_dashboard import rbac
+
+    rbac.set_role("user:alice", "operator")
+    rbac.set_role("user:bob", "operator")
     with world_model.WorldModel(tmp_path / "world.db") as world:
-        yield TestClient(app_module.app), world
+        yield TestClient(app_module.app, base_url="http://127.0.0.1"), world
     config.reset_config_cache()
 
 

@@ -33,7 +33,7 @@ def client(tmp_path, monkeypatch):
     config.reset_config_cache()
     from maverick_dashboard import app as dash_app
     dash_app._world_cache.clear()
-    yield TestClient(dash_app.app, headers={"Origin": "http://testserver"})
+    yield TestClient(dash_app.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     config.reset_config_cache()
 
 
@@ -221,7 +221,7 @@ def test_viewer_report_reads_plainly_and_flags_an_unknown_person(client):
     text = visible_text(page)
     assert "hasn't signed in or been invited yet" in text
     assert "Sign-in is off." in text
-    assert "Operator" in text  # the first-login default role
+    assert "Viewer" in text  # the first-login default role
     assert "Configured first-login default" in text
 
 

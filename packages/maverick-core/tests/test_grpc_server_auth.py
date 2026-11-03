@@ -157,6 +157,7 @@ def test_per_agent_token_binds_owner_and_execution_identity(monkeypatch):
         "alice": TrustedAgent(
             id="alice", grpc_token="alice-secret", direction="inbound",
             max_dollars=2.0, max_wall_seconds=120.0,
+            allow_tools=frozenset({"read_file"}), max_risk="low",
         ),
     }
     monkeypatch.setattr(agent_trust, "load_registry", lambda cfg=None: registry)
@@ -195,6 +196,11 @@ def test_per_agent_token_binds_owner_and_execution_identity(monkeypatch):
     assert calls["status"]["expected_owner"] == "agent:alice"
     assert calls["run_goal"]["expected_execution_principal"] == "agent:alice"
     assert calls["run_goal"]["capability"].principal == "agent:alice"
+    for method in ("start_goal", "run_goal"):
+        grant = calls[method]["capability"]
+        assert grant.permits("read_file")
+        assert not grant.permits("shell")
+        assert grant.max_risk == "low"
     assert calls["run_goal"]["channel"] == "grpc"
     assert calls["run_goal"]["user_id"] == "alice"
     # A caller may voluntarily request a stricter budget than the registry cap.

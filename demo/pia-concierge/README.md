@@ -1,5 +1,11 @@
 # PIA Concierge — governed privacy-assessment demo
 
+In standalone mode, a deployment owner may configure an Ed25519 license token
+and the public key they choose to trust. This is an operator-managed policy,
+not a vendor-enforced licensing boundary for the open-source deployment.
+See the [self-managed demo license guide](../../docs/self-managed-demo-licenses.md)
+for key generation and setup.
+
 ## Standalone and platform modes
 
 PIA Concierge runs in two modes from one codebase:
@@ -10,12 +16,14 @@ PIA Concierge runs in two modes from one codebase:
   imports nothing from `maverick`), files into OneTrust, and a human reviews
   and approves there. There is **no audit trail, no governance, no learning,
   no dashboard, and no control-catalog citations** in this mode. The agent
-  still works end to end. `/about` shows the live capability matrix.
+  works with a configured OneTrust tenant. To run the local mock instead, set
+  `PIA_ENABLE_ONETRUST_MOCK=1` before launching; the script generates a fresh
+  mock token if none is supplied. `/about` shows the live capability matrix.
 * **Platform mode** — the same agent running on the Lightwork platform, which
   adds the governed engine, the Ed25519 signed audit chain, the world-model
   approval queue, the privacy workspace + program insights, the full
   framework catalog with control citations, cross-run memory / suggested
-  answers, connected-source document discovery, the Art. 28 clause-by-clause
+  answers, operator-side document review, the Art. 28 clause-by-clause
   DPA review, model-assisted chat understanding, and the connectors.
 
 The seam is `capabilities.py` (what's on) and `backend.py` (binds each
@@ -40,9 +48,8 @@ the risk with the real assessment engine, maps required controls with
 framework citations, and files the completed analysis **straight into
 OneTrust as Under Review**. The privacy team reviews and approves it *inside
 OneTrust*; the decision is mirrored onto the governed approval row and the
-real Ed25519-signed audit chain in the background. Vendors that were already
-assessed take the short path: "just adding documents" appends an analyzed
-addendum to the existing OneTrust record — no second interview.
+real Ed25519-signed audit chain in the background. An authenticated reviewer
+can add documents to an existing OneTrust record from the operator surface.
 
 ## What is real vs. simulated
 
@@ -56,14 +63,13 @@ addendum to the existing OneTrust record — no second interview.
 | OneTrust filing — `maverick.tools.onetrust_tool` (confirm-gated POST) | |
 | Signed audit chain — `maverick.audit` (verify with `maverick audit verify`) | |
 | Evidence storage — `maverick.attachments` (real goal attachments: size caps, mime allowlist, executable deny) | |
-| Doc discovery — `maverick.doc_discovery` (searches connected sources for the SOW/contract/DPA) | |
+| Connected-source discovery is unavailable from requester intake until reviewer-authorized access is added | |
 | Addendum analysis — `maverick.privacy_ops` Art. 28 clause review on appended documents | |
 
 Point `ONETRUST_HOSTNAME` at a real OneTrust sandbox and the filing is live —
 same code path. Any ticketing system that can send a webhook can replace the
-mock ServiceNow. Export a real `MSGRAPH_ACCESS_TOKEN` (and unset
-`MSGRAPH_BASE_URL`) and "Find my documents" searches your real SharePoint /
-OneDrive — same code path there too.
+mock ServiceNow. Requester-side connected-source discovery is disabled until
+there is a reviewer-authorized grant for the source and documents.
 
 Chat answers are interpreted by scripted rules (identical behavior with no
 key and no network); set `ANTHROPIC_API_KEY` and ambiguous replies get a
@@ -72,11 +78,10 @@ Voice input uses the browser's Web Speech API (Chrome; allow the mic) and
 "Read questions aloud" speaks the agent's side — no server dependency.
 
 **The agent answers what it can prove.** Attached documents, the ticket's
-own data-types declaration, and the vendor's last review pre-answer intake
-questions with quoted provenance ("Yes — from Acme DPA.pdf: '…'"); the
+own data-types declaration can pre-answer intake questions with quoted provenance ("Yes — from Acme DPA.pdf: '…'"); the
 interview skips them visibly and the reviewer sees every source in the
 answer notes. A known vendor opens with the full memory (last record, risk,
-who decided, when, documents on file) and offers "just adding documents" —
+who decided, when, documents on file) on the operator review surface —
 appended files get an on-the-spot Art. 28 clause review diffed against the
 last review's gaps. The landing page's **speed story** strip counts it all:
 median ticket→decision minutes, evidence-answered ratio, and hours saved
@@ -95,7 +100,12 @@ demo store; the world model and signed audit chain stay clean.
 
 ## Run it
 
+Set `PIA_OPERATOR_TOKEN` to a strong secret before starting the demo. The
+reviewer signs in using `PIA_OPERATOR_USER` (default `reviewer`) and that
+token; use HTTPS for any non-local deployment.
+
 ```bash
+export PIA_OPERATOR_TOKEN="<your-reviewer-token>"
 bash demo/pia-concierge/run_demo.sh
 ```
 
@@ -212,10 +222,9 @@ plus the tools the organization already uses (ServiceNow, email, OneTrust).
 2. **[Requester inbox]** Open the intake email and click the link. The
    interview opens in **Chat** mode: tap the 🎤 and speak an answer, type
    another in plain words, then flip the toggle to **Guided** for the
-   one-click version. Click **Find my documents**: the DPA and security
-   overview attach and auto-answer their questions with quoted evidence, and
-   the interview skips those questions visibly. Every skipped question shows
-   its source, and the requester's own words are kept for the reviewer.
+   one-click version. Upload supporting documents for this case; the agent can
+   suggest answers with quoted evidence. The requester's own words are kept
+   for the reviewer.
 3. **[OneTrust]** The assessment is **already at the top of the queue, Under
    Review**, in a tenant seeded with a year of history. Open it: the full
    interview verbatim with the provenance notes, findings, required controls
@@ -231,9 +240,8 @@ plus the tools the organization already uses (ServiceNow, email, OneTrust).
 5. **[OneTrust record]** Click **＋ Add document to this vendor** and drop the
    updated DPA. The addendum is clause-reviewed on the spot, diffed against
    the last review's gaps, and flagged for re-review only if the risk picture
-   changed. (The same works from chat: a new ticket for a known vendor opens
-   with everything on file and offers "just adding documents" — or a fresh
-   assessment that carries the old answers forward.)
+   changed. Requester-side carry-forward and append are unavailable until
+   prior-record access has been authorized by a reviewer.
 
 **Part 2 — the platform (right window):**
 
@@ -282,6 +290,33 @@ ServiceNow (mock, :8890) ──webhook──▶ harness ──create_goal/append
                                         ├─create_approval (mirror) ────────────▶─┘
                                         └─onetrust_tool POST (Under Review) ──▶ OneTrust (mock)
         OneTrust "Approve" ──▶ decide approval + assessment record ──▶ Completed · ticket resolved · email · goal done
-        "Add document" / chat append ──▶ Art. 28 clause review ──▶ addendum (+ re-review flag)
+        operator "Add document" ──▶ Art. 28 clause review ──▶ addendum (+ re-review flag)
         every step ──▶ maverick.audit (Ed25519 signed chain)
 ```
+
+Intake and operator access now require configuration:
+
+- Set `PIA_OPERATOR_TOKEN` to a strong secret; `PIA_OPERATOR_USER` selects the
+  HTTP Basic username. Operator pages, the demo mailbox, ticket records and
+  reviewer actions require these credentials. Browser changes also require a
+  same-origin request.
+- Configure `PIA_BASE_URL` as the public HTTPS origin. Plain HTTP is accepted
+  only for `localhost`, `127.0.0.1` or `::1` development URLs. Configure the
+  reverse proxy to avoid logging query strings: emailed intake links contain
+  short-lived bearer credentials. The standalone launcher disables access logs.
+- Platform deployments must set `PIA_EMAIL_ALLOWED_DOMAINS` to a comma-separated
+  list of exact recipient domains before the app sends requester or delegate
+  email. Standalone email stays in the local demo inbox.
+- External ticketing integrations may call `/webhook/pia` with a separate,
+  strong `PIA_WEBHOOK_TOKEN` as a Bearer token. It must differ from the operator,
+  OneTrust and simulated Graph tokens. Alternatively, an authenticated operator
+  may call the route with the configured Origin header.
+- Requester and question-scoped delegate links expire after seven days. An
+  authenticated operator can send a replacement from the ticket page; issuing
+  one invalidates the prior requester and delegate links. Restarting this
+  in-memory demo also invalidates links. Proxy and mail-service rate limits are needed across workers
+  and deployments; the built-in peer and delegation limits are process-local.
+- Intake uploads are limited to 10 MiB. Carry-forward and appending directly to
+  a prior assessment, and connected-source document discovery, are unavailable
+  until a reviewer-authorized access path is provided. A submission whose result is uncertain requires operator review
+  rather than replaying it from the requester link.

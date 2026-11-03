@@ -199,6 +199,26 @@ def test_imap_requires_sender_verification_and_an_explicit_people_list(mailbox):
     assert [row["uid"] for row in source.poll(IMAP_CONFIG, rejected.cursor).events] == ["32"]
 
 
+def test_imap_rejects_forged_dmarc_pass_inside_server_comment(mailbox):
+    source = ev.ImapEmailSource()
+    baseline = source.poll(IMAP_CONFIG, "")
+    mailbox.uids.append(31)
+    original_uid = mailbox.uid
+
+    def forged_uid(operation, *args):
+        if operation == "fetch":
+            return "OK", [(b"header", b"From: synthetic@example.invalid\r\n"
+                           b"Authentication-Results: mx.example.invalid; spf=pass "
+                           b"(sender; dmarc=pass header.from=example.invalid); "
+                           b"dmarc=fail header.from=example.invalid\r\n\r\n")]
+        return original_uid(operation, *args)
+
+    mailbox.uid = forged_uid
+    rejected = source.poll(IMAP_CONFIG, baseline.cursor)
+    assert rejected.events == []
+    assert ev._decode_cursor(rejected.cursor, "imap") == ["800", 31]
+
+
 def test_imap_authenticated_but_unlisted_sender_does_not_start_work(mailbox):
     source = ev.ImapEmailSource()
     baseline = source.poll(IMAP_CONFIG, "")

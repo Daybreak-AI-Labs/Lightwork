@@ -56,7 +56,7 @@ def _prepare(monkeypatch, tmp_path: Path, ep: _EntryPoint) -> TestClient:
         lambda group: [ep] if group == "maverick.tools" else [],
     )
     dashboard_app._world_cache.clear()
-    return TestClient(dashboard_app.app)
+    return TestClient(dashboard_app.app, base_url="http://127.0.0.1")
 
 
 def _tool_row(client: TestClient) -> dict[str, Any]:

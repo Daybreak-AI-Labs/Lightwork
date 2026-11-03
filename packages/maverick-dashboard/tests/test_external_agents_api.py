@@ -4,6 +4,7 @@ routes (minted bearer or platform-native credential — no session, no CSRF
 surface, 404 while disabled)."""
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac as hmac_mod
 import threading
@@ -36,7 +37,7 @@ except Exception as _e:  # pragma: no cover - env-dependent
 requires_crypto = pytest.mark.skipif(not _CRYPTO_OK,
                                      reason=_CRYPTO_SKIP_REASON)
 
-client = TestClient(app, headers={"Origin": "http://testserver"})
+client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 @pytest.fixture(autouse=True)
@@ -60,6 +61,73 @@ def _isolated(tmp_path, monkeypatch):
     config.reset_config_cache()
     yield
     config.reset_config_cache()
+
+
+@pytest.mark.parametrize(("path", "maximum"), [
+    ("/api/v1/external/runs", 256 * 1024),
+    ("/api/v1/external/runtime/evaluate", 512 * 1024),
+    ("/api/v1/external/discovery-sensors/sensor/observations", 64 * 1024),
+    ("/api/v1/external/ai-vendor/submissions", 128 * 1024),
+    ("/api/v1/external/red-team/campaign/results", 2 * 1024 * 1024),
+])
+def test_external_body_limit_applies_before_authentication(monkeypatch, path, maximum):
+    monkeypatch.setenv("MAVERICK_EXTERNAL_AGENTS", "0")
+    response = client.post(path, content=b"{}", headers={"Content-Length": str(maximum + 1)})
+    assert response.status_code == 413
+
+
+def test_chunked_external_body_stops_reading_at_limit(monkeypatch):
+    import httpx
+
+    monkeypatch.setenv("MAVERICK_EXTERNAL_AGENTS", "0")
+    sent = []
+
+    async def chunks():
+        for i in range(3):
+            sent.append(i)
+            yield b"x" * (128 * 1024 + 1)
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                     base_url="http://127.0.0.1") as requester:
+            return await requester.post("/api/v1/external/runs", content=chunks())
+
+    assert asyncio.run(run()).status_code == 413
+    assert sent == [0, 1]
+
+
+def test_signed_get_body_is_limited_before_authentication(monkeypatch):
+    monkeypatch.setenv("MAVERICK_EXTERNAL_AGENTS", "0")
+    response = client.request(
+        "GET", "/api/v1/external/approvals/1", content=b"{}",
+        headers={"Content-Length": str(256 * 1024 + 1), "X-Agent-Signature": "synthetic"},
+    )
+    assert response.status_code == 413
+
+
+def test_slow_external_body_times_out_and_releases_capacity(monkeypatch):
+    import httpx
+    from maverick_dashboard import app as dash_app
+
+    monkeypatch.setenv("MAVERICK_EXTERNAL_AGENTS", "0")
+    monkeypatch.setattr(dash_app, "_EXTERNAL_BODY_SLOTS", 1)
+    monkeypatch.setattr(dash_app, "_EXTERNAL_BODY_TIMEOUT_SECONDS", 0.03)
+
+    async def slow():
+        yield b"{"
+        await asyncio.sleep(1)
+        yield b"}"
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                     base_url="http://127.0.0.1") as requester:
+            first = await requester.post("/api/v1/external/runs", content=slow())
+            second = await requester.post("/api/v1/external/runs", content=b"{}")
+            return first.status_code, second.status_code
+
+    first, second = asyncio.run(run())
+    assert first == 408
+    assert second != 503
 
 
 def _enroll(**overrides):
@@ -198,7 +266,7 @@ def test_agent_facing_routes_require_the_rest_bearer():
     _enroll()
     token = _mint()
     # No session, no Origin — the bearer alone authenticates (self-auth path).
-    bare = TestClient(app)
+    bare = TestClient(app, base_url="http://127.0.0.1")
     r = bare.post("/api/v1/external/runs",
                   headers={"Authorization": f"Bearer {token}"},
                   json={"title": "Quote for Northwind", "outcome": "success",
@@ -221,7 +289,7 @@ def test_agent_facing_routes_require_the_rest_bearer():
 def test_screen_flow_and_approval_poll_over_http():
     _enroll(max_risk="high")
     token = _mint()
-    bare = TestClient(app)
+    bare = TestClient(app, base_url="http://127.0.0.1")
     hdr = {"Authorization": f"Bearer {token}"}
     ok = bare.post("/api/v1/external/screen", headers=hdr,
                    json={"tool": "crm_update", "detail": "update stage",
@@ -266,7 +334,7 @@ def test_gateway_404s_while_disabled(monkeypatch):
     _enroll()
     token = _mint()
     monkeypatch.delenv("MAVERICK_EXTERNAL_AGENTS", raising=False)
-    bare = TestClient(app)
+    bare = TestClient(app, base_url="http://127.0.0.1")
     r = bare.post("/api/v1/external/screen",
                   headers={"Authorization": f"Bearer {token}"},
                   json={"tool": "crm_update"})
@@ -279,7 +347,7 @@ def test_gateway_404s_while_disabled(monkeypatch):
 
 
 def test_openapi_artifact_describes_every_gateway_operation():
-    spec = TestClient(app).get("/api/v1/external/openapi.json").json()
+    spec = TestClient(app, base_url="http://127.0.0.1").get("/api/v1/external/openapi.json").json()
     assert spec["openapi"].startswith("3.")
     assert set(spec["paths"]) == {
         "/api/v1/external/screen", "/api/v1/external/runs",
@@ -303,7 +371,7 @@ def test_external_runtime_guardrail_is_authenticated_exact_bound_and_transient(
 
     _enroll()
     token = _mint()
-    bare = TestClient(app)
+    bare = TestClient(app, base_url="http://127.0.0.1")
     headers = {"Authorization": f"Bearer {token}"}
     asset_id = "MAA-" + ("a" * 32)
     digest = "b" * 64
@@ -416,7 +484,7 @@ def test_external_execute_runtime_gate_cannot_be_bypassed_when_enabled(monkeypat
     _enroll()
     token = _mint()
     headers = {"Authorization": f"Bearer {token}"}
-    bare = TestClient(app)
+    bare = TestClient(app, base_url="http://127.0.0.1")
     asset_id = "MAA-" + ("6" * 32)
     digest = "7" * 64
     executed = []
@@ -516,7 +584,7 @@ def test_runtime_policy_mutation_before_core_boundary_blocks_provider(monkeypatc
     _enroll()
     token = _mint()
     headers = {"Authorization": f"Bearer {token}"}
-    bare = TestClient(app)
+    bare = TestClient(app, base_url="http://127.0.0.1")
     asset_id = "MAA-" + ("6" * 32)
     digest = "7" * 64
     state = {"risk_tier": "high"}
@@ -640,7 +708,7 @@ def test_openapi_advertises_red_team_only_when_its_plane_is_enabled(monkeypatch)
     from maverick import red_team_assurance as rta
 
     monkeypatch.setattr(rta, "enabled", lambda: True)
-    spec = TestClient(app).get("/api/v1/external/openapi.json").json()
+    spec = TestClient(app, base_url="http://127.0.0.1").get("/api/v1/external/openapi.json").json()
     assert "/api/v1/external/red-team/{campaign_id}/cases" in spec["paths"]
     result = spec["paths"][
         "/api/v1/external/red-team/{campaign_id}/results"
@@ -663,7 +731,7 @@ def test_red_team_routes_preserve_agent_binding_and_do_not_echo_raw(monkeypatch)
 
     _enroll()
     token = _mint()
-    bare = TestClient(app)
+    bare = TestClient(app, base_url="http://127.0.0.1")
     headers = {"Authorization": f"Bearer {token}"}
     observed: dict = {}
 
@@ -739,7 +807,7 @@ def test_red_team_routes_preserve_agent_binding_and_do_not_echo_raw(monkeypatch)
 def test_red_team_result_body_is_bounded_before_signed_auth():
     from maverick_dashboard import external_gateway
 
-    response = TestClient(app).post(
+    response = TestClient(app, base_url="http://127.0.0.1").post(
         "/api/v1/external/red-team/RTC-one/results",
         content=b"{}",
         headers={
@@ -760,7 +828,7 @@ def test_red_team_result_body_is_bounded_before_signed_auth():
 def test_red_team_case_pull_body_is_bounded_before_signed_auth():
     from maverick_dashboard import external_gateway
 
-    response = TestClient(app).request(
+    response = TestClient(app, base_url="http://127.0.0.1").request(
         "GET",
         "/api/v1/external/red-team/RTC-one/cases",
         content=b"{}",
@@ -780,13 +848,14 @@ def test_red_team_case_pull_body_is_bounded_before_signed_auth():
 
 def test_memory_routes_over_http(monkeypatch):
     monkeypatch.setenv("MAVERICK_FLEET_MEMORY", "1")
+    monkeypatch.setenv("MAVERICK_AGENT_TRUST", "0")
     from maverick import fleet_memory
     monkeypatch.setattr(fleet_memory, "registry_path",
                         lambda: fleet_memory.inbox_dir().parent
                         / "agents.ndjson")
-    _enroll()
+    _enroll(data_scopes=["sales"])
     token = _mint()
-    bare = TestClient(app)
+    bare = TestClient(app, base_url="http://127.0.0.1")
     hdr = {"Authorization": f"Bearer {token}"}
     r = bare.post("/api/v1/external/memory/ingest", headers=hdr,
                   json={"kind": "success",
@@ -797,6 +866,12 @@ def test_memory_routes_over_http(monkeypatch):
                   json={"query": "renewal quote"})
     assert r.status_code == 200
     assert "context" in r.json() and "reason" in r.json()
+    denied = bare.post("/api/v1/external/memory/ingest", headers=hdr,
+                       json={"kind": "success", "goal_text": "finance", "domain": "finance"})
+    assert denied.status_code == 403
+    denied = bare.post("/api/v1/external/memory/recall", headers=hdr,
+                       json={"query": "finance", "domain": "finance"})
+    assert denied.status_code == 200 and not denied.json()["context"]
     # The scorecard surfaces the contribution.
     page = client.get("/external-agents/sf-quotebot").text
     assert "Learning contributions" in page
@@ -821,7 +896,7 @@ def test_console_page_renders_roster_and_forms():
 
 def test_admin_mutations_are_csrf_gated_but_gateway_is_not():
     # The ADMIN surface keeps the same-origin gate in no-token mode…
-    bare = TestClient(app)
+    bare = TestClient(app, base_url="http://127.0.0.1")
     assert bare.post("/api/v1/external-agents",
                      json={"id": "x", "platform": "custom"}).status_code == 403
     # …while the agent-facing prefix authenticates by bearer alone (asserted
@@ -838,7 +913,7 @@ def test_unenroll_over_http():
 def test_live_run_flow_over_http():
     _enroll()
     token = _mint()
-    bare = TestClient(app)
+    bare = TestClient(app, base_url="http://127.0.0.1")
     hdr = {"Authorization": f"Bearer {token}"}
     start = bare.post("/api/v1/external/runs/start", headers=hdr,
                       json={"title": "Live quote", "summary": "working"})
@@ -874,7 +949,7 @@ def test_scorecard_page_renders_and_404s_unknown():
 def test_boards_keep_external_agent_platform_segments_out_of_local_scope():
     _enroll()
     token = _mint()
-    bare = TestClient(app)
+    bare = TestClient(app, base_url="http://127.0.0.1")
     bare.post("/api/v1/external/runs",
               headers={"Authorization": f"Bearer {token}"},
               json={"title": "Quote", "outcome": "success", "summary": "s",
@@ -898,7 +973,7 @@ def test_boards_keep_external_agent_platform_segments_out_of_local_scope():
 def test_idempotency_key_over_http():
     _enroll()
     token = _mint()
-    bare = TestClient(app)
+    bare = TestClient(app, base_url="http://127.0.0.1")
     hdr = {"Authorization": f"Bearer {token}"}
     body = {"title": "Quote", "outcome": "success", "summary": "s",
             "cost_dollars": 1.0, "idempotency_key": "k-1"}
@@ -916,7 +991,7 @@ def test_gateway_rate_limit_trips_and_names_the_action(monkeypatch):
     token = _mint()
     monkeypatch.setitem(gw._RATE_LIMITS, "screen", 3)
     monkeypatch.setattr(gw, "_rate_times", {})
-    bare = TestClient(app)
+    bare = TestClient(app, base_url="http://127.0.0.1")
     hdr = {"Authorization": f"Bearer {token}"}
     body = {"tool": "research", "risk": "low"}
     for _ in range(3):
@@ -931,7 +1006,7 @@ def test_gateway_rate_limit_trips_and_names_the_action(monkeypatch):
 def test_admin_release_and_reset_budget_routes():
     _enroll(max_risk="medium", max_dollars=1.0)
     token = _mint()
-    bare = TestClient(app)
+    bare = TestClient(app, base_url="http://127.0.0.1")
     hdr = {"Authorization": f"Bearer {token}"}
     # Trip the containment via repeated ceiling breaches.
     for _ in range(5):
@@ -1033,7 +1108,7 @@ def _write_body(**kw):
 
 def test_execute_requires_bearer_before_validation():
     _enroll()
-    bare = TestClient(app)
+    bare = TestClient(app, base_url="http://127.0.0.1")
     # Even a body that could never validate gets 401, not 422 — the bearer
     # dependency resolves before the schema, so nothing leaks to strangers.
     assert bare.post("/api/v1/external/execute",
@@ -1048,7 +1123,7 @@ def test_execute_routes_404_while_disabled(monkeypatch):
     _enroll()
     token = _mint()
     monkeypatch.delenv("MAVERICK_EXTERNAL_AGENTS", raising=False)
-    bare = TestClient(app)
+    bare = TestClient(app, base_url="http://127.0.0.1")
     hdr = {"Authorization": f"Bearer {token}"}
     assert bare.post("/api/v1/external/execute", headers=hdr,
                      json=_write_body()).status_code == 404
@@ -1062,7 +1137,7 @@ def test_execute_verdict_when_connector_not_enabled(monkeypatch):
     _enroll()
     token = _mint()
     monkeypatch.delenv("MAVERICK_EXTERNAL_CONNECTORS", raising=False)
-    bare = TestClient(app)
+    bare = TestClient(app, base_url="http://127.0.0.1")
     r = bare.post("/api/v1/external/execute",
                   headers={"Authorization": f"Bearer {token}"},
                   json={"connector": "fakecrm", "op": "get",
@@ -1077,7 +1152,7 @@ def test_execute_read_end_to_end_over_http(monkeypatch):
     conn = _wire_fakecrm(monkeypatch)
     _enroll()
     token = _mint()
-    bare = TestClient(app)
+    bare = TestClient(app, base_url="http://127.0.0.1")
     r = bare.post("/api/v1/external/execute",
                   headers={"Authorization": f"Bearer {token}"},
                   json={"connector": "fakecrm", "op": "get",
@@ -1094,7 +1169,7 @@ def test_write_park_poll_approve_and_commit_over_http(monkeypatch):
     conn = _wire_fakecrm(monkeypatch)
     _enroll(max_risk="high")
     token = _mint()
-    bare = TestClient(app)
+    bare = TestClient(app, base_url="http://127.0.0.1")
     hdr = {"Authorization": f"Bearer {token}"}
     parked = bare.post("/api/v1/external/execute", headers=hdr,
                        json=_write_body()).json()
@@ -1123,7 +1198,7 @@ def test_write_park_idempotency_survives_replay_conflict_and_commit(monkeypatch)
     conn = _wire_fakecrm(monkeypatch)
     _enroll(max_risk="high")
     token = _mint()
-    bare = TestClient(app)
+    bare = TestClient(app, base_url="http://127.0.0.1")
     hdr = {"Authorization": f"Bearer {token}"}
     request = _write_body(idempotency_key="pilot-change-001")
 
@@ -1174,7 +1249,7 @@ def test_commit_digest_mismatch_over_http(monkeypatch):
     conn = _wire_fakecrm(monkeypatch)
     _enroll(max_risk="high")
     token = _mint()
-    bare = TestClient(app)
+    bare = TestClient(app, base_url="http://127.0.0.1")
     hdr = {"Authorization": f"Bearer {token}"}
     parked = bare.post("/api/v1/external/execute", headers=hdr,
                        json=_write_body()).json()
@@ -1190,7 +1265,7 @@ def test_commit_digest_mismatch_over_http(monkeypatch):
 def test_execution_status_unknown_id_404s():
     _enroll()
     token = _mint()
-    bare = TestClient(app)
+    bare = TestClient(app, base_url="http://127.0.0.1")
     r = bare.get("/api/v1/external/executions/nope",
                  headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 404
@@ -1203,7 +1278,7 @@ def test_execute_rate_limit_trips_and_commit_shares_the_bucket(monkeypatch):
     token = _mint()
     monkeypatch.setitem(gw._RATE_LIMITS, "execute", 2)
     monkeypatch.setattr(gw, "_rate_times", {})
-    bare = TestClient(app)
+    bare = TestClient(app, base_url="http://127.0.0.1")
     hdr = {"Authorization": f"Bearer {token}"}
     body = {"connector": "fakecrm", "op": "get", "path": "/opportunities"}
     for _ in range(2):
@@ -1261,7 +1336,7 @@ def test_envelope_auth_over_http():
     _enroll()
     priv, pub_hex = _ed25519_pair()
     _identity(pubkey=pub_hex)
-    r = TestClient(app).post(
+    r = TestClient(app, base_url="http://127.0.0.1").post(
         "/api/v1/external/screen",
         headers=_envelope_headers(priv, _SCREEN_BODY, nonce="n-1"),
         content=_SCREEN_BODY)
@@ -1275,7 +1350,7 @@ def test_envelope_replayed_nonce_is_401():
     priv, pub_hex = _ed25519_pair()
     _identity(pubkey=pub_hex)
     hdr = _envelope_headers(priv, _SCREEN_BODY, nonce="n-replay")
-    bare = TestClient(app)
+    bare = TestClient(app, base_url="http://127.0.0.1")
     assert bare.post("/api/v1/external/screen", headers=hdr,
                      content=_SCREEN_BODY).status_code == 200
     # A byte-identical replay carries a valid signature; the single-use
@@ -1299,7 +1374,7 @@ def test_hmac_auth_over_http(monkeypatch):
     monkeypatch.setenv(_HMAC_REF, _HMAC_SECRET)
     _enroll()
     _identity(hmac_secret_ref=_HMAC_REF)
-    r = TestClient(app).post("/api/v1/external/screen",
+    r = TestClient(app, base_url="http://127.0.0.1").post("/api/v1/external/screen",
                              headers=_hmac_headers(_SCREEN_BODY),
                              content=_SCREEN_BODY)
     assert r.status_code == 200, r.text
@@ -1311,7 +1386,7 @@ def test_hmac_stale_timestamp_is_401(monkeypatch):
     _enroll()
     _identity(hmac_secret_ref=_HMAC_REF)
     hdr = _hmac_headers(_SCREEN_BODY, ts=str(int(time.time()) - 4000))
-    r = TestClient(app).post("/api/v1/external/screen", headers=hdr,
+    r = TestClient(app, base_url="http://127.0.0.1").post("/api/v1/external/screen", headers=hdr,
                              content=_SCREEN_BODY)
     assert r.status_code == 401
 
@@ -1344,7 +1419,7 @@ def _jwt_token(priv_pem: bytes, **overrides) -> str:
 def test_jwt_auth_over_http(tmp_path):
     _enroll()
     priv_pem = _jwt_setup(tmp_path)
-    r = TestClient(app).post(
+    r = TestClient(app, base_url="http://127.0.0.1").post(
         "/api/v1/external/screen",
         headers={"Authorization": f"Bearer {_jwt_token(priv_pem)}"},
         json={"tool": "crm_update", "risk": "low"})
@@ -1359,7 +1434,7 @@ def test_jwt_for_another_subject_is_401(tmp_path):
     _enroll()
     priv_pem = _jwt_setup(tmp_path)
     token = _jwt_token(priv_pem, sub="other-bot")
-    r = TestClient(app).post(
+    r = TestClient(app, base_url="http://127.0.0.1").post(
         "/api/v1/external/screen",
         headers={"Authorization": f"Bearer {token}"},
         json={"tool": "crm_update", "risk": "low"})
@@ -1372,7 +1447,7 @@ def test_bearer_still_works_alongside_strong_credentials():
     _enroll()
     token = _mint()
     _identity(pubkey="ab" * 32)
-    r = TestClient(app).post("/api/v1/external/screen",
+    r = TestClient(app, base_url="http://127.0.0.1").post("/api/v1/external/screen",
                              headers={"Authorization": f"Bearer {token}"},
                              json={"tool": "crm_update", "risk": "low"})
     assert r.status_code == 200, r.text
@@ -1391,7 +1466,7 @@ def test_require_signed_refuses_bearer_for_strong_credential_agents(tmp_path):
     (tmp_path / "config.toml").write_text(
         "[external_agents]\nrequire_signed = true\n", encoding="utf-8")
     config.reset_config_cache()
-    bare = TestClient(app)
+    bare = TestClient(app, base_url="http://127.0.0.1")
     body = {"tool": "crm_update", "risk": "low"}
     # The pubkey-bearing agent must present its strong credential…
     r = bare.post("/api/v1/external/screen",
@@ -1415,7 +1490,7 @@ def test_require_signed_covers_hmac_only_agents(tmp_path):
     (tmp_path / "config.toml").write_text(
         "[external_agents]\nrequire_signed = true\n", encoding="utf-8")
     config.reset_config_cache()
-    bare = TestClient(app)
+    bare = TestClient(app, base_url="http://127.0.0.1")
     r = bare.post("/api/v1/external/screen",
                   headers={"Authorization": f"Bearer {token}"},
                   json={"tool": "crm_update", "risk": "low"})

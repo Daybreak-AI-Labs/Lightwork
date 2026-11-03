@@ -37,7 +37,7 @@ def client(monkeypatch, tmp_path):
     dashboard.app.dependency_overrides[auth.require_principal_in_request_context] = bind
     monkeypatch.setattr(auth, "role_for_principal", lambda _principal: "operator")
     try:
-        with TestClient(dashboard.app, headers={"Origin": "http://testserver"}) as test_client:
+        with TestClient(dashboard.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}) as test_client:
             yield test_client
     finally:
         dashboard.app.dependency_overrides.clear()

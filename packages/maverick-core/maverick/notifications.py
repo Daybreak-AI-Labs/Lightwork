@@ -121,12 +121,11 @@ def _get_executor():
 
 
 def _resolve_env_ref(value: str | None) -> str | None:
-    """Resolve `${ENV_VAR}` references in config strings."""
+    """Reject unresolved references; trusted layers were expanded by config."""
     if not value:
         return value
     if value.startswith("${") and value.endswith("}"):
-        env_name = value[2:-1]
-        return os.environ.get(env_name)
+        return None
     return value
 
 
@@ -264,10 +263,17 @@ def _send_slack(title: str, body: str, url: str) -> bool:
         import httpx
 
         from .governed_http import guarded_sender
-
+        from .slack_interactive import _slack_literal
+        raw = f"{title}\n{body}"
+        if len(raw) > 145000:
+            log.warning("notify slack failed: message exceeds Slack block limits")
+            return False
+        message = _slack_literal(raw)
+        blocks = [{"type": "section", "text": {"type": "plain_text", "text": raw[i:i + 2900], "emoji": False}}
+                  for i in range(0, len(raw), 2900)]
         resp = guarded_sender(httpx.post)(
             url,
-            json={"text": f"*{title}*\n{body}"},
+            json={"text": message, "blocks": blocks, "mrkdwn": False, "parse": "none", "link_names": False},
             timeout=10.0,
         )
         return _response_accepted(resp.status_code)

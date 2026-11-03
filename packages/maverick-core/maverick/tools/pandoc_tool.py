@@ -19,6 +19,12 @@ from . import Tool
 
 log = logging.getLogger(__name__)
 
+_READERS = frozenset({"markdown", "markdown_strict", "commonmark", "commonmark_x", "gfm", "html", "docx", "rst", "latex"})
+_WRITERS = frozenset({"markdown", "commonmark", "commonmark_x", "gfm", "html", "html5", "plain", "docx", "rst", "latex"})
+_EXTENSIONS = {".md": "markdown", ".markdown": "markdown", ".html": "html", ".htm": "html",
+               ".docx": "docx", ".rst": "rst", ".tex": "latex", ".txt": "plain"}
+_SAFE_ARGS = frozenset({"--standalone", "--toc", "--number-sections", "--wrap=none", "--wrap=auto", "--wrap=preserve"})
+
 
 _PANDOC_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -46,13 +52,10 @@ def _need_pandoc() -> str | None:
 
 
 def _safe_path(sandbox, user_path: str) -> str:
+    if user_path.startswith("-"):
+        raise ValueError("paths may not begin with '-'")
     if sandbox is None:
-        # No workspace to confine to, but still neutralize option-injection:
-        # a path like "-i" / "-write ..." would otherwise be parsed as a flag
-        # by the media binary. Reject leading-dash paths.
-        if user_path.startswith("-"):
-            raise ValueError(f"path {user_path!r} may not begin with '-'")
-        return user_path
+        raise ValueError("document conversion requires a workspace")
     workdir = Path(sandbox.workdir).resolve()
     candidate = (workdir / user_path).resolve()
     try:
@@ -70,34 +73,47 @@ def _op_convert(args: dict, sandbox) -> str:
     dst = (args.get("output_path") or "").strip()
     if not src or not dst:
         return "ERROR: convert requires input_path and output_path"
+    output_parts = dst.replace("\\", "/").split("/")
     try:
         src = _safe_path(sandbox, src)
         dst = _safe_path(sandbox, dst)
     except ValueError as e:
         return f"ERROR: {e}"
-    cmd = ["pandoc", src, "-o", dst]
-    if args.get("from_"):
-        cmd.extend(["-f", str(args["from_"])])
-    if args.get("to"):
-        cmd.extend(["-t", str(args["to"])])
-    from . import safe_media_args, sandbox_run
-    cmd.extend(safe_media_args(args.get("args")))
+    if any(part.rstrip(" .").casefold() == ".git" for part in (*output_parts, *Path(dst).parts)):
+        return "ERROR: refusing to write under .git/"
+    # Output names can cause Pandoc to start an external PDF engine even when
+    # a different writer is specified. PDF conversion needs a separately
+    # isolated worker because TeX can read files referenced by the document.
+    if Path(dst).name.rstrip(" .").lower().endswith(".pdf"):
+        return "ERROR: PDF conversion requires an isolated document worker"
+    source_suffix = Path(src).suffix.lower()
+    reader = args.get("from_") or ("markdown" if source_suffix == ".txt" else _EXTENSIONS.get(source_suffix))
+    writer = args.get("to") or _EXTENSIONS.get(Path(dst).suffix.lower())
+    if not isinstance(reader, str) or reader not in _READERS:
+        return "ERROR: unsupported input format; choose a built-in document reader"
+    if not isinstance(writer, str) or writer not in _WRITERS:
+        return "ERROR: unsupported output format; choose a built-in document writer"
+    extra = args.get("args")
+    if extra is None:
+        extra = []
+    if (not isinstance(extra, list) or len(extra) > 16
+            or any(not isinstance(item, str) or item not in _SAFE_ARGS for item in extra)):
+        return "ERROR: unsupported Pandoc options"
+    from . import sandbox_run
+    cmd = ["pandoc", src, "-o", dst, "-f", reader, "-t", writer, *extra]
     code, _out, stderr = sandbox_run(sandbox, cmd, timeout=120)
     if code != 0:
         return f"ERROR: pandoc ({code}): {stderr.strip()[-300:]}"
     return f"wrote {dst}"
 
 
-def _op_formats(_args: dict, sandbox) -> str:
+def _op_formats(_args: dict, _sandbox) -> str:
     err = _need_pandoc()
     if err:
         return err
-    from . import sandbox_run
-    _ci, in_out, _ie = sandbox_run(sandbox, ["pandoc", "--list-input-formats"], timeout=30)
-    _co, out_out, _oe = sandbox_run(sandbox, ["pandoc", "--list-output-formats"], timeout=30)
     return (
-        f"input formats:\n{in_out.strip()}\n\n"
-        f"output formats:\n{out_out.strip()}"
+        "supported input formats:\n" + "\n".join(sorted(_READERS)) +
+        "\n\nsupported output formats:\n" + "\n".join(sorted(_WRITERS))
     )
 
 
@@ -140,8 +156,9 @@ def pandoc_tool(sandbox=None) -> Tool:
         description=(
             "Pandoc document conversion. ops: convert (file in/out + "
             "optional from/to/args), formats (list), markdown_to_html "
-            "(string), html_to_markdown (string). Requires pandoc on "
-            "PATH."
+            "(string), html_to_markdown (string). File conversion accepts "
+            "supported built-in formats and basic options; PDF requires an "
+            "isolated document worker. Requires pandoc on PATH."
         ),
         input_schema=_PANDOC_SCHEMA,
         fn=lambda args: _run(args, sandbox),

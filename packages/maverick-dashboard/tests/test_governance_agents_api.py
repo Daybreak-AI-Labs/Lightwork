@@ -290,8 +290,8 @@ def environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: C901
     app.state.governance_agent_reference_maintenance = ReferenceMaintenance()
     app.include_router(api.router, prefix="/api/v1")
     client = TestClient(
-        app,
-        headers={"Origin": "http://testserver", "X-Test-Subject": "owner"},
+        app, base_url="http://127.0.0.1",
+        headers={"Origin": "http://127.0.0.1", "X-Test-Subject": "owner"},
     )
     return client, state
 
@@ -699,7 +699,7 @@ def test_status_allows_only_genuine_auth_off_without_mutation_authority(
     )
     app = FastAPI()
     app.include_router(api.create_governance_agents_router(), prefix="/api/v1")
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
     status = client.get(f"{API}/status")
     assert status.status_code == 200

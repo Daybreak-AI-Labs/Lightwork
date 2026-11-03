@@ -6,6 +6,7 @@ of the package __init__ so the @main.group decorators fire on package import.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import click
 
@@ -162,14 +163,14 @@ def voice_setup_cmd(model_name: str | None, force: bool) -> None:
 def voice_transcribe_cmd(audio_file: str, language: str | None,
                          backend: str | None) -> None:
     """Transcribe an audio file (smoke test for the STT pipeline)."""
-    from ..tools.voice import _run_transcribe
+    from ..tools.voice import _run_transcribe_internal
 
-    args: dict = {"source": audio_file}
+    args: dict = {"source": str(Path(audio_file).resolve())}
     if language:
         args["language"] = language
     if backend:
         args["backend"] = backend
-    out = _run_transcribe(args, None)
+    out = _run_transcribe_internal(args)
     from ..tool_results import tool_result_failed
 
     if tool_result_failed(out):

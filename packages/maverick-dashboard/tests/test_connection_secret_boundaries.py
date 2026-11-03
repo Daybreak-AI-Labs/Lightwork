@@ -159,7 +159,7 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(connection_oauth, "_post_token", lambda *args: pytest.fail("Unexpected provider request"))
     config.reset_config_cache()
     # No lifespan or provider launch is needed to exercise the actual app handler.
-    yield TestClient(dashboard.app, headers={"Origin": "http://testserver"})
+    yield TestClient(dashboard.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     config.reset_config_cache()
 
 

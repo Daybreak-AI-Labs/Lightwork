@@ -4,6 +4,7 @@ world governance and no audit trail, and the whole intake -> score -> file ->
 review -> approve flow still works."""
 from __future__ import annotations
 
+import base64
 import importlib.util
 import io
 import json
@@ -57,6 +58,9 @@ def sa_app(tmp_path_factory):
 
 @pytest.fixture(autouse=True)
 def _clean_store(sa_app, monkeypatch):
+    monkeypatch.setenv("PIA_BASE_URL", "http://testserver")
+    monkeypatch.setenv("PIA_OPERATOR_USER", "L. Haller")
+    monkeypatch.setenv("PIA_OPERATOR_TOKEN", "review-test-value")
     sa_app.STORE.tickets.clear()
     sa_app.STORE.cases.clear()
     sa_app.STORE.onetrust.clear()
@@ -98,8 +102,12 @@ def _json_req(payload):
 
     async def _recv():
         return {"type": "http.request", "body": body, "more_body": False}
-    return Request({"type": "http", "method": "POST", "path": "/x",
-                    "headers": [(b"content-type", b"application/json")]}, _recv)
+    auth = base64.b64encode(b"L. Haller:review-test-value")
+    return Request({"type": "http", "method": "POST", "path": "/x", "scheme": "http",
+                    "server": ("testserver", 80), "query_string": b"",
+                    "headers": [(b"content-type", b"application/json"),
+                                (b"origin", b"http://testserver"),
+                                (b"authorization", b"Basic " + auth)]}, _recv)
 
 
 def _upload(name, data, mime="application/pdf"):
@@ -181,7 +189,7 @@ def test_append_document_degrades_without_clause_engine(sa_app):
     asyncio.run(sa_app.intake_submit(_req("POST"), case.id))
     ot_id = case.onetrust_id
     pdf = sa_app._mini_pdf("Acme DPA", ["Art. 28 data processing agreement."])
-    r = json.loads(asyncio.run(sa_app.onetrust_add_document(
+    r = json.loads(asyncio.run(sa_app._onetrust_add_document(
         ot_id, _upload("dpa.pdf", pdf))).body)
     assert r["ok"]
     entry = sa_app.STORE.onetrust[ot_id].addenda[0]

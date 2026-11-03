@@ -220,7 +220,17 @@ def _run_sql_query(args: dict[str, Any], sandbox) -> str:
         return "ERROR: params must be a list"
 
     try:
+        if sandbox is None:
+            raise ValueError("a sandbox workspace is required to query a database")
+        from ..sandbox.ssh import SSHBackend
+        if isinstance(sandbox, SSHBackend):
+            raise ValueError("host database tools cannot access an SSH workspace")
         db_path = _safe_path(sandbox, database)
+        from ..paths import maverick_home
+        candidate = Path(db_path).resolve()
+        state = maverick_home().resolve()
+        if candidate.is_relative_to(state) and not candidate.is_relative_to(state / "workspace"):
+            raise ValueError("Lightwork's internal data directory cannot be queried")
     except ValueError as e:
         return f"ERROR: {e}"
     p = Path(db_path)

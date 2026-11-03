@@ -66,6 +66,22 @@ def agent_boundary(monkeypatch, fn, *, shield=None):
 
 
 @pytest.mark.asyncio
+async def test_agent_dispatch_binds_explicit_capability_for_nested_flow(monkeypatch):
+    from maverick import capability, tool_authz
+    monkeypatch.setattr(capability, "capability_enforced", lambda: False)
+    monkeypatch.setattr(tool_authz, "_record_denial", lambda *a, **k: None)
+    agent, _, _, _ = agent_boundary(
+        monkeypatch,
+        lambda _args: tool_authz.authorize("http_fetch", {}, origin="flow") or "ALLOWED",
+    )
+    output = await agent._run_dispatched_tool(
+        "producer", {}, shield=None, quarantine=None, call_id="call",
+        call_commitment="digest", principal="user:alice", capability_active=True,
+    )
+    assert "capability enforcement" in output
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("state", "content", "is_error", "disposition"),
     [

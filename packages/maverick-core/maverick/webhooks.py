@@ -93,21 +93,12 @@ def _max_inflight() -> int:
 
 
 def _expand_env(val: object) -> str | None:
-    """Resolve a config value that may be a ``${VAR}`` env reference. Returns the
-    literal string, the env var's value, or ``None`` (unset / non-string)."""
+    """Reject unresolved references; operator config expands them centrally."""
     if not isinstance(val, str):
         return str(val) if val is not None else None
     if val.startswith("${") and val.endswith("}"):
-        resolved = os.environ.get(val[2:-1]) or None
-        if resolved is None:
-            # Fail-open to unsigned webhooks must not be silent: warn the
-            # operator that a configured secret env var is unset so signing
-            # isn't disabled without a trace.
-            log.warning(
-                "webhooks: env var %s referenced by [webhooks] secret is unset; "
-                "outbound webhooks will be sent UNSIGNED", val[2:-1],
-            )
-        return resolved
+        log.warning("webhooks: unresolved configuration reference; refusing the value")
+        return None
     return val or None
 
 
@@ -120,7 +111,8 @@ def _load_config_outbound() -> tuple[list[str], str | None]:
         return [], None
     section = (cfg or {}).get("webhooks") or {}
     urls = list(section.get("outbound") or [])
-    secret = _expand_env(section.get("secret"))
+    from .secret_provider import get_secret
+    secret = get_secret("MAVERICK_WEBHOOK_SECRET") or _expand_env(section.get("secret"))
     return urls, secret
 
 
@@ -443,6 +435,9 @@ def fire(
         urls, secret = _load_config_outbound()
     if not urls:
         return 0
+    if secret and not separate_webhook_credential(secret, "outbound"):
+        log.warning("webhooks: refusing to send with a secret shared with an inbound credential")
+        return 0
     headers = build_headers(body, event, secret, event_id=envelope["id"])
 
     # Enterprise egress lock: outbound webhooks are off-box data egress just like
@@ -536,19 +531,42 @@ def _timestamp_fresh(timestamp: str, max_age: int | None) -> bool:
 
 
 def inbound_secret() -> str | None:
-    """Resolve the HMAC secret used to authenticate inbound webhooks.
-
-    Shares the ``[webhooks] secret`` knob with the outbound dispatcher so
-    operators configure one signing key. ``MAVERICK_WEBHOOK_SECRET`` in the
-    environment takes precedence for deploys that prefer env over config.
-    Returns None when no secret is configured (the receiver fails closed).
-    """
+    """Resolve the dedicated inbound control-plane HMAC secret."""
     from .secret_provider import get_secret  # vault-mountable secret (#54)
-    env = get_secret("MAVERICK_WEBHOOK_SECRET")
-    if env:
-        return env
-    _, secret = _load_config_outbound()
-    return secret or None
+    return get_secret("MAVERICK_INBOUND_WEBHOOK_SECRET") or None
+
+
+def separate_webhook_credential(value: str | None, purpose: str) -> bool:
+    """Reject credentials shared with another externally exposed trust domain."""
+    if not value:
+        return False
+    from .github_app import webhook_secret as github_webhook_secret
+    from .issue_webhooks import gitlab_webhook_token
+    from .secret_provider import get_secret
+
+    credentials = {
+        "control": inbound_secret(),
+        "outbound": _load_config_outbound()[1],
+        "approval": get_secret("MAVERICK_FLOW_APPROVAL_SECRET"),
+        "linear": get_secret("MAVERICK_LINEAR_WEBHOOK_SECRET"),
+        "jira": get_secret("MAVERICK_JIRA_WEBHOOK_SECRET"),
+        "gitlab": gitlab_webhook_token(),
+        "github": github_webhook_secret(),
+    }
+    if purpose not in credentials:
+        return False
+    candidate = value.encode("utf-8")
+    return not any(other and hmac.compare_digest(candidate, other.encode("utf-8"))
+                   for name, other in credentials.items() if name != purpose)
+
+
+def issue_webhook_secret(provider: str) -> str | None:
+    """Resolve a provider-specific secret; never fall back to the control key."""
+    from .secret_provider import get_secret
+    if provider not in {"linear", "jira"}:
+        return None
+    secret = get_secret(f"MAVERICK_{provider.upper()}_WEBHOOK_SECRET")
+    return secret if separate_webhook_credential(secret, provider) else None
 
 
 __all__ = ["build_envelope", "build_headers", "encode_body", "fire",

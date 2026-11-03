@@ -43,8 +43,8 @@ def test_send_posts_card(monkeypatch):
 
     import maverick.tools._ssrf as ssrf
     monkeypatch.setattr(ssrf, "safe_client", lambda url, **kw: _FakeClient(url, **kw))
-    out = teams_tool().fn({"text": "deploy done", "title": "CI",
-                           "webhook": "https://outlook.office.com/webhook/abc"})
+    monkeypatch.setenv("TEAMS_WEBHOOK_URL", "https://outlook.office.com/webhook/abc")
+    out = teams_tool().fn({"text": "deploy done", "title": "CI"})
     assert out == "posted to Teams"
     assert captured["json"]["text"] == "deploy done"
     assert captured["json"]["title"] == "CI"
@@ -58,17 +58,25 @@ def test_send_requires_webhook(monkeypatch):
     assert out.startswith("ERROR") and "webhook" in out
 
 
-def test_send_rejects_non_https():
-    out = teams_tool().fn({"text": "hi", "webhook": "http://outlook.office.com/x"})
+def test_send_rejects_non_https(monkeypatch):
+    monkeypatch.setenv("TEAMS_WEBHOOK_URL", "http://outlook.office.com/x")
+    out = teams_tool().fn({"text": "hi"})
     assert out.startswith("ERROR") and "https" in out
 
 
 def test_send_rejects_private_host(monkeypatch):
     # A loopback/private webhook is rejected by the pinned client (BlockedHost).
     monkeypatch.delenv("MAVERICK_FETCH_ALLOW_PRIVATE", raising=False)
-    out = teams_tool().fn({"text": "hi", "webhook": "https://127.0.0.1/webhook"})
+    monkeypatch.setenv("TEAMS_WEBHOOK_URL", "https://127.0.0.1/webhook")
+    out = teams_tool().fn({"text": "hi"})
     assert out.startswith("ERROR")
 
 
 def test_send_requires_text():
-    assert teams_tool().fn({"text": "", "webhook": "https://x.office.com/w"}).startswith("ERROR")
+    assert teams_tool().fn({"text": ""}).startswith("ERROR")
+
+
+def test_send_refuses_caller_selected_webhook(monkeypatch):
+    monkeypatch.setenv("TEAMS_WEBHOOK_URL", "https://x.office.com/configured")
+    out = teams_tool().fn({"text": "hi", "webhook": "https://x.office.com/other"})
+    assert "operator-configured" in out

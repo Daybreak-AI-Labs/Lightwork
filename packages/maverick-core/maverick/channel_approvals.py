@@ -704,6 +704,15 @@ def decide_from_channel(
         )
     if decision == "approved":
         require_current_card(approval, binding=binding, now=current)
+        if channel != "dashboard":
+            from .approval_cards import decode_approval_detail
+
+            card = decode_approval_detail(approval.detail)
+            if card and card.get("display"):
+                raise ChannelApprovalRefused(
+                    "dashboard_only",
+                    "Review and approve the full operation on the Lightwork Approvals page.",
+                )
         require_separate_approver(world, int(approval_id), who)
     require_acknowledgement(approval, who=who, channel=channel, decision=decision,
                             confirmed=confirmed, acknowledged=acknowledged,

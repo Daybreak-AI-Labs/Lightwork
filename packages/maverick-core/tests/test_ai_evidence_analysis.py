@@ -930,11 +930,21 @@ def test_optional_local_parser_dependencies_fail_closed(
     content: bytes,
     package: str,
 ) -> None:
-    _blocked_import(monkeypatch, package)
+    if media_type == evidence.MEDIA_PDF:
+        # PDF decoding runs in another interpreter, so model a missing child
+        # dependency at the process boundary rather than patching this process.
+        def unavailable(*args, **kwargs):
+            raise RuntimeError("pypdf is required")
+
+        monkeypatch.setattr("maverick.parser_isolation.parse_isolated", unavailable)
+    else:
+        _blocked_import(monkeypatch, package)
     environment = _environment(tmp_path)
     artifact = _artifact("artifact-optional", media_type=media_type, content=content)
     _register(environment, artifact)
-    with pytest.raises(evidence.EvidenceAnalysisConfigError, match="required"):
+    expected = (evidence.EvidenceAnalysisValidationError if media_type == evidence.MEDIA_PDF
+                else evidence.EvidenceAnalysisConfigError)
+    with pytest.raises(expected, match="PDF extraction failed closed|required"):
         _analyze(environment, artifact)
 
 
@@ -1008,6 +1018,13 @@ def test_fake_local_pdf_xlsx_and_image_parsers_emit_only_digest_facts(
 
     pypdf.PdfReader = Reader
     monkeypatch.setitem(sys.modules, "pypdf", pypdf)
+    from maverick import parser_isolation
+    monkeypatch.setattr(
+        parser_isolation, "parse_isolated",
+        lambda name, data, **kwargs: evidence._isolated_evidence_pdf_text(
+            data, maximum_characters=kwargs["maximum_characters"]
+        ),
+    )
 
     openpyxl = types.ModuleType("openpyxl")
     cell = SimpleNamespace(
@@ -1095,3 +1112,14 @@ def test_ocr_dependency_is_optional_but_fails_closed_when_selected(
     _register(environment, artifact)
     with pytest.raises(evidence.EvidenceAnalysisConfigError, match="pytesseract"):
         _analyze(environment, artifact)
+
+
+def test_evidence_pdf_parser_failure_does_not_fall_back_in_process(monkeypatch):
+    from maverick import parser_isolation
+
+    def refuse(*args, **kwargs):
+        raise RuntimeError("child timed out")
+
+    monkeypatch.setattr(parser_isolation, "parse_isolated", refuse)
+    with pytest.raises(evidence.EvidenceAnalysisValidationError, match="failed closed"):
+        evidence.BoundedLocalExtractionAdapter()._pdf_text(b"%PDF-1.4")

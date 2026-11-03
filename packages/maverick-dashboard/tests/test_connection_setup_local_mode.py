@@ -30,7 +30,7 @@ def _local_home(tmp_path, monkeypatch):
 
 
 def _client() -> TestClient:
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def test_account_sign_in_is_reported_unavailable_not_as_lost_access():
@@ -59,7 +59,7 @@ def test_fresh_local_install_is_offered_the_named_owner_set_up(monkeypatch):
 
 def test_shared_dashboard_token_gets_the_same_plain_answer(monkeypatch):
     monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "dashboard-token")  # pragma: allowlist secret
-    response = TestClient(app).get(
+    response = TestClient(app, base_url="http://127.0.0.1").get(
         "/api/v1/connection-setup",
         headers={"Authorization": "Bearer dashboard-token"},  # pragma: allowlist secret
     )

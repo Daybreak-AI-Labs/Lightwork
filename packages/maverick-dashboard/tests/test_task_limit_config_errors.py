@@ -13,7 +13,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_BUDGET_DOLLARS", "not-a-number")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")  # pragma: allowlist secret - synthetic
     from maverick_dashboard.app import app
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def test_create_goal_with_malformed_budget_config_is_503(client):

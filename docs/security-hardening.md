@@ -1,5 +1,20 @@
 # Security hardening (operator guide)
 
+When a capability restricts workspace paths, tools that cannot enforce those
+restrictions—including shell execution, workspace-wide searches and language
+servers—are refused. Use a dedicated sandbox or an appropriately scoped tool
+instead. Path checks alone do not establish an OS isolation boundary.
+
+When a capability restricts hosts, only reviewed local tools and network tools
+that enforce the grant are admitted. Unclassified/custom tools and built-ins
+with unscoped network paths are refused, even if some of their operations are
+local. Additions require an explicit security review before they are available
+under a host-restricted grant.
+
+The deferred `find_tools` discovery tool is also unavailable with restricted
+host or path grants until its registry identity can be authenticated. Configure
+the required reviewed tools directly for those agents.
+
 Lightwork ships **defense in depth**. The protective controls that don't break
 the happy path are now **on by default** ([Secure by default](#secure-by-default)
 — at-rest encryption, audit signing, fail-closed consent for high/critical
@@ -134,8 +149,9 @@ security posture by name:
     available container backend (docker → podman) instead of running
     `shell=True` on the host; if no container runtime is installed it fails
     closed rather than running unsandboxed (`[sandbox] backend` / `require_container`).
-  - **Plugin isolation = subprocess.** Third-party plugins run out-of-process by
-    default instead of in-process (`[plugins] isolation`).
+  - **Plugin tool calls = subprocess.** The configured proxy can move tool
+    calls out-of-process, but plugin discovery, import, and factories still
+    run in the host process; install only trusted plugins (`[plugins] isolation`).
   - **Plugin lock = enforce.** The version/content lockfile is enforced (a no-op
     until you run `maverick plugin lock`, then drifted/unpinned plugins are
     refused) (`[plugins] lock_policy`).
@@ -615,13 +631,20 @@ that, the browser is authenticated by the cookie — no bearer header needed.
 > login flow out of Lightwork entirely. Reach for this built-in flow only when
 > running a proxy isn't practical.
 
-**Off by default, fail-closed.** The `/auth/login`, `/auth/callback`, and
-`/auth/logout` routes are inert (they return `404`) unless the flow is **fully
-configured**; an unconfigured deployment behaves exactly as before, and the
+**Off by default, fail-closed.** The `/auth/login` and `/auth/callback` routes
+are inert (they return `404`) unless the flow is **fully configured**; an
+unconfigured deployment behaves exactly as before, and the
 bearer gate is untouched. "Fully configured" means OIDC is enabled **and**
 `client_id` **and** `session_secret` are set **and** the authorization/token
 endpoints are reachable (either an `issuer` for discovery, or both endpoints set
 explicitly).
+
+`GET /auth/logout` shows a confirmation; only a same-origin `POST` ends the
+browser session or, with `?all=1`, revokes all sessions. Local and SAML sessions
+also use this sign-out route. Behind a TLS proxy, configure the public HTTPS
+origin with `MAVERICK_PUBLIC_URL` or `[dashboard] public_url` so the origin
+check matches the browser's address. Open the dashboard at that canonical
+origin; other host aliases cannot submit the sign-out form.
 
 **config.toml** (extends the same `[auth.oidc]` table)
 
@@ -1289,3 +1312,69 @@ maverick audit verify
 (SOC 2 TSC → control mapping), the enterprise-mode docs under
 [`docs/security/`](security/), and [`docs/env-vars.md`](env-vars.md) for the
 full environment-variable reference.
+
+Evidence PDF extraction runs in a child process with a 30-second timeout and a
+per-process concurrency limit. On supported POSIX systems it also sets CPU,
+address-space and file-size limits; their enforcement depends on the operating
+system and process privileges. The parent discards stderr and reads at most
+16 MiB of child output. Evidence PDF extraction fails closed on non-POSIX systems
+or when resource limits cannot be set. These controls do not
+isolate filesystem or network access, contain subprocess descendants, or
+coordinate limits across workers. Deployments accepting untrusted PDFs still
+need operating-system process and network isolation around the service.
+
+Spreadsheet XLSX `read`, `info`, and edits to existing workbooks run archive
+validation and workbook parsing in a resource-limited child, with a 30-second
+timeout and two concurrent parser slots per service process. Edited workbooks
+are limited to 11 MiB and are published atomically only after the worker
+succeeds. These operations fail closed where the POSIX resource controls are
+unavailable. Recalculation has a separate parsing path and does not yet share
+this isolation; the same filesystem, network, descendant and cross-worker
+limits above apply.
+
+Direct flow and workflow tool actions are unavailable when capability
+enforcement is enabled, including in enterprise mode, or when they inherit an
+active agent grant during tool dispatch. These runners do not yet carry and
+enforce the originating agent's attenuated tool, path and host grant. Direct
+registry calls and independently started jobs need their own authorization.
+Use governed agent steps until that propagation is implemented.
+
+Teams sends require a fresh human decision in the live registry, including when
+the default operation is omitted.
+Teams destinations must be configured by the operator in `TEAMS_WEBHOOK_URL`;
+the tool refuses caller-supplied webhook URLs.
+WebSocket message sending is unavailable until its asynchronous effect can be
+bound to a human decision. HTTP requests and WebSocket handshakes can transmit
+information to destinations; direct calls to raw tool functions do not pass
+through the registry's connector wrapper. Use destination controls and process
+isolation where untrusted content can influence outgoing requests.
+
+MCP catalog entries are available for discovery, but installing or probing a
+registry-provided server is unavailable until the complete server configuration
+can be authenticated against trusted publisher keys. Administrators can still
+independently configure servers. This change does not remove servers previously
+installed from a registry; review those configurations and their destinations.
+
+The interactive browser connects through the same DNS-pinning proxy used by the
+consent scanner. It refuses private addresses and permits outbound TCP only on
+ports 80 and 443, even when `MAVERICK_FETCH_ALLOW_PRIVATE` is enabled. The proxy
+is not an operating-system sandbox; deployments handling untrusted pages should
+also restrict the browser process's network access at the operating-system or
+container boundary. Long-idle browser connections may be closed by the proxy.
+
+For interactive-browser proxy connections, the enterprise and originating
+workspace hostname policies are checked before DNS resolution, including for
+WebSocket connections. Chromium is configured to disable HTTP/2 and QUIC to
+reduce cross-origin connection coalescing; actual browser enforcement must be
+validated for the deployed version. This remains a connection-level check,
+and existing connections are not revoked
+immediately when a policy changes. Route-level checks and network isolation
+remain necessary for stronger enforcement.
+
+Earned-autonomy predictions are recorded by action type, so qualification is
+advisory and does not grant consent. Shadow execution still invokes its human
+approval callback. Historical unscoped standing-consent records cannot be
+attributed reliably to an operator or to earned autonomy and no longer grant
+authority. Operators must explicitly reauthorize any unscoped standing consent
+they still need. Existing scoped records retain their prior authority binding;
+clearing prediction qualification does not revoke an explicit consent grant.

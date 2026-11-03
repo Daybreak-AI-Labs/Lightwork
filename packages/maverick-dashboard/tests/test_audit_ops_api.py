@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 
 pytest.importorskip("cryptography", reason="checkpoints are always signed")
 
-ORIGIN = {"Origin": "http://testserver"}
+ORIGIN = {"Origin": "http://127.0.0.1"}
 BASE = "/api/v1/audit/checkpoints"
 DAY = "2026-01-01"
 BANNED = re.compile(
@@ -45,7 +45,7 @@ def client(tmp_path, monkeypatch):
     audit_writer._default = None
     audit_writer._defaults.clear()
     dash_app._world_cache.clear()
-    yield TestClient(dash_app.app, headers=ORIGIN)
+    yield TestClient(dash_app.app, base_url="http://127.0.0.1", headers=ORIGIN)
     config.reset_config_cache()
     audit_writer._default = None
     audit_writer._defaults.clear()
@@ -240,7 +240,7 @@ def test_audit_page_shows_the_checkpoint_buttons_in_plain_words(client, monkeypa
 
 def test_changes_from_another_site_are_refused(client):
     _write_day()
-    cross_site = TestClient(client.app)
+    cross_site = TestClient(client.app, base_url="http://127.0.0.1")
     assert cross_site.post(f"{BASE}/publish", json={"day": DAY}).status_code == 403
     assert cross_site.post(f"{BASE}/retire", json={"sequence": 1, "confirm": True}).status_code == 403
     assert cross_site.post("/api/v1/security/own/fixes/apply",
@@ -292,7 +292,7 @@ def test_checkpoint_settings_are_for_installation_administrators(client, monkeyp
         assert client.get(SETTINGS).status_code == 403
     finally:
         reset_tenant(token)
-    assert TestClient(client.app).post(f"{SETTINGS}/folder", json={"folder": ""}).status_code == 403
+    assert TestClient(client.app, base_url="http://127.0.0.1").post(f"{SETTINGS}/folder", json={"folder": ""}).status_code == 403
 
 
 def test_a_chosen_folder_is_checked_on_the_server_and_confirmed(client, monkeypatch, tmp_path):

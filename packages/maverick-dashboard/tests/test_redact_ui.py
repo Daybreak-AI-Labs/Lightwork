@@ -14,7 +14,7 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     # Mutating requests must carry a matching Origin (the dashboard CSRF contract).
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 _TEXT = "key AKIAIOSFODNN7EXAMPLE and mail alice@example.com"

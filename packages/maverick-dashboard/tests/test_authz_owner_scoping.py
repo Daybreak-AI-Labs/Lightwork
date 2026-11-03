@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 from maverick.oidc import VerifiedPrincipal
 from maverick_dashboard.app import app
 
-client = TestClient(app)
+client = TestClient(app, base_url="http://127.0.0.1")
 
 
 # ----------------------------- fixtures / helpers -----------------------------
@@ -46,13 +46,16 @@ def world(tmp_path, monkeypatch):
     return world_model.WorldModel(db)
 
 
-def _enable_oidc_principal_map(monkeypatch):
+def _enable_oidc_principal_map(monkeypatch, *, operator=True):
     """OIDC on; the bearer token string *is* the subject.
 
     ``Bearer alice`` -> principal ``user:alice``. Lets each request act as a
     chosen user with no real JWT.
     """
     monkeypatch.setattr(auth, "oidc_enabled", lambda: True)
+    if operator:
+        from maverick_dashboard import rbac
+        monkeypatch.setattr(rbac, "default_role", lambda: "operator")
 
     def _verify(token, **_kw):
         return VerifiedPrincipal(
@@ -70,7 +73,7 @@ def _origin() -> dict:
     same-origin-gates every mutating method before the route runs; without a
     matching Origin a POST 403s regardless of ownership.
     """
-    return {"Origin": "http://testserver"}
+    return {"Origin": "http://127.0.0.1"}
 
 
 def _as(user: str, *, post: bool = False) -> dict:
@@ -82,6 +85,19 @@ def _as(user: str, *, post: bool = False) -> dict:
     if post:
         headers.update(_origin())
     return headers
+
+
+def test_unassigned_oidc_user_can_view_but_cannot_operate(monkeypatch, tmp_path):
+    from maverick import config
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    monkeypatch.delenv("MAVERICK_DASHBOARD_ADMINS", raising=False)
+    config.reset_config_cache()
+    _enable_oidc_principal_map(monkeypatch, operator=False)
+    assert client.get("/providers", headers=_as("alice")).status_code == 200
+    assert client.post("/api/v1/goals", headers=_as("alice", post=True),
+                       json={"title": "work"}).status_code == 403
+    assert client.post("/api/v1/approvals/1/approve", headers=_as("alice", post=True)).status_code == 403
 
 
 @pytest.fixture

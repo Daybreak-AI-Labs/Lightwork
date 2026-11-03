@@ -19,7 +19,10 @@ export PIA_DATA_DIR="${PIA_DATA_DIR:-$HERE/.standalone-data}"
 # OneTrust target: the in-process mock tenant by default; repoint at a real
 # OneTrust sandbox and the agent files there instead (same POST).
 export ONETRUST_HOSTNAME="${ONETRUST_HOSTNAME:-http://127.0.0.1:$WORLD_PORT/ot-api}"
-export ONETRUST_TOKEN="${ONETRUST_TOKEN:-demo-bearer-token}"
+export PIA_ENABLE_ONETRUST_MOCK="${PIA_ENABLE_ONETRUST_MOCK:-0}"
+if [[ "$PIA_ENABLE_ONETRUST_MOCK" == "1" && -z "${ONETRUST_TOKEN:-}" ]]; then
+  export ONETRUST_TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+fi
 export PIA_BASE_URL="${PIA_BASE_URL:-http://127.0.0.1:$WORLD_PORT}"
 
 # Email: the requester inbox is in-process; a standalone build delivers there.

@@ -13,7 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 from maverick_dashboard.app import app
 
-client = TestClient(app, headers={"Origin": "http://testserver"})
+client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 API = "/api/v1/third-party/portal-routing-key"
 ENV = "MAVERICK_THIRD_PARTY_PORTAL_ROUTING_KEY"
 
@@ -108,7 +108,7 @@ def test_no_grace_ends_old_links_now_and_at_most_two_old_keys_stay(audit_rows):
 def test_only_installation_administrators_on_this_site_can_rotate(monkeypatch, audit_rows):
     from maverick_dashboard import auth, rbac
 
-    assert TestClient(app).post(API + "/rotate", json={"confirm": True, "grace_hours": 1}).status_code == 403
+    assert TestClient(app, base_url="http://127.0.0.1").post(API + "/rotate", json={"confirm": True, "grace_hours": 1}).status_code == 403
     assert _rotate(1, extra="field").status_code == 422
     assert client.post(API + "/rotate", json={"confirm": False, "grace_hours": 1}).status_code == 422
     assert _rotate(5).status_code == 422

@@ -120,8 +120,8 @@ def environment(monkeypatch: pytest.MonkeyPatch):
     app = FastAPI()
     app.include_router(api.create_ai_cloud_agent_governance_router(deps), prefix="/api/v1")
     client = TestClient(
-        app,
-        headers={"Origin": "http://testserver", "X-Test-Subject": "operator"},
+        app, base_url="http://127.0.0.1",
+        headers={"Origin": "http://127.0.0.1", "X-Test-Subject": "operator"},
     )
     return client, state, app
 
@@ -168,7 +168,7 @@ def test_shipped_router_reports_unavailable_before_asking_for_a_workspace(monkey
     monkeypatch.setattr(api, "_tenant_id", lambda: (_ for _ in ()).throw(AssertionError("tenant")))
     app = FastAPI()
     app.include_router(api.create_ai_cloud_agent_governance_router(), prefix="/api/v1")
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     response = client.get(f"{BASE}/status")
     assert response.status_code == 200
     assert response.json()["reason"] == "not_connected"
@@ -404,7 +404,7 @@ def test_mismatched_runtime_and_sensitive_core_errors_fail_closed(
         ),
         prefix="/api/v1",
     )
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     assert client.get(f"{BASE}/status").status_code == 503
 
     class _Ambiguous(_Runtime):

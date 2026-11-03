@@ -212,13 +212,21 @@ def _time_limit_words(timeout: float | None) -> str:
     return f"Time limit: {timeout:g} seconds."
 
 
-def _shown_command(cmd: str) -> str:
-    """The command as the person deciding reads it (secrets are masked on the
-    card). A very long one is shortened for reading; the approval still binds
-    to exactly what will run."""
-    if len(cmd) <= 3800:
-        return cmd
-    return cmd[:3800] + "\n… (shortened here; the approval covers the full command)"
+def _reviewable_command_error(cmd: str) -> str | None:
+    """Refuse commands whose complete contents cannot be shown for review."""
+    if len(cmd) > 3800:
+        return "ERROR: shell command is too long to review; split it into shorter commands"
+    if any(char not in "\n\t" and not char.isprintable() for char in cmd):
+        return "ERROR: shell command contains characters that cannot be safely reviewed"
+    try:
+        from ..safety.secret_detector import redact
+
+        shown, _ = redact(cmd)
+    except Exception:
+        return "ERROR: shell command could not be checked for safe review"
+    if shown != cmd:
+        return "ERROR: shell command contains material that would be hidden from the reviewer"
+    return None
 
 
 def shell(sandbox) -> Tool:
@@ -239,6 +247,11 @@ def shell(sandbox) -> Tool:
 
     def fn(args: dict) -> str:
         cmd = args["cmd"]
+        # Every shell invocation needs a reviewable complete command. Do not
+        # approve an invisible tail or control/format characters the card may
+        # omit or render misleadingly.
+        if review_error := _reviewable_command_error(cmd):
+            return review_error
         opaque = os.environ.get("MAVERICK_BENCHMARK_OPAQUE", "1") != "0"
         coding = os.environ.get("MAVERICK_CODING_MODE", "").lower() in ("1", "true", "yes")
         # Defensively pop MAVERICK_GOLD_PATCH
@@ -345,7 +358,7 @@ def shell(sandbox) -> Tool:
                 before="The command has not run.",
                 after="The command has run once; its changes stay.",
                 irreversible=True,
-                display_command=_shown_command(cmd),
+                display_command=cmd,
                 target_provider=_sandbox_target,
                 parameters_provider=lambda: {
                     "command": cmd,

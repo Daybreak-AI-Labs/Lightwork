@@ -115,8 +115,8 @@ def test_request_dependencies_are_isolated_per_application():
 
     install(first)
     install(second)
-    assert TestClient(first).get("/who").json() == {"principal": "user:first"}
-    assert TestClient(second).get("/who").json() == {"principal": "user:second"}
+    assert TestClient(first, base_url="http://127.0.0.1").get("/who").json() == {"principal": "user:first"}
+    assert TestClient(second, base_url="http://127.0.0.1").get("/who").json() == {"principal": "user:second"}
 
 
 @pytest.mark.asyncio

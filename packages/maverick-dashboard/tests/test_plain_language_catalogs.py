@@ -18,7 +18,7 @@ from maverick_dashboard.tool_summary import plain_tool_summary
 
 from test_support.plain_language import developer_terms, visible_text
 
-HTML = {"Accept": "text/html", "Origin": "http://testserver"}
+HTML = {"Accept": "text/html", "Origin": "http://127.0.0.1"}
 _TECHNICAL = re.compile(
     r"(?is)<details\b[^>]*>\s*<summary>\s*Technical details.*?</details>"
 )
@@ -55,7 +55,7 @@ def _isolate(tmp_path, monkeypatch):
 def _client() -> TestClient:
     from maverick_dashboard.app import app
 
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 # ---------- tools ----------
@@ -195,7 +195,7 @@ def test_feature_off_and_named_sign_in_pages_say_what_is_actually_wrong():
     _route("/__named", "Sign in with a named account and select a workspace to use team reviews.")
     _route("/__role", "admin required")
     _route("/__expired", "unauthorized", status=401)
-    client = TestClient(__import__("maverick_dashboard.app", fromlist=["app"]).app,
+    client = TestClient(__import__("maverick_dashboard.app", fromlist=["app"]).app, base_url="http://127.0.0.1",
                         raise_server_exceptions=False)
     off = client.get("/__off", headers=HTML)
     assert off.status_code == 403

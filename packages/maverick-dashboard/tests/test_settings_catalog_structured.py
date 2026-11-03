@@ -22,7 +22,7 @@ from maverick_dashboard.app import app
 
 from test_support.settings_pages import every_group, save_catalog
 
-client = TestClient(app, headers={"Origin": "http://testserver"})
+client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 API = "/api/v1/settings/catalog"
 ROWS = [catalog.BY_ID[s.id] for s in structured.entries(catalog.S, catalog.C, catalog.Column)]
 _PASSWORD = "team-password-for-tests-only-0000000001"  # pragma: allowlist secret
@@ -560,7 +560,7 @@ def test_a_fingerprint_is_worked_out_from_the_uploaded_program(audit_rows):
     assert client.post(f"{API}/fingerprint?setting_id={setting_id}&server=true").status_code == 400
     assert client.post(f"{API}/fingerprint?setting_id={setting_id}", content=b"").status_code == 400
     assert client.post(f"{API}/fingerprint?setting_id=audit.sign", content=b"x").status_code == 404
-    foreign = TestClient(app, headers={"Origin": "https://evil.example"})
+    foreign = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "https://evil.example"})
     assert foreign.post(f"{API}/fingerprint?setting_id={setting_id}",
                         content=program).status_code == 403
 

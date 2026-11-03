@@ -241,11 +241,12 @@ def _http_get(url: str, headers: dict | None = None, timeout: float = 15.0) -> A
     event-source URL is operator config, but a loopback/metadata host would make
     the poller an SSRF proxy). Shared by the JSON and text fetchers."""
     try:
-        from .tools._ssrf import BlockedHost, safe_get
+        from .tools._ssrf import BlockedHost, safe_client
     except Exception as e:  # pragma: no cover -- guard unavailable
         raise EventSourceError("SSRF guard unavailable") from e
     try:
-        resp = safe_get(url, headers=headers or {}, timeout=timeout)
+        with safe_client(url, timeout=timeout, require_public=True) as client:
+            resp = client.get(url, headers=headers or {})
     except BlockedHost as e:
         raise EventSourceError(f"blocked by SSRF guard: {e}") from e
     except Exception as e:
@@ -274,7 +275,7 @@ def _http_read_bytes(
     except Exception as e:  # pragma: no cover -- guard unavailable
         raise EventSourceError("SSRF guard unavailable") from e
     try:
-        with safe_client(url, timeout=timeout) as client:
+        with safe_client(url, timeout=timeout, require_public=True) as client:
             with client.stream("GET", url, headers=headers or {}) as resp:
                 if getattr(resp, "status_code", 200) >= 400:
                     raise EventSourceError(f"source returned HTTP {resp.status_code}")
@@ -433,19 +434,12 @@ register("rss", RssSource)
 def _oauth_refresher(config: dict):
     """A ``refresher(record) -> token_dict`` for ``vault.access_token``, or
     ``None`` when no refresh is possible (then a stored, still-valid token is
-    used as-is). Two ways to configure it:
-
-    * explicit ``token_url`` + ``client_id`` in the trigger config, or
-    * a ``provider`` that names a known preset (:mod:`maverick.oauth_providers`),
-      whose token endpoint + env credentials are used -- so ``{provider: 'slack'}``
-      refreshes turnkey without hand-entering Slack's token URL.
-
-    ``client_secret`` is always read from an env-var name, never stored in config.
+    used as-is). The provider preset supplies both endpoint and credential
+    environment names; saved triggers cannot redirect credentials elsewhere.
     """
     cfg = config or {}
-    token_url = str(cfg.get("token_url") or "").strip()
-    client_id = str(cfg.get("client_id") or "").strip()
-    secret_env = str(cfg.get("client_secret_env") or "").strip()
+    if any(cfg.get(key) for key in ("token_url", "client_id", "client_secret_env")):
+        raise EventSourceError("Remove saved OAuth credential overrides and configure the provider preset environment credentials")
 
     def _wrap(inner):
         def _refresh(record: dict) -> dict:
@@ -456,24 +450,11 @@ def _oauth_refresher(config: dict):
                     f"OAuth token refresh failed: {type(e).__name__}") from e
         return _refresh
 
-    if token_url and client_id:
-        def _explicit(record: dict) -> dict:
-            import os
-
-            from .tools.oauth_helper import _post_form  # SSRF + https-guarded POST
-            data = {"grant_type": "refresh_token", "client_id": client_id,
-                    "refresh_token": str(record.get("refresh_token") or "")}
-            if secret_env and os.environ.get(secret_env):
-                data["client_secret"] = os.environ[secret_env]
-            return _post_form(token_url, data)
-        return _wrap(_explicit)
-
     # Preset fallback: a known provider supplies its own token endpoint + creds.
     provider = str(cfg.get("provider") or "").strip()
     if provider:
         from . import oauth_providers
-        preset = oauth_providers.make_refresher(
-            provider, client_id=client_id, client_secret_env=secret_env)
+        preset = oauth_providers.make_refresher(provider)
         if preset is not None:
             return _wrap(preset)
     return None
@@ -497,7 +478,7 @@ def _oauth_bearer(config: dict) -> str:
     if not token:
         raise EventSourceError(
             f"no valid OAuth token for provider {provider!r}; authorize it first "
-            "(and set token_url + client_id to auto-refresh an expired one)")
+            "(configure provider credentials to auto-refresh an expired one)")
     return token
 
 
@@ -506,11 +487,29 @@ class OAuthHttpJsonSource(HttpJsonSource):
     the ``Authorization`` header is a live OAuth token from the sealed vault
     (``provider``) rather than a static header -- so long-lived polling of
     Slack/Gmail/GitHub/most SaaS REST APIs works with token refresh. ``config``:
-    ``{provider, url, items_path?, id_field?, newest_first?, token_url?,
-    client_id?, client_secret_env?, headers?}``."""
+    ``{provider, url, items_path?, id_field?, newest_first?, headers?}``.
+    The URL must be an approved API origin for the named provider."""
     source = "oauth_http_json"
 
     def _extra_headers(self, config: dict) -> dict:
+        from urllib.parse import urlsplit
+
+        allowed = {
+            "google": {"www.googleapis.com", "gmail.googleapis.com"},
+            "microsoft": {"graph.microsoft.com"},
+            "slack": {"slack.com"}, "github": {"api.github.com"},
+            "hubspot": {"api.hubapi.com"}, "zoom": {"api.zoom.us"},
+            "atlassian": {"api.atlassian.com"}, "linear": {"api.linear.app"},
+        }
+        provider = str((config or {}).get("provider") or "").strip().lower()
+        try:
+            url = urlsplit(str((config or {}).get("url") or ""))
+            valid = (url.scheme == "https" and not url.username and not url.password
+                     and url.port in (None, 443) and url.hostname in allowed.get(provider, set()))
+        except ValueError:
+            valid = False
+        if not valid:
+            raise EventSourceError("OAuth source URL is not an approved endpoint for this provider")
         return {"Authorization": f"Bearer {_oauth_bearer(config)}"}
 
 
@@ -533,7 +532,10 @@ class GithubIssuesSource:
         state = str((config or {}).get("state") or "open")
         from .tools.github_issues import _headers, _list_url
         headers = _headers()  # GITHUB_TOKEN or anonymous
-        if str((config or {}).get("provider") or "").strip():
+        provider = str((config or {}).get("provider") or "").strip().lower()
+        if provider and provider != "github":
+            raise EventSourceError("GitHub issues require the GitHub OAuth provider")
+        if provider:
             headers = {**headers, "Authorization": f"Bearer {_oauth_bearer(config)}"}
         items = _http_get_json(_list_url(owner, repo, state, 50), headers=headers)
         if not isinstance(items, list):

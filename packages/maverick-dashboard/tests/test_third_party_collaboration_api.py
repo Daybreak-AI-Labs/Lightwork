@@ -214,7 +214,7 @@ def environment(monkeypatch: pytest.MonkeyPatch):
     )
     app.include_router(api.create_third_party_collaboration_router(dependencies), prefix="/api/v1")
     app.include_router(api.create_external_third_party_collaboration_router(dependencies))
-    return TestClient(app), store, state
+    return TestClient(app, base_url="http://127.0.0.1"), store, state
 
 
 def issue_body() -> dict[str, Any]:

@@ -7,7 +7,7 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-ORIGIN = {"Origin": "http://testserver"}
+ORIGIN = {"Origin": "http://127.0.0.1"}
 
 
 @pytest.fixture
@@ -25,7 +25,7 @@ def audit_log(monkeypatch, tmp_path):
 @pytest.fixture
 def client():
     from maverick_dashboard.app import app
-    return TestClient(app, headers=ORIGIN)
+    return TestClient(app, base_url="http://127.0.0.1", headers=ORIGIN)
 
 
 def _ev(log, kind, **payload):
@@ -73,6 +73,19 @@ def test_check_and_download(audit_log, client):
     assert r.status_code == 200 and r.headers["content-type"].startswith("text/csv")
     assert r.text.splitlines()[0] == "Time (UTC),Event,Who,Task,Details"
     assert "attachment" in r.headers["content-disposition"]
+
+
+def test_unsigned_day_is_problem_when_signing_expected(monkeypatch, tmp_path, client):
+    from maverick import paths, soc2
+
+    directory = tmp_path / "audit"
+    directory.mkdir()
+    (directory / "2026-01-01.ndjson").write_text('{"kind":"tool_call"}\n')
+    monkeypatch.setattr(paths, "data_dir", lambda *args, **kwargs: directory)
+    monkeypatch.setattr(soc2, "_audit_signing_expected", lambda: True)
+    result = client.post("/api/v1/audit/check", json={}).json()
+    assert result["intact"] is False
+    assert result["unsigned_days"] == 0 and result["problems"]
 
 
 def test_download_without_dates_covers_every_day_and_never_runs_formulas(audit_log, client):

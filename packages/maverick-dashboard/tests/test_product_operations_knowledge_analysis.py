@@ -14,7 +14,7 @@ def test_source_analysis_copilot_keeps_exact_source_and_native_operation(monkeyp
     checked=[]
     monkeypatch.setattr(knowledge_task_context,'validate_selection',lambda actor,selection:checked.append((actor,selection)))
     monkeypatch.setattr(auth,'caller_principal',lambda request:'user:alice')
-    request=Request({'type':'http','method':'POST','path':'/api/v1/copilot/product-operations/execute','headers':[(b'origin',b'http://testserver')],'query_string':b''})
+    request=Request({'type':'http','method':'POST','path':'/api/v1/copilot/product-operations/execute','headers':[(b'origin',b'http://127.0.0.1')],'query_string':b''})
     arguments={'purpose':'business','source':'c'*64,'title':'Review','description':'Explain'}
     snapshot=operations.analysis_snapshot(request,{})
     assert snapshot.fields[1]['choices_by']['business'][0]['label']=='Current policy / v1'

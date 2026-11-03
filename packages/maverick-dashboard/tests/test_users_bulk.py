@@ -24,7 +24,7 @@ def client(tmp_path, monkeypatch):
     for who, role in (("user:ana@corp.com", "viewer"), ("user:ben@corp.com", "viewer"),
                       ("user:cy@corp.com", "operator"), ("user:dee@other.org", "viewer")):
         rbac.set_role(who, role, actor="user:setup")
-    yield TestClient(dash_app.app, headers={"Origin": "http://testserver"})
+    yield TestClient(dash_app.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     config.reset_config_cache()
 
 

@@ -119,10 +119,10 @@ def test_uvicorn_launch_kwargs_disables_proxy_headers_when_enabled(monkeypatch):
     assert uvicorn_launch_kwargs() == {"proxy_headers": False}
 
 
-def test_uvicorn_launch_kwargs_empty_when_proxy_auth_disabled(monkeypatch):
+def test_uvicorn_launch_kwargs_preserves_peer_when_proxy_auth_disabled(monkeypatch):
     monkeypatch.delenv("MAVERICK_PROXY_AUTH", raising=False)
     _cfg(monkeypatch, {})
-    assert uvicorn_launch_kwargs() == {}
+    assert uvicorn_launch_kwargs() == {"proxy_headers": False}
 
 
 async def _run_asgi(app, *, client_host, headers):

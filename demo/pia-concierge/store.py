@@ -7,6 +7,7 @@ the signed audit chain) lives in the actual maverick modules, not here.
 """
 from __future__ import annotations
 
+import asyncio
 import threading
 import time
 from dataclasses import dataclass, field
@@ -32,6 +33,7 @@ class Ticket:
     work_notes: list[dict] = field(default_factory=list)
     case_id: str = ""
     created_at: float = field(default_factory=_now)
+    intake_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
 
     def note(self, text: str, by: str = "PIA Concierge (agent)") -> None:
         self.work_notes.append({"at": _now(), "by": by, "text": text})
@@ -83,7 +85,12 @@ class Case:
                                 # -> approved / rejected -> filed
     answers: dict[str, dict] = field(default_factory=dict)
     uploads: list[str] = field(default_factory=list)
-    # Delegated question sets: token -> {qids, to_name, to_email, note, answered}.
+    # Grants are SHA-256 digests of random bearer tokens, never raw tokens.
+    intake_grant_hash: str = ""
+    intake_grant_expires_at: float = 0.0
+    next_delegation_at: float = 0.0
+    intake_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
+    # Delegated question sets: grant digest -> scope and recipient metadata.
     delegations: dict[str, dict] = field(default_factory=dict)
     # The saved maverick.assessment record id (set at submit) — the dashboard
     # review pop-out and the follow-up loop key on it.

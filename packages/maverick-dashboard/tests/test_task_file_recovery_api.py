@@ -44,7 +44,7 @@ def fixture(tmp_path, monkeypatch):
     folder = tmp_path / "task"
     folder.mkdir()
     (folder / "review.txt").write_text("original")
-    with TestClient(application, headers={"Origin": "http://testserver"}) as client:
+    with TestClient(application, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}) as client:
         yield client, world, goal, LocalBackend(folder)
     config.reset_config_cache()
 

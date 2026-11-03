@@ -92,7 +92,7 @@ def test_http_layer_stamps_the_acting_admin(_audit_dir, monkeypatch, tmp_path):
     dash_app._world_cache.clear()
     monkeypatch.setattr(auth, "caller_principal", lambda request: "user:boss")
     monkeypatch.setattr(api, "caller_principal", lambda request: "user:boss")
-    c = TestClient(dash_app.app, headers={"Origin": "http://testserver"})
+    c = TestClient(dash_app.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     assert c.put("/api/v1/users/user:fin/suites",
                  json={"suites": ["finance"]}).status_code == 204
     ev = _events(_audit_dir)

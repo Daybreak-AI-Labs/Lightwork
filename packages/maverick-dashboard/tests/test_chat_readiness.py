@@ -29,7 +29,7 @@ def chat(monkeypatch, tmp_path):
         runs.append((goal_id, kwargs))
 
     monkeypatch.setattr("maverick.runner.run_goal_in_background_async", run)
-    yield TestClient(dashboard.app, headers={"Origin": "http://testserver"}), world, runs
+    yield TestClient(dashboard.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}), world, runs
     world.close()
 
 

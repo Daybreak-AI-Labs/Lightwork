@@ -20,7 +20,7 @@ def main() -> None:  # pragma: no cover - thin launcher
     from app import app
     host, port = bind()
     print(f"DSAR Concierge (standalone) → http://{host}:{port}")
-    uvicorn.run(app, host=host, port=port, log_level="warning")
+    uvicorn.run(app, host=host, port=port, log_level="warning", proxy_headers=False)
 
 
 if __name__ == "__main__":  # pragma: no cover

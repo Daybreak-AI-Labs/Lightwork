@@ -43,7 +43,7 @@ def workspace(tmp_path, monkeypatch):
 
 
 def api_client():
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def test_identity_transition_review_and_grant_preserve_admin_context_and_explicit_binding(monkeypatch):

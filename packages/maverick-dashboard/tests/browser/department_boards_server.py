@@ -87,8 +87,8 @@ def main():
         from maverick_dashboard import department_boards
         original_spend = department_boards._spend
         pending = {"change_pack": False}
-        def interrupt_projection(request, native_world, native_owner, days):
-            projection = original_spend(request, native_world, native_owner, days)
+        def interrupt_projection(request, native_world, native_owner, days, goals=None):
+            projection = original_spend(request, native_world, native_owner, days, goals)
             if pending["change_pack"]:
                 pending["change_pack"] = False
                 write_override(fork, {"extends": refused})

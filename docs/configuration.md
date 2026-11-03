@@ -13,7 +13,7 @@ type = "desktop"       # desktop | docker | vps | phone
 # record -- they interleave valid ones, so the result verifies clean and is
 # unreconstructable. Startup takes an exclusive lock on the data root and a
 # second process refuses to serve. Set this only if you have guaranteed
-# exclusivity another way; /readyz then reports `replica_safety: unenforced`.
+# exclusivity another way; authenticated probe details report `replica_safety: unenforced`.
 # allow_multiple_control_planes = false   # env: MAVERICK_ALLOW_MULTIPLE_CONTROL_PLANES
 
 [governance]
@@ -188,6 +188,10 @@ check_retention_days    = 90
 backend = "local"                   # local | docker | ssh | podman | devcontainer | firecracker | kubernetes
 workdir = "~/maverick-workspace"
 timeout = 60
+# devcontainer defaults to the invoking non-root UID:GID, ignoring the repo's
+# remoteUser. Run Lightwork as a non-root user on a platform with UID/GID
+# support. An operator can explicitly set allow_root = true to trust that
+# repository user setting, including its ability to run as root.
 
 [features]
 # Toggle agent-facing behaviors that are otherwise always on. All default true.
@@ -599,7 +603,7 @@ auto_run = true                  # run the fleet cycle on the dashboard's overni
 [self_learning]            # governed local learning (default on)
 enable = true
 create_tools = false       # generated executable code remains a separate opt-in
-allow_mcp_acquisition = false # starting third-party MCP remains a separate opt-in
+allow_mcp_acquisition = false # legacy setting; catalog MCP acquisition is unavailable
 allow_provider_egress = false # extra learning-only model calls may cross providers
 preflight = true           # default uses a local redacted catalog match; the
                            # LLM needs-analysis call requires provider egress above
@@ -689,7 +693,8 @@ data_grounding = true      # auto-grant each analyst pack its suite's primary-
                            #   Env: MAVERICK_WORKFORCE_DATA_GROUNDING.
 
 [fleet_memory]             # external agents read/write governed memory
-enable = false             # explicit trust decision; roster-gated
+enable = false             # explicit trust decision; per-agent data_scopes
+                           # apply even when global trust enforcement is off
 
 [cortex]                   # Cortex, the company brain (default on)
 enable = true              # one governed recall/deposit surface over knowledge
@@ -697,6 +702,8 @@ enable = true              # one governed recall/deposit surface over knowledge
                            #   Operating Record and fleet memory: tenant-exact,
                            #   one audit row per read and per write. Each
                            #   source's own toggle still applies. Operator
+                           #   External callers can use only scoped fleet memory;
+                           #   other Cortex sources remain internal.
                            #   commands: `maverick cortex status|recall|deposit`.
                            #   Env: MAVERICK_CORTEX.
 
@@ -771,7 +778,7 @@ Roles available:
 
 ## Env vars vs config
 
-- **Secrets** (API keys, bot tokens) live in `~/.maverick/.env` (chmod 600) and are referenced via `${VAR}` interpolation.
+- **Secrets** (API keys, bot tokens) live in `~/.maverick/.env` (chmod 600) and are referenced via `${VAR}` interpolation in operator-owned `config.toml`. Dashboard and tenant configuration values are literal and do not expand process environment variables; move any existing references into an operator-owned configuration layer.
 - **Everything else** lives in `config.toml` and is safe to commit (e.g. to a personal dotfiles repo).
 
 The installer keeps these separated automatically.
@@ -797,25 +804,67 @@ MAVERICK_CONFIG=/etc/maverick/config.toml maverick start "..."
 
 Useful for VPS deployments where you want the config under `/etc/`.
 
+## Document conversion
+
+The Pandoc tool accepts a restricted set of built-in formats and basic options;
+PDF output is currently unavailable; it requires an isolated document worker.
+Rich document conversion can read referenced files or fetch resources. Run it
+only in an isolated workspace without secrets and with network access disabled.
+The ImageMagick tool similarly accepts only bounded basic conversion options;
+untrusted image formats can invoke decoders or refer to external resources, so
+use the same isolation for image processing. FFmpeg accepts a restricted set
+of conversion options and permits only file, crypto and data input protocols,
+but media files can still reference other local files; use an isolated workspace
+for those too.
+
+## WebSocket connections
+
+The WebSocket tool connects directly to its validated, pinned destination and
+does not follow redirects or use implicit proxy settings. Use the final URL;
+deployments that require a proxy need a separately configured safe egress path.
+
+## Incoming email authentication
+
+Configure a trusted receiving mail server that removes inbound
+`Authentication-Results` headers and adds its own. Email-driven work requires
+that server's topmost result to contain one aligned DMARC pass. The parser
+fails closed on quoted `header.from` values and DMARC method versions; verify
+the format emitted by your mail server before enabling email-driven work.
+
 ## Dashboard authentication
 
 For desktop installs the dashboard binds to `127.0.0.1:8765` and bearer
 auth is optional. For VPS deploys (reachable from the open internet)
 set `MAVERICK_DASHBOARD_TOKEN` — every request to `/api/v1/*` and every
-HTML page is then gated. The probe/discovery paths `/healthz`, `/livez`,
-`/readyz`, `/openapi.json`, `/docs`, `/redoc`, and the agent-card
-well-knowns are exempt (so monitoring + API discovery still works). The
+HTML page is then gated. The probe paths `/healthz`, `/livez`, `/readyz` and
+the agent-card well-knowns are exempt. Public probes return status only;
+authenticated administrators can inspect `/api/v1/admin/system/probe-details`.
+The OpenAPI schema and reference pages require authentication. In static-token
+mode, use an authenticated API client for the schema; interactive reference
+pages require a browser session that authenticates their assets and requests. The
 inbound webhook routes (`/webhook/start`, `/webhook/run`, issue webhooks)
 and the `/share/`, `/scim/`, `/saml/` prefixes authenticate by their own
 mechanism (HMAC signature / share token / SSO) rather than the bearer.
 
-Two ways to authenticate:
-
-- **Header**: `Authorization: Bearer <token>` — for API clients.
-- **Query string**: `?token=<token>` — so phone browsers can bookmark a
-  page once and not retype the token.
+API clients authenticate with `Authorization: Bearer <token>`. Dashboard
+tokens in URL query strings are not accepted. Use a named browser session for
+interactive access.
 
 Token comparison is constant-time (`hmac.compare_digest`).
+
+A shared dashboard token has no named owner whose access can be rechecked
+later. Creating or changing a webhook or event trigger, or creating an executive
+report schedule, therefore requires a named account or genuine local auth-off mode.
+Existing triggers can still be inspected or removed; older token-owned records
+may need to be recreated under a named account before they can run.
+
+Authenticated accounts without an explicit role or verified group mapping
+default to `viewer`. Assign `operator` or `admin` deliberately before granting
+the ability to run work or decide approvals. If no workspace-role roster has
+been initialized, installations may explicitly set `[dashboard] default_role =
+"operator"` to restore the previous fallback. Once workspace roles are in use,
+unassigned users need an explicit global assignment or workspace membership.
+The viewer role still grants read access where `view` permission is sufficient.
 
 ## External MCP servers
 

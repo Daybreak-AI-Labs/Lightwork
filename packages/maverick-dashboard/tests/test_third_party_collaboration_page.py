@@ -25,7 +25,7 @@ def _client(*, enabled: bool) -> TestClient:
             {"third_party_collaboration_enabled": enabled},
         )
 
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def test_enabled_page_is_an_invitation_list_with_an_invite_form() -> None:

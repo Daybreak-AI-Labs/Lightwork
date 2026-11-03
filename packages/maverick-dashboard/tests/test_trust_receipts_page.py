@@ -31,7 +31,7 @@ def _app(monkeypatch, permitted: bool = True) -> TestClient:
     monkeypatch.setattr(page, "require_permission", _require)
     app = FastAPI()
     app.include_router(page.create_trust_receipts_page_router(_templates()))
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def test_page_is_wired_and_hardened(monkeypatch) -> None:

@@ -91,9 +91,14 @@ def _rows(world, sql, values):
 
 def _population(request, world, owner):
     columns = ("id", "status", "created_at", "updated_at", "domain", "owner")
-    rows = _rows(world, "SELECT " + ",".join(columns) + " FROM goals WHERE owner = ? ORDER BY id", (owner,))
+    # The backend's typed listing applies its tenant boundary; raw SQL on the
+    # shared PostgreSQL store does not automatically scope the query.
+    goals = world.list_goals(owner=owner, limit=_LIMIT + 1, strict_tenant=True)
+    if len(goals) > _LIMIT:
+        raise HTTPException(503, "This board is too large to read safely right now. Your permitted tasks remain available in Chat.")
+    rows = [{name: getattr(goal, name) for name in columns} for goal in goals]
     cache = {}
-    return [row for values in rows if _permitted(request, row := dict(zip(columns, values, strict=True)), cache)]
+    return [row for row in rows if _permitted(request, row, cache)]
 
 
 def _recent(request, world, goals):
@@ -140,7 +145,7 @@ def _overview(request, world, goals, days):
             "recent": _recent(request, world, goals)}
 
 
-def _spend(request, world, owner, days):
+def _spend(request, world, owner, days, goals=None):
     from datetime import datetime, timezone
 
     from maverick.workforce_value import _is_done
@@ -151,13 +156,27 @@ def _spend(request, world, owner, days):
     dates, since, previous = _board_day_list(days)
     columns = ("episode_id", "goal_id", "started_at", "ended_at", "outcome", "cost_dollars",
                "input_tokens", "output_tokens", "tool_calls", "domain", "owner")
-    rows = _rows(world, "SELECT e.id,e.goal_id,e.started_at,e.ended_at,e.outcome,e.cost_dollars,"
-                 "e.input_tokens,e.output_tokens,e.tool_calls,g.domain,g.owner "
-                 "FROM episodes e JOIN goals g ON e.goal_id=g.id WHERE g.owner=? ORDER BY e.id", (owner,))
+    if goals is None:
+        goals = _population(request, world, owner)
     cache, episodes = {}, []
+    permitted_ids = {goal["id"] for goal in goals}
+    # Filter before applying the row cap, so another workspace's episodes for
+    # the same owner cannot exhaust this workspace's reporting budget.
+    rows = []
+    identifiers = sorted(permitted_ids)
+    for start in range(0, len(identifiers), 400):
+        batch = identifiers[start:start + 400]
+        marks = ",".join("?" for _ in batch)
+        rows.extend(_rows(world, "SELECT e.id,e.goal_id,e.started_at,e.ended_at,e.outcome,e.cost_dollars,"
+                          "e.input_tokens,e.output_tokens,e.tool_calls,g.domain,g.owner "
+                          "FROM episodes e JOIN goals g ON e.goal_id=g.id WHERE g.owner=? "
+                          f"AND g.id IN ({marks}) ORDER BY e.id", (owner, *batch)))
+        if len(rows) > _LIMIT:
+            raise HTTPException(503, "This board is too large to read safely right now. Your permitted tasks remain available in Chat.")
+    rows.sort(key=lambda values: values[0])
     for values in rows:
         row = dict(zip(columns, values, strict=True))
-        if _permitted(request, {**row, "id": row["goal_id"]}, cache):
+        if row["goal_id"] in permitted_ids and _permitted(request, {**row, "id": row["goal_id"]}, cache):
             row["outcome"] = _dec_field(row["outcome"])
             try:
                 price = float(row["cost_dollars"])
@@ -274,10 +293,20 @@ def _savings(request, world, owner, goals, prices):
 
     permitted = {row["id"]: row for row in goals}
     accepted = 0
-    for goal_id, decision, reviewer in _rows(world,
-            "SELECT s.goal_id,s.decision,s.decided_by FROM signoffs s JOIN goals g ON s.goal_id=g.id WHERE g.owner=?", (owner,)):
-        if goal_id in permitted and permitted[goal_id]["status"] == "done" and decision == "approved" and str(reviewer or "").startswith("user:"):
-            accepted += 1
+    identifiers = sorted(permitted)
+    count = 0
+    for start in range(0, len(identifiers), 400):
+        batch = identifiers[start:start + 400]
+        marks = ",".join("?" for _ in batch)
+        rows = _rows(world, "SELECT s.goal_id,s.decision,s.decided_by FROM signoffs s "
+                     "JOIN goals g ON s.goal_id=g.id WHERE g.owner=? "
+                     f"AND g.id IN ({marks})", (owner, *batch))
+        count += len(rows)
+        if count > _LIMIT:
+            raise HTTPException(503, "This board is too large to read safely right now. Your permitted tasks remain available in Chat.")
+        for goal_id, decision, reviewer in rows:
+            if goal_id in permitted and permitted[goal_id]["status"] == "done" and decision == "approved" and str(reviewer or "").startswith("user:"):
+                accepted += 1
     comparisons, source_state = [], "current"
     enabled = not config.config_source_errors(include_tenant=True) and config.get_features().get("outcome_measurement") is True
     if not auth.has_permission(request, "operate") or not enabled:
@@ -328,10 +357,16 @@ def _oversight(request, world, owner, goals):
     _require_oversight(request)
     permitted = {row["id"]: row for row in goals}
     requests, bindings = [], []
-    ids = _rows(world, "SELECT a.id FROM approvals a LEFT JOIN goals g ON a.goal_id=g.id WHERE a.status='pending' "
-                      "AND ((a.goal_id IS NOT NULL AND g.owner=?) OR (a.goal_id IS NULL AND a.requested_by=?)) ORDER BY a.id DESC", (owner, owner))
-    for (approval_id,) in ids:
-        row = world.get_approval(approval_id)
+    approval_ids = world.pending_unattached_approval_ids(owner, limit=_LIMIT + 1)
+    identifiers = sorted(permitted)
+    for start in range(0, len(identifiers), 400):
+        approval_ids.extend(world.pending_goal_approval_ids(identifiers[start:start + 400], limit=_LIMIT + 1))
+        if len(approval_ids) > _LIMIT:
+            raise HTTPException(503, "This board is too large to read safely right now. Your permitted tasks remain available in Chat.")
+    if len(approval_ids) > _LIMIT:
+        raise HTTPException(503, "This board is too large to read safely right now. Your permitted tasks remain available in Chat.")
+    for approval_id in sorted(approval_ids, reverse=True):
+        row = world.get_approval(approval_id, strict_tenant=True)
         if not row or row.status != "pending" or not can_read_approval(request, row, world) or not auth.domain_suites_allowed(request, row.department):
             continue
         if row.goal_id:
@@ -346,8 +381,18 @@ def _oversight(request, world, owner, goals):
                          "href": f"/approvals#approval-{row.id}"})
         bindings.append((row.id, digest(vars(row))))
     stops = []
-    for goal_id, created_at in _rows(world, "SELECT r.goal_id,r.created_at FROM goal_mutation_receipts r JOIN goals g ON r.goal_id=g.id "
-                                          "WHERE r.kind='stop' AND r.actor=? AND g.owner=? ORDER BY r.created_at DESC", (owner, owner)):
+    stop_rows = []
+    identifiers = sorted(permitted)
+    for start in range(0, len(identifiers), 400):
+        batch = identifiers[start:start + 400]
+        marks = ",".join("?" for _ in batch)
+        stop_rows.extend(_rows(world, "SELECT r.goal_id,r.created_at FROM goal_mutation_receipts r "
+                               "JOIN goals g ON r.goal_id=g.id WHERE r.kind='stop' AND r.actor=? "
+                               f"AND g.owner=? AND g.id IN ({marks}) ORDER BY r.created_at DESC", (owner, owner, *batch)))
+        if len(stop_rows) > _LIMIT:
+            raise HTTPException(503, "This board is too large to read safely right now. Your permitted tasks remain available in Chat.")
+    stop_rows.sort(key=lambda row: row[1], reverse=True)
+    for goal_id, created_at in stop_rows:
         goal = world.get_goal(goal_id)
         if goal_id in permitted and goal and goal.owner == owner and auth.can_access_goal(request, goal):
             stops.append({"title": goal.title, "href": f"/chat/goal/{goal.id}", "recorded_at": created_at,
@@ -379,7 +424,7 @@ def build(request, board: str, days: int | None = None) -> dict:
     elif board == "oversight":
         payload = _oversight(request, world, owner, goals)
     else:
-        prices = _spend(request, world, owner, days)
+        prices = _spend(request, world, owner, days, goals)
         payload = prices if board == "spend" else _workforce(request, world, goals, prices) if board == "workforce" else _savings(request, world, owner, goals, prices)
         prices.pop("_domain_prices", None)
         prices.pop("_read_domains", None)
@@ -393,7 +438,7 @@ def build(request, board: str, days: int | None = None) -> dict:
     if any(row["id"] not in current or current[row["id"]] != row["domain"] for row in goals):
         raise HTTPException(409, "Task ownership or department access changed while this report was read. Reload to read current permitted work.")
     for approval_id, identity in payload.pop("_approval_bindings", []):
-        row = world.get_approval(approval_id)
+        row = world.get_approval(approval_id, strict_tenant=True)
         if not row or digest(vars(row)) != identity or not auth.domain_suites_allowed(request, row.department):
             raise HTTPException(409, "A request changed while this report was read. Refresh to read the current requests.")
     if not hmac.compare_digest(original_context, check_context(request)):

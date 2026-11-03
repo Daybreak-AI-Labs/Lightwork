@@ -45,7 +45,7 @@ def _client(monkeypatch, tmp_path, *, areas=False, role="admin", action_center=T
     monkeypatch.setattr(auth, "caller_principal", lambda request: principal)
     monkeypatch.setattr(app, "caller_principal", lambda request: principal)
     app._world_cache.clear()
-    return TestClient(app.app, headers={"Origin": "http://testserver"})
+    return TestClient(app.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 class _Content(HTMLParser):

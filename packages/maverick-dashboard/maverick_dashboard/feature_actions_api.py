@@ -551,7 +551,7 @@ async def mcp_registry_add(body: RegistryAddIn, request: Request) -> dict:
     try:
         name = await run_in_threadpool(_do)
     except ValueError as exc:
-        raise HTTPException(409, "That tool server could not be added. It may have been removed from the "
-                                 "list, or it does not meet Lightwork's safety rules.") from exc
+        raise HTTPException(409, "Registry server installation is unavailable until publisher "
+                                 "authentication is implemented. Independently review and configure the server.") from exc
     await run_in_threadpool(lambda: _record(request, "mcp_registry_add", installation=True, server=name))
     return {"added": name}

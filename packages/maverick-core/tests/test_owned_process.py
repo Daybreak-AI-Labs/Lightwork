@@ -7,6 +7,7 @@ import shutil
 import sys
 import threading
 import time
+from pathlib import Path
 
 import pytest
 from maverick import owned_process
@@ -105,14 +106,26 @@ def _alive(pid):
             kernel.CloseHandle(handle)
     try:
         os.kill(pid, 0)
-        return True
     except ProcessLookupError:
         return False
+    # A descendant that has exited can remain a zombie when the container's
+    # PID 1 does not reap orphaned processes. It cannot execute any more work.
+    # Direct children are separately checked by _assert_reaped above.
+    if sys.platform.startswith("linux"):
+        try:
+            state = Path(f"/proc/{pid}/stat").read_text().rsplit(") ", 1)[1].split()[0]
+            if state == "Z":
+                return False
+        except (FileNotFoundError, ProcessLookupError):
+            return False
+        except (IndexError, OSError):
+            pass
+    return True
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("parent_exits", [False, True])
-async def test_cancel_or_success_reaps_descendants_and_preserves_unrelated_process(children, tmp_path, parent_exits):
+async def test_cancel_or_success_terminates_descendants_and_preserves_unrelated_process(children, tmp_path, parent_exits):
     import subprocess
 
     unrelated = subprocess.Popen(_command("import time; time.sleep(60)"))

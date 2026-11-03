@@ -14,7 +14,7 @@ from maverick_dashboard import api as api_mod
 from maverick_dashboard import app as app_mod
 from maverick_dashboard.app import app
 
-client = TestClient(app, headers={"Origin": "http://testserver"})
+client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 @pytest.fixture(autouse=True)

@@ -7,17 +7,19 @@ from fastapi.testclient import TestClient
 def _client():
     from maverick_dashboard.app import app
     # follow_redirects off so we assert on each page directly
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def _isolate(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_FLOWS", "1")
-    monkeypatch.setenv("MAVERICK_WEBHOOK_SECRET", "link-secret")  # pragma: allowlist secret
+    monkeypatch.setenv("MAVERICK_FLOW_APPROVAL_SECRET", "link-secret")  # pragma: allowlist secret
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     from maverick import world_model
+    from maverick_dashboard import rbac
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    rbac.set_role("user:alice", "operator")
 
 
 def _as_actor(monkeypatch, principal="user:alice"):
@@ -182,6 +184,8 @@ def test_forwarded_link_is_refused_for_the_wrong_assignee(monkeypatch, tmp_path)
     _isolate(monkeypatch, tmp_path)
     from maverick_dashboard import automation_queue as aq
     monkeypatch.setattr(aq, "_queue", None)
+    from maverick_dashboard import rbac
+    rbac.set_role("user:bob", "operator")
     _as_actor(monkeypatch, "user:bob")
     rid, _ = _paused_run()
 

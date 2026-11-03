@@ -54,7 +54,7 @@ def start_page(monkeypatch, tmp_path):
         monkeypatch.setattr(onboarding_state, "selected_model_route_state", lambda: {
             "status": "configured" if ready else "incomplete", "configured": ready, "detail": "",
             "evidence": {"kind": "offline_configuration", "live_provider_verified": False}})
-        page = TestClient(dashboard.app, headers={"Origin": "http://testserver"}).get("/start")
+        page = TestClient(dashboard.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}).get("/start")
         assert page.status_code == 200
         return page.text
 

@@ -28,7 +28,9 @@ def client():
             "pia_voice_app", HERE / "app.py")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        return TestClient(module.app)
+        tc = TestClient(module.app)
+        tc.pia_module = module
+        return tc
     finally:
         sys.path.remove(str(HERE))
 
@@ -57,7 +59,8 @@ def test_intake_speaks_through_the_voice_layer(client):
         requester="Sam", requester_email="sam@example.test",
         data_types="contact data")
     demo_store.STORE.cases[case.id] = case
-    page = client.get(f"/intake/{case.id}").text
+    token = client.pia_module._issue_requester_grant(case)
+    page = client.get(f"/intake/{case.id}?grant={token}").text
     assert '/static/concierge-voice.js' in page
     assert "lwVoice.speak(text)" in page
     # The picker is a labelled control, and the ack phrasing rotates —

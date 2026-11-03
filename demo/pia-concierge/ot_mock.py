@@ -26,10 +26,12 @@ from __future__ import annotations
 
 import copy
 import json
+import os
+import secrets
 import time
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 from store import STORE, OneTrustAssessment
 
@@ -195,11 +197,21 @@ reset_mock()
 
 
 def _bearer_ok(request: Request) -> bool:
-    return request.headers.get("authorization", "").startswith("Bearer ")
+    expected = os.environ.get("ONETRUST_TOKEN", "")
+    scheme, separator, token = request.headers.get("authorization", "").partition(" ")
+    return bool(expected and len(expected) <= 4096 and separator and scheme.lower() == "bearer"
+                and token and len(token) <= 4096
+                and secrets.compare_digest(token.encode("utf-8", "surrogatepass"),
+                                           expected.encode("utf-8", "surrogatepass")))
 
 
 def _missing_bearer() -> JSONResponse:
     return JSONResponse({"error": "missing bearer token"}, status_code=401)
+
+
+def require_bearer(request: Request) -> None:
+    if not _bearer_ok(request):
+        raise HTTPException(status_code=401, detail="invalid bearer token")
 
 
 def _rec(aid: str) -> OneTrustAssessment | None:
@@ -515,6 +527,21 @@ async def ot_record_attach(record_id: str, request: Request) -> JSONResponse:
 async def ot_upload(request: Request) -> JSONResponse:
     if not _bearer_ok(request):
         return _missing_bearer()
+    # Bound the entire multipart request before Starlette parses or spools it,
+    # including chunked requests without Content-Length.
+    body_limit = MAX_ATTACHMENT_BYTES + 256 * 1024
+    try:
+        declared = request.headers.get("content-length")
+        if declared is not None and (int(declared) < 0 or int(declared) > body_limit):
+            return JSONResponse({"message": "attachment exceeds the size limit"}, status_code=413)
+    except ValueError:
+        return JSONResponse({"message": "invalid content length"}, status_code=400)
+    body = bytearray()
+    async for chunk in request.stream():
+        if len(body) + len(chunk) > body_limit:
+            return JSONResponse({"message": "attachment exceeds the size limit"}, status_code=413)
+        body.extend(chunk)
+    request._body = bytes(body)
     form = await request.form()
     blob = form.get("file")
     meta = form.get("attachment")
@@ -527,7 +554,7 @@ async def ot_upload(request: Request) -> JSONResponse:
     except ValueError:
         return JSONResponse({"errorCode": "INVALID_REQUEST_INPUT"},
                             status_code=400)
-    content = await blob.read()
+    content = await blob.read(MAX_ATTACHMENT_BYTES + 1)
     if len(content) > MAX_ATTACHMENT_BYTES:
         return JSONResponse(
             {"errorCode": "INVALID_REQUEST_INPUT",

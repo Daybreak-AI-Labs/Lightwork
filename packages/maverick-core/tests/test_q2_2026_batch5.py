@@ -4,6 +4,7 @@ from __future__ import annotations
 import importlib.util
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -242,14 +243,21 @@ def test_email_send_via_smtp_ssl(monkeypatch):
 _HAS_PANDAS = importlib.util.find_spec("pandas") is not None
 
 
-def test_pandas_query_requires_source():
+def test_pandas_query_requires_source(tmp_path):
     from maverick.tools.pandas_query import pandas_query
-    assert "source is required" in pandas_query().fn({"op": "head"})
+    assert "source is required" in pandas_query(SimpleNamespace(workdir=tmp_path)).fn({"op": "head"})
+
+
+def test_pandas_query_requires_workspace(tmp_path):
+    from maverick.tools.pandas_query import pandas_query
+    assert "sandbox workspace is required" in pandas_query().fn({
+        "op": "head", "source": str(tmp_path / "input.csv"),
+    })
 
 
 def test_pandas_query_missing_file(tmp_path):
     from maverick.tools.pandas_query import pandas_query
-    out = pandas_query().fn({
+    out = pandas_query(SimpleNamespace(workdir=tmp_path)).fn({
         "op": "head",
         "source": str(tmp_path / "missing.csv"),
     })
@@ -261,7 +269,7 @@ def test_pandas_query_head_csv(tmp_path):
     csv_path = tmp_path / "people.csv"
     csv_path.write_text("name,age\nAlice,30\nBob,25\nCarol,40\n")
     from maverick.tools.pandas_query import pandas_query
-    out = pandas_query().fn({"op": "head", "source": str(csv_path), "n": 2})
+    out = pandas_query(SimpleNamespace(workdir=tmp_path)).fn({"op": "head", "source": str(csv_path), "n": 2})
     assert "Alice" in out
     assert "Bob" in out
     assert "Carol" not in out
@@ -272,7 +280,7 @@ def test_pandas_query_where_filter(tmp_path):
     csv_path = tmp_path / "people.csv"
     csv_path.write_text("name,age\nAlice,30\nBob,25\nCarol,40\n")
     from maverick.tools.pandas_query import pandas_query
-    out = pandas_query().fn({
+    out = pandas_query(SimpleNamespace(workdir=tmp_path)).fn({
         "op": "head", "source": str(csv_path),
         "where": "age > 28",
     })
@@ -287,7 +295,7 @@ def test_pandas_query_rejects_bad_where(tmp_path):
     csv_path = tmp_path / "p.csv"
     csv_path.write_text("a,b\n1,2\n")
     from maverick.tools.pandas_query import pandas_query
-    out = pandas_query().fn({
+    out = pandas_query(SimpleNamespace(workdir=tmp_path)).fn({
         "op": "head", "source": str(csv_path),
         "where": "df.eval('a + b')",
     })
@@ -322,7 +330,7 @@ def test_pandas_query_caps_oversized_input(tmp_path, monkeypatch):
     rows = "\n".join(f"r{i},{i}" for i in range(50))
     csv_path.write_text("name,val\n" + rows + "\n")
 
-    out = pq.pandas_query().fn({"op": "head", "source": str(csv_path), "n": 100})
+    out = pq.pandas_query(SimpleNamespace(workdir=tmp_path)).fn({"op": "head", "source": str(csv_path), "n": 100})
     assert "truncated to the first 5 rows" in out
 
 

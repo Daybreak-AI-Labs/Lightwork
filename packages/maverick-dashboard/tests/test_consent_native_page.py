@@ -31,7 +31,7 @@ def test_page_is_liquid_glass_copilot_wired_and_permission_aware(monkeypatch) ->
     app = FastAPI()
     app.include_router(page.create_consent_native_page_router(_templates()))
 
-    response = TestClient(app).get(page.PAGE_PATH)
+    response = TestClient(app, base_url="http://127.0.0.1").get(page.PAGE_PATH)
 
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-store, private, max-age=0"
@@ -70,7 +70,7 @@ def test_page_rejects_unknown_query_parameters(monkeypatch) -> None:
     app = FastAPI()
     app.include_router(page.create_consent_native_page_router(_templates()))
 
-    response = TestClient(app).get(page.PAGE_PATH + "?tenant_id=attacker")
+    response = TestClient(app, base_url="http://127.0.0.1").get(page.PAGE_PATH + "?tenant_id=attacker")
 
     assert response.status_code == 404
 

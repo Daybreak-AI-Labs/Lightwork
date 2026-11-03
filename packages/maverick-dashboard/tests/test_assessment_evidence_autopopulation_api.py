@@ -119,7 +119,7 @@ def environment(monkeypatch):
         api.create_assessment_evidence_autopopulation_router(dependencies),
         prefix="/api/v1",
     )
-    return TestClient(app, headers={"Origin": "http://testserver"}), state, service
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}), state, service
 
 
 def test_status_is_store_free_and_disabled_is_literal(environment):

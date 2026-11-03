@@ -69,7 +69,7 @@ async def test_http_cancel_interrupts_owned_await(stop_world, monkeypatch, wall,
     task = owned_task(agent._await_wall_clock_guarded(pending, in_flight_note=phase))
     try:
         await asyncio.wait_for(started.wait(), 1)
-        with TestClient(app, headers={"Origin": "http://testserver"}) as client:
+        with TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}) as client:
             response = await asyncio.to_thread(client.post, f"/goals/{gid}/cancel")
         assert response.status_code == 204
         with pytest.raises(asyncio.CancelledError) as caught:

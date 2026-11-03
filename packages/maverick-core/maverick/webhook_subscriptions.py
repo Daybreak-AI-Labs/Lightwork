@@ -304,6 +304,10 @@ def create_subscription(
     filters = normalize_events(events)
     if len(str(secret or "")) > _MAX_SECRET:
         raise SubscriptionError("the secret is too long")
+    if secret:
+        from .webhooks import separate_webhook_credential
+        if not separate_webhook_credential(str(secret), "outbound"):
+            raise SubscriptionError("The outbound secret must differ from inbound and approval credentials.")
     stamp = time.time() if now is None else float(now)
     sub_id = "whs_" + uuid.uuid4().hex[:16]
     ws = workspace_id()
@@ -370,6 +374,10 @@ def update_subscription(
     if secret is not None:
         if len(secret) > _MAX_SECRET:
             raise SubscriptionError("the secret is too long")
+        if secret:
+            from .webhooks import separate_webhook_credential
+            if not separate_webhook_credential(secret, "outbound"):
+                raise SubscriptionError("The outbound secret must differ from inbound and approval credentials.")
         sets.append("secret = ?")
         values.append(_enc_field(secret) or "")
         changed["secret_set"] = bool(secret)
@@ -418,6 +426,10 @@ def _send_source(delivery: dict, world: Any, *, read: Callable[[], dict | None] 
         urls, secret = _load_config_outbound()
         if delivery["url"] not in urls:
             raise SubscriptionError("This destination is no longer configured. Nothing was sent.")
+        if secret:
+            from .webhooks import separate_webhook_credential
+            if not separate_webhook_credential(secret, "outbound"):
+                raise SubscriptionError("The outbound secret is shared with an inbound credential. Nothing was sent.")
         return (tuple(urls), secret), secret
     source = (read() if read is not None else _row(
         world, "SELECT * FROM webhook_subscriptions WHERE id = ? AND workspace = ?",
@@ -429,6 +441,10 @@ def _send_source(delivery: dict, world: Any, *, read: Callable[[], dict | None] 
     secret = _dec_field(source["secret"] or "")
     if secret == _UNSEALED_WITHHELD:
         raise SubscriptionError("The saved signing secret could not be verified. Nothing was sent.")
+    if secret:
+        from .webhooks import separate_webhook_credential
+        if not separate_webhook_credential(secret, "outbound"):
+            raise SubscriptionError("The outbound secret is shared with an inbound credential. Nothing was sent.")
     return (source["id"], source["workspace"], source["url"], source["enabled"],
             source["secret"], source["updated_at"]), secret or None
 

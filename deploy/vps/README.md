@@ -1,9 +1,14 @@
 # VPS service workspace
 
 Run the pinned `install.sh` recipe. After setup, it invokes `render_service.py`
-as the service account to read that account's `.maverick/config.toml`, create
-the selected workspace and confirm it is writable. Only then does it publish
-and enable the systemd unit. `WorkingDirectory` and `ReadWritePaths` use the
+as the service account to create and check the selected workspace. It then
+renders the unit separately using isolated system Python as root; output from
+the service account is never installed as the unit. Only then does it publish
+and enable the systemd unit. The service account controls its configuration and
+probe process, so the probe is a usability check rather than proof that the
+later rendered workspace was checked. Privileged rendering requires the service
+home's ancestors to be root-owned directories without group or world write
+access. `WorkingDirectory` and `ReadWritePaths` use the
 saved absolute workspace for local and container sandboxes; spaces and systemd
 percent specifiers are escaped. With an SSH sandbox, the service instead uses
 the local `.maverick/service-workspace` directory. The configured SSH workspace

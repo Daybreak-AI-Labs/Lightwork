@@ -808,42 +808,31 @@ class SelfImprovementController:
     def _human_approval(self, cand: Candidate, needs_human: bool) -> tuple[bool, str | None, str]:
         """Resolve the human-approval gate to ``(ok, approver_id, reason)``.
 
-        When cryptographic approval is enforced (a deployment configured trusted
-        approver keys, see :mod:`maverick.approval_signing`), a valid Ed25519 signature
-        over (candidate id, rung, payload digest) is REQUIRED at human-gated
-        rungs and the self-settable ``approved`` boolean is ignored -- the whole
-        point is that a self-modifying agent cannot forge the signature or set a
-        control that lives outside its process. Fails **closed**: no/invalid
-        signature or any verifier error => not approved. When signing is not
-        enforced, the legacy boolean is honoured (unchanged dev/community path).
+        A valid Ed25519 signature over the exact candidate is required at
+        human-gated rungs. Missing signatures and verifier errors fail closed;
+        the self-settable ``approved`` boolean cannot grant authority.
         """
         if not needs_human:
             return True, None, ""
-        enforced = self.approval_verifier is not None
         approver: str | None = None
         try:
             if self.approval_verifier is not None:
                 approver = self.approval_verifier(cand)
             else:
                 from . import approval_signing
-                enforced = approval_signing.signing_enforced()
-                if enforced:
-                    approver = approval_signing.verify_candidate(cand)
+                approval_signing.signing_enforced()  # validates policy availability
+                approver = approval_signing.verify_candidate(cand)
         except Exception:
             # Whether signing is configured is itself security policy. If that
             # policy or its trust roots cannot be resolved, we cannot prove that
             # the legacy boolean path is authorized, so refuse the promotion.
             return (False, None,
                     f"{cand.rung} promotion approval policy is unavailable")
-        if enforced:
-            if approver:
-                return True, approver, ""
-            return (False, None,
-                    f"{cand.rung} promotion requires a valid approver signature "
-                    "(none present or signature invalid)")
-        if cand.approved is True:
-            return True, None, ""
-        return False, None, f"{cand.rung} promotion requires human approval"
+        if approver:
+            return True, approver, ""
+        return (False, None,
+                f"{cand.rung} promotion requires a valid approver signature "
+                "(none present or signature invalid)")
 
     def _reject(self, cand: Candidate, gates: list[GateResult]) -> Verdict:
         return Verdict(cand.id, cand.rung, False, tuple(gates),

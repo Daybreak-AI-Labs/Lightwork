@@ -27,7 +27,7 @@ def isolated(monkeypatch, tmp_path):
 
     monkeypatch.setattr("maverick.runner.run_goal_in_background_async", run)
     monkeypatch.setattr("maverick.runner.run_goal_in_thread", lambda *a, **kw: pytest.fail("unexpected native runner"))
-    client = TestClient(dashboard.app, headers={"Origin": "http://testserver"})
+    client = TestClient(dashboard.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     yield client, world, runs
     world.close()
 
@@ -120,7 +120,9 @@ def test_missing_receipt_stays_unknown_and_denied_owner_cannot_read_private_goal
     store = SubmissionStore(world)
     receipt = store.create(token="private", fingerprint="a" * 64, owner="user:alice", title="Private", description="secret", manifest=[])
     headers = {"Idempotency-Key": "private"}
-    from maverick_dashboard import auth
+    from maverick_dashboard import auth, rbac
+    rbac.set_role("user:alice", "operator")
+    rbac.set_role("user:bob", "operator")
     monkeypatch.setattr(auth, "_authorization_principal", lambda request: "user:bob")
     monkeypatch.setattr(api, "caller_principal", lambda request: "user:bob")
     missing = client.get("/api/v1/goal-submissions/receipt?kind=chat", headers=headers)

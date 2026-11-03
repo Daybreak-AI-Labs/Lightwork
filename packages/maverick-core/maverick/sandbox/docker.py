@@ -124,6 +124,8 @@ class DockerBackend:
 
     def _container_flags(self) -> list[str]:
         """The run/create flags shared by the cold and warm paths."""
+        from .workspace_guard import validate_container_workspace
+        validate_container_workspace(self.workdir)
         flags = [
             "-v", f"{self.workdir.resolve()}:/workspace",
             "-w", "/workspace",
@@ -165,6 +167,8 @@ class DockerBackend:
             self.close()
             if self.pending_cleanup:
                 raise RuntimeError("previous sandbox container cleanup is unresolved")
+        from .workspace_guard import validate_container_workspace
+        validate_container_workspace(self.workdir)
         # Per-call `timeout` matches LocalBackend so the shell
         # tool can plumb a longer cap for pytest/npm test/etc. Falls
         # back to self.timeout (default 60 s).

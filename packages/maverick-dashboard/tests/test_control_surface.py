@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 
 def _client():
     from maverick_dashboard.app import app
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 # ---------- halt ----------
@@ -38,7 +38,7 @@ def test_halt_post_then_status_then_delete(monkeypatch, tmp_path: Path):
     r = client.post(
         "/api/v1/halt",
         json={"reason": "test"},
-        headers={"Origin": "http://testserver"},
+        headers={"Origin": "http://127.0.0.1"},
     )
     assert r.status_code == 204
     assert (tmp_path / "HALT").exists()
@@ -48,7 +48,7 @@ def test_halt_post_then_status_then_delete(monkeypatch, tmp_path: Path):
     # Clear.
     r = client.delete(
         "/api/v1/halt",
-        headers={"Origin": "http://testserver"},
+        headers={"Origin": "http://127.0.0.1"},
     )
     assert r.status_code == 204
     assert not (tmp_path / "HALT").exists()
@@ -69,7 +69,7 @@ def test_cancel_goal_marks_status(monkeypatch, tmp_path: Path):
     client = _client()
     r = client.post(
         f"/api/v1/goals/{gid}/cancel",
-        headers={"Origin": "http://testserver"},
+        headers={"Origin": "http://127.0.0.1"},
     )
     assert r.status_code == 204
 
@@ -85,7 +85,7 @@ def test_cancel_unknown_goal_404(monkeypatch, tmp_path: Path):
     client = _client()
     r = client.post(
         "/api/v1/goals/99999/cancel",
-        headers={"Origin": "http://testserver"},
+        headers={"Origin": "http://127.0.0.1"},
     )
     assert r.status_code == 404
 
@@ -101,7 +101,7 @@ def test_cancel_already_done_goal_noop(monkeypatch, tmp_path: Path):
     client = _client()
     r = client.post(
         f"/api/v1/goals/{gid}/cancel",
-        headers={"Origin": "http://testserver"},
+        headers={"Origin": "http://127.0.0.1"},
     )
     assert r.status_code == 204
     g = world_model.WorldModel(db).get_goal(gid)

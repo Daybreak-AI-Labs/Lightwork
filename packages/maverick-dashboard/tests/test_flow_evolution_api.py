@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 def _client():
     from maverick_dashboard.app import app
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def _isolate(monkeypatch, tmp_path):
@@ -728,6 +728,9 @@ def test_dry_run_resume_never_upgrades_to_real_executors(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     from maverick.flow import Flow, FlowNode, execution, node_outcomes, store
     from maverick_dashboard import automation_queue as aq
+    from maverick_dashboard import rbac
+
+    rbac.set_role("user:alice", "operator")
 
     flow = Flow(id="dry-pause", name="dry", start="gate", nodes={
         "gate": FlowNode(id="gate", kind="approval", prompt="continue?", next="read"),

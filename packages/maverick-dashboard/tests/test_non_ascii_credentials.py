@@ -12,7 +12,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-ORIGIN = {"Origin": "http://testserver"}
+ORIGIN = {"Origin": "http://127.0.0.1"}
 # The same mistake in ASCII and in non-ASCII.
 WRONG = ("0" * 64, "é" * 64, "café")
 # JSON can also carry a lone surrogate. Only routes whose body models accept it are
@@ -35,7 +35,7 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(auth, "caller_principal", lambda _request: "user:customer")
     config.reset_config_cache()
     api._world_cache.clear()
-    yield TestClient(app.app, headers=ORIGIN, raise_server_exceptions=False)
+    yield TestClient(app.app, base_url="http://127.0.0.1", headers=ORIGIN, raise_server_exceptions=False)
     config.reset_config_cache()
     api._world_cache.clear()
 
@@ -50,7 +50,7 @@ def test_static_token_with_non_ascii_text_is_a_plain_401(monkeypatch):
     monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "static-token-for-tests")  # pragma: allowlist secret
     from maverick_dashboard.app import app
 
-    c = TestClient(app, headers=ORIGIN, raise_server_exceptions=False)
+    c = TestClient(app, base_url="http://127.0.0.1", headers=ORIGIN, raise_server_exceptions=False)
     ascii_wrong = c.get("/api/v1/account/me", headers={"Authorization": "Bearer wrong"})
     assert ascii_wrong.status_code == 401
     # Header text arrives decoded as latin-1, so e-acute is a non-ASCII str.

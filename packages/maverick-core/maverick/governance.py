@@ -418,6 +418,52 @@ def _money(amount: float | None, currency: str) -> str:
     return f"{amount:g}{cur}"
 
 
+def transaction_value(action: str, args: object, policy: Policy) -> tuple[float | None, str, bool]:
+    """Resolve a dispatch's value, marking relevant but unverifiable amounts.
+
+    Thresholds are dollar ceilings, not exchange rates. A Stripe refund's
+    currency comes from the charge, so caller-supplied currency cannot prove it.
+    A zero or omitted refund amount means the full, unknown balance.
+    """
+    from decimal import Decimal, InvalidOperation
+
+    values = args if isinstance(args, dict) else {}
+    op = values.get("op")
+    refund = action in {"stripe", "shopify"} and op == "refund_create"
+    reads = {
+        "stripe": {"customer_get", "customer_search", "charges", "subscriptions", "balance"},
+        "shopify": {"orders", "order_get", "products", "product_get", "inventory", "customer_get"},
+    }
+    if action in {"read_file", "list_dir"}:
+        return None, "", False
+    if op in reads.get(action, set()):
+        return None, "", False
+    if _threshold_for(policy.deny_above, action) is None and _threshold_for(policy.require_human_above, action) is None:
+        return None, "", False
+    # Generic connectors and unrecognized operations can ignore a top-level
+    # amount while sending a different nested payload. Never trust that field
+    # as proof of a transaction's value without a known operation contract.
+    if not refund or action == "stripe":
+        return None, "", True
+
+    currency = values.get("currency", "")
+    if not isinstance(currency, str):
+        return None, "", True
+    currency = currency.strip().upper()
+    if currency and currency != "USD":
+        return None, currency, True
+    raw = values.get("amount_cents")
+    if isinstance(raw, bool) or not isinstance(raw, (int, float, str)):
+        return None, currency, True
+    try:
+        amount = Decimal(str(raw))
+    except (InvalidOperation, ValueError, OverflowError):
+        return None, currency, True
+    if not amount.is_finite() or amount <= 0 or amount != amount.to_integral_value() or amount > 2**53:
+        return None, currency, True
+    return float(amount / 100), currency, False
+
+
 def _automation_verdict(
     policy: Policy, action: str, amount: float | None, *, stage: str,
 ) -> Verdict | None:
@@ -465,6 +511,7 @@ def evaluate(
     policy: Policy | None = None,
     amount: float | None = None,
     currency: str = "",
+    amount_unavailable: bool | None = None,
 ) -> Verdict:
     """Decide ALLOW / DENY / REQUIRE_HUMAN for ``action`` (a tool name).
 
@@ -479,12 +526,23 @@ def evaluate(
 
     ``risk`` overrides the classifier (``safety.tool_risk``) when given. ``amount``
     (in ``currency``) is the transaction value, checked against the policy's
-    dollar-threshold tiers — the finance delegation-of-authority gate. ``policy``
+    dollar-threshold tiers — the finance delegation-of-authority gate. An
+    omitted amount is unverifiable unless a trusted caller explicitly marks it
+    not applicable with ``amount_unavailable=False``. ``policy``
     defaults to :meth:`Policy.from_config`; ``capability`` is an optional
     :class:`maverick.capability.Capability`.
     """
     if policy is None:
         policy = Policy.from_config()
+    if amount_unavailable is None:
+        amount_unavailable = amount is None
+    if amount is not None:
+        import math
+        if (isinstance(amount, bool) or not isinstance(amount, (int, float))
+                or not math.isfinite(amount) or amount < 0):
+            amount, amount_unavailable = None, True
+    if currency and (not isinstance(currency, str) or currency.strip().upper() != "USD"):
+        amount, amount_unavailable = None, True
     eff_risk = _risk_level(risk) or tool_risk(action)
 
     # 1. Least privilege: the capability is the ceiling; deny below it wins.
@@ -501,6 +559,10 @@ def evaluate(
                        f"{eff_risk}-risk {action!r} denied by org policy",
                        "deny_min_risk", policy.compliance_profiles)
     deny_thresh = _threshold_for(policy.deny_above, action)
+    if amount_unavailable and deny_thresh is not None:
+        return Verdict(Decision.DENY,
+                       f"{action!r} transaction amount cannot be verified against the deny ceiling",
+                       "deny_above", policy.compliance_profiles)
     if amount is not None and deny_thresh is not None and amount > deny_thresh:
         return Verdict(Decision.DENY,
                        f"{action!r} amount {_money(amount, currency)} exceeds the "
@@ -520,6 +582,10 @@ def evaluate(
                        f"{eff_risk}-risk {action!r} requires human approval",
                        "require_human_min_risk", policy.compliance_profiles)
     hitl_thresh = _threshold_for(policy.require_human_above, action)
+    if amount_unavailable and hitl_thresh is not None:
+        return Verdict(Decision.REQUIRE_HUMAN,
+                       f"{action!r} transaction amount cannot be verified against the approval threshold",
+                       "require_human_above", policy.compliance_profiles)
     if amount is not None and hitl_thresh is not None and amount > hitl_thresh:
         return Verdict(Decision.REQUIRE_HUMAN,
                        f"{action!r} amount {_money(amount, currency)} exceeds the "

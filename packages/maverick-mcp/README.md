@@ -44,6 +44,18 @@ Add to your Claude Code MCP config (typically
 Then restart Claude Code. The Lightwork tools should appear under the
 MCP servers menu.
 
+Each MCP start or resume attempt defaults to a $2 spend cap and a 1,800-second
+wall-clock cap when no operator ceiling is configured. Operators can set
+`MAVERICK_MCP_MAX_DOLLARS` and `MAVERICK_MCP_MAX_WALL_SECONDS` (or the
+corresponding `[mcp]` settings); a stricter configured budget also applies.
+
+Network MCP callers, including clients using the shared HTTP bearer, cannot
+read or write the tenant-wide fact store. Facts remain available to local
+operator integrations; network callers' goals also do not receive those facts
+as standing context.
+These are per-attempt limits, not a shared limit across concurrent calls or
+elicitation resumes. Configure an organization budget for aggregate spending.
+
 ## Tools exposed
 
 | Tool | What it does |
@@ -52,7 +64,7 @@ MCP servers menu.
 | `maverick_status` | List recent goals + open questions |
 | `maverick_resume` | Resume a paused goal |
 | `maverick_answer` | Answer a queued question |
-| `maverick_skill_install` | Install a SKILL.md from URL / gh:org/repo / local path |
+| `maverick_skill_install` | Install a SKILL.md from URL or gh:org/repo when `MAVERICK_ALLOW_SKILL_INSTALL=1` (local paths are rejected) |
 | `maverick_skills_list` | List installed / distilled skills |
 | `maverick_fact_set` | Set a fact in the world model |
 | `maverick_facts_get` | Get all known facts |
@@ -68,5 +80,9 @@ Minimal JSON-RPC 2.0 over stdio (`lightwork mcp`) or streamable HTTP
 (`lightwork mcp --http`), matching the MCP 2025-11-25 spec (with a
 2024-11-05 fallback). Stdio has no external dependencies; the HTTP
 transport needs the `[http]` extra (FastAPI + uvicorn).
+Failed HTTP bearer attempts are limited per network peer. Callers behind the
+same proxy share that failure budget; configure an upstream limiter when they
+need independent quotas. Lightwork's launcher preserves the socket peer; an
+external ASGI server must also disable proxy-header rewriting for this limit.
 The full `mcp` Python SDK is an option for a future hardening pass;
 this hand-rolled version keeps the dependency footprint tiny.

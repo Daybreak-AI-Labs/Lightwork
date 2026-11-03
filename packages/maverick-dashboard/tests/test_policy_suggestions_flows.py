@@ -15,7 +15,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
-ORIGIN = {"Origin": "http://testserver"}
+ORIGIN = {"Origin": "http://127.0.0.1"}
 ANA = "user:ana@corp.com"
 DANA = "user:dana@corp.com"
 LEE = "user:lee@corp.com"
@@ -48,7 +48,7 @@ def client(monkeypatch, tmp_path):
     audit_writer._defaults.clear()
     from maverick_dashboard.app import app
 
-    yield TestClient(app, headers=ORIGIN), app, tmp_path
+    yield TestClient(app, base_url="http://127.0.0.1", headers=ORIGIN), app, tmp_path
     config.reset_config_cache()
     audit_writer._default = None
     audit_writer._defaults.clear()
@@ -190,7 +190,7 @@ def notices(client, monkeypatch):
     from maverick_dashboard import privacy_notice_governance_api as native
 
     _http, app, tmp_path = client
-    http = TestClient(_SignedIn(app), headers=ORIGIN)
+    http = TestClient(_SignedIn(app), base_url="http://127.0.0.1", headers=ORIGIN)
     database = tmp_path / "notices.sqlite3"
     monkeypatch.setattr(notice, "require_enabled", lambda: None)
     monkeypatch.setattr(notice, "enabled", lambda: True)

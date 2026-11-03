@@ -65,7 +65,7 @@ def task_actions(tmp_path, monkeypatch):
     monkeypatch.setattr("maverick.runner.run_goal_in_background_async", run)
     app_for_test = FastAPI()
     app_for_test.include_router(ops.router)
-    with TestClient(app_for_test, headers={"Origin": "http://testserver"}) as client:
+    with TestClient(app_for_test, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}) as client:
         yield client, world, runs, principal
     world.close()
 
@@ -133,7 +133,7 @@ def test_find_returns_only_currently_accessible_task_links(task_actions):
     from starlette.requests import Request
 
     request = Request({"type": "http", "method": "GET", "path": "/api/v1/goals/search",
-                       "headers": [(b"host", b"testserver")]})
+                       "headers": [(b"host", b"127.0.0.1")]})
     assert [goal.id for goal in api.search_goals(request, "Quarterly", limit=1)] == [own]
     principal["value"] = "user:other"
     changed = _prepare(client, catalog, "tasks.find", {"query": "Quarterly"})

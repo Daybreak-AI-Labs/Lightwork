@@ -5330,9 +5330,16 @@ def _save_partial(state: dict[str, Any]) -> None:
     try:
         import json as _json
 
-        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        PARTIAL_STATE_PATH.write_text(_json.dumps(state, default=str))
-        os.chmod(PARTIAL_STATE_PATH, 0o600)
+        from maverick.file_lock import atomic_write_text
+
+        saved = dict(state)
+        advanced = saved.get("advanced")
+        oidc = advanced.get("oidc") if isinstance(advanced, dict) else None
+        if isinstance(oidc, dict) and any(oidc.get(key) for key in ("client_secret", "session_secret")):
+            # Resume must ask for this step again; omitting just the secrets
+            # would silently write an incomplete browser SSO configuration.
+            saved.pop("advanced", None)
+        atomic_write_text(PARTIAL_STATE_PATH, _json.dumps(saved, default=str), mode=0o600)
     except OSError:
         pass
 
@@ -5344,7 +5351,25 @@ def _load_partial() -> dict[str, Any] | None:
     try:
         import json as _json
 
-        return _json.loads(PARTIAL_STATE_PATH.read_text())
+        state = _json.loads(PARTIAL_STATE_PATH.read_text())
+        if not isinstance(state, dict):
+            return None
+        advanced = state.get("advanced")
+        oidc = advanced.get("oidc") if isinstance(advanced, dict) else None
+        if isinstance(oidc, dict) and any(oidc.get(key) for key in ("client_secret", "session_secret")):
+            # Older versions wrote these secrets to the resume file. Remove
+            # them immediately and require the operator to re-enter the step.
+            from maverick.file_lock import atomic_write_text
+
+            state.pop("advanced", None)
+            try:
+                atomic_write_text(PARTIAL_STATE_PATH, _json.dumps(state, default=str), mode=0o600)
+            except OSError as exc:
+                raise RuntimeError(
+                    "Cannot securely remove old OIDC secrets from the wizard resume file. "
+                    f"Secure or remove {PARTIAL_STATE_PATH} before resuming."
+                ) from exc
+        return state
     except (OSError, ValueError):
         return None
 

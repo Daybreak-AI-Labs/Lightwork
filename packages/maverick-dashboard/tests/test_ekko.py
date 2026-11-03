@@ -12,7 +12,7 @@ from maverick.work_discovery_planning import BenefitAssumptions, OpportunityPlan
 from maverick.work_discovery_store import WorkDiscoveryStore
 from maverick_dashboard.app import app
 
-client = TestClient(app, headers={"Origin": "http://testserver"})
+client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def _isolate(tmp_path, monkeypatch, *, enabled: bool = True):

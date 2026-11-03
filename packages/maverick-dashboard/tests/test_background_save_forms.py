@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-_ORIGIN = {"origin": "http://testserver"}
+_ORIGIN = {"origin": "http://127.0.0.1"}
 _JSON = {**_ORIGIN, "accept": "application/json"}
 TEMPLATES = Path(__file__).resolve().parents[1] / "maverick_dashboard" / "templates"
 
@@ -24,7 +24,7 @@ def client(monkeypatch, tmp_path):
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
     from maverick_dashboard import app as dash_app
     dash_app._world_cache.clear()
-    return TestClient(dash_app.app, headers=_ORIGIN)
+    return TestClient(dash_app.app, base_url="http://127.0.0.1", headers=_ORIGIN)
 
 
 def _field_error(response, field):
@@ -109,7 +109,7 @@ def test_a_background_save_from_another_site_is_still_refused(monkeypatch, tmp_p
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     from maverick_dashboard import app as dash_app
-    evil = TestClient(dash_app.app, headers={"origin": "http://evil.example", "accept": "application/json"})
+    evil = TestClient(dash_app.app, base_url="http://127.0.0.1", headers={"origin": "http://evil.example", "accept": "application/json"})
     assert evil.post(path, data=data, follow_redirects=False).status_code == 403
 
 

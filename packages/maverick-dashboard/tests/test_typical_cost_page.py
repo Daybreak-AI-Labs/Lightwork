@@ -36,7 +36,7 @@ def env(tmp_path, monkeypatch):
 
     dash_app._world_cache.clear()
     world = WorldModel(tmp_path / "world.db")
-    yield TestClient(dash_app.app, headers={"Origin": "http://testserver"}), world, tmp_path
+    yield TestClient(dash_app.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}), world, tmp_path
     world.close()
     config.reset_config_cache()
 

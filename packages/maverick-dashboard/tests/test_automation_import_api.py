@@ -21,7 +21,7 @@ API = "/api/v1/automation-imports"
 
 def _client(user="alice"):
     from maverick_dashboard.app import app
-    return TestClient(app, headers={"Origin": "http://testserver", "X-Forwarded-User": user})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1", "X-Forwarded-User": user})
 
 
 def _review(client, source, definitions, **choices):
@@ -58,6 +58,9 @@ def _isolate(monkeypatch, tmp_path):
     monkeypatch.setattr(auth, "proxy_trusts", lambda _host: True)
     monkeypatch.setattr(auth, "proxy_header_name", lambda: "X-Forwarded-User")
     monkeypatch.setattr(auth, "oidc_enabled", lambda: False)
+    from maverick_dashboard import rbac
+
+    rbac.set_role("user:alice", "operator")
 
 
 N8N_WF = {

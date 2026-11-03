@@ -9,10 +9,11 @@ layer. It reuses the generic federated catalog
 
 Unlike skills (whose installable artifact is a fetched ``SKILL.md`` verified by
 ``sha256``), an MCP server's installable artifact is *configuration*: a spec
-(command/args/env or url/headers). So a registry entry carries that spec
-**inline** (`CatalogEntry.spec`), and the supply-chain defense is the spec's
-``pin_sha256`` — verified against the resolved executable at spawn time by
-`MCPClient.start()` (the CVE-2026-30615 class) — not a hash of the spec text.
+(command/args/env or url/headers). A registry entry carries that spec inline.
+An executable hash does not authenticate its arguments or child workloads, so
+registry-sourced local commands are refused; administrators must independently
+review and configure servers. Registry-provided HTTP entries are also refused
+until their complete configuration can be authenticated by a trusted publisher.
 
 Install validates the spec through `MCPServerSpec.from_config` (the same
 subprocess-injection / url checks the kernel applies to hand-written config),
@@ -143,6 +144,11 @@ def _validate_registry_spec(spec: MCPServerSpec) -> None:
     """
     if spec.is_http:
         return
+    if spec.inherit_env or spec.env:
+        raise ValueError(
+            "Registry-provided stdio servers may not inherit or set process "
+            "environment variables; an operator must configure them explicitly."
+        )
     if not spec.pin_sha256:
         raise ValueError(
             f"MCP registry entry {spec.name!r} uses stdio command {spec.command!r} "
@@ -206,7 +212,15 @@ def spec_from_entry(entry: catalog.CatalogEntry) -> MCPServerSpec:
     # policy because they are untrusted network-fed data.
     spec = MCPServerSpec.from_config(entry.name, entry.spec)
     _validate_registry_spec(spec)
-    return spec
+    if not spec.is_http:
+        raise ValueError(
+            "Registry-provided local commands cannot be authenticated as a complete "
+            "workload. Configure and review local MCP servers directly instead."
+        )
+    raise ValueError(
+        "Registry-provided MCP server configuration is not authenticated. "
+        "Independently review and configure the server directly instead."
+    )
 
 
 def install_mcp_from_registry(name: str, *, indexes: list[str] | None = None) -> MCPServerSpec:

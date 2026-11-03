@@ -56,8 +56,8 @@ def chat(tmp_path, monkeypatch):
         limit_source=lambda: api.SESSION_CLIENT_PER_MINUTE, clock=lambda: clock["now"]))
     monkeypatch.setattr(api, "_CLIENT_DAY_LIMITER", api._ClientDayLimiter())
     yield SimpleNamespace(
-        client=TestClient(dash_app.app, headers={"Origin": "http://testserver"}),
-        anon=TestClient(dash_app.app),
+        client=TestClient(dash_app.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}),
+        anon=TestClient(dash_app.app, base_url="http://127.0.0.1"),
         clock=clock, home=tmp_path / "mh", api=api, tmp=tmp_path, monkeypatch=monkeypatch,
     )
     config.reset_config_cache()
@@ -365,7 +365,7 @@ def _visitor(address):
     from fastapi.testclient import TestClient
     from maverick_dashboard import app as dash_app
 
-    return TestClient(dash_app.app, client=(address, 50000))
+    return TestClient(dash_app.app, base_url="http://127.0.0.1", client=(address, 50000))
 
 
 def _visit(client, key, origin=SHOP, forwarded=None):

@@ -28,7 +28,7 @@ def page_client():
             {"privacy_regulatory_intelligence_enabled": enabled, "can_admin": True},
         )
 
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def test_page_renders_operator_contract_and_no_unsafe_dom_sink(

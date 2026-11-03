@@ -321,6 +321,7 @@ def test_unbound_fact_reads_omit_tenant_precedence(
 
     [(sql, _params)] = cur.calls
     assert expected_order in sql
+    assert "tenant_id IS NULL" in sql
     assert "ORDER BY 0" not in sql
     assert "CASE WHEN" not in sql
     assert postgres._tenant_precedence() == ("", [])
@@ -634,6 +635,43 @@ def test_list_goals_omits_domain_and_project_id_predicates_when_unset(monkeypatc
     assert "domain = %s" not in sql
     assert "project_id = %s" not in sql
     assert params == ()
+
+
+def test_list_goals_can_exclude_unbound_legacy_rows(monkeypatch):
+    world = PostgresWorldModel.__new__(PostgresWorldModel)
+    cur = RecordingCursor()
+    cur.fetchall = list
+
+    @contextmanager
+    def tx():
+        yield cur
+
+    monkeypatch.setattr(world, "_tx", tx)
+    monkeypatch.setattr(postgres, "_active_tenant", lambda: "tenant-a")
+    monkeypatch.setattr(postgres, "_strict_tenant_isolation", lambda: False)
+    world.list_goals(owner="user:alice", strict_tenant=True)
+    sql, params = cur.calls[0]
+    assert "tenant_id = %s" in sql and "tenant_id IS NULL" not in sql
+    assert params == ("user:alice", "tenant-a")
+
+
+def test_board_approval_queries_require_exact_tenant(monkeypatch):
+    world = PostgresWorldModel.__new__(PostgresWorldModel)
+    cur = RecordingCursor()
+    cur.fetchall = list
+
+    @contextmanager
+    def tx():
+        yield cur
+
+    monkeypatch.setattr(world, "_tx", tx)
+    monkeypatch.setattr(postgres, "_active_tenant", lambda: "tenant-a")
+    monkeypatch.setattr(postgres, "_strict_tenant_isolation", lambda: False)
+    world.pending_unattached_approval_ids("user:alice", limit=10)
+    world.pending_goal_approval_ids([1, 2], limit=10)
+    for sql, params in cur.calls:
+        assert "tenant_id = %s" in sql and "tenant_id IS NULL" not in sql
+        assert "tenant-a" in params
 
 
 def test_explicit_env_on_is_explicit(_clean_toggle_env, monkeypatch):

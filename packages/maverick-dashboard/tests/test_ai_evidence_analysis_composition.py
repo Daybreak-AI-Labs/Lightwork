@@ -733,7 +733,7 @@ def test_admin_bootstrap_enrolls_the_local_adapter_again_at_revision_four(
         authority_api.create_ai_evidence_analysis_authority_router(),
         prefix="/api/v1",
     )
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
     response = client.post("/api/v1/ai-evidence-analysis/authorities/bootstrap")
 
@@ -1032,7 +1032,7 @@ def test_admin_router_is_global_permission_bound_and_metadata_only(
         authority_api.create_ai_evidence_analysis_authority_router(),
         prefix="/api/v1",
     )
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     body = {
         "case_ref": "case-api",
         "media_type": "text",
@@ -1133,7 +1133,7 @@ def test_picker_lists_use_tenant_view_permission_and_the_workspace_registry(
     app.include_router(
         authority_api.create_ai_evidence_analysis_authority_router(), prefix="/api/v1"
     )
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     artifacts = client.get("/api/v1/ai-evidence-analysis/authorities/artifacts")
     criteria = client.get("/api/v1/ai-evidence-analysis/authorities/criteria")
     assert artifacts.status_code == 200 and criteria.status_code == 200
@@ -1161,7 +1161,7 @@ def test_upload_registration_computes_the_fingerprint_on_the_server(
     app.include_router(
         authority_api.create_ai_evidence_analysis_authority_router(), prefix="/api/v1"
     )
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     raw = b"supplier contract text"
     response = client.post(
         "/api/v1/ai-evidence-analysis/authorities/artifacts/register",

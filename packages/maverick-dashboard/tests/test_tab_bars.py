@@ -22,7 +22,7 @@ from fastapi.testclient import TestClient
 from maverick_dashboard.app import static_url
 
 PACKAGE = Path(__file__).resolve().parents[1] / "maverick_dashboard"
-_ORIGIN = {"Origin": "http://testserver"}
+_ORIGIN = {"Origin": "http://127.0.0.1"}
 
 
 @pytest.fixture(autouse=True)
@@ -40,7 +40,7 @@ def _isolated(tmp_path, monkeypatch):
 
 def _client():
     from maverick_dashboard.app import app
-    return TestClient(app, headers=_ORIGIN)
+    return TestClient(app, base_url="http://127.0.0.1", headers=_ORIGIN)
 
 
 class _Page(HTMLParser):

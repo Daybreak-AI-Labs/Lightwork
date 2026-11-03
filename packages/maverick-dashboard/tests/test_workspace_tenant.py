@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 from maverick.oidc import VerifiedPrincipal
 from maverick_dashboard.app import app
 
-client = TestClient(app, headers={"Origin": "http://testserver"})
+client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 # The user-reported dead end: a tenant-gated workbench page. Its only gates
 # are "view" and the tenant binding, so it isolates exactly this feature.
@@ -59,7 +59,7 @@ def test_first_workspace_retry_uses_fresh_identifier_after_audit_refusal(monkeyp
     monkeypatch.setattr(auth, "has_global_permission", lambda request, permission: True)
     request = Request({"type": "http", "method": "GET", "path": "/settings",
                        "query_string": b"", "headers": [], "scheme": "http",
-                       "server": ("testserver", 80)})
+                       "server": ("127.0.0.1", 80)})
 
     def refused(*args, **kwargs):
         raise audit.AuditRefused("synthetic custody outage")

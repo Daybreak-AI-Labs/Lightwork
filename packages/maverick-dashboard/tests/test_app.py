@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 from maverick_dashboard.app import app
 
-client = TestClient(app)
+client = TestClient(app, base_url="http://127.0.0.1")
 
 
 def test_livez():
@@ -19,14 +19,14 @@ def test_livez():
     assert resp.json() == {"status": "ok"}
 
 
-def test_healthz_returns_check_breakdown(monkeypatch):
-    """Deep healthz returns a per-check map, may be 200 or 503."""
+def test_healthz_returns_only_public_status(monkeypatch):
+    """The public health probe exposes status without operational details."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
     resp = client.get("/healthz")
     assert resp.status_code in (200, 503)
     body = resp.json()
     assert body["status"] in ("ok", "degraded")
-    assert "checks" in body
+    assert set(body) == {"status"}
 
 
 def test_readyz_deep_check_client_binding(tmp_path, monkeypatch):
@@ -43,7 +43,12 @@ def test_readyz_deep_check_client_binding(tmp_path, monkeypatch):
         assert resp.status_code == 503
         body = resp.json()
         assert body["status"] == "not_ready"
-        assert "enforced" in body["checks"]["client_binding"]
+        from maverick_dashboard.app import _readiness_deep_checks
+
+        ready, checks = _readiness_deep_checks()
+        assert ready is False
+        assert "enforced" in checks["client_binding"]
+        assert "checks" not in body
     finally:
         client.reset_client_cache()
 

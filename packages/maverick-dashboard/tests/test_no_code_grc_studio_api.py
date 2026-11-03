@@ -62,6 +62,9 @@ def blueprint() -> dict[str, object]:
 
 @pytest.fixture()
 def environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from maverick_dashboard import rbac
+
+    rbac.set_role("user:operator", "operator")
     actor = {"value": "author"}
     store = studio.GRCStudioStore(
         tmp_path / "grc.sqlite3",
@@ -103,7 +106,7 @@ def environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     app.include_router(api.create_no_code_grc_studio_router(dependencies), prefix="/api/v1")
     # Studio changes must come from the page itself (same-origin check).
-    return TestClient(app, headers={"Origin": "http://testserver"}), state
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}), state
 
 
 def test_status_is_store_free_and_honest(environment) -> None:

@@ -19,7 +19,7 @@ def _client(monkeypatch, tmp_path):
     from maverick_dashboard import app as dash_app
 
     dash_app._world_cache.clear()
-    return TestClient(dash_app.app, headers={"Origin": "http://testserver"})
+    return TestClient(dash_app.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def _as_workspace_admin(client, email="alice@example.com", role="admin"):
@@ -42,6 +42,59 @@ def _as_global_admin(client, email="owner@example.com"):
     return principal
 
 
+def test_api_reference_requires_session_and_loads_with_invite_cookie(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    paths = ["/docs", "/redoc", "/openapi.json", "/static/swagger-ui-5.33.1.css",
+             "/static/swagger-ui-5.33.1-bundle.js"]
+    for path in paths:
+        assert client.get(path, follow_redirects=False).status_code in (401, 403, 307)
+    _as_global_admin(client)
+    for path in paths:
+        assert client.get(path).status_code == 200
+
+
+def test_probe_details_require_global_admin_invite_session(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _as_workspace_admin(client)
+    assert client.get("/api/v1/admin/system/probe-details").status_code == 403
+    _as_global_admin(client)
+    response = client.get("/api/v1/admin/system/probe-details")
+    assert response.status_code in (200, 503)
+    assert "checks" in response.json()
+    assert response.headers["cache-control"] == "private, no-store"
+
+
+def test_workspace_admin_spending_page_does_not_show_global_or_other_roster(monkeypatch, tmp_path):
+    from maverick import spending_limits
+    from maverick.paths import tenant_scope
+    from maverick.quotas import UsageLedger
+    from maverick.tenant import registry
+    from maverick_dashboard import rbac
+
+    client = _client(monkeypatch, tmp_path)
+    registry.create_tenant("acme", display_name="Acme")
+    registry.create_tenant("outside", display_name="Outside")
+    rbac.set_role("user:global-secret@example.com", "viewer")
+    rbac.set_tenant_role("acme", "user:member@example.com", "viewer")
+    rbac.set_tenant_role("outside", "user:other@example.com", "viewer")
+    with tenant_scope(tenant="acme"):
+        UsageLedger().record("user:former@example.com", 1.0, 0, 0)
+        spending_limits.set_user_limit("user:former@example.com", 5, "day", actor="user:owner")
+    _as_workspace_admin(client)
+    page = client.get("/spending-limits")
+    assert page.status_code == 200
+    assert "user:member@example.com" in page.text
+    assert "user:former@example.com" in page.text
+    assert "user:global-secret@example.com" not in page.text
+    assert "user:other@example.com" not in page.text
+    response = client.post("/spending-limits/person", data={
+        "_expected_tenant": "acme", "principal": "user:member@example.com", "amount": "3", "period": "day",
+    }, follow_redirects=False)
+    assert response.status_code == 303
+    _as_global_admin(client)
+    assert "user:global-secret@example.com" in client.get("/spending-limits").text
+
+
 def _invitation_path(response):
     match = re.search(r'id="workspace-invite-link"[^>]*value="([^"]+)"', response.text)
     assert match, response.text[:1000]
@@ -55,7 +108,7 @@ def _global_invitation_path(response):
 
 
 def _invitee(client):
-    return TestClient(client.app, headers={"Origin": "http://testserver"})
+    return TestClient(client.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 PASSPHRASE_FORM = {"password": "synthetic workspace invite passphrase",  # pragma: allowlist secret
@@ -499,3 +552,29 @@ def test_a_workspace_admin_cannot_test_a_list_of_addresses(monkeypatch, tmp_path
     _as_global_admin(client)
     for number in range(6):
         assert _invite_attempt(client, f"bulk{number}@example.com").status_code == 200
+
+
+def test_workspace_member_has_no_implicit_root_authority(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    from maverick.tenant import registry
+    from maverick_dashboard import invites, rbac
+
+    registry.create_tenant("acme", display_name="Acme")
+    principal = "user:member@example.com"
+    rbac.set_tenant_role("acme", principal, "viewer")
+    client.cookies.set("mvk_session", invites.mint_local_session("member@example.com"))
+
+    assert client.get("/api/v1/goals/search", params={"q": "x"}).status_code == 403
+    assert client.get("/workspace/tenant").status_code == 200
+    selected = client.put("/api/v1/workspace/active-tenant", json={"tenant_id": "acme"})
+    assert selected.status_code == 200, selected.text
+    assert client.get("/api/v1/goals/search", params={"q": "x"}).status_code == 200
+    cleared = client.put("/api/v1/workspace/active-tenant", json={"tenant_id": None},
+                         headers={"X-Lightwork-Expected-Tenant": "acme"})
+    assert cleared.status_code == 200, cleared.text
+    assert client.get("/api/v1/goals/search", params={"q": "x"}).status_code == 403
+
+    rbac.remove_tenant_role("acme", principal)
+    assert client.get("/api/v1/goals/search", params={"q": "x"}).status_code == 403
+    rbac.set_role(principal, "viewer")
+    assert client.get("/api/v1/goals/search", params={"q": "x"}).status_code == 200

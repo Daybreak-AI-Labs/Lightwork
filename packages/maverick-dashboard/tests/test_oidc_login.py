@@ -57,7 +57,7 @@ def login_env(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_OIDC_CLIENT_ID", CLIENT_ID)
     monkeypatch.setenv("MAVERICK_OIDC_CLIENT_SECRET", "test-client-secret")
     monkeypatch.setenv(
-        "MAVERICK_OIDC_REDIRECT_URI", "http://testserver/auth/callback"
+        "MAVERICK_OIDC_REDIRECT_URI", "http://127.0.0.1/auth/callback"
     )
     monkeypatch.setenv("MAVERICK_OIDC_SESSION_SECRET", SESSION_SECRET)
     monkeypatch.setenv("MAVERICK_OIDC_AUTHORIZATION_ENDPOINT", AUTH_ENDPOINT)
@@ -77,7 +77,7 @@ def clear_consumed_transactions():
 
 @pytest.fixture
 def client():
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 # ---- login: redirect carries state + PKCE S256 --------------------------------
@@ -118,7 +118,7 @@ def test_auth_cookie_secure_only_on_plain_http_loopback(login_env, client):
     # Behind a TLS-terminating proxy (connects over loopback but the user is on
     # HTTPS): the forwarded-proto header must force Secure so the session cookie
     # can't leak over a downgraded HTTP request.
-    fresh = TestClient(app)
+    fresh = TestClient(app, base_url="http://127.0.0.1")
     proxied = fresh.get(
         "/auth/login", follow_redirects=False,
         headers={"X-Forwarded-Proto": "https"})
@@ -313,7 +313,7 @@ def test_callback_missing_tx_cookie_fails(login_env, client, monkeypatch):
 
     monkeypatch.setattr(ol, "_exchange_code_for_tokens", _must_not_exchange)
     # Fresh client (no tx cookie).
-    fresh = TestClient(app)
+    fresh = TestClient(app, base_url="http://127.0.0.1")
     resp = fresh.get("/auth/callback?code=c&state=whatever", follow_redirects=False)
     assert resp.status_code in (303, 400)  # redirect to /auth/error (cleared)
     # No session was set.
@@ -377,7 +377,9 @@ def test_callback_records_pairwise_sub_in_subject_directory(
 
 
 def test_logout_clears_session(login_env, client):
-    resp = client.get("/auth/logout", follow_redirects=False)
+    confirmation = client.get("/auth/logout", follow_redirects=False)
+    assert confirmation.status_code == 200 and "set-cookie" not in confirmation.headers
+    resp = client.post("/auth/logout", follow_redirects=False, headers={"Origin": "http://127.0.0.1"})
     assert resp.status_code == 303
     assert resp.headers["location"] == "/"
     set_cookie = resp.headers.get("set-cookie", "")
@@ -396,7 +398,7 @@ def test_logout_redirects_to_idp_when_end_session_configured(
         "MAVERICK_OIDC_END_SESSION_ENDPOINT",
         "https://idp.example.com/oidc/logout",
     )
-    resp = client.get("/auth/logout", follow_redirects=False)
+    resp = client.post("/auth/logout", follow_redirects=False, headers={"Origin": "http://127.0.0.1"})
     assert resp.status_code == 303
     parsed = urlparse(resp.headers["location"])
     assert f"{parsed.scheme}://{parsed.netloc}{parsed.path}" == (
@@ -404,7 +406,7 @@ def test_logout_redirects_to_idp_when_end_session_configured(
     )
     qs = parse_qs(parsed.query)
     assert qs.get("client_id") == [CLIENT_ID]
-    assert qs.get("post_logout_redirect_uri") == ["http://testserver/"]
+    assert qs.get("post_logout_redirect_uri") == ["http://127.0.0.1/"]
     assert ol.SESSION_COOKIE in resp.headers.get("set-cookie", "")
 
 
@@ -426,9 +428,9 @@ def test_logout_all_revokes_even_when_session_already_revoked(login_env, client)
 
     client.cookies.set(ol.SESSION_COOKIE, raw)
     # Same-origin Referer so the destructive ?all revocation is honored.
-    resp = client.get(
+    resp = client.post(
         "/auth/logout?all=1", follow_redirects=False,
-        headers={"Referer": "http://testserver/settings"})
+        headers={"Referer": "http://127.0.0.1/settings"})
     assert resp.status_code == 303
     # The epoch was re-bumped (>=), proving revoke fired despite the prior
     # revocation -- not silently skipped.
@@ -436,10 +438,7 @@ def test_logout_all_revokes_even_when_session_already_revoked(login_env, client)
 
 
 def test_logout_all_ignored_cross_site(login_env, client):
-    # A cross-site top-level navigation to /auth/logout?all=1 (session-revocation
-    # CSRF) must NOT trigger the global revocation, though it may still clear the
-    # local cookie. With no same-origin Origin/Referer the ?all side effect is
-    # skipped.
+    # A cross-site navigation must not clear the cookie or revoke sessions.
     import time
 
     from maverick.web_session import sign_session
@@ -455,9 +454,44 @@ def test_logout_all_ignored_cross_site(login_env, client):
     resp = client.get(
         "/auth/logout?all=1", follow_redirects=False,
         headers={"Referer": "http://evil.example/"})
-    assert resp.status_code == 303
+    assert resp.status_code == 200
+    assert "set-cookie" not in resp.headers
+    refused = client.post("/auth/logout?all=1", follow_redirects=False,
+                          headers={"Origin": "http://evil.example"})
+    assert refused.status_code == 403 and "set-cookie" not in refused.headers
     # Cross-site referer -> the epoch was NOT bumped (revocation did not fire).
     assert sr.revocation_epoch("user-xsite") == 0
+
+
+@pytest.mark.parametrize("origin", [None, "https://127.0.0.1", "http://127.0.0.1:81", "http://evil.example"])
+def test_logout_post_requires_matching_full_origin(login_env, client, origin):
+    headers = {"Origin": origin} if origin else {}
+    response = client.post("/auth/logout", headers=headers, follow_redirects=False)
+    assert response.status_code == 403
+    assert "set-cookie" not in response.headers
+
+
+def test_logout_uses_configured_public_origin_behind_proxy(login_env, client, monkeypatch):
+    monkeypatch.setenv("MAVERICK_PUBLIC_URL", "https://lightwork.example")
+    headers = {"Origin": "https://lightwork.example"}
+    assert client.post("/auth/logout", headers=headers, follow_redirects=False).status_code == 303
+    headers["Origin"] = "http://lightwork.example"
+    assert client.post("/auth/logout", headers=headers, follow_redirects=False).status_code == 403
+
+
+def test_logout_rejects_conflicting_origin_even_with_matching_referer(login_env, client):
+    response = client.post("/auth/logout", follow_redirects=False, headers={
+        "Origin": "http://evil.example", "Referer": "http://127.0.0.1/page",
+    })
+    assert response.status_code == 403
+
+
+def test_logout_accepts_equivalent_default_port_and_mounted_form(login_env):
+    mounted = TestClient(app, base_url="http://127.0.0.1", root_path="/lightwork")
+    page = mounted.get("/auth/logout?all=1")
+    assert page.status_code == 200 and 'action="logout?all=1"' in page.text
+    response = mounted.post("/auth/logout", headers={"Origin": "http://127.0.0.1:80"}, follow_redirects=False)
+    assert response.status_code == 303
 
 
 # ---- disabled: every route 404s -----------------------------------------------
@@ -475,7 +509,7 @@ def test_routes_404_when_login_disabled(monkeypatch, tmp_path):
         "MAVERICK_OIDC_TOKEN_ENDPOINT",
     ):
         monkeypatch.delenv(name, raising=False)
-    c = TestClient(app)
+    c = TestClient(app, base_url="http://127.0.0.1")
     for path in ("/auth/login", "/auth/callback", "/auth/logout", "/auth/error"):
         assert c.get(path, follow_redirects=False).status_code == 404
 

@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 from maverick_dashboard.app import app
 
-client = TestClient(app, headers={"Origin": "http://testserver"})
+client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 API = "/api/v1/settings/catalog"
 _ST = "consent_preferences.storage"
 _DU = "data_use_governance.scheduler"
@@ -104,7 +104,7 @@ def test_move_preview_and_refusal_while_records_are_in_files(audit_rows):
                        json={"confirm": True}).status_code == 409
     assert client.post("/api/v1/admin/installation/consent-records/move",
                        json={}).status_code == 409
-    assert TestClient(app).post("/api/v1/admin/installation/consent-records/move",
+    assert TestClient(app, base_url="http://127.0.0.1").post("/api/v1/admin/installation/consent-records/move",
                                 json={"confirm": True}).status_code == 403
     assert audit_rows == []
 

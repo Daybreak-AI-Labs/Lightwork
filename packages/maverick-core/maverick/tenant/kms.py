@@ -189,7 +189,7 @@ def _kms_config_for(tenant_id: str | None) -> dict:
         overlay_path = _io_path(
             maverick_home() / "tenants" / _tenant_segment(tenant_id) / "config.toml"
         )
-        merged = (_deep_merge_config(base, _load_config_file(overlay_path))
+        merged = (_deep_merge_config(base, _load_config_file(overlay_path, interpolate=False))
                   if overlay_path.exists() else base)
         return dict((merged or {}).get("kms") or {})
     except Exception:
@@ -219,7 +219,7 @@ def _tenant_own_key_id(tenant_id: str | None) -> str | None:
         )
         if not overlay_path.exists():
             return None
-        key_id = ((_load_config_file(overlay_path) or {}).get("kms") or {}).get("key_id")
+        key_id = ((_load_config_file(overlay_path, interpolate=False) or {}).get("kms") or {}).get("key_id")
     except Exception:
         return None
     return (str(key_id).strip() or None) if key_id else None

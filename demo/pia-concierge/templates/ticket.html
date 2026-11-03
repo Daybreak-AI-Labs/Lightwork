@@ -24,6 +24,20 @@
   <span class="t">Lightwork emailed {{ ticket.requester.split(' ')[0] }} the questionnaire link.
     Play the requester and answer it.</span>
   <a class="btn" href="/mail">Open the requester's inbox →</a>
+  <button class="btn ghost" type="button" id="reissue-intake">Send a new intake link</button>
+  <span class="muted" id="reissue-intake-status" role="status"></span>
+  <script>
+    document.getElementById('reissue-intake').addEventListener('click', async function () {
+      const status = document.getElementById('reissue-intake-status');
+      this.disabled = true;
+      try {
+        const response = await fetch('/cases/{{ case.id }}/intake-link', {method: 'POST'});
+        const result = await response.json();
+        status.textContent = result.ok ? 'A new link was sent.' : (result.error || 'The link could not be sent.');
+      } catch (_) { status.textContent = 'The link could not be sent.'; }
+      this.disabled = false;
+    });
+  </script>
 </div>
 {% elif case and case.stage in ('pending_review', 'in_onetrust_review') %}
 <div class="nextstep">

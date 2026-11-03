@@ -62,7 +62,7 @@ def test_the_background_loop_runs_the_hourly_check():
 def test_the_page_says_when_it_checked_and_since_when(env):
     from maverick_dashboard.app import app
 
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     page = client.get("/compliance").text
     assert 'id="cmp-checked"' in page and "checks every protection again each hour" in page
     assert '<th scope="col">Since</th>' in page

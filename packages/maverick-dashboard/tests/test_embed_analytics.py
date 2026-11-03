@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 from maverick_dashboard.app import app, static_url
 
-client = TestClient(app)
+client = TestClient(app, base_url="http://127.0.0.1")
 
 
 def test_component_js_served_with_correct_content_type():
@@ -47,9 +47,9 @@ def test_component_js_is_inert_text_for_other_methods():
     # only GET serves it; mutating verbs are 405, not silently accepted
     assert client.post(
         "/static/lightwork-analytics.js",
-        headers={"Origin": "http://testserver"},
+        headers={"Origin": "http://127.0.0.1"},
     ).status_code == 405
     assert client.post(
         "/static/maverick-analytics.js",
-        headers={"Origin": "http://testserver"},
+        headers={"Origin": "http://127.0.0.1"},
     ).status_code == 405

@@ -29,7 +29,7 @@ def client(world_with_events, monkeypatch):
     from maverick_dashboard import app as app_mod
     w, _g1 = world_with_events
     monkeypatch.setattr(app_mod, "_world", lambda: w)
-    return TestClient(app_mod.app)
+    return TestClient(app_mod.app, base_url="http://127.0.0.1")
 
 
 def test_trajectory_renders_agent_filter(client, world_with_events):
@@ -82,7 +82,7 @@ def test_trajectory_steps_read_in_plain_words_with_the_recording_folded_away(tmp
                        "verification skipped (conversational answer: no tools, no code)")
         w.append_event(gid, "orchestrator-0-72eb85", "finding", "**Total:** $412,800")
         monkeypatch.setattr(app_mod, "_world", lambda: w)
-        body = TestClient(app_mod.app).get(f"/goals/{gid}/trajectory").text
+        body = TestClient(app_mod.app, base_url="http://127.0.0.1").get(f"/goals/{gid}/trajectory").text
     finally:
         w.close()
     assert '<p class="ev-step">Started working on your request</p>' in body

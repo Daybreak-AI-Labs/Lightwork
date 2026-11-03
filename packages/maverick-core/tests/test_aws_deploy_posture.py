@@ -8,6 +8,7 @@ delete the data stores, and the service can be pinned to an image digest.
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -37,16 +38,18 @@ def test_the_state_volume_is_backed_up():
 
 
 def test_identifiers_of_people_are_not_tracked():
-    tracked = _tf("oidc.auto.tfvars")
-    assert "@" not in tracked
-    assert not re.search(r"^\s*(dashboard_admins|email_from)\s*=", tracked, re.MULTILINE)
+    tracked = subprocess.run(
+        ["git", "ls-files", "--", "deploy/aws/terraform/oidc.auto.tfvars",
+         "deploy/aws/terraform/local.auto.tfvars"],
+        cwd=REPO_ROOT, capture_output=True, text=True, check=True,
+    )
+    assert tracked.stdout == ""
     example = _tf("local.auto.tfvars.example")
     assert re.search(r"^dashboard_admins\s*=", example, re.MULTILINE)
     assert re.search(r"^email_from\s*=", example, re.MULTILINE)
     assert "<sub>" in example and "<name>" in example  # placeholders, not people
     ignored = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
     assert "deploy/aws/terraform/local.auto.tfvars" in ignored
-    assert not (TERRAFORM / "local.auto.tfvars").exists()
     handoff = _tf("NEXT_STEPS.md")
     assert "cp deploy/aws/terraform/local.auto.tfvars.example deploy/aws/terraform/local.auto.tfvars" in handoff
 

@@ -48,7 +48,7 @@ def web(tmp_path, monkeypatch):
                                       clock=lambda: NOW)
     monkeypatch.setattr(app.state, "vendor_onboarding_binding_factory",
                         lambda request: WorkflowBinding(service, ctx))
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     yield client, service, ctx, tickets
     config.reset_config_cache()
 

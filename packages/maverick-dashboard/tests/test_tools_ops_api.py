@@ -18,7 +18,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-ORIGIN = {"Origin": "http://testserver"}
+ORIGIN = {"Origin": "http://127.0.0.1"}
 SKILL = """---
 name: weekly-status
 triggers:
@@ -60,7 +60,7 @@ def client(monkeypatch, tmp_path):
     audit_writer._defaults.clear()
     dash_app._world_cache.clear()
     try:
-        yield TestClient(dash_app.app, headers=ORIGIN)
+        yield TestClient(dash_app.app, base_url="http://127.0.0.1", headers=ORIGIN)
     finally:
         config.reset_config_cache()
         audit_writer._default = None
@@ -622,10 +622,30 @@ def test_ratings_download_is_the_kernel_export(client):
 # ---- tool servers: look before adding -------------------------------------------
 
 def _registry(monkeypatch, spec):
+    # Exercise preview/probe mechanics with an explicitly supplied trusted spec;
+    # the real registry boundary is tested separately below.
+    from maverick import mcp_registry
+    from maverick.mcp_client import MCPServerSpec
+    def trusted_spec(name, **_kwargs):
+        if name != "weather":
+            raise ValueError("unknown server")
+        return MCPServerSpec.from_config(name, spec)
+    monkeypatch.setattr(mcp_registry, "install_mcp_from_registry", trusted_spec)
+
+
+def test_unauthenticated_registry_entry_cannot_be_previewed_probed_or_added(client, monkeypatch):
     from maverick import catalog, mcp_registry
-    entry = catalog.CatalogEntry(name="weather", version="1", kind="mcp", summary="Forecasts",
-                                 source="", sha256="", spec=spec)
-    monkeypatch.setattr(mcp_registry, "resolve_mcp", lambda name, **k: entry if name == "weather" else None)
+    entry = catalog.CatalogEntry(name="weather", version="1", kind="mcp", summary="Weather",
+                                 source="", sha256="", spec={"url": "https://mcp.example.com/"})
+    monkeypatch.setattr(mcp_registry, "resolve_mcp", lambda *_a, **_k: entry)
+    monkeypatch.setattr(mcp_registry, "add_mcp_server_to_config",
+                        lambda *_a, **_k: pytest.fail("configuration changed"))
+    for path, body in (
+        ("/api/v1/mcp-registry/preview", {"name": "weather"}),
+        ("/api/v1/mcp-registry/tools", {"name": "weather", "fingerprint": "a" * 64, "confirm": True}),
+        ("/api/v1/mcp-registry/add", {"name": "weather"}),
+    ):
+        assert client.post(path, json=body).status_code == 409
 
 
 def test_registry_preview_shows_the_exact_program_and_address(client, monkeypatch):
@@ -843,7 +863,7 @@ def test_pages_carry_the_new_controls_in_plain_words(client, monkeypatch, path, 
 
 def test_page_scripts_are_served():
     from maverick_dashboard.app import app
-    c = TestClient(app)
+    c = TestClient(app, base_url="http://127.0.0.1")
     for name in ("lightwork-tool-ops.js", "lightwork-insight-ops.js", "lightwork-code-sandbox.js"):
         r = c.get("/static/" + name)
         assert r.status_code == 200 and "javascript" in r.headers["content-type"], name

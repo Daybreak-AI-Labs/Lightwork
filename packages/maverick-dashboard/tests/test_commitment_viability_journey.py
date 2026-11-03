@@ -47,7 +47,7 @@ def web(monkeypatch):
     monkeypatch.setattr(api, "require_permission", lambda *_args: None)
     monkeypatch.setattr(api, "context_for", lambda _request: "a" * 64)
     monkeypatch.setattr(api, "caller_principal", lambda _request: "user:owner")
-    return TestClient(app, headers={"Origin": "http://testserver",
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1",
                                     "X-Lightwork-Commitment-Context": "a" * 64})
 
 

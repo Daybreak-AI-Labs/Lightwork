@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 from maverick_dashboard.app import app
 
-client = TestClient(app, headers={"Origin": "http://testserver"})
+client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 @pytest.fixture(autouse=True)
@@ -122,7 +122,7 @@ def test_put_assumptions_validates_input():
 
 def test_put_assumptions_requires_same_origin():
     # No Origin header on a mutating request -> the CSRF check rejects it.
-    bare = TestClient(app)
+    bare = TestClient(app, base_url="http://127.0.0.1")
     resp = bare.put("/api/v1/savings/assumptions", json={"hourly_rate": 10})
     assert resp.status_code in (403, 400)
 

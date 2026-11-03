@@ -217,13 +217,21 @@ def options(request):
     message = "Choose a saved report and a timetable. Each run reads the selected records again."
     rows = []
     try:
+        if auth.require_durable_automation_creator(request) != before["owner"]:
+            raise HTTPException(409, "Your account changed. Review sign-in before scheduling.")
         authority(request, before["context"], write=True)
         runtime = _build_runtime(request.app, tenant_id=before["tenant"], request=request)
         rows = [{"value": row.report_id, "revision": row.integrity_sha256,
                  "label": row.brand.report_title + " — " + time.strftime("%b %d, %Y %H:%M UTC", time.gmtime(row.created_at))}
                 for row in runtime.store.list_reports(caller_role=runtime.role_view, limit=500)
                 if isinstance(row, reports.ExecutiveReportRecord) and row.state == "active"]
-    except (HTTPException, reports.ThirdPartyExecutiveReportError):
+    except HTTPException as exc:
+        available = False
+        if "named account" in str(exc.detail):
+            message = "Sign in with a named account to create a report schedule. You can still check or stop existing requests."
+        else:
+            message = "New report schedules are unavailable or turned off. You can still check an original request and stop future runs."
+    except reports.ThirdPartyExecutiveReportError:
         available = False
         message = "New report schedules are unavailable or turned off. You can still check an original request and stop future runs."
     if before != authority(request):
@@ -236,6 +244,8 @@ def review(request, body):
     from .schedule_ops_api import TimetableIn, _cron
     with authority_effect_fence():
         current = authority(request, body["context"], write=True)
+        if auth.require_durable_automation_creator(request) != current["owner"]:
+            raise HTTPException(409, "Your account changed. Review sign-in before scheduling.")
         runtime = _build_runtime(request.app, tenant_id=current["tenant"], request=request)
         layout = _layout(runtime, body["report"], body["revision"])
         cron, zone, runs = _cron(TimetableIn.model_validate(body["timetable"]))
@@ -310,6 +320,8 @@ def create(request, reference, body):
         if prior["found"]:
             return prior
         def current():
+            if auth.require_durable_automation_creator(request) != value["authority"]["owner"]:
+                raise HTTPException(409, "Your account changed. Review sign-in before scheduling.")
             if not _access_holds(authority(request, value["authority"]["context"], write=True), value["authority"]):
                 raise HTTPException(409, "Your access changed. Review the current report schedule again.")
             recipe = unseal(value["payload"]["report_recipe"])

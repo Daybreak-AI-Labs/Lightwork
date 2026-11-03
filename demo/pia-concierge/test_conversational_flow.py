@@ -4,6 +4,7 @@ documents to a vendor that has already been assessed."""
 from __future__ import annotations
 
 import asyncio
+import base64
 import importlib.util
 import io
 import json
@@ -53,6 +54,9 @@ def demo_app():
 
 @pytest.fixture(autouse=True)
 def _fresh_world(tmp_path, monkeypatch, demo_app):
+    monkeypatch.setenv("PIA_BASE_URL", "http://testserver")
+    monkeypatch.setenv("PIA_OPERATOR_USER", "GT Reviewer")
+    monkeypatch.setenv("PIA_OPERATOR_TOKEN", "review-test-value")
     from maverick import config, world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
@@ -79,6 +83,7 @@ def _request(method: str = "GET", path: str = "/", body: bytes = b"") -> Request
         return {"type": "http.request", "body": body, "more_body": False}
 
     headers = [(b"content-type", b"application/json")] if body else []
+    headers.append((b"authorization", b"Basic " + base64.b64encode(b"GT Reviewer:review-test-value")))
     return Request(
         {"type": "http", "method": method, "path": path, "headers": headers,
          "query_string": b"", "scheme": "http",
@@ -89,8 +94,11 @@ def _request(method: str = "GET", path: str = "/", body: bytes = b"") -> Request
 
 def _json_request(payload: dict) -> Request:
     return Request(
-        {"type": "http", "method": "POST", "path": "/x",
-         "headers": [(b"content-type", b"application/json")]},
+        {"type": "http", "method": "POST", "path": "/x", "scheme": "http",
+         "server": ("testserver", 80), "query_string": b"",
+         "headers": [(b"content-type", b"application/json"),
+                     (b"origin", b"http://testserver"),
+                     (b"authorization", b"Basic " + base64.b64encode(b"GT Reviewer:review-test-value"))]},
         _receive_of(json.dumps(payload).encode()),
     )
 
@@ -211,7 +219,7 @@ def test_onetrust_approve_completes_everything(demo_app, monkeypatch):
     ot = _submit(demo_app, monkeypatch, case)
     resp = asyncio.run(demo_app.onetrust_decide(_json_request(
         {"assessment_id": ot.assessment_id, "decision": "approve",
-         "reviewer": "GT Reviewer"})))
+         "reviewer": "Spoofed Reviewer"})))
     assert json.loads(resp.body)["ok"] is True
     assert ot.status == "Completed" and ot.decided_by == "GT Reviewer"
     assert case.stage == "filed"
@@ -223,6 +231,57 @@ def test_onetrust_approve_completes_everything(demo_app, monkeypatch):
     record = load_saved(case.assessment_id)
     assert record["status"] == "approved"
     assert demo_app.STORE.tickets[case.ticket_number].state == "Resolved"
+
+
+def test_onetrust_review_requires_authentication_and_same_origin(demo_app, monkeypatch):
+    from starlette.testclient import TestClient
+
+    case = _mkcase(demo_app)
+    ot = _submit(demo_app, monkeypatch, case)
+    client = TestClient(demo_app.app)
+    body = {"assessment_id": ot.assessment_id, "decision": "approve"}
+    assert client.post("/onetrust/decide", json=body,
+                       headers={"Origin": "http://testserver"}).status_code == 401
+    assert client.post("/onetrust/decide", json=body,
+                       headers={"Origin": "https://attacker.example"},
+                       auth=("GT Reviewer", "review-test-value")).status_code == 403
+    assert demo_app._world().get_approval(int(case.approval_id)).status == "pending"
+    monkeypatch.delenv("PIA_OPERATOR_TOKEN")
+    assert client.post("/onetrust/decide", json=body,
+                       headers={"Origin": "http://testserver"}).status_code == 503
+
+
+def test_review_accepts_configured_public_origin_behind_tls_proxy(demo_app, monkeypatch):
+    from starlette.testclient import TestClient
+
+    case = _mkcase(demo_app)
+    ot = _submit(demo_app, monkeypatch, case)
+    monkeypatch.setenv("PIA_BASE_URL", "https://PIA.example.test:443")
+    client = TestClient(demo_app.app)
+    result = client.post("/onetrust/decide",
+                         json={"assessment_id": ot.assessment_id, "decision": "approve"},
+                         headers={"Origin": "https://pia.example.test"},
+                         auth=("GT Reviewer", "review-test-value"))
+    assert result.status_code == 200
+    assert ot.decided_by == "GT Reviewer"
+
+
+def test_onetrust_does_not_complete_a_pending_quorum(demo_app, monkeypatch):
+    from types import SimpleNamespace
+
+    case = _mkcase(demo_app)
+    ot = _submit(demo_app, monkeypatch, case)
+    world = SimpleNamespace(
+        decide_approval=lambda *args, **kwargs: True,
+        get_approval=lambda approval_id: SimpleNamespace(status="pending"),
+    )
+    monkeypatch.setattr(demo_app, "_world", lambda: world)
+    monkeypatch.setattr(demo_app, "_open_followups", lambda _case: [])
+    response = asyncio.run(demo_app.onetrust_decide(_json_request(
+        {"assessment_id": ot.assessment_id, "decision": "approve"})))
+    assert json.loads(response.body)["pending"] is True
+    assert case.stage == "in_onetrust_review"
+    assert ot.status == "Under Review"
 
 
 def test_onetrust_send_back(demo_app, monkeypatch):
@@ -254,7 +313,7 @@ def _dpa_pdf(demo_app) -> bytes:
 def test_add_document_to_existing_onetrust_record(demo_app, monkeypatch):
     case = _mkcase(demo_app)
     ot = _submit(demo_app, monkeypatch, case)
-    resp = asyncio.run(demo_app.onetrust_add_document(
+    resp = asyncio.run(demo_app._onetrust_add_document(
         ot.assessment_id, _upload("acme-dpa-v2.pdf", _dpa_pdf(demo_app))))
     payload = json.loads(resp.body)
     assert payload["ok"] is True
@@ -271,26 +330,21 @@ def test_add_document_to_existing_onetrust_record(demo_app, monkeypatch):
     assert entry["re_review"] is True and ot.needs_re_review is True
 
 
-def test_chat_side_append_resolves_prior_vendor_and_closes_case(
-        demo_app, monkeypatch):
+def test_chat_side_append_requires_reviewer_authority(demo_app, monkeypatch):
     first = _mkcase(demo_app)
     ot = _submit(demo_app, monkeypatch, first)
-    # A NEW request for the same vendor: append-only, no second interview.
     second = _mkcase(demo_app, case_id="LW-PIA-T002", ticket="PRV-T-2")
-    resp = asyncio.run(demo_app.intake_append_doc(
+    response = asyncio.run(demo_app.intake_append_doc(
         second.id, _upload("acme-dpa-v2.pdf", _dpa_pdf(demo_app))))
-    payload = json.loads(resp.body)
-    assert payload["ok"] is True and payload["ot_id"] == ot.assessment_id
-    assert second.stage == "addendum_filed"
-    assert demo_app.STORE.tickets["PRV-T-2"].state == "Resolved"
-    assert len(ot.addenda) == 1
-
+    assert response.status_code == 403
+    assert second.stage == "intake_sent"
+    assert not ot.addenda
 
 def test_append_without_prior_assessment_is_refused(demo_app):
     case = _mkcase(demo_app, subject="Never Assessed Inc")
     resp = asyncio.run(demo_app.intake_append_doc(
         case.id, _upload("doc.pdf", _dpa_pdf(demo_app))))
-    assert resp.status_code == 404
+    assert resp.status_code == 403
 
 
 # --------------------------------------------------------------------------- #
@@ -349,29 +403,19 @@ def test_upload_endpoint_returns_prefills(demo_app):
     assert case.answers["pia_security"]["answer"] == "yes"
 
 
-def test_carry_forward_prefills_from_the_last_review(demo_app, monkeypatch):
+def test_carry_forward_requires_reviewer_authority(demo_app, monkeypatch):
     first = _mkcase(demo_app)
     _submit(demo_app, monkeypatch, first)
     second = _mkcase(demo_app, case_id="LW-PIA-T011", ticket="PRV-T-11")
-    resp = asyncio.run(demo_app.intake_carry_forward(second.id))
-    payload = json.loads(resp.body)
-    assert payload["ok"] is True
-    assert len(payload["prefilled"]) == len(demo_app._DEMO_ANSWERS)
-    assert payload["prior"]["ot_id"] == first.onetrust_id
-    rec = second.answers["pia_transfers"]
-    assert rec["auto"] is True and "last review" in rec["source"]
-    # Nothing to carry -> clean empty, not an error.
-    lone = _mkcase(demo_app, subject="Globex HRIS",
-                   case_id="LW-PIA-T012", ticket="PRV-T-12")
-    assert json.loads(asyncio.run(
-        demo_app.intake_carry_forward(lone.id)).body)["prefilled"] == []
-
+    response = asyncio.run(demo_app.intake_carry_forward(second.id))
+    assert response.status_code == 403
+    assert not second.answers
 
 def test_addendum_reports_gaps_closed_since_last_review(demo_app, monkeypatch):
     case = _mkcase(demo_app)
     ot = _submit(demo_app, monkeypatch, case)
     # First document: sparse DPA -> plenty of missing clauses recorded.
-    asyncio.run(demo_app.onetrust_add_document(
+    asyncio.run(demo_app._onetrust_add_document(
         ot.assessment_id, _upload("acme-dpa-v1.pdf", _dpa_pdf(demo_app))))
     # Second document: fuller DPA -> closes some of those gaps.
     fuller = demo_app._mini_pdf(
@@ -385,7 +429,7 @@ def test_addendum_reports_gaps_closed_since_last_review(demo_app, monkeypatch):
          "Deletion or return of all personal data at contract end.",
          "Assists the controller with data subject requests.",
          "Technical and organisational security measures per Art. 32."])
-    resp = asyncio.run(demo_app.onetrust_add_document(
+    resp = asyncio.run(demo_app._onetrust_add_document(
         ot.assessment_id, _upload("acme-dpa-v2.pdf", fuller)))
     entry = json.loads(resp.body)["addendum"]
     assert entry["closed_gaps"], "the fuller DPA closes earlier gaps"
@@ -525,22 +569,14 @@ def test_seeded_tenant_documents_are_clickable(demo_app, monkeypatch):
     assert ins >= 1 and dels >= 1
 
 
-def test_seeded_vendor_supports_memory_and_carry_forward(demo_app, monkeypatch):
+def test_seeded_vendor_does_not_expose_prior_assessment(demo_app, monkeypatch):
     monkeypatch.setenv("PIA_SEED_TENANT", "1")
     demo_app._seed_tenant()
-    case = _mkcase(demo_app, subject="Wayne Payments",
-                   case_id="LW-PIA-T020", ticket="PRV-T-20")
+    case = _mkcase(demo_app, subject="Wayne Payments", case_id="LW-PIA-T020", ticket="PRV-T-20")
     html = asyncio.run(demo_app.intake(_request(), case.id)).body.decode()
-    assert 'id="appendCard"' in html   # the vendor is known
-    resp = asyncio.run(demo_app.intake_carry_forward(case.id))
-    payload = json.loads(resp.body)
-    assert len(payload["prefilled"]) == 10   # seeded interview carries over
-    assert all("last review" in p["source"] for p in payload["prefilled"])
+    assert 'id="appendCard"' not in html
+    assert asyncio.run(demo_app.intake_carry_forward(case.id)).status_code == 403
 
-
-# --------------------------------------------------------------------------- #
-# Pages: the selectable chat/guided experience; suggestions panel is gone
-# --------------------------------------------------------------------------- #
 def test_intake_page_offers_both_modes_and_voice_without_suggestions(demo_app):
     case = _mkcase(demo_app)
     html = asyncio.run(demo_app.intake(_request(), case.id)).body.decode()
@@ -554,19 +590,13 @@ def test_intake_page_offers_both_modes_and_voice_without_suggestions(demo_app):
     assert "Use suggested" not in html
 
 
-def test_intake_page_offers_append_when_vendor_already_assessed(
-        demo_app, monkeypatch):
+def test_intake_page_does_not_offer_prior_record_access(demo_app, monkeypatch):
     first = _mkcase(demo_app)
     _submit(demo_app, monkeypatch, first)
     second = _mkcase(demo_app, case_id="LW-PIA-T003", ticket="PRV-T-3")
     html = asyncio.run(demo_app.intake(_request(), second.id)).body.decode()
-    assert 'id="appendCard"' in html
-    assert "Just adding documents" in html
-    # No prior vendor -> no append offer.
-    fresh = _mkcase(demo_app, subject="Globex HRIS",
-                    case_id="LW-PIA-T004", ticket="PRV-T-4")
-    html = asyncio.run(demo_app.intake(_request(), fresh.id)).body.decode()
     assert 'id="appendCard"' not in html
+    assert "Just adding documents" not in html
 
 
 def test_onetrust_page_is_a_review_surface(demo_app, monkeypatch):
@@ -644,3 +674,134 @@ def test_repeat_review_files_a_delta_and_rereviews_the_paper(
     assert round1.get("attachment_id") or round1.get("version")
     filed = demo_app._vendor_documents(case2.subject)
     assert any("redline" in d["filename"] for d in filed)
+
+
+def test_intake_grants_are_case_and_role_scoped(demo_app, monkeypatch):
+    from urllib.parse import parse_qs, urlsplit
+
+    from starlette.testclient import TestClient
+
+    monkeypatch.setattr(demo_app, "BASE_URL", "http://testserver")
+    monkeypatch.setattr(demo_app, "_recipient_allowed", lambda _address: True)
+    monkeypatch.setattr(demo_app, "_trusted_intake_base", lambda: True)
+    demo_app._INTAKE_RATE.clear()
+    messages = []
+
+    async def send_email(to, subject, body):
+        messages.append((to, subject, body))
+        return "ok"
+
+    monkeypatch.setattr(demo_app, "_send_email", send_email)
+    first = demo_app.Case(id="LW-PIA-7001", ticket_number="T1", subject="A",
+                          requester="Alice", requester_email="alice@example.test", data_types="email")
+    second = demo_app.Case(id="LW-PIA-7002", ticket_number="T2", subject="B",
+                           requester="Bob", requester_email="bob@example.test", data_types="email")
+    demo_app.STORE.cases[first.id] = first
+    demo_app.STORE.cases[second.id] = second
+    token = demo_app._issue_requester_grant(first)
+    question_ids = [q.id for q in demo_app.get_template("pia").questions]
+    with TestClient(demo_app.app) as requester, TestClient(demo_app.app) as delegate:
+        assert requester.get(f"/intake/{first.id}").status_code == 403
+        assert requester.get(f"/intake/{second.id}?grant={token}").status_code == 403
+        assert requester.get("/mail").status_code == 401
+        response = requester.get(f"/intake/{first.id}?grant={token}", follow_redirects=False)
+        assert response.status_code == 303
+        assert "grant=" not in response.headers["location"]
+        assert "httponly" in response.headers["set-cookie"].lower()
+        assert requester.get(response.headers["location"]).status_code == 200
+        assert requester.post(f"/intake/{first.id}/delegate", json={
+            "questions": [question_ids[0]], "to_email": "colleague@example.test",
+            "to_name": "Colleague",
+        }).status_code == 403  # no Origin
+        response = requester.post(f"/intake/{first.id}/delegate", headers={"Origin": "http://testserver"},
+                                  json={"questions": [question_ids[0]],
+                                        "to_email": "colleague@example.test", "to_name": "Colleague"})
+        assert response.status_code == 200
+        assert "token" not in response.json()
+        link = next(part for part in messages[-1][2].split() if "/intake/" in part)
+        delegate_token = parse_qs(urlsplit(link).query)["grant"][0]
+        assert delegate.get(f"/intake/{first.id}?grant={delegate_token}", follow_redirects=False).status_code == 303
+        page = delegate.get(f"/intake/{first.id}")
+        assert page.status_code == 200
+        assert token not in page.text and delegate_token not in page.text
+        assert requester.cookies.get("pia_intake") != delegate.cookies.get("pia_intake")
+        headers = {"Origin": "http://testserver"}
+        denied = delegate.post(f"/intake/{first.id}/answer", headers=headers,
+                               data={"question_id": question_ids[1], "answer": "yes"})
+        assert denied.status_code == 403
+        assert delegate.post(f"/intake/{first.id}/submit", headers=headers).status_code == 403
+        allowed = delegate.post(f"/intake/{first.id}/answer", headers=headers,
+                                data={"question_id": question_ids[0], "answer": "yes"})
+        assert allowed.status_code == 200
+        assert first.answers[question_ids[0]]["by"] == "Colleague"
+        assert question_ids[1] not in first.answers
+
+
+def test_requester_link_rotation_failure_preserves_existing_grant(demo_app, monkeypatch):
+    from starlette.testclient import TestClient
+
+    monkeypatch.setattr(demo_app, "BASE_URL", "http://testserver")
+    monkeypatch.setattr(demo_app, "_trusted_intake_base", lambda: True)
+    monkeypatch.setattr(demo_app, "_recipient_allowed", lambda _address: True)
+    case = _mkcase(demo_app)
+    old_token = demo_app._issue_requester_grant(case)
+
+    async def fail_email(*_args):
+        return "ERROR: smtp failed"
+
+    monkeypatch.setattr(demo_app, "_send_email", fail_email)
+    client = TestClient(demo_app.app)
+    result = client.post(f"/cases/{case.id}/intake-link", headers={"Origin": "http://testserver"},
+                         auth=("GT Reviewer", "review-test-value"))
+    assert result.status_code == 502
+    assert demo_app._grant_identity(case, old_token) == ("requester", "")
+    case.intake_grant_expires_at = 0
+    assert client.get(f"/intake/{case.id}?grant={old_token}").status_code == 403
+
+
+def test_public_webhook_requires_distinct_credential_and_bounded_body(demo_app, monkeypatch):
+    from starlette.testclient import TestClient
+
+    monkeypatch.setattr(demo_app, "_trusted_intake_base", lambda: True)
+    monkeypatch.setattr(demo_app, "_recipient_allowed", lambda _address: False)
+    monkeypatch.setenv("PIA_WEBHOOK_TOKEN", "dedicated-webhook-secret")
+    demo_app._INTAKE_RATE.clear()
+    client = TestClient(demo_app.app)
+    assert client.post("/webhook/pia", json={}, headers={"Origin": "http://testserver"}).status_code == 401
+    denied = client.post("/webhook/pia", json={}, headers={"Authorization": "Bearer dedicated-webhook-secret"})
+    assert denied.status_code == 400  # authenticated, but no permitted recipient
+    monkeypatch.setenv("PIA_WEBHOOK_TOKEN", "review-test-value")
+    reused = client.post("/webhook/pia", json={}, headers={"Authorization": "Bearer review-test-value", "Origin": "http://testserver"})
+    assert reused.status_code == 401
+    large = client.post("/webhook/pia", content=b"x" * (128 * 1024 + 1),
+                        headers={"Authorization": "Bearer review-test-value"})
+    assert large.status_code == 413
+
+
+def test_reissuing_requester_link_revokes_old_requester_and_delegate_grants(demo_app, monkeypatch):
+    from starlette.testclient import TestClient
+
+    monkeypatch.setattr(demo_app, "BASE_URL", "http://testserver")
+    monkeypatch.setattr(demo_app, "_trusted_intake_base", lambda: True)
+    monkeypatch.setattr(demo_app, "_recipient_allowed", lambda _address: True)
+    case = _mkcase(demo_app)
+    previous = demo_app._issue_requester_grant(case)
+    delegate_token = "x" * 43
+    case.delegations[demo_app._grant_hash(delegate_token)] = {
+        "qids": ["pia_processors"], "to_name": "Colleague", "expires_at": 2**40,
+    }
+    sent = []
+
+    async def deliver(to, subject, body):
+        sent.append(body)
+        return "sent"
+
+    monkeypatch.setattr(demo_app, "_send_email", deliver)
+    result = TestClient(demo_app.app).post(
+        f"/cases/{case.id}/intake-link", headers={"Origin": "http://testserver"},
+        auth=("GT Reviewer", "review-test-value"),
+    )
+    assert result.status_code == 200
+    assert demo_app._grant_identity(case, previous) is None
+    assert demo_app._grant_identity(case, delegate_token) is None
+    assert "?grant=" in sent[0]

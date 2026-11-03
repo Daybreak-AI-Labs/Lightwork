@@ -28,7 +28,7 @@ def page_client() -> TestClient:
             {"policy_publication_links_enabled": enabled},
         )
 
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def test_operator_page_renders_full_safe_contract(page_client: TestClient) -> None:
@@ -104,6 +104,6 @@ def test_main_dashboard_mounts_only_the_public_retrieval_auth_exemption(
     assert page["floor"] == "operate"
     assert page["in_nav"] is False
 
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     assert client.get("/api/v1/public/policies/PPL-opaque").status_code == 404
     assert client.get("/api/v1/policy-publication-links/audit").status_code == 401

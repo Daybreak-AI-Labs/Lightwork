@@ -507,7 +507,7 @@ def _attachment_identity(info: os.stat_result) -> tuple[int, int, int, int]:
     return info.st_dev, info.st_ino, info.st_mode, info.st_nlink
 
 
-def _verify_stored_attachment(path: Path, expected_digest: str) -> None:
+def _verify_stored_attachment(path: Path, expected_digest: str) -> bytes:
     """Bind a private regular path to its descriptor and content address."""
     try:
         before = path.lstat()
@@ -564,6 +564,33 @@ def _verify_stored_attachment(path: Path, expected_digest: str) -> None:
         len(expected_digest) == 16 and actual.startswith(expected_digest)
     ):
         raise AttachmentRejected("stored attachment content-address mismatch")
+    return payload
+
+
+@contextmanager
+def _verified_companion_path(goal_id: int, attachment, root: Path | None) -> Iterator[Path]:
+    """Snapshot only the registered attachment into a private working file."""
+    digest = attachment.sha256
+    filename = attachment.filename
+    if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise AttachmentRejected("invalid attachment digest")
+    _validate_portable_name(filename, reserve_units=_CONTENT_PREFIX_UNITS)
+    directory = _root_for_goal(goal_id, root)
+    source = Path(os.path.abspath(attachment.path))
+    canonical = f"{digest[:16]}-{filename}"
+    # Clarification submissions publish attempt-exclusive filenames so they
+    # can safely roll back only their own files after an interrupted answer.
+    exclusive = rf"{digest[:16]}-c[0-9a-f]{{16}}-{re.escape(filename[-80:])}"
+    if source.parent != Path(os.path.abspath(directory)) or not (
+        source.name == canonical or re.fullmatch(exclusive, source.name)
+    ):
+        raise AttachmentRejected("attachment path does not match its goal and content address")
+    payload = _verify_stored_attachment(source, digest)
+    with tempfile.TemporaryDirectory(prefix="mvk-companion-") as directory:
+        file_lock.ensure_private_directory(directory)
+        snapshot = Path(directory) / filename
+        file_lock.atomic_create_bytes(snapshot, payload)
+        yield snapshot
 
 
 def _publish_attachment(path: Path, data: bytes, expected_digest: str) -> bool:
@@ -700,6 +727,7 @@ def store(
     existing_total: int = 0,
     root: Path | None = None,
     generated_companion: bool = False,
+    mirror: bool = True,
 ) -> Stored:
     """Validate and publish one file; metadata admission serializes goal quotas."""
     sha256 = validate_attachment(filename, mime, data, existing_total=existing_total,
@@ -712,7 +740,7 @@ def store(
     dest = dest_dir / f"{sha256[:16]}-{filename}"
     on_disk = _encode_for_disk(data, dest)
     created = _publish_attachment(dest, on_disk, sha256)
-    if created and s3_mirror_enabled():
+    if created and mirror and s3_mirror_enabled():
         _s3_mirror(goal_id, dest, mime, on_disk)
 
     return Stored(
@@ -920,8 +948,8 @@ def _companion_feature(key: str, env: str) -> bool:
 def _transcribe_media(path: Path) -> str | None:
     """Speech-to-text via the kernel STT backends. None when unavailable."""
     try:
-        from .tools.voice import _run_transcribe
-        out = _run_transcribe({"source": str(path)}, None)
+        from .tools.voice import _run_transcribe_internal
+        out = _run_transcribe_internal({"source": str(path)})
     except Exception:  # noqa: BLE001 -- companion generation never raises
         return None
     from .tool_results import tool_result_failed
@@ -962,7 +990,9 @@ def companion_coverage(world, goal_id: int) -> list[dict]:
     return result
 
 
-def generate_companions(world, goal_id: int, *, root: Path | None = None) -> int:
+def generate_companions(
+    world, goal_id: int, *, root: Path | None = None, mirror: bool = True,
+) -> int:
     """Create text companions for a goal's media/document attachments.
 
     For each audio/video attachment, a ``<name>.transcript.txt`` (kernel STT
@@ -1004,7 +1034,7 @@ def generate_companions(world, goal_id: int, *, root: Path | None = None) -> int
         if name in have:
             continue
         try:
-            with plaintext_path(a.path) as source:
+            with _verified_companion_path(goal_id, a, root) as source:
                 result = produce(source)
         except (OSError, ValueError, AttachmentRejected):
             continue
@@ -1027,7 +1057,7 @@ def generate_companions(world, goal_id: int, *, root: Path | None = None) -> int
             data = text.encode("utf-8")
             rec = store(goal_id, name, "text/plain", data,
                         existing_total=total, root=root,
-                        generated_companion=True)
+                        generated_companion=True, mirror=mirror)
             world.add_attachment(goal_id, rec.filename, rec.mime,
                                  rec.size_bytes, rec.sha256, str(rec.path))
         except Exception:  # noqa: BLE001 -- quota/store issues: skip quietly

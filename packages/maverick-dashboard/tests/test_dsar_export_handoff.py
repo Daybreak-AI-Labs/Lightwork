@@ -22,7 +22,7 @@ def client(monkeypatch, tmp_path):
     config.reset_config_cache()
     app = FastAPI()
     app.include_router(api.router)
-    yield TestClient(app, headers={"Origin": "http://testserver"})
+    yield TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     config.reset_config_cache()
 
 

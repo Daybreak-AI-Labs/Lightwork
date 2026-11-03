@@ -63,6 +63,11 @@ KINDS = ("success", "failure", "lesson")
 _caller: ContextVar[str | None] = ContextVar("fleet_caller", default=None)
 
 
+def current_caller() -> str | None:
+    """Return the transport-bound fleet identity, if any."""
+    return _caller.get()
+
+
 @contextmanager
 def bind_caller(identity: str | None):
     """Bind the authenticated caller identity for fleet ops in this context.
@@ -78,6 +83,16 @@ def bind_caller(identity: str | None):
         yield
     finally:
         _caller.reset(token)
+
+
+@contextmanager
+def bind_verified_caller(identity: str):
+    """Bind an external caller without replacing a transport-bound identity."""
+    existing = _caller.get()
+    if existing is not None and existing != identity:
+        raise PermissionError("fleet caller identity does not match the authenticated caller")
+    with bind_caller(identity):
+        yield
 
 
 def _authorize_claim(agent_id: str) -> str | None:
@@ -366,14 +381,13 @@ def ingest(record: dict, *, shield: Any | None = None) -> tuple[bool, str]:
     if raw_domain and domain is None:
         return False, "record blocked by safety screening"
 
-    # Trust-plane gate on the WRITE path (memory-poisoning defense): when
-    # engaged, an external agent may only deposit into a data scope its
-    # [agent_trust] entry permits — the same gate recall uses. Disengaged ->
-    # no-op (roster check alone, as before). Writes are the higher-trust op, so
-    # gating only recall (read) was backwards.
+    # A per-agent credential always carries its registered data scopes, even
+    # when optional installation-wide default-deny enforcement is disabled.
+    # Shared-operator and local calls retain their existing trust contract.
     try:
         from . import agent_trust
         enforced, registry = agent_trust.load_trust_state()
+        enforced = enforced or bool(_caller.get())
         if enforced:
             d = agent_trust.decide_memory_access(
                 agent_id, domain, registry=registry, enforced=True)
@@ -442,16 +456,13 @@ def recall(
     if denial:
         _audit("recall_blocked", source=source, reason=denial)
         return "", denial
-    # Data-scope control: when the Agent Trust Plane is engaged, an external
-    # agent may only recall a data scope its [agent_trust] entry allows, AND the
-    # returned content is HARD-FILTERED to that scope (department is a real
-    # WHERE clause here, not just a ranking boost). An unscoped (domain=None)
-    # recall is denied when engaged — omitting the scope must not read across
-    # all departments. Disengaged -> no-op (roster check alone, as before).
+    # Per-agent credentials always enforce their data scopes and hard-filter
+    # recall; global trust enforcement also applies this to other callers.
     enforced = False
     try:
         from . import agent_trust
         enforced, registry = agent_trust.load_trust_state()
+        enforced = enforced or bool(_caller.get())
         if enforced:
             d = agent_trust.decide_memory_access(
                 agent_id, domain, registry=registry, enforced=True)
@@ -527,5 +538,5 @@ def status() -> dict:
 
 __all__ = [
     "KINDS", "enabled", "register_agent", "roster", "ingest", "recall",
-    "status", "inbox_dir", "registry_path", "bind_caller",
+    "status", "inbox_dir", "registry_path", "bind_caller", "bind_verified_caller", "current_caller",
 ]

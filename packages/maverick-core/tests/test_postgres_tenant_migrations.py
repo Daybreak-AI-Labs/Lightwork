@@ -388,11 +388,10 @@ def test_projects_migration_adds_table_and_goal_fk():
     assert "ALTER TABLE goals ADD COLUMN IF NOT EXISTS project_id INTEGER" in joined
 
 
-def test_tenant_scope_noop_without_active_tenant(monkeypatch):
+def test_tenant_scope_limits_unbound_reads_to_legacy_rows(monkeypatch):
     monkeypatch.setattr(pg, "_active_tenant", lambda: None)
-    frag, params = pg._tenant_scope()
-    assert frag == ""
-    assert params == []
+    assert pg._tenant_scope() == ("tenant_id IS NULL", [])
+    assert pg._tenant_scope("g.tenant_id") == ("g.tenant_id IS NULL", [])
 
 
 def test_erasure_scope_never_turns_unbound_admin_view_into_global_delete(
@@ -667,7 +666,10 @@ def test_create_goal_persists_owner_with_tenant(monkeypatch):
         owner="user:alice",
         execution_principal="agent:worker",
     ) == 99
-    sql, params = cursor.calls[0]
+    parent_sql, parent_params = cursor.calls[0]
+    assert "tenant_id = %s FOR SHARE" in parent_sql
+    assert parent_params == (4, "tenant-a")
+    sql, params = cursor.calls[-1]
     # domain/project_id joined the
     # column list (signature parity with the SQLite backend), between
     # execution_principal and tenant_id.

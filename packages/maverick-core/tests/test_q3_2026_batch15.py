@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import maverick.tools.view_video as vv
 from maverick.tools.view_video import _evenly_spaced, view_video
@@ -31,9 +32,9 @@ def test_view_video_missing_ffmpeg(monkeypatch):
     assert out.startswith("ERROR") and "ffmpeg" in out
 
 
-def test_view_video_missing_file(monkeypatch):
+def test_view_video_missing_file(monkeypatch, tmp_path):
     monkeypatch.setattr(vv, "_need", lambda b: None)
-    out = view_video().fn({"source": "/no/such/video.mp4"})
+    out = view_video(sandbox=SimpleNamespace(workdir=tmp_path)).fn({"source": str(tmp_path / "missing.mp4")})
     assert "video file not found" in out.lower()
 
 
@@ -42,7 +43,7 @@ def test_view_video_probe_failure(monkeypatch, tmp_path):
     vid.write_bytes(b"\x00")
     monkeypatch.setattr(vv, "_need", lambda b: None)
     monkeypatch.setattr(vv, "_probe_duration", lambda src, sandbox: None)
-    out = view_video().fn({"source": str(vid)})
+    out = view_video(sandbox=SimpleNamespace(workdir=tmp_path)).fn({"source": str(vid)})
     assert "could not probe video duration" in out.lower()
 
 
@@ -52,7 +53,7 @@ def test_view_video_no_frames_extracted(monkeypatch, tmp_path):
     monkeypatch.setattr(vv, "_need", lambda b: None)
     monkeypatch.setattr(vv, "_probe_duration", lambda src, sandbox: 10.0)
     monkeypatch.setattr(vv, "_extract_frames", lambda src, ts, tmp, sandbox: [])
-    out = view_video().fn({"source": str(vid)})
+    out = view_video(sandbox=SimpleNamespace(workdir=tmp_path)).fn({"source": str(vid)})
     assert "extracted no frames" in out.lower()
 
 
@@ -91,7 +92,7 @@ def _prep(monkeypatch, tmp_path, *, frames):
 def test_view_video_full_flow_builds_vision_blocks(monkeypatch, tmp_path):
     frames = [(2.0, b"\xff\xd8a"), (6.0, b"\xff\xd8b"), (10.0, b"\xff\xd8c")]
     vid = _prep(monkeypatch, tmp_path, frames=frames)
-    out = view_video().fn({"source": str(vid), "prompt": "What instrument?"})
+    out = view_video(sandbox=SimpleNamespace(workdir=tmp_path)).fn({"source": str(vid), "prompt": "What instrument?"})
     assert out == "a cat plays the piano, then jumps down"
 
     content = _FakeLLM.last_messages[0]["content"]
@@ -111,7 +112,7 @@ def test_view_video_passes_bound_budget_to_vision_call(monkeypatch, tmp_path):
     frames = [(2.0, b"\xff\xd8a")]
     vid = _prep(monkeypatch, tmp_path, frames=frames)
 
-    out = view_video(budget=budget).fn({"source": str(vid)})
+    out = view_video(sandbox=SimpleNamespace(workdir=tmp_path), budget=budget).fn({"source": str(vid)})
 
     assert out == "a cat plays the piano, then jumps down"
     assert _FakeLLM.last_budget is budget
@@ -130,7 +131,7 @@ def test_view_video_clamps_num_frames(monkeypatch, tmp_path):
     monkeypatch.setattr(vv, "_probe_duration", lambda src, sandbox: 60.0)
     monkeypatch.setattr(vv, "_extract_frames", _capture)
     monkeypatch.setattr("maverick.llm.LLM", _FakeLLM)
-    view_video().fn({"source": str(vid), "num_frames": 100})
+    view_video(sandbox=SimpleNamespace(workdir=tmp_path)).fn({"source": str(vid), "num_frames": 100})
     assert seen["n"] == 20  # capped at _MAX_FRAMES
 
 
@@ -138,7 +139,7 @@ def test_view_video_includes_transcript_when_requested(monkeypatch, tmp_path):
     frames = [(3.0, b"\xff\xd8a")]
     vid = _prep(monkeypatch, tmp_path, frames=frames)
     monkeypatch.setattr(vv, "_transcribe_track", lambda src, tmp, sandbox: "hello from the clip")
-    view_video().fn({"source": str(vid), "transcribe": True})
+    view_video(sandbox=SimpleNamespace(workdir=tmp_path)).fn({"source": str(vid), "transcribe": True})
     texts = [b["text"] for b in _FakeLLM.last_messages[0]["content"]
              if b.get("type") == "text"]
     assert any("hello from the clip" in t for t in texts)
@@ -152,7 +153,7 @@ def test_view_video_skips_transcript_by_default(monkeypatch, tmp_path):
         raise AssertionError("_transcribe_track must not run when transcribe is false")
 
     monkeypatch.setattr(vv, "_transcribe_track", _boom)
-    out = view_video().fn({"source": str(vid)})
+    out = view_video(sandbox=SimpleNamespace(workdir=tmp_path)).fn({"source": str(vid)})
     assert out == "a cat plays the piano, then jumps down"
 
 
@@ -203,3 +204,16 @@ def test_view_video_passes_sandbox_to_run_cmd(monkeypatch, tmp_path):
 
     out = view_video(_SB()).fn({"source": "v.mp4", "num_frames": 2})
     assert out == "a cat plays the piano, then jumps down"
+
+
+def test_video_audio_uses_its_private_generated_file(monkeypatch, tmp_path):
+    from maverick.tools import voice
+
+    def extract(_sandbox, cmd, *, timeout=600.0):
+        Path(cmd[-1]).write_bytes(b"ID3audio")
+        return 0, "", ""
+
+    monkeypatch.setattr(vv, "_run_cmd", extract)
+    monkeypatch.setattr(voice, "_default_stt_backend", lambda: "local")
+    monkeypatch.setattr(voice, "_whisper_local", lambda path, _lang: path.read_bytes().decode())
+    assert vv._transcribe_track("source.mp4", str(tmp_path), object()) == "ID3audio"

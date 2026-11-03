@@ -157,7 +157,7 @@ def request_for(app: FastAPI) -> Request:
             "query_string": b"",
             "headers": [],
             "client": ("127.0.0.1", 1234),
-            "server": ("testserver", 80),
+            "server": ("127.0.0.1", 80),
             "app": app,
         }
     )

@@ -811,7 +811,7 @@ def test_status_aggregates_containment_and_wall_violations():
 def test_memory_ingest_and_recall_over_the_gateway(monkeypatch):
     monkeypatch.setenv("MAVERICK_FLEET_MEMORY", "1")
     from maverick import fleet_memory
-    _enroll()
+    _enroll(data_scopes=["sales"])
     # Enrollment registered the agent on the fleet roster under its platform.
     assert any(r["agent_id"] == "sf-quotebot" and r["vendor"] == "agentforce"
                for r in fleet_memory.roster())
@@ -825,6 +825,11 @@ def test_memory_ingest_and_recall_over_the_gateway(monkeypatch):
     assert xa.status()["memory_contributions"] == 1
     context, reason = xa.memory_recall("sf-quotebot", "renewal quote")
     assert reason in ("", "ok") or isinstance(context, str)
+    ok, reason = xa.memory_ingest("sf-quotebot", {
+        "kind": "success", "goal_text": "finance", "domain": "finance"})
+    assert not ok and "scope" in reason
+    context, reason = xa.memory_recall("sf-quotebot", "finance", domain="finance")
+    assert not context and "scope" in reason
     # Unenrolled and contained agents are refused.
     ok, reason = xa.memory_ingest("ghost", {"kind": "success",
                                             "goal_text": "x"})

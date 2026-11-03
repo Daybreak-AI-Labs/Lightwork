@@ -381,7 +381,10 @@ def _trust_capability(context, agent):
         )
         _abort(context, _grpc_code().UNAVAILABLE, "agent trust policy unavailable")
     if enforced is False:
-        return None
+        # A per-agent bearer authenticates a registry entry even when the
+        # optional trust plane is disengaged. Its tool ceiling is still an
+        # explicit restriction on that credential, not an optional policy.
+        return agent.capability() if agent is not None else None
     agent_id = agent.id if agent is not None else "grpc"
     try:
         decision = agent_trust.decide_inbound(

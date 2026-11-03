@@ -21,7 +21,7 @@ _SCRIPTS = [
 @pytest.fixture
 def client(monkeypatch):
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 @pytest.mark.parametrize("name", _SCRIPTS)

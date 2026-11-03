@@ -82,15 +82,15 @@ def test_spec_to_dict_roundtrip_http():
 def test_load_and_resolve(fake_registry):
     names = {e.name for e in mcp_registry.load_mcp_registry(indexes=fake_registry)}
     assert names == {"github", "remote-thing"}
-    assert mcp_registry.resolve_mcp("github", indexes=fake_registry).verified is True
+    assert mcp_registry.resolve_mcp("github", indexes=fake_registry).verified is False
     assert mcp_registry.resolve_mcp("absent", indexes=fake_registry) is None
 
 
-def test_install_builds_validated_spec(fake_registry):
-    spec = mcp_registry.install_mcp_from_registry("github", indexes=fake_registry)
-    assert spec.command == "github-mcp" and spec.args == ["--stdio"]
-    http = mcp_registry.install_mcp_from_registry("remote-thing", indexes=fake_registry)
-    assert http.is_http and http.url == "https://mcp.example.com/sse"
+def test_install_refuses_unauthenticated_registry_specs(fake_registry):
+    with pytest.raises(ValueError):
+        mcp_registry.install_mcp_from_registry("github", indexes=fake_registry)
+    with pytest.raises(ValueError, match="not authenticated"):
+        mcp_registry.install_mcp_from_registry("remote-thing", indexes=fake_registry)
 
 
 def test_install_unknown_name_raises(fake_registry):
@@ -175,6 +175,16 @@ def test_registry_rejects_interpreter_even_without_inline_eval_flags():
         _validate_registry_spec(spec)
 
 
+def test_registry_rejects_untrusted_process_environment():
+    from maverick.mcp_client import MCPServerSpec
+    from maverick.mcp_registry import _validate_registry_spec
+
+    for options in ({"inherit_env": True}, {"env": {"LD_PRELOAD": "/tmp/library.so"}}):
+        spec = MCPServerSpec(name="untrusted", command="server", pin_sha256="a" * 64, **options)
+        with pytest.raises(ValueError, match="environment"):
+            _validate_registry_spec(spec)
+
+
 def test_registry_rejects_pinned_interpreter_with_unpinned_script():
     from maverick.mcp_registry import _validate_registry_spec
     spec = MCPServerSpec(name="ok", command="python3",
@@ -230,11 +240,10 @@ def test_remove_preserves_unrelated_config(tmp_path):
     assert parsed["budget"]["max_dollars"] == 5.0
 
 
-def test_install_to_config_roundtrip(tmp_path, fake_registry):
-    # End to end: resolve from registry -> validated spec -> write -> read back
-    # -> same spec via the loader path the kernel uses.
+def test_operator_configured_http_server_roundtrip(tmp_path):
+    # Operator-authored config stays available independently of the registry.
     cfg = tmp_path / "config.toml"
-    spec = mcp_registry.install_mcp_from_registry("github", indexes=fake_registry)
+    spec = MCPServerSpec(name="remote-thing", url="https://mcp.example.com/sse")
     mcp_registry.add_mcp_server_to_config(spec.name, spec.to_dict(), path=cfg)
-    server_cfg = _toml_load(cfg)["mcp_servers"]["github"]
-    assert MCPServerSpec.from_config("github", server_cfg) == spec
+    server_cfg = _toml_load(cfg)["mcp_servers"]["remote-thing"]
+    assert MCPServerSpec.from_config("remote-thing", server_cfg) == spec

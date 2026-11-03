@@ -24,7 +24,8 @@ def _iso(monkeypatch, tmp_path):
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     config.reset_config_cache()
     from maverick_dashboard import app as dash_app
-    from maverick_dashboard import integration_readiness
+    from maverick_dashboard import integration_readiness, rbac
+    rbac.set_role("user:alice", "operator")
     integration_readiness._clear_for_testing()
     dash_app._world_cache.clear()
     yield
@@ -235,7 +236,7 @@ def test_dashboard_routes_still_use_the_shared_functions():
     # Local dashboard credentials have no employee identity and may decide
     # only unowned approval content; a named request needs a reviewed grant.
     aid, binding = _approval(requested_by="")
-    client = TestClient(_app(), headers={"Origin": "http://testserver"})
+    client = TestClient(_app(), base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     r = client.post(f"/api/v1/approvals/{aid}/approve",
                     headers={"X-Lightwork-Approval-Binding": binding})
     assert r.status_code == 204
@@ -273,7 +274,7 @@ def _save_teams(client):
 
 def test_channels_page_tests_the_teams_connection(monkeypatch):
     from maverick_dashboard import channel_check_api
-    client = TestClient(_app(), headers={"Origin": "http://testserver"})
+    client = TestClient(_app(), base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     _save_teams(client)
     page = client.get("/channels").text
     assert "Microsoft Teams" in page and "People linked to Teams" in page and "App ID" in page
@@ -296,7 +297,7 @@ def test_channels_page_tests_the_teams_connection(monkeypatch):
 
 def test_channels_page_links_teams_accounts(monkeypatch):
     from maverick import teams_identity
-    client = TestClient(_app(), headers={"Origin": "http://testserver"})
+    client = TestClient(_app(), base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     r = client.post("/channels/teams/link", data={"teams_id": "Alice@Example.com", "principal": "alice",
                                                   "approver": "on"}, follow_redirects=False)
     assert r.status_code == 303 and "saved=linked" in r.headers["location"]
@@ -315,7 +316,7 @@ def test_channels_page_links_teams_accounts(monkeypatch):
     r = client.post("/channels/teams/unlink", data={"teams_id": "alice@example.com"}, follow_redirects=False)
     assert "saved=unlinked" in r.headers["location"] and teams_identity.link_for("alice@example.com") is None
     # Same-origin + admin only.
-    assert TestClient(_app()).post("/channels/teams/link", data={"teams_id": "a@b.c", "principal": "x"}).status_code == 403
+    assert TestClient(_app(), base_url="http://127.0.0.1").post("/channels/teams/link", data={"teams_id": "a@b.c", "principal": "x"}).status_code == 403
 
 
 def test_teams_settings_are_in_the_catalog():

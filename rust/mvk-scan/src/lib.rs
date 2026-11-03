@@ -28,6 +28,39 @@ pub(crate) fn compile_pattern(pattern: &str) -> Result<fancy_regex::Regex, fancy
         .build()
 }
 
+/// Search a lookaround-free candidate pattern, checking boundaries against the
+/// original input. Where a valid match can overlap a rejected candidate, retry
+/// one character after its start. Otherwise skip the rejected candidate to
+/// avoid rescanning an unbounded suffix. Accepted matches are non-overlapping.
+pub(crate) fn filtered_matches<'t>(
+    re: &fancy_regex::Regex,
+    text: &'t str,
+    retry_overlaps: bool,
+    accept: impl Fn(&str, usize, usize) -> Result<bool, String>,
+) -> Result<Vec<fancy_regex::Match<'t>>, String> {
+    let mut matches = Vec::new();
+    let mut offset = 0;
+    while offset < text.len() {
+        let Some(m) = re.find_from_pos(text, offset).map_err(|e| e.to_string())? else {
+            break;
+        };
+        if accept(text, m.start(), m.end())? {
+            offset = m.end();
+            matches.push(m);
+        } else if retry_overlaps {
+            offset = m.start()
+                + text[m.start()..]
+                    .chars()
+                    .next()
+                    .expect("nonempty candidate")
+                    .len_utf8();
+        } else {
+            offset = m.end();
+        }
+    }
+    Ok(matches)
+}
+
 /// Convert regex byte offsets to **codepoint** indices, preserving input order.
 ///
 /// Python's `re` reports `Match.span()` as indices into the `str` (a sequence of

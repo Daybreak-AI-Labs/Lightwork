@@ -48,7 +48,7 @@ def _client(monkeypatch: pytest.MonkeyPatch, *, permitted: bool = True) -> TestC
     monkeypatch.setattr(api, "require_permission", require)
     app = FastAPI()
     app.include_router(api.create_evolution_ledger_router())
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def test_history_checkpoint_native_prefix_roundtrip_and_replacement_refusal(tmp_path, monkeypatch):

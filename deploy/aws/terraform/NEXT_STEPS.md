@@ -69,18 +69,21 @@ terraform version || {
 
 ### 1b. Create the untracked operator inputs
 
-`oidc.auto.tfvars` is tracked and holds only non-personal configuration. The
-two inputs that identify people are read from `local.auto.tfvars`, which git
-ignores:
+Deployment-specific identifiers and the shared key digest belong in
+`local.auto.tfvars`, which git ignores. The previously tracked
+`oidc.auto.tfvars` has been removed; move its values into the operator file or
+the deployment pipeline's protected variables:
 
 ```bash
-cp deploy/aws/terraform/local.auto.tfvars.example deploy/aws/terraform/local.auto.tfvars
-# fill in dashboard_admins (the break-glass Auth0 principals) and email_from
+test -e deploy/aws/terraform/local.auto.tfvars || \
+  cp deploy/aws/terraform/local.auto.tfvars.example deploy/aws/terraform/local.auto.tfvars
+# Edit the existing file, preserving its admins and email settings. Add the
+# domain, OIDC settings, encryption digest and any feature flags in use.
 ```
 
-An existing deployment must get this file before its next `terraform apply`,
-or the plan removes the break-glass admins and switches platform email to the
-`variables.tf` default from-address. A running deployment's current values
+An existing deployment must supply these values before its next `terraform
+apply`; inspect the plan carefully before applying. The domain and encryption
+digest are required inputs. A running deployment's current values
 are the `MAVERICK_DASHBOARD_ADMINS` and `EMAIL_FROM` environment variables of
 its task definition, whose family is `<project>-<environment>`:
 

@@ -175,6 +175,7 @@ class GuidedJsonlObserver:
         self.follow = follow
         self.exhausted = False
         self.line_number = 0
+        self.max_lines: int | None = None
         self._handle = handle if handle is not None else path.open("r", encoding="utf-8")
 
     @classmethod
@@ -191,6 +192,8 @@ class GuidedJsonlObserver:
         import json
 
         while True:
+            if self.max_lines is not None and self.line_number >= self.max_lines:
+                return None
             line = self._handle.readline(self._MAX_LINE_BYTES + 1)
             if line == "":
                 if self.follow:
@@ -407,6 +410,7 @@ class EkkoDaemon:
         *,
         stop_when: Callable[[], bool] | None = None,
         max_events: int | None = None,
+        max_idle_sleep: float | None = None,
     ) -> int:
         """Run until explicitly stopped, terminal, exhausted, or bounded."""
         if max_events is not None and max_events < 0:
@@ -430,10 +434,21 @@ class EkkoDaemon:
                 and self.accepted_events - accepted_at_start >= max_events
             ):
                 break
+            line_before = (self.observer.line_number
+                           if isinstance(self.observer, GuidedJsonlObserver) else None)
             inserted = self.run_once()
             if not inserted:
+                if line_before is not None and self.observer.exhausted:
+                    break
+                if line_before is not None and self.observer.line_number > line_before:
+                    # An already uploaded line was consumed, or EOF reached;
+                    # this is not an idle live-observer poll.
+                    continue
                 # Explicitly bounded; injected tests do not actually wait.
-                self._sleep(float(self.policy.poll_interval_seconds))
+                delay = float(self.policy.poll_interval_seconds)
+                if max_idle_sleep is not None:
+                    delay = min(delay, max_idle_sleep)
+                self._sleep(delay)
         return self.accepted_events - accepted_at_start
 
     def pause(self) -> WorkSession:

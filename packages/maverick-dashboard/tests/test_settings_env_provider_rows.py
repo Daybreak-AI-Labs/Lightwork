@@ -97,8 +97,8 @@ def test_settings_page_no_longer_says_nothing_is_connected(monkeypatch):
     # The routed model, exactly as in the audit's lab: tasks already run on it.
     monkeypatch.setenv("MAVERICK_MODEL_OVERRIDE", "openai_compatible:fake-model")
     client = TestClient(
-        __import__("maverick_dashboard.app", fromlist=["app"]).app,
-        headers={"Origin": "http://testserver"},
+        __import__("maverick_dashboard.app", fromlist=["app"]).app, base_url="http://127.0.0.1",
+        headers={"Origin": "http://127.0.0.1"},
     )
     response = client.get("/settings")
     assert response.status_code == 200
@@ -151,8 +151,8 @@ def test_provider_form_key_rotation_preserves_the_server_address_source(monkeypa
     # Discovery is a separate network operation, not evidence of a saved key.
     monkeypatch.setattr(admin_pages, "_refresh_models_quietly", lambda _name: None)
     client = TestClient(
-        __import__("maverick_dashboard.app", fromlist=["app"]).app,
-        headers={"Origin": "http://testserver"},
+        __import__("maverick_dashboard.app", fromlist=["app"]).app, base_url="http://127.0.0.1",
+        headers={"Origin": "http://127.0.0.1"},
     )
     page = client.get("/settings").text
     field = re.search(r'<input[^>]*id="provider-url-openai_compatible"[^>]*>', page).group()
@@ -201,8 +201,8 @@ def test_provider_address_sign_in_material_is_not_displayed_or_prefilled(monkeyp
     assert row["base_url"] == _ENV_URL
     assert row["base_url_needs_repair"] is True
     client = TestClient(
-        __import__("maverick_dashboard.app", fromlist=["app"]).app,
-        headers={"Origin": "http://testserver"},
+        __import__("maverick_dashboard.app", fromlist=["app"]).app, base_url="http://127.0.0.1",
+        headers={"Origin": "http://127.0.0.1"},
     )
     page = client.get("/settings").text
     assert "private-password" not in page and "private-token" not in page and "private-fragment" not in page
@@ -226,8 +226,8 @@ def test_provider_rejects_an_unusable_address_before_rotating_the_key(monkeypatc
     from maverick_dashboard import settings_store
 
     client = TestClient(
-        __import__("maverick_dashboard.app", fromlist=["app"]).app,
-        headers={"Origin": "http://testserver"},
+        __import__("maverick_dashboard.app", fromlist=["app"]).app, base_url="http://127.0.0.1",
+        headers={"Origin": "http://127.0.0.1"},
     )
     response = client.post("/settings/providers", data={
         "provider": "openai_compatible", "api_key": "new-key-5678", "base_url": address,  # pragma: allowlist secret -- test value
@@ -240,8 +240,8 @@ def test_provider_rejects_an_unusable_address_before_rotating_the_key(monkeypatc
 
 def test_self_hosted_setup_hints_match_the_service_and_keyless_model(monkeypatch):
     client = TestClient(
-        __import__("maverick_dashboard.app", fromlist=["app"]).app,
-        headers={"Origin": "http://testserver"},
+        __import__("maverick_dashboard.app", fromlist=["app"]).app, base_url="http://127.0.0.1",
+        headers={"Origin": "http://127.0.0.1"},
     )
     page = client.get("/settings").text
 
@@ -261,8 +261,8 @@ def test_all_settings_shows_effective_server_fallback_and_safe_replacement(monke
     from maverick import config
 
     client = TestClient(
-        __import__("maverick_dashboard.app", fromlist=["app"]).app,
-        headers={"Origin": "http://testserver"},
+        __import__("maverick_dashboard.app", fromlist=["app"]).app, base_url="http://127.0.0.1",
+        headers={"Origin": "http://127.0.0.1"},
     )
 
     def current_rows():
@@ -314,8 +314,8 @@ def test_reset_installer_address_reveals_server_fallback(monkeypatch):
     path.write_text('[providers.openai_compatible]\nbase_url = "https://installer.example.test/v1"\n', encoding="utf-8")
     config.reset_config_cache()
     client = TestClient(
-        __import__("maverick_dashboard.app", fromlist=["app"]).app,
-        headers={"Origin": "http://testserver"},
+        __import__("maverick_dashboard.app", fromlist=["app"]).app, base_url="http://127.0.0.1",
+        headers={"Origin": "http://127.0.0.1"},
     )
     initial = client.get("/api/v1/settings/catalog?group=integrations").json()
     response = client.post("/api/v1/settings/catalog", json={

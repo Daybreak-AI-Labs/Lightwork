@@ -6,7 +6,7 @@ Lightwork wraps its agent loop in Agent Shield (`packages/maverick-shield`) at t
 2. **Tool-call scan** — every `tool_use` request goes through `shield.scan_tool_call(name, args)` before the sandbox executes it.
 3. **Output scan** — every final answer goes through `shield.scan_output()` before reaching the user.
 
-All three chokepoints additionally run a **decode/defang pre-pass** (`maverick_shield/deobfuscate.py`): base64 / hex / percent-encoded payloads are decoded and Unicode homoglyphs (Cyrillic/Greek lookalikes NFKC leaves alone) plus zero-width/bidi chars are folded, then the detectors re-run over each variant — so an *encoded* `rm -rf /` is caught even when the literal surface form hides it. This is part of the **built-in** shield (not the optional SDK), is monotonic (it can only turn an allowed scan into a block, never the reverse), and is bounded against decode bombs. Detector failures, including decoding and phishing checks, retain a scan-error result: strict or required policies refuse; optional policies may allow while retaining the error and any existing block. Escape hatch: `MAVERICK_SHIELD_NO_DECODE=1`; disabling a required scan does not establish that the input is safe.
+All three chokepoints additionally run a **decode/defang pre-pass** (`maverick_shield/deobfuscate.py`): base64 / hex / percent-encoded payloads are decoded and Unicode homoglyphs (Cyrillic/Greek lookalikes NFKC leaves alone) plus zero-width/bidi chars are folded, then the detectors re-run over each variant. This can detect some encoded attacks, but detection is not guaranteed. The pre-pass is part of the **built-in** shield (not the optional SDK), is monotonic (it can only turn an allowed scan into a block, never the reverse), and is bounded against decode bombs. Detector failures, including decoding and phishing checks, retain a scan-error result: strict or required policies refuse; optional policies may allow while retaining the error and any existing block. Escape hatch: `MAVERICK_SHIELD_NO_DECODE=1`; disabling a required scan does not establish that the input is safe.
 
 ## Profiles
 
@@ -26,6 +26,14 @@ block_threshold = "high"
 ```
 
 ## What gets caught
+
+The built-in rules are best-effort pattern matching, not a security boundary.
+Shell syntax, alternate executables, and obfuscation can evade individual rules;
+use sandbox isolation, least privilege and scoped credentials independently.
+Container workspace checks reject common private locations, but cannot detect
+every custom secret directory, hard link, nested mount, or filesystem race.
+Use a dedicated workspace and OS-level isolation. The local sandbox executes on
+the host and does not provide a filesystem isolation boundary.
 
 The **bundled built-in rules** are what run in the standard release: the
 full Agent Shield SDK is **not published on PyPI and not vendored

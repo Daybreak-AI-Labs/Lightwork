@@ -22,7 +22,7 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_KMS_KEK", "19" * 32)  # pragma: allowlist secret -- synthetic key
     monkeypatch.setattr(kms, "_dek_cache", {})
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def checkpoint():
@@ -123,7 +123,7 @@ def test_html_recovery_page_never_echoes_exception_details(client):
 
     request = Request({"type": "http", "method": "GET", "path": "/flow/approve",
                        "headers": [(b"accept", b"text/html")], "query_string": b"",
-                       "scheme": "http", "server": ("testserver", 80)})
+                       "scheme": "http", "server": ("127.0.0.1", 80)})
     response = asyncio.run(flow_payload_exception_handler(
         request, payloads.FlowPayloadError("private-key-path-and-customer-content")))
     assert response.status_code == 409

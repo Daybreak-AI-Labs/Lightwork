@@ -26,8 +26,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 def bind() -> tuple[str, int]:
     """Loopback by default (safe for a desktop install). Deployments behind a
     reverse proxy / in a container set PIA_HOST=0.0.0.0 — and MUST put TLS
-    and authentication in front (see DEPLOYMENT.md): the intake links are
-    reachable by case id by design."""
+    and authentication in front (see DEPLOYMENT.md). Intake links contain
+    a short-lived, scoped capability."""
     return (os.environ.get("PIA_HOST", "127.0.0.1"),
             int(os.environ.get("WORLD_PORT", "8890")))
 
@@ -38,7 +38,8 @@ async def main() -> None:
 
     host, port = bind()
     server = uvicorn.Server(uvicorn.Config(
-        world_app, host=host, port=port, log_level="warning"))
+        world_app, host=host, port=port, log_level="warning", proxy_headers=False,
+        access_log=False))
     print("PIA Concierge — STANDALONE agent (no Lightwork platform)")
     print(f"  Agent + OneTrust review → http://{host}:{port}")
     print("  (dashboard, signed audit, and the privacy workspace need Lightwork)")

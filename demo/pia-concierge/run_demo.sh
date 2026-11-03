@@ -29,8 +29,13 @@ export EMAIL_SMTP_PORT="${EMAIL_SMTP_PORT:-1025}"   # non-465 -> STARTTLS path
 # --- OneTrust: the real onetrust tool pointed at the mock tenant
 export PIA_BASE_URL="${PIA_BASE_URL:-http://127.0.0.1:$WORLD_PORT}"
 export LIGHTWORK_DASHBOARD_URL="${LIGHTWORK_DASHBOARD_URL:-http://127.0.0.1:$DASH_PORT}"
-export ONETRUST_HOSTNAME="${ONETRUST_HOSTNAME:-$PIA_BASE_URL/ot-api}"
-export ONETRUST_TOKEN="${ONETRUST_TOKEN:-demo-bearer-token}"
+if [[ -z "${ONETRUST_HOSTNAME:-}" ]]; then
+  export ONETRUST_HOSTNAME="$PIA_BASE_URL/ot-api"
+  export PIA_ENABLE_ONETRUST_MOCK="${PIA_ENABLE_ONETRUST_MOCK:-1}"
+else
+  export PIA_ENABLE_ONETRUST_MOCK="${PIA_ENABLE_ONETRUST_MOCK:-0}"
+fi
+export ONETRUST_TOKEN="${ONETRUST_TOKEN:-$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')}"
 
 # --- lived-in tenant: a year of backdated OneTrust history (0 = clean slate)
 export PIA_SEED_TENANT="${PIA_SEED_TENANT:-1}"

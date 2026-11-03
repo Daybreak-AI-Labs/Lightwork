@@ -66,7 +66,7 @@ config = RelayConfig(
     deadline_seconds=30.0,
     start_url="http://localhost:8080/webhook/start",
     secondary_channel="telegram",
-    hmac_secret="...",  # shares the [webhooks] secret knob for outbound /webhook/start
+    hmac_secret="...",  # matches MAVERICK_INBOUND_WEBHOOK_SECRET on the receiver
     inbound_auth_token="...",  # separate bearer token required from the device/user
 )
 
@@ -165,8 +165,8 @@ When `RelayConfig.hmac_secret` is set, `build_start_request` attaches
 `X-Lightwork-Signature` and `X-Lightwork-Timestamp`, plus identical
 `X-Maverick-*` compatibility headers, using the same HMAC-SHA256
 construction as `maverick.webhooks`, so the existing inbound `/webhook/start`
-receiver verifies the relay's forward with no extra wiring. Share one signing
-key via the `[webhooks] secret` config knob (env `MAVERICK_WEBHOOK_SECRET`).
+receiver verifies the relay's forward. Set the relay's HMAC key to the distinct
+`MAVERICK_INBOUND_WEBHOOK_SECRET` configured on the receiving server.
 
 ## Caveats (verify before committing)
 

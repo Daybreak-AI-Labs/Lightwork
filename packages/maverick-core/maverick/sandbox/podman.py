@@ -90,6 +90,8 @@ class PodmanBackend:
             self.close()
             if self.pending_cleanup:
                 raise RuntimeError("previous sandbox container cleanup is unresolved")
+        from .workspace_guard import validate_container_workspace
+        validate_container_workspace(self.workdir)
         effective = self.timeout if timeout is None else timeout
         container_name = f"maverick-sandbox-{uuid.uuid4().hex}"
         # `:Z` relabels the SELinux context for the mount so rootless

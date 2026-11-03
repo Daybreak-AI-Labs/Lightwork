@@ -33,7 +33,7 @@ def _isolate(monkeypatch, tmp_path):
 
 def _client():
     from maverick_dashboard.app import app
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def _auth() -> dict:
@@ -335,8 +335,8 @@ def test_corrupt_group_store_fails_closed_and_mutator_does_not_overwrite(client)
     with pytest.raises(scim.ScimStoreError):
         scim._load_groups()
     no_raise_client = TestClient(
-        app,
-        headers={"Origin": "http://testserver"},
+        app, base_url="http://127.0.0.1",
+        headers={"Origin": "http://127.0.0.1"},
         raise_server_exceptions=False,
     )
     response = no_raise_client.post(
@@ -392,7 +392,7 @@ def test_corrupt_scim_state_denies_group_derived_access(client, monkeypatch):
     # return an explicit least-privilege answer at that seam.
     assert scim_groups.role_for_principal("user:oid-a") == "viewer"
     assert scim_groups.suites_for_principal("user:oid-a") == frozenset()
-    assert auth.global_role_for_principal("user:oid-a") == "viewer"
+    assert auth.global_role_for_principal("user:oid-a") is None
     assert suite_grants.granted_suites("user:oid-a") == frozenset()
 
 

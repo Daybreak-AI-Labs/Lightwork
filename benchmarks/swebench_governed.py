@@ -175,8 +175,7 @@ def _worktree_diff(repo: Path) -> str:
     often stages its edit, which bare ``git diff`` (working-vs-index) then shows
     as EMPTY, silently dropping a perfectly good fix and forcing the fallback to
     the model's hand-written prose diff (which LLMs miscount -> "corrupt patch").
-    ``git add -N`` first so brand-new files also appear. When HEAD is the grader
-    test-fixture commit, this excludes test_patch by construction. Literal git
+    ``git add -N`` first so brand-new files also appear. Literal git
     output, so it always applies with ``git apply -p1``. Hardened env (no
     ext-diff/textconv, no global/system/local config) mirrors
     ``swe_bench._git_diff`` while also refusing repository-local filter
@@ -316,6 +315,14 @@ def llm_proposer(inst: Instance) -> str:
     clean -fdx``): point ``repo_path`` ONLY at a dedicated instance checkout.
     Fail-loud on a missing key -- a keyless run must not silently score 0.
     """
+    # The agent can reach host tools and checkout metadata beyond the opaque
+    # tool filters. A hidden fixture cannot safely share this execution context,
+    # even if it is not applied to the checkout. Refuse before launching it.
+    if (getattr(inst, "test_patch", "") or "").strip():
+        raise RuntimeError(
+            "agent solving with a hidden test patch is unavailable: "
+            "the solver and grader do not have a verified isolation boundary"
+        )
     if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("MAVERICK_PROVIDER_READY")):
         raise RuntimeError(
             "llm_proposer needs a provider key (set ANTHROPIC_API_KEY, or set "
@@ -348,36 +355,18 @@ def llm_proposer(inst: Instance) -> str:
         from swe_bench import run_maverick
 
         base_sha = _git_head(inst.repo_path)
-        # Give the agent the GRADED tests so its own test verifier gives REAL
-        # feedback. The FAIL_TO_PASS/PASS_TO_PASS the agent is told to satisfy are
-        # added by the grader's test_patch, which does NOT exist at base_commit --
-        # so without this the agent runs "test not found" -> 0/N on everything,
-        # concludes its fix broke the suite, thrashes, and emits no diff (the
-        # observed failure). Commit test_patch as a fixture on top of base_commit:
-        # the tests now exist and run, opaque mode still blocks READING their
-        # source, and committing it keeps the candidate diff clean (git diff against
-        # this commit excludes the fixture).
-        fixture_sha = base_sha
-        if (inst.test_patch or "").strip() and base_sha:
-            if _commit_fixture(inst.repo_path, inst.test_patch):
-                fixture_sha = _git_head(inst.repo_path)
-
         # Point the agent's sandbox at THIS instance's checkout. build_sandbox()
         # reads [sandbox] workdir from config (default ~/maverick-workspace) and
         # NEVER consults cwd -- the overlay is the one runtime knob it honors.
         restore = _point_sandbox_at(inst.repo_path, require_container=auto_approve_shell)
 
         def _attempt(brief_text: str):
-            # Reset to the fixture commit (base + test_patch), not bare base, so
-            # run_maverick's pre-run reset keeps the graded tests present.
             r = run_maverick(
                 inst.instance_id, brief_text,
                 fail_to_pass=inst.fail_to_pass, pass_to_pass=inst.pass_to_pass,
                 gold_patch=inst.gold_patch, language=inst.language,
-                base_commit=fixture_sha)
-            # Candidate = the agent's source edits ONLY: diff against the fixture
-            # commit excludes the committed test_patch. Fall back to the desanitized
-            # prose diff if the tree is clean (agent emitted a diff without editing).
+                base_commit=base_sha)
+            # Fall back to the desanitized prose diff if the tree is clean.
             td = _worktree_diff(inst.repo_path)
             pd = _desanitize_csv_patch(getattr(r, "predicted_patch", "") or "")
             return r, td, pd
@@ -392,10 +381,8 @@ def llm_proposer(inst: Instance) -> str:
         if (os.environ.get("MAVERICK_RETRY_ON_EMPTY", "1") != "0"
                 and not (chosen or "").strip()):
             attempt1_cost = float(getattr(row, "cost_dollars", 0.0) or 0.0)
-            # Hard reset BETWEEN attempts to the fixture commit (NOT base_sha):
-            # drop attempt 1's edits but keep the graded-test fixture so
-            # attempt 2 still gets real verifier feedback.
-            _hard_reset(inst.repo_path, fixture_sha)
+            # Drop attempt 1's edits before retrying.
+            _hard_reset(inst.repo_path, base_sha)
             row, tree_diff, prose_diff = _attempt(inst.brief + _RETRY_ON_EMPTY_ADDENDUM)
             chosen = tree_diff if tree_diff.strip() else prose_diff
         return chosen
@@ -410,8 +397,7 @@ def llm_proposer(inst: Instance) -> str:
                 os.environ.pop(k, None)
             else:
                 os.environ[k] = old
-        # Restore the tree to the pristine base_commit (drop the fixture commit
-        # AND the agent's edits) so the governed evaluator copies a clean base.
+        # Restore the dedicated checkout before the governed evaluator uses it.
         _hard_reset(inst.repo_path, base_sha)
 
 
@@ -423,33 +409,6 @@ def _git_head(repo: Path) -> str:
         return (r.stdout or "").strip() if r.returncode == 0 else ""
     except (subprocess.SubprocessError, OSError):
         return ""
-
-
-def _commit_fixture(repo: Path, test_patch: str) -> bool:
-    """Apply ``test_patch`` and commit it as a throwaway fixture on top of the
-    current commit. Returns True on success. Best-effort: on any failure the
-    caller proceeds without the fixture (agent gets weaker feedback, still
-    correct)."""
-    import subprocess
-
-    from maverick.self_modify_eval import git_apply
-    if not getattr(git_apply(test_patch, repo), "ok", False):
-        log.warning("_commit_fixture: test_patch did not apply to %s", repo)
-        return False
-    env = {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
-           "GIT_AUTHOR_NAME": "swebench", "GIT_AUTHOR_EMAIL": "swebench@local",
-           "GIT_COMMITTER_NAME": "swebench", "GIT_COMMITTER_EMAIL": "swebench@local",
-           "PATH": os.environ.get("PATH", "")}
-    try:
-        subprocess.run(["git", "-C", str(repo), "add", "-A"],
-                       capture_output=True, timeout=60, env=env, check=True)
-        subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m",
-                        "swebench: grader test fixture (throwaway)"],
-                       capture_output=True, timeout=60, env=env, check=True)
-        return True
-    except (subprocess.SubprocessError, OSError):
-        log.warning("_commit_fixture: could not commit fixture in %s", repo, exc_info=True)
-        return False
 
 
 def _hard_reset(repo: Path, sha: str) -> None:
@@ -877,6 +836,15 @@ def _load_manifest(path: Path) -> list[Instance]:
     return out
 
 
+def _agent_has_hidden_tests(proposer: str, instances: list[Instance]) -> bool:
+    return proposer == "llm" and any((inst.test_patch or "").strip() for inst in instances)
+
+
+def _limited_instances(manifest: Path, limit: int) -> list[Instance]:
+    instances = _load_manifest(manifest)
+    return instances[:limit] if limit else instances
+
+
 def main(argv: list[str] | None = None) -> int:
     import tempfile
 
@@ -919,9 +887,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.agent_max_steps is not None:
         os.environ["MAVERICK_MAX_STEPS"] = str(args.agent_max_steps)
 
-    instances = _load_manifest(args.manifest)
-    if args.limit:
-        instances = instances[: args.limit]
+    instances = _limited_instances(args.manifest, args.limit)
+    if _agent_has_hidden_tests(args.proposer, instances):
+        print("[ABORT] agent solving with hidden test patches requires a separate trusted grader boundary")
+        return 2
     propose = PROPOSERS[args.proposer]
     ledger = PromotionLedger(path=args.ledger)
     # Forensics sidecars land next to the ledger so a failed apply/grade is

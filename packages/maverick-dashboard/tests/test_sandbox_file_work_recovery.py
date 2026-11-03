@@ -29,7 +29,7 @@ def client(tmp_path, monkeypatch):
         budget={"max_dollars": 2, "max_wall_seconds": 1800},
     ) == "local"
     config.reset_config_cache()
-    yield TestClient(app, headers={"Origin": "http://testserver"})
+    yield TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     config.reset_config_cache()
 
 

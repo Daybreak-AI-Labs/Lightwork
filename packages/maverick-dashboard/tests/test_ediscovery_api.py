@@ -63,7 +63,7 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     app = FastAPI()
     app.include_router(api.router, prefix="/api/v1")
-    client = TestClient(app, headers={"Origin": "http://testserver", "X-Role": "auditor"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1", "X-Role": "auditor"})
     with tenant_scope(tenant="ws-a"):
         yield SimpleNamespace(client=client, state=state, world=world, recorded=recorded, ledger=ledger)
     world.close()
@@ -209,7 +209,7 @@ def test_compliance_page_shows_legal_holds_only_when_enabled_and_nonced(monkeypa
     from maverick_dashboard.app import app
 
     monkeypatch.setattr(ediscovery, "enabled", lambda: True)
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     page = client.get("/compliance")
     assert page.status_code == 200
     assert 'id="edh-title"' in page.text
@@ -235,7 +235,7 @@ def test_switch_is_a_privacy_setting_off_by_default_that_the_settings_page_turns
     monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     config.reset_config_cache()
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     assert ediscovery.enabled() is False
     assert client.get(BASE).status_code == 404
     saved = save_catalog(client, "/api/v1/settings/catalog",
@@ -426,7 +426,7 @@ def test_the_real_permission_gate_admits_only_admins_and_auditors(tmp_path, monk
     monkeypatch.setattr(paths_module, "current_tenant_id_strict", lambda: "ws-a")
     app = FastAPI()
     app.include_router(api.router, prefix="/api/v1")
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     response = client.get(BASE)
     assert (response.status_code == 200) is allowed, (role, response.status_code)
     if not allowed:
@@ -463,7 +463,7 @@ def test_legal_holds_form_says_how_to_find_a_linked_account(monkeypatch):
     from maverick_dashboard.app import app
 
     monkeypatch.setattr(ediscovery, "enabled", lambda: True)
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     page = client.get("/compliance")
     assert page.status_code == 200
     assert 'id="edh-custodian-help"' in page.text

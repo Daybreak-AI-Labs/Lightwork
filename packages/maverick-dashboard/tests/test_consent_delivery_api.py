@@ -14,7 +14,7 @@ from maverick.consent_preferences import (
 )
 from maverick_dashboard.app import app
 
-client = TestClient(app, headers={"Origin": "http://testserver"})
+client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 API = "/api/v1/consent/delivery"
 NOW = 1_800_000_000.0
 DIGEST = hashlib.sha256(b"authority").hexdigest()

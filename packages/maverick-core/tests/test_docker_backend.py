@@ -1,7 +1,9 @@
+
 import os
 import subprocess
 
 import pytest
+import pytest as _workspace_guard_pytest
 from maverick.sandbox.docker import DockerBackend
 from maverick.sandbox.podman import PodmanBackend
 
@@ -337,3 +339,12 @@ def test_build_sandbox_reuse_container(monkeypatch, tmp_path):
     from maverick.sandbox import build_sandbox
     sb = build_sandbox(workdir=tmp_path, backend="docker")
     assert sb.reuse_container is False  # default off
+
+
+# Container argv tests use a workspace separate from the operator's state.
+@_workspace_guard_pytest.fixture(autouse=True)
+def _separate_container_test_home(tmp_path, monkeypatch, _isolate_dynamic_maverick_home):
+    operator_home = tmp_path.parent / (tmp_path.name + "-operator")
+    monkeypatch.setenv("HOME", str(operator_home))
+    monkeypatch.setenv("USERPROFILE", str(operator_home))
+    monkeypatch.setenv("MAVERICK_HOME", str(operator_home / ".maverick"))

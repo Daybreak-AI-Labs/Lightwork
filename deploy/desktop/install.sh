@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Lightwork desktop bootstrap (macOS / Linux).
 #
-# Zero prerequisites. It installs Python 3 if missing, checks out an exact
+# Installs Python 3 if missing and uses a trusted system-installed pipx,
+# then checks out an exact
 # Lightwork commit into an isolated pipx environment, and launches the wizard
 # (`maverick init`). There is deliberately no public-package-index fallback.
 #
@@ -75,12 +76,9 @@ ensure_pipx() {
   elif have dnf;     then sudo dnf install -y pipx
   elif have pacman;  then sudo pacman -Sy --noconfirm python-pipx
   else
-    python3 -m ensurepip --upgrade >/dev/null 2>&1 || true
-    # PEP 668 ("externally managed") needs --break-system-packages; older
-    # pip does not know the flag, so fall back to a plain --user install.
-    python3 -m pip install --user --upgrade pipx \
-      || python3 -m pip install --user --break-system-packages --upgrade pipx
+    die "Install pipx using your trusted system package manager, then re-run."
   fi
+  pipx_cmd --version >/dev/null 2>&1 || die "pipx is unavailable after installation."
   pipx_cmd ensurepath >/dev/null 2>&1 || true
 }
 

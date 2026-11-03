@@ -13,9 +13,12 @@ from __future__ import annotations
 import base64
 import logging
 import os
+import stat
 from pathlib import Path
 from typing import Any
 
+from ..budget import BudgetExceeded, UsageAccountingError
+from ..killswitch import Halted
 from . import Tool
 
 log = logging.getLogger(__name__)
@@ -31,10 +34,6 @@ _VIEW_IMAGE_INPUT_SCHEMA: dict[str, Any] = {
         "prompt": {
             "type": "string",
             "description": "What to look for in the image. Default: 'Describe this image in detail.'",
-        },
-        "model": {
-            "type": "string",
-            "description": "Override vision model (provider:model). Defaults to MAVERICK_VISION_MODEL env or the configured vision model ([models].vision, default claude-sonnet-4-6).",
         },
     },
     "required": ["source"],
@@ -56,7 +55,7 @@ def _guess_mime(source: str) -> str:
     return _MIME_BY_EXT.get(ext, "image/jpeg")
 
 
-def _load_image(source: str, *, workdir: Path | None = None) -> tuple[bytes, str] | None:
+def _load_image(source: str, sandbox=None, *, workdir: Path | None = None) -> tuple[bytes, str] | None:
     """Return (image_bytes, mime_type) for the source, or None on failure."""
     if source.startswith(("http://", "https://")):
         try:
@@ -91,7 +90,7 @@ def _load_image(source: str, *, workdir: Path | None = None) -> tuple[bytes, str
         except Exception as e:
             log.warning("image fetch failed: %s", e)
             return None
-    workdir = (workdir or Path.cwd()).resolve()
+    workdir = Path(getattr(sandbox, "workdir", None) or workdir or Path.cwd()).resolve()
     path = Path(os.path.expanduser(source))
     if not path.is_absolute():
         path = (workdir / path).resolve()
@@ -101,29 +100,37 @@ def _load_image(source: str, *, workdir: Path | None = None) -> tuple[bytes, str
         path.relative_to(workdir)
     except ValueError:
         return None
-    if not path.exists() or not path.is_file():
+    from .fs import _open_contained
+
+    try:
+        fd = _open_contained(workdir, path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
+        with os.fdopen(fd, "rb") as source_file:
+            if not stat.S_ISREG(os.fstat(source_file.fileno()).st_mode):
+                return None
+            data = source_file.read(20 * 1024 * 1024 + 1)
+        if len(data) > 20 * 1024 * 1024:
+            return None
+        return data, _guess_mime(source)
+    except (OSError, ValueError):
         return None
-    return path.read_bytes(), _guess_mime(source)
 
 
-def _run_view_image(args: dict[str, Any], sandbox: Any = None) -> str:
+def _run_view_image(args: dict[str, Any], sandbox=None, *, budget=None) -> str:
     source = (args.get("source") or "").strip()
     if not source:
         return "ERROR: source is required"
     prompt = (args.get("prompt") or "Describe this image in detail.").strip()
     from ..llm import model_for_role
-    model = (
-        args.get("model")
-        or os.environ.get("MAVERICK_VISION_MODEL")
-        or model_for_role("vision")
-    )
+    if "model" in args:
+        return "ERROR: the vision model is configured by the operator"
+    if budget is None:
+        return "ERROR: image analysis requires an active run budget"
+    model = os.environ.get("MAVERICK_VISION_MODEL") or model_for_role("vision")
 
-    workdir = Path(sandbox.workdir) if sandbox is not None else None
-    loaded = _load_image(source, workdir=workdir)
+    loaded = _load_image(source, sandbox)
     if loaded is None:
         return f"ERROR: could not load image from {source!r}"
     image_bytes, mime = loaded
-
     # Anthropic format -- providers' adapters translate to OpenAI / Gemini
     # vision schemas in their `complete()` methods.
     image_block: dict[str, Any] = {
@@ -150,13 +157,16 @@ def _run_view_image(args: dict[str, Any], sandbox: Any = None) -> str:
             system="You analyze images carefully and concisely.",
             messages=messages,
             max_tokens=1024,
+            budget=budget,
         )
         return (resp.text or "").strip() or "(no description returned)"
+    except (BudgetExceeded, UsageAccountingError, Halted):
+        raise
     except Exception as e:
         return f"ERROR: vision call failed: {type(e).__name__}: {e}"
 
 
-def view_image(sandbox: Any = None) -> Tool:
+def view_image(sandbox=None, *, budget=None) -> Tool:
     """Factory: builds the view_image tool."""
     return Tool(
         name="view_image",
@@ -164,9 +174,8 @@ def view_image(sandbox: Any = None) -> Tool:
             "Look at an image (local path or http(s) URL) and describe / "
             "analyze it. Provide a `prompt` to focus the analysis (e.g. "
             "'What's the error message?'). Picks the configured vision "
-            "model automatically; override via `model` arg or "
-            "MAVERICK_VISION_MODEL env var."
+            "model automatically from the operator's settings."
         ),
         input_schema=_VIEW_IMAGE_INPUT_SCHEMA,
-        fn=lambda args: _run_view_image(args, sandbox),
+        fn=lambda args: _run_view_image(args, sandbox, budget=budget),
     )

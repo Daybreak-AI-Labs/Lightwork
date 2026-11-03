@@ -291,12 +291,13 @@ def test_manual_poll_endpoint_publishes_durable_job_without_background_execution
     from maverick_dashboard.app import app
     monkeypatch.setattr(api, "_world", lambda: runtime[0])
     from maverick.oidc import VerifiedPrincipal
-    from maverick_dashboard import auth
+    from maverick_dashboard import auth, rbac
+    rbac.set_role("user:synthetic", "operator")
     monkeypatch.setattr(auth, "oidc_enabled", lambda: True)
     monkeypatch.setattr(auth, "verify_oidc_token", lambda token, **kwargs: VerifiedPrincipal(
         sub=token, issuer="https://issuer.example", audience="maverick", claims={"sub": token}))
     # Deliberately no lifespan/worker startup; inspect actual durable admission.
-    client = TestClient(app, headers={"Origin": "http://testserver", "Authorization": "Bearer synthetic"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1", "Authorization": "Bearer synthetic"})
     response = client.post("/api/v1/event-triggers/poll?name=orders")
     assert response.status_code == 200, response.text
     result = response.json()["triggers"][0]

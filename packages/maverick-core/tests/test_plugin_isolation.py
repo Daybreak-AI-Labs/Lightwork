@@ -56,7 +56,40 @@ def test_mode_default_none(monkeypatch):
     monkeypatch.setenv("MAVERICK_PLUGIN_ISOLATION", "subprocess")
     assert isolation_mode() == "subprocess"
     monkeypatch.setenv("MAVERICK_PLUGIN_ISOLATION", "bogus")
-    assert isolation_mode() == "none"
+    with pytest.raises(ValueError, match="invalid plugin isolation"):
+        isolation_mode()
+    assert "isolation policy" in run_isolated("example:tool", {})
+
+
+@pytest.mark.parametrize("bad_config", [[], {"plugins": []}, {"plugins": {"isolation": "unknown"}}])
+def test_invalid_plugin_policy_refuses_direct_execution(monkeypatch, bad_config):
+    import maverick.config as config_mod
+    monkeypatch.delenv("MAVERICK_PLUGIN_ISOLATION", raising=False)
+    monkeypatch.setattr(config_mod, "load_config", lambda: bad_config)
+    assert "isolation policy" in run_isolated("example:tool", {})
+    assert "isolation policy" in run_isolated("example:tool", {}, mode="invalid")
+
+
+def test_plugin_policy_lookup_failure_is_not_a_direct_fallback(monkeypatch):
+    import maverick.config as config_mod
+    monkeypatch.delenv("MAVERICK_PLUGIN_ISOLATION", raising=False)
+    def unavailable():
+        raise OSError("unavailable")
+    monkeypatch.setattr(config_mod, "load_config", unavailable)
+    assert "isolation policy" in run_isolated("example:tool", {})
+
+
+def test_corrupt_plugin_config_does_not_enable_direct_execution(monkeypatch, tmp_path):
+    from maverick import config
+    bad = tmp_path / "config.toml"
+    bad.write_text("[plugins\nisolation = 'subprocess'\n", encoding="utf-8")
+    monkeypatch.delenv("MAVERICK_PLUGIN_ISOLATION", raising=False)
+    monkeypatch.setenv("MAVERICK_CONFIG", str(bad))
+    config.reset_config_cache()
+    try:
+        assert "isolation policy" in run_isolated("example:tool", {})
+    finally:
+        config.reset_config_cache()
 
 
 def test_none_mode_runs_in_process(plugin_on_path):
@@ -177,6 +210,52 @@ def test_discover_tools_wraps_with_isolation(tmp_path, monkeypatch):
     assert out == "ran for ada"
     assert hasattr(sys, "_iso_tool_polluted") == had  # ran in the child
     sys.modules.pop("iso_tool_plugin", None)
+
+
+def test_isolated_factory_refuses_immutable_or_ignored_wrapper():
+    from maverick import plugins
+
+    class Immutable:
+        @property
+        def fn(self):
+            return lambda _args: "unsafe direct call"
+
+    class IgnoresAssignment:
+        @property
+        def fn(self):
+            return lambda _args: "unsafe direct call"
+
+        @fn.setter
+        def fn(self, _value):
+            pass
+
+    for target in (Immutable, IgnoresAssignment):
+        factory = plugins._isolated_factory("example", "example:factory", target, mode="subprocess")
+        with pytest.raises(RuntimeError, match="refusing to load"):
+            factory()
+
+
+def test_isolated_discovery_skips_entry_without_worker_target(monkeypatch):
+    from maverick import plugin_isolation, plugins
+    monkeypatch.setattr(plugin_isolation, "isolation_mode", lambda: "subprocess")
+    monkeypatch.setattr(plugins, "_iter_loaded_with_value", lambda *_args: [
+        ("example", lambda: pytest.fail("unwrapped factory called"), "", "example-dist"),
+    ])
+    assert plugins.discover_tools() == []
+
+
+def test_isolated_factory_keeps_the_selected_mode(monkeypatch):
+    from types import SimpleNamespace
+
+    from maverick import plugin_isolation, plugins
+    monkeypatch.setattr(plugin_isolation, "isolation_mode", lambda: "none")
+    monkeypatch.setattr(plugin_isolation, "run_isolated",
+                        lambda _entry, _args, **kwargs: kwargs["mode"])
+    factory = plugins._isolated_factory(
+        "example", "example:factory", lambda: SimpleNamespace(fn=lambda _args: "direct"),
+        mode="subprocess",
+    )
+    assert factory().fn({}) == "subprocess"
 
 
 def test_discover_tools_direct_when_isolation_off(tmp_path, monkeypatch):

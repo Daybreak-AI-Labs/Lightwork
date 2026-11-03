@@ -39,7 +39,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     )
     app = FastAPI()
     app.include_router(page.create_consent_application_scanner_page_router(templates))
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def test_workbench_is_store_free_closed_and_liquid_glass(client: TestClient) -> None:
@@ -192,7 +192,7 @@ def test_custom_theme_style_is_bound_to_the_page_csp_nonce(monkeypatch) -> None:
     )
     app = FastAPI()
     app.include_router(page.create_consent_application_scanner_page_router(templates))
-    response = TestClient(app, headers={"Origin": "http://testserver"}).get(ROUTE)
+    response = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}).get(ROUTE)
     assert response.status_code == 200
     nonce_match = re.search(r'<style nonce="([A-Za-z0-9_-]+)">', response.text)
     assert nonce_match is not None

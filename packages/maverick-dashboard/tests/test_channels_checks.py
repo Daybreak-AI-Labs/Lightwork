@@ -37,7 +37,7 @@ def client(tmp_path, monkeypatch):
     from maverick_dashboard import integration_readiness
     integration_readiness._clear_for_testing()
     dash_app._world_cache.clear()
-    yield TestClient(dash_app.app, headers={"Origin": "http://testserver"})
+    yield TestClient(dash_app.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     integration_readiness._clear_for_testing()
     config.reset_config_cache()
 
@@ -177,7 +177,7 @@ def test_email_check_requires_sender_setup_and_tests_both_mail_signins(monkeypat
 
 def test_checks_are_admin_only_same_origin_and_need_a_turned_on_app(client, monkeypatch):
     assert client.post("/channels/test", data={"channel": "slack"}).status_code == 409
-    assert TestClient(client.app).post("/channels/test", data={"channel": "slack"}).status_code == 403
+    assert TestClient(client.app, base_url="http://127.0.0.1").post("/channels/test", data={"channel": "slack"}).status_code == 403
     from maverick_dashboard import auth, rbac
     rbac.set_role("user:vic", "viewer")
     monkeypatch.setattr(auth, "caller_principal", lambda request: "user:vic")

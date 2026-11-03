@@ -38,7 +38,7 @@ def _isolate(monkeypatch, tmp_path):
 def _client() -> TestClient:
     from maverick_dashboard.app import app
 
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def test_governance_screens_survive_a_capability_assessment(monkeypatch):

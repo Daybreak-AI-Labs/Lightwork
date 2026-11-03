@@ -145,3 +145,4 @@ agent_run_ledger.json
 # Operator-specific Terraform inputs that identify people (deploy/aws/terraform/
 # local.auto.tfvars.example is the tracked template).
 deploy/aws/terraform/local.auto.tfvars
+deploy/aws/terraform/oidc.auto.tfvars

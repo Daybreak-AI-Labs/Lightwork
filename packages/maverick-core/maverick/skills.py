@@ -861,6 +861,7 @@ def _validate_and_write(
     before_save: Callable[[], None] | None = None,
     replace_existing: bool = True,
     internal_distillation: bool = False,
+    expected_name: str | None = None,
 ) -> Skill:
     """Parse + shield-scan skill content, then write it. Shared by
     ``install_skill`` (free-text source) and ``install_from_catalog``
@@ -899,6 +900,8 @@ def _validate_and_write(
     _front = re.match(r"^---\n(.*?)\n---\n", content, re.DOTALL)
     if not (_front and re.search(r"(?m)^name:[ \t]*\S", _front.group(1))):
         raise ValueError("skill frontmatter missing required 'name'")
+    if expected_name is not None and parsed.name != expected_name:
+        raise ValueError("catalog skill name does not match the signed content")
 
     # Signed-skill policy: enforce [skills].require_signed / trusted_pubkeys
     # (and the catalog's require_signature) BEFORE the shield scan and BEFORE
@@ -1248,19 +1251,11 @@ def install_from_catalog(
     the index: when ``[skills].trusted_pubkeys`` is configured, the resolved
     skill MUST carry a ``sig``/``pubkey`` that verifies against a trusted
     publisher (``_validate_and_write`` enforces this) -- sha256 stays as a
-    transit check on top. With no trusted keys configured we keep today's
-    sha256-TOFU behavior (non-breaking), but the returned ``Skill.verified``
-    reflects REAL signature status, not the index's self-asserted bool.
-
-    ``[skills].require_signed_catalog`` (or ``MAVERICK_REQUIRE_SIGNED_CATALOG``)
-    forces a verified signature for ANY catalog install regardless of
-    ``trusted_pubkeys``. ``require_signature=True`` lets an autonomous caller
-    force that same fail-closed posture even when the operator keeps manual
-    catalog installs in compatibility/TOFU mode. A missing/mismatched hash is a
-    hard error.
+    transit check on top. Catalog installs require a signature from a configured
+    trusted publisher. With no trusted keys, installation fails closed. A
+    missing/mismatched hash is also a hard error.
     """
     from . import catalog as _catalog
-    from . import config as _config
 
     entry = _catalog.resolve(name, "skills", indexes=indexes)
     if entry is None:
@@ -1276,24 +1271,13 @@ def install_from_catalog(
             "not match the catalog's pinned sha256. Refusing to install."
         )
     content = raw.decode("utf-8", errors="replace")
-    cfg = _config.get_skills()
-    # Authenticity for catalog installs: when a trust anchor is configured
-    # (trusted_pubkeys non-empty), the resolved skill MUST carry a signature
-    # that verifies against a trusted publisher -- an unsigned skill from the
-    # unauthenticated index host is no longer accepted. require_signed_catalog
-    # forces this even with an empty anchor. With neither configured, today's
-    # sha256-TOFU behavior is preserved (non-breaking).
-    require_sig = (
-        require_signature
-        or bool(cfg.get("require_signed_catalog"))
-        or bool(cfg.get("trusted_pubkeys"))
-    )
     target_dir = _resolved_skills_dir(skills_dir)
     return _validate_and_write(
         content,
         target_dir,
-        require_signature=require_sig,
+        require_signature=True,
         before_save=before_save,
+        expected_name=name,
     )
 
 

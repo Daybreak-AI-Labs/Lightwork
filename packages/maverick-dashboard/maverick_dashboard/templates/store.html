@@ -5,9 +5,9 @@
   {% set can_install = is_admin and install_allowed %}
   {% call hero('Workforce capability', 'Skill store',
                subtitle='Ready-made skills',
-               lede='Skills other people have written and checked. Each one is
-                     locked to the exact version that was checked, so what you
-                     add is what was reviewed.') %}
+               lede='Skills are supplied by the listed catalogs. Review the
+                     source and author before adding one; catalog-provided
+                     hashes alone do not verify the publisher.') %}
     {{ state('Current state',
              ((entries | length) ~ ' skills to choose from') if entries
              else 'No skills to show right now',
@@ -43,7 +43,6 @@
         <select class="select" id="st-sort">
           <option value="name">Name</option>
           <option value="popular">Most added</option>
-          <option value="checked">Checked authors first</option>
         </select>
       </label>
     </div>
@@ -51,10 +50,9 @@
       {% for e in entries %}
         {% set label = e.name | humanize %}
         <div class="card" data-st-name="{{ label | lower }}" data-st-text="{{ (label ~ ' ' ~ (e.summary or '') ~ ' ' ~ (e.author or '')) | lower }}"
-             data-st-count="{{ e.install_count or 0 }}" data-st-checked="{{ 1 if e.verified else 0 }}">
+             data-st-count="{{ e.install_count or 0 }}">
           <div class="store__head">
             <strong class="store__name">{{ label }}</strong>
-            {% if e.verified %}<span class="badge active" title="The author's identity was checked">Checked author</span>{% endif %}
           </div>
           <p class="store__summary">{{ e.summary or "No description." }}</p>
           <p class="muted store__meta">
@@ -167,7 +165,6 @@
         const key = sort.value;
         cards.sort(function(a, b) {
           if (key === 'popular') return Number(b.dataset.stCount) - Number(a.dataset.stCount);
-          if (key === 'checked' && a.dataset.stChecked !== b.dataset.stChecked) return Number(b.dataset.stChecked) - Number(a.dataset.stChecked);
           return a.dataset.stName.localeCompare(b.dataset.stName);
         }).forEach(function(c) { grid.appendChild(c); });
         none.hidden = shown !== 0;
@@ -216,7 +213,7 @@
               btn.classList.add('btn--ghost');
               msg.textContent = 'Added ' + label + '. Agents use it from the next task.';
             } else if (r.status === 400) {
-              msg.textContent = 'The skill “' + label + '” couldn’t be added: it may have changed since it was checked, or failed its safety check.';
+              msg.textContent = 'The skill “' + label + '” couldn’t be added: it may not match the catalog hash, or it failed a safety check.';
             } else {
               msg.textContent = window.mvErrorText(r, 'add the skill');
             }

@@ -88,7 +88,7 @@ controls; the other packages build on it.
   `apps/installer-cli/tests/`); the module is the unit (`money_format.py` ->
   `test_money_format.py`). Tool wrappers under `maverick/tools/` often have no
   standalone test file, so grep before assuming a test file name.
-- Dashboard tests use `TestClient(app, headers={"Origin": "http://testserver"})`,
+- Dashboard tests use `TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})`,
   because mutating `/api/v1` requests in no-token mode must pass the
   same-origin CSRF check, plus an autouse fixture that monkeypatches
   `world_model.DEFAULT_DB` to `tmp_path` so tests never touch the real world

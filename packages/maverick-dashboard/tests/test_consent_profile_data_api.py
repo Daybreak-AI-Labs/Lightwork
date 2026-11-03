@@ -71,8 +71,8 @@ def environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     app.include_router(api.create_consent_profile_data_router(dependencies), prefix="/api/v1")
     client = TestClient(
-        app,
-        headers={"Origin": "http://testserver", "X-Test-Subject": "profile-owner"},
+        app, base_url="http://127.0.0.1",
+        headers={"Origin": "http://127.0.0.1", "X-Test-Subject": "profile-owner"},
     )
     return client, state, clock, database
 
@@ -442,7 +442,7 @@ def test_app_state_factory_receives_exact_tenant_and_resolver(
         ),
         prefix="/api/v1",
     )
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     assert client.get(f"{API}/status").status_code == 200
     assert captured[0]["tenant_id"] == "tenant-a"
     assert captured[0]["request"].app is app
@@ -484,8 +484,8 @@ def test_integrity_and_unexpected_failures_are_generic(
         prefix="/api/v1",
     )
     client = TestClient(
-        app,
-        headers={"Origin": "http://testserver"},
+        app, base_url="http://127.0.0.1",
+        headers={"Origin": "http://127.0.0.1"},
         raise_server_exceptions=False,
     )
     response = client.get(f"{API}/integrity")

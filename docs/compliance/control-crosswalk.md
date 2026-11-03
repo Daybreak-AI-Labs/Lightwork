@@ -125,7 +125,7 @@ Annex A (AI controls A.2–A.10).
 
 | Theme | SOC 2 | ISO 27001 | ISO 42001 | Lightwork control | Status | Evidence |
 | --- | --- | --- | --- | --- | --- | --- |
-| Human oversight | PI1.3 | — | A.9.2 | Governance engine ALLOW/DENY/REQUIRE_HUMAN; consent gates; two-person approval | Implemented | `maverick/governance.py`; `maverick/safety/consent.py`; `maverick/approval_delegation.py` |
+| Human oversight | PI1.3 | — | A.9.2 | Governance engine ALLOW/DENY/REQUIRE_HUMAN; consent gates; configurable two-person approval | Implemented | `maverick/governance.py`; `maverick/safety/consent.py`; `maverick/safety/dual_control.py` |
 | Transparency to affected parties | CC2.3 | — | A.8.2, A.8.3 | Art.50 first-turn AI disclosure; right-to-explanation | Implemented | `maverick/compliance.py`; `maverick/tools/right_to_explanation.py` |
 | AI system lifecycle | — | — | A.6.2 | Governed learning loop: dreaming, hindsight (snapshot-replay regression), staged rollout, calibration gating, atomic rollback | Implemented | `maverick/dreaming.py`, `hindsight.py`, `learning_rollout.py`, `calibration.py` |
 | Learning audit / provable change | CC2.1 | A.8.15 | A.6.2 | Ed25519 signed, cross-language-verifiable learning audit | Implemented | `maverick/audit/signing.py` |

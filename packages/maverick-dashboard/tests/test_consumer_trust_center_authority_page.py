@@ -28,7 +28,7 @@ def page_client() -> TestClient:
             {"consumer_trust_center_authority_enabled": enabled},
         )
 
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def test_page_exposes_full_four_eyes_authority_workbench(page_client) -> None:

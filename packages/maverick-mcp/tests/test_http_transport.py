@@ -88,6 +88,7 @@ class TestHTTPTransport:
             return SimpleNamespace(name="x", path="/tmp/x")
 
         monkeypatch.setattr(skills_mod, "install_skill", _fake_install)
+        monkeypatch.setenv("MAVERICK_ALLOW_SKILL_INSTALL", "1")
         monkeypatch.setenv("MAVERICK_MCP_TOKEN", "s3cr3t")
         client = self._client()
         resp = client.post("/mcp", json={

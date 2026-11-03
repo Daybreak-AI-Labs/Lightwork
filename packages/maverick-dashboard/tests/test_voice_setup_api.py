@@ -54,7 +54,7 @@ def test_actual_lifespan_and_first_start_do_not_fetch_without_opt_in(monkeypatch
 
 
 def client():
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def review(c):

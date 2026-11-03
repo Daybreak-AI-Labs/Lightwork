@@ -277,11 +277,12 @@ def test_vps_installer_checks_the_python_floor_after_installing(tmp_path, report
     script = _read("deploy/vps/install.sh")
     start = script.index("install_system_deps() {")
     function = script[start:script.index("\n}\n", start) + 3]
+    function = function.replace("/usr/bin/python3", str(tmp_path / "bin" / "python3"))
     major, minor = reported.split(".")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     stubs = {
-        "python3": f'#!/bin/sh\ncase "$2" in *02d*) echo {major}{int(minor):02d} ;; *) echo {reported} ;; esac\n',
+        "python3": f'#!/bin/sh\ncase "$*" in *02d*) echo {major}{int(minor):02d} ;; *) echo {reported} ;; esac\n',
         "apt-get": "#!/bin/sh\nexit 0\n",
         "pipx": "#!/bin/sh\nexit 0\n",
     }
@@ -901,8 +902,9 @@ def test_security_dependency_floors_cover_current_fixed_releases():
     _assert_floor(core_extras["langchain"], "langchain-core", "1.3.3")
     _assert_floor(core_extras["langchain"], "langsmith", "0.8.18")
     _assert_floor(core_extras["computer-use"], "pillow", "13.0.0")
-    _assert_floor(core_extras["pdf"], "pypdf", "6.14.2")
-    _assert_floor(core_extras["evidence-analysis"], "pypdf", "6.14.2")
+    _assert_floor(core_extras["release-runtime"], "pypdf", "6.21.4")
+    _assert_floor(core_extras["pdf"], "pypdf", "6.21.4")
+    _assert_floor(core_extras["evidence-analysis"], "pypdf", "6.21.4")
     _assert_floor(core_extras["evidence-analysis"], "pillow", "13.0.0")
     assert all(
         canonicalize_name(Requirement(item).name) != "pytesseract"
@@ -925,7 +927,7 @@ def test_security_dependency_floors_cover_current_fixed_releases():
 
     knowledge = _metadata("packages/maverick-knowledge/pyproject.toml")
     knowledge_extras = knowledge["project"]["optional-dependencies"]
-    _assert_floor(knowledge_extras["parsers"], "pypdf", "6.14.2")
+    _assert_floor(knowledge_extras["parsers"], "pypdf", "6.21.4")
     _assert_floor(knowledge_extras["vision"], "pillow", "13.0.0")
 
 
@@ -938,3 +940,12 @@ def test_all_python_builds_require_patched_setuptools_floor():
         requirements = build.get("requires", [])
         if any(Requirement(item).name.casefold() == "setuptools" for item in requirements):
             _assert_floor(requirements, "setuptools", "83.0.0")
+
+
+def test_windows_python_autodiscovery_does_not_scan_drive_root():
+    script = _read("deploy/desktop/install.ps1")
+    resolver = script.split("function Resolve-Python {", 1)[1].split("\nWrite-Host", 1)[0]
+    parents = resolver.split("$parents = @(", 1)[1].split("\n  )", 1)[0]
+    assert "'C:\\'" not in parents
+    assert "$env:LOCALAPPDATA" in parents and "$env:ProgramFiles" in parents
+    assert "$env:MAVERICK_PYTHON" in resolver

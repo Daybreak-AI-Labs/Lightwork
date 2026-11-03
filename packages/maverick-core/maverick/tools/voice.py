@@ -439,6 +439,22 @@ def warm_up_local_stt(*, cancel: threading.Event | None = None) -> bool:
         _WARMING.clear()
 
 
+def _run_transcribe_internal(args: dict[str, Any]) -> str:
+    """Transcribe a trusted caller's file without granting a model host access.
+
+    The caller chooses the file (generated audio, a verified private
+    attachment snapshot, or a CLI argument). The ordinary tool entry point must continue to pass its own
+    sandbox and must never call this helper with a model-chosen path.
+    """
+    from types import SimpleNamespace
+
+    source = (args.get("source") or "").strip()
+    if not source:
+        return "ERROR: source is required"
+    path = Path(source).absolute()
+    return _run_transcribe({**args, "source": str(path)}, SimpleNamespace(workdir=path.parent))
+
+
 def _run_transcribe(args: dict[str, Any], sandbox: Any = None) -> str:
     from ..tool_results import confirmed_success_text
 
@@ -447,8 +463,8 @@ def _run_transcribe(args: dict[str, Any], sandbox: Any = None) -> str:
         return "ERROR: source is required"
     # Confine the model-supplied path to the workspace: transcription reads the
     # file and ships its bytes to a Whisper backend, so an unconfined source is
-    # arbitrary host-file read + exfiltration (~/.ssh/id_rsa, .env). sandbox=None
-    # -- the trusted internal view_video caller's temp path -- passes through.
+    # arbitrary host-file read + exfiltration (~/.ssh/id_rsa, .env).
+    # Trusted internal callers use _run_transcribe_internal for their own files.
     from .ffmpeg_tool import _safe_path
     try:
         path = Path(_safe_path(sandbox, src))

@@ -11,7 +11,7 @@ from maverick import cortex
 from maverick_dashboard import cortex_api
 from maverick_dashboard.app import app
 
-client = TestClient(app, headers={"Origin": "http://testserver"})
+client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 BASE = "/api/v1/cortex"
 _DEPOSIT = {"text": "Accruals over $25k need controller sign-off.", "kind": "knowledge",
             "collection": "finance", "source": "close-policy.md"}
@@ -246,9 +246,9 @@ def test_deposit_is_same_origin_only(deposited):
     assert kw["caller"] == cortex.Caller(principal="dashboard")
     # a cross-site page cannot write to the brain; neither can a request with
     # no Origin at all (the guard fails closed)
-    foreign = TestClient(app, headers={"Origin": "http://evil.example"})
+    foreign = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://evil.example"})
     assert foreign.post(f"{BASE}/deposit", json=_DEPOSIT).status_code == 403
-    assert TestClient(app).post(f"{BASE}/deposit", json=_DEPOSIT).status_code == 403
+    assert TestClient(app, base_url="http://127.0.0.1").post(f"{BASE}/deposit", json=_DEPOSIT).status_code == 403
     assert len(deposited) == 1
 
 
@@ -329,11 +329,11 @@ def test_a_viewer_reads_the_brain_but_cannot_write_to_it(monkeypatch, recalled, 
 
 def test_unauthenticated_requests_are_refused_when_a_token_is_configured(monkeypatch, recalled):
     monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "sekret")
-    anonymous = TestClient(app)
+    anonymous = TestClient(app, base_url="http://127.0.0.1")
     assert anonymous.get(f"{BASE}/status").status_code == 401
     assert anonymous.post(f"{BASE}/recall", json={"query": "close"}).status_code == 401
     assert anonymous.post(f"{BASE}/deposit", json=_DEPOSIT).status_code == 401
     assert recalled == []
-    bearer = TestClient(app, headers={"Authorization": "Bearer sekret"})
+    bearer = TestClient(app, base_url="http://127.0.0.1", headers={"Authorization": "Bearer sekret"})
     assert bearer.get(f"{BASE}/status").status_code == 200
     assert bearer.post(f"{BASE}/recall", json={"query": "close"}).status_code == 200

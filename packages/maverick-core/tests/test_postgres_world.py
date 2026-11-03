@@ -108,7 +108,7 @@ def test_goal_batch_limits_queries_and_preserves_encryption(world, monkeypatch, 
 
 
 def test_shoring_completion_and_approval_context_are_tenant_scoped(world, monkeypatch):
-    from maverick.logging_config import reset_goal_context, set_goal_context
+    from maverick.logging_config import _goal_id_var, reset_goal_context, set_goal_context
     from maverick.paths import tenant_scope
     from maverick.world_model_backends import postgres
 
@@ -136,11 +136,18 @@ def test_shoring_completion_and_approval_context_are_tenant_scoped(world, monkey
             try:
                 approval = world.create_approval("payment", detail="support")
                 with tenant_scope(tenant=other):
+                    with pytest.raises(ValueError, match="approval goal is unavailable"):
+                        world.create_approval("finance_ap", scope="finance_ap")
+            finally:
+                reset_goal_context(tokens)
+            with tenant_scope(tenant=other):
+                no_goal = _goal_id_var.set(None)
+                try:
                     foreign = world.create_approval("finance_ap", scope="finance_ap")
                     assert world.get_approval(foreign).department == ""
                     assert world.shoring_measurements("finance_ap", since=0, until=clock[0])["delivered"] == 0
-            finally:
-                reset_goal_context(tokens)
+                finally:
+                    _goal_id_var.reset(no_goal)
             records = [world.get_approval(approval), *world.pending_approvals(), *world.list_approvals()]
             assert all(row.department == "finance_ap" and row.goal_id == goal for row in records)
     finally:
@@ -1526,6 +1533,36 @@ def test_goal_status_counts_and_ping(world):
     assert world.ping() is True
 
 
+def test_goal_status_counts_scope_same_owner_to_workspace_and_legacy_root(world, monkeypatch):
+    from maverick.paths import tenant_scope
+
+    monkeypatch.setenv("MAVERICK_STRICT_TENANT_ISOLATION", "1")
+    marker = "status-" + uuid.uuid4().hex[:12]
+    other = marker + "-other"
+    owner = "user:" + marker
+    try:
+        before_root = sum(world.goal_status_counts().values())
+        world.create_goal("legacy root", owner=owner)
+        with tenant_scope(tenant=marker):
+            world.create_goal("one", owner=owner)
+        with tenant_scope(tenant=other):
+            world.create_goal("two", owner=owner)
+            world.create_goal("three", owner=owner)
+        assert sum(world.goal_status_counts(owner=owner).values()) == 1
+        assert sum(world.goal_status_counts().values()) == before_root + 1
+        with tenant_scope(tenant=marker):
+            assert sum(world.goal_status_counts(owner=owner).values()) == 1
+        with tenant_scope(tenant=other):
+            assert sum(world.goal_status_counts(owner=owner).values()) == 2
+        monkeypatch.setenv("MAVERICK_STRICT_TENANT_ISOLATION", "0")
+        with tenant_scope(tenant=marker):
+            assert sum(world.goal_status_counts(owner=owner).values()) == 2
+    finally:
+        with world._tx() as cursor:
+            cursor.execute("DELETE FROM goals WHERE tenant_id IN (%s, %s)", (marker, other))
+            cursor.execute("DELETE FROM goals WHERE tenant_id IS NULL AND owner=%s", (owner,))
+
+
 def test_rate_events_window_count(world):
     import time
     now = time.time()
@@ -1779,6 +1816,39 @@ def test_history_limit_applies_after_effective_precedence_projection(
     finally:
         world.delete_facts_matching(subject)
         reset_tenant(tok)
+
+
+def test_unbound_fact_reads_exclude_named_tenants(world, monkeypatch):
+    from maverick.paths import tenant_scope
+
+    monkeypatch.setenv("MAVERICK_STRICT_TENANT_ISOLATION", "0")
+    unique = uuid.uuid4().hex
+    key_a = f"tenant-a:{unique}"
+    key_b = f"tenant-b:{unique}"
+    key_root = f"legacy:{unique}"
+    try:
+        with tenant_scope(tenant="acme"):
+            world.upsert_fact(key_a, "workspace-a-private")
+        with tenant_scope(tenant="globex"):
+            world.upsert_fact(key_b, "workspace-b-private")
+        world.upsert_fact(key_root, "legacy-visible")
+        assert world.get_fact(key_a) is None
+        assert world.get_fact(key_b) is None
+        facts = world.get_facts()
+        assert key_a not in facts and key_b not in facts
+        assert facts[key_root] == "legacy-visible"
+        with tenant_scope(tenant="acme"):
+            assert world.get_fact(key_a) == "workspace-a-private"
+            assert world.get_fact(key_b) is None
+        with tenant_scope(tenant="globex"):
+            assert world.get_fact(key_b) == "workspace-b-private"
+            assert world.get_fact(key_a) is None
+    finally:
+        with tenant_scope(tenant="acme"):
+            world.delete_fact(key_a)
+        with tenant_scope(tenant="globex"):
+            world.delete_fact(key_b)
+        world.delete_fact(key_root)
 
 
 def test_unbound_fact_delete_mutates_only_legacy_null_row(world, monkeypatch):
@@ -2162,6 +2232,49 @@ def test_fk_readers_are_tenant_scoped(world, monkeypatch):
     assert len(world.share_links_for_goal(ga)) == 1
     assert world.signoffs_for_goals([ga]) == {ga: "approved"}
     assert world.origin_status_counts("schedule", "shared-ref")  # non-empty
+
+
+def test_named_tenant_cannot_mutate_legacy_or_link_foreign_rows(world, monkeypatch):
+    from maverick.world_model_backends import postgres as pg
+
+    tenant = "mutation-" + uuid.uuid4().hex
+    monkeypatch.setattr(pg, "_strict_tenant_isolation", lambda: False)
+    active = [None]
+    monkeypatch.setattr(pg, "_active_tenant", lambda: active[0])
+    legacy = world.create_goal("legacy")
+    legacy_project = world.create_project("legacy project")
+    active[0] = tenant
+    own = world.create_goal("own")
+    own_project = world.create_project("own project")
+    conversation = world.get_or_create_conversation("channel", tenant).id
+    try:
+        world.set_goal_project(own, own_project)
+        assert world.get_goal(own).project_id == own_project
+        assert world.add_artifact(own, "text", "own report", "data") > 0
+        assert world.append_turn(conversation, "user", "message", goal_id=own) > 0
+        world.set_goal_title(legacy, "changed")
+        assert world.get_goal(legacy).title == "legacy"  # compatibility read only
+        with pytest.raises(ValueError):
+            world.add_artifact(legacy, "text", "report", "data")
+        with pytest.raises(ValueError):
+            world.start_episode(legacy)
+        with pytest.raises(ValueError):
+            world.append_turn(conversation, "user", "message", goal_id=legacy)
+        with pytest.raises(ValueError):
+            world.create_goal("foreign child", parent_id=legacy)
+        with pytest.raises(ValueError):
+            world.create_goal("foreign project", project_id=legacy_project)
+        world.set_goal_parent(own, legacy)
+        assert world.get_goal(own).parent_id is None
+        world.set_goal_project(own, legacy_project)
+        assert world.get_goal(own).project_id == own_project
+    finally:
+        with world._tx() as cur:
+            cur.execute("DELETE FROM turns WHERE conversation_id=%s", (conversation,))
+            cur.execute("DELETE FROM conversations WHERE id=%s", (conversation,))
+            cur.execute("DELETE FROM artifacts WHERE goal_id IN (%s,%s)", (legacy, own))
+            cur.execute("DELETE FROM goals WHERE id IN (%s,%s)", (legacy, own))
+            cur.execute("DELETE FROM projects WHERE id IN (%s,%s)", (legacy_project, own_project))
 
 
 def test_erase_conversations_deletes_all_goal_child_rows(world):

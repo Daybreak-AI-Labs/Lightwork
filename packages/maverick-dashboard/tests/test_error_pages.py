@@ -20,7 +20,7 @@ def _restore_test_routes():
 
 def _client():
     from maverick_dashboard.app import app
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def test_404_html_for_browser(monkeypatch, tmp_path):
@@ -59,7 +59,7 @@ def test_unmatched_browser_route_with_unverified_auth_stays_404(monkeypatch, sco
     monkeypatch.setenv("MAVERICK_DASHBOARD_INVITES", "1")
     email = "error-page@example.test"
     rbac.set_role("user:" + email, "admin")
-    with TestClient(app, headers={"Origin": "http://testserver"}, raise_server_exceptions=False) as client:
+    with TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}, raise_server_exceptions=False) as client:
         client.cookies.set("mvk_session", invites.mint_local_session(email))
         assert client.get("/users").status_code == 200
         if scoped_cookie:
@@ -78,7 +78,7 @@ def test_unmatched_route_without_required_dashboard_token_stays_unauthorized(mon
     from maverick_dashboard.app import app
 
     monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "synthetic-error-page-token")
-    with TestClient(app, headers={"Origin": "http://testserver"}, raise_server_exceptions=False) as client:
+    with TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}, raise_server_exceptions=False) as client:
         if scoped_cookie:
             client.cookies.set("mvk_pref_context", "unverified-account-context")
             client.cookies.set("mvk_lang", "fr")
@@ -107,7 +107,7 @@ def test_browser_http_errors_are_branded_and_actionable(monkeypatch):
         )
 
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
-    client = TestClient(dash_app.app, raise_server_exceptions=False)
+    client = TestClient(dash_app.app, base_url="http://127.0.0.1", raise_server_exceptions=False)
     expected = {
         403: "Permission required",
         409: "Refresh before continuing",
@@ -135,7 +135,7 @@ def test_browser_500_has_a_single_primary_heading(monkeypatch, tmp_path):
         raise RuntimeError("internal detail")
 
     dash_app.app.add_api_route("/__server_error", fail, methods=["GET"])
-    response = TestClient(dash_app.app, raise_server_exceptions=False).get(
+    response = TestClient(dash_app.app, base_url="http://127.0.0.1", raise_server_exceptions=False).get(
         "/__server_error", headers={"Accept": "text/html"}
     )
     assert response.status_code == 500
@@ -152,7 +152,7 @@ def test_non_browser_http_error_contract_stays_json(monkeypatch):
 
     dash_app.app.add_api_route("/__api_conflict", fail_api, methods=["GET"])
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
-    response = TestClient(dash_app.app).get(
+    response = TestClient(dash_app.app, base_url="http://127.0.0.1").get(
         "/__api_conflict", headers={"Accept": "application/json"}
     )
     assert response.status_code == 409
@@ -170,7 +170,7 @@ def test_unhandled_exception_renders_500(monkeypatch, tmp_path):
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     # TestClient re-raises unhandled exceptions by default; disable so
     # our exception handler can produce the branded page.
-    client = TestClient(dash_app.app, raise_server_exceptions=False)
+    client = TestClient(dash_app.app, base_url="http://127.0.0.1", raise_server_exceptions=False)
     resp = client.get("/__boom", headers={"Accept": "text/html"})
     assert resp.status_code == 500
     assert "Something went wrong" in resp.text
@@ -216,7 +216,7 @@ def test_runtime_policy_error_is_actionable_and_path_safe(monkeypatch):
         )
 
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
-    client = TestClient(dash_app.app, raise_server_exceptions=False)
+    client = TestClient(dash_app.app, base_url="http://127.0.0.1", raise_server_exceptions=False)
 
     html = client.get(
         "/__policy_unavailable",

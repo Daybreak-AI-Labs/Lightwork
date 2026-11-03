@@ -40,7 +40,7 @@ def client(tmp_path, monkeypatch):
     )
     application.include_router(workflow_router, prefix="/api/v1")
     attach_vendor_onboarding_composition(application)
-    with TestClient(application, headers={"Origin": "http://testserver"}) as value:
+    with TestClient(application, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}) as value:
         yield value
     config.reset_config_cache()
 

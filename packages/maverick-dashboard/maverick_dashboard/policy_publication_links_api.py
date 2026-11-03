@@ -365,7 +365,7 @@ class PublicPolicyRateLimiter:
         self,
         *,
         per_key: int = 60,
-        global_limit: int = 2_000,
+        global_limit: int = 20_000,
         window_seconds: float = 60.0,
         max_keys: int = 10_000,
         clock: Callable[[], float] = time.monotonic,
@@ -407,6 +407,14 @@ class PublicPolicyRateLimiter:
                 raise PublicPolicyRateLimitExceeded("public policy rate limit reached")
             events.append(now)
             self._global.append(now)
+
+
+def _public_policy_rate_limiter() -> PublicPolicyRateLimiter:
+    try:
+        limit = int(os.environ.get("MAVERICK_PUBLIC_POLICY_GLOBAL_RATE", "20000"))
+    except ValueError:
+        limit = 20_000
+    return PublicPolicyRateLimiter(global_limit=max(1, min(limit, 100_000)))
 
 
 def _default_tenant_resolver() -> str | None:
@@ -532,9 +540,9 @@ def create_policy_publication_routers(  # noqa: C901 - explicit route assembly
     """Create separately mountable authenticated-admin and public routers."""
 
     deps = dependencies or PolicyPublicationDependencies(
-        rate_limiter=PublicPolicyRateLimiter()
+        rate_limiter=_public_policy_rate_limiter()
     )
-    limiter = deps.rate_limiter or PublicPolicyRateLimiter()
+    limiter = deps.rate_limiter or _public_policy_rate_limiter()
     admin = APIRouter(
         prefix="/policy-publication-links",
         tags=["policy-publication-links"],
@@ -993,8 +1001,11 @@ def create_policy_publication_routers(  # noqa: C901 - explicit route assembly
             alias="format",
         ),
     ) -> Response:
-        client = request.client.host if request.client is not None else "unknown"
-        limiter_key = hashlib.sha256(f"{client}\0{link_id}".encode()).hexdigest()
+        from .ip_allowlist import client_ip
+        # Only configured trusted proxies may supply a forwarded client. Use
+        # one budget across link IDs so changing IDs cannot evade the limit.
+        client = client_ip(request)
+        limiter_key = hashlib.sha256(str(client or "unknown").encode()).hexdigest()
         try:
             limiter.check(limiter_key)
         except PublicPolicyRateLimitExceeded as exc:

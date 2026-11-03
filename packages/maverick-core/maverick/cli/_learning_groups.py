@@ -263,30 +263,18 @@ def workforce_graduation(db_path: str | None) -> None:
               help="Score unscored consequence cards against landed real "
                    "outcomes first (may graduate or demote action types).")
 @click.option("--revoke", "revoke_action", default=None, metavar="ACTION",
-              help="Demote ACTION and withdraw its standing grant for the "
-                   "current identity and policy. Other identities' grants "
-                   "are not withdrawn. Works while the feature is disabled.")
+              help="Clear ACTION's evidence qualification. Explicit standing "
+                   "consent grants are managed separately.")
 def earned_autonomy(do_reconcile: bool, revoke_action: str | None) -> None:
-    """Which action types have earned policy-auto-approval, and how?
-
-    The Earned Autonomy dial (maverick.earned_autonomy): per action type, how
-    many predictions reality confirmed, the current accurate streak, and
-    whether it has graduated from "a human approves" to "policy
-    auto-approves". Without --reconcile/--revoke this is read-only.
-    """
+    """Review action-level prediction evidence; evidence does not grant approval."""
     from ..earned_autonomy import enabled, shared
     engine = shared()
     if revoke_action:
         ok = engine.revoke(revoke_action)
         if not ok:
-            raise click.ClickException(
-                f"revocation not confirmed for {revoke_action!r}; inspect the "
-                "standing grant and local revocation ledger. A partial "
-                "withdrawal may already have occurred."
-            )
-        click.echo(f"Withdrawal recorded for {revoke_action!r} under the current "
-                   "identity and policy; local earned-autonomy state demoted. "
-                   "Other identities' standing grants are not withdrawn.")
+            raise click.ClickException(f"evidence revocation not confirmed for {revoke_action!r}")
+        click.echo(f"Evidence qualification cleared for {revoke_action!r}. "
+                   "Explicit standing consent grants are unchanged.")
     if do_reconcile:
         from . import _learning_cli_preflight, _run_learning_cli
         _learning_cli_preflight("earned_autonomy")
@@ -297,10 +285,8 @@ def earned_autonomy(do_reconcile: bool, revoke_action: str | None) -> None:
                    f"{list(report.demoted) or 'none'}.")
     states = engine.status()
     if not enabled():
-        click.echo("Earned autonomy is disabled ([earned_autonomy] enable / "
-                   "MAVERICK_EARNED_AUTONOMY). Note: disabling stops evidence "
-                   "and demotion but does NOT withdraw grants already minted; "
-                   "use --revoke ACTION to withdraw one.")
+        click.echo("Earned-autonomy evidence collection is disabled. "
+                   "Evidence does not grant approval.")
     if not states:
         click.echo("No consequence-card evidence yet (cards are pinned when "
                    "rehearsed high-risk actions run, and scored when reality "
@@ -308,7 +294,7 @@ def earned_autonomy(do_reconcile: bool, revoke_action: str | None) -> None:
         return
     click.echo(f"Cards: {engine.cards.verify()}  Ledger: {engine.ledger.verify()}")
     for s in states:
-        dial = "AUTO (graduated)" if s.graduated else "human approves"
+        dial = "evidence qualified; no approval granted" if s.graduated else "no approval granted by evidence"
         click.echo(f"  {s.action}: {dial} -- "
                    f"{s.hits}/{s.samples} accurate, streak {s.streak}")
 

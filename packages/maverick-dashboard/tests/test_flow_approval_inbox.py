@@ -30,7 +30,7 @@ def setup(monkeypatch, tmp_path):
     app.dependency_overrides[auth.require_principal_in_request_context] = bind
     monkeypatch.setattr(auth, "role_for_principal", lambda _principal: "operator")
     try:
-        yield TestClient(app, headers={"Origin": "http://testserver"}), actor
+        yield TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}), actor
     finally:
         app.dependency_overrides.clear()
         config.reset_config_cache()
@@ -237,7 +237,9 @@ def test_named_assignee_gets_existing_personal_decision_alert(setup, monkeypatch
     from maverick import budget_guidance
     from maverick.personal_notifications import PersonalInbox
     from maverick_dashboard import personal_notifications_api as notifications
+    from maverick_dashboard import rbac
 
+    rbac.set_role("user:reviewer", "operator")
     actor["principal"] = "user:reviewer"
     monkeypatch.setattr(budget_guidance, "warning_sources", lambda _actor: [])
     world = SimpleNamespace(

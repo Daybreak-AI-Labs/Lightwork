@@ -406,7 +406,9 @@ class _PinnedSocksProxy:
         dns_timeout_seconds: float = _SOCKS_DNS_TIMEOUT_SECONDS,
         connect_timeout_seconds: float = 15.0,
         idle_timeout_seconds: float = 60.0,
+        authorize_host: Callable[[str, int], bool] | None = None,
     ) -> None:
+        self._authorize_host = authorize_host
         self._resolver = resolver
         self._connector = connector
         self._dns_timeout = max(0.1, min(float(dns_timeout_seconds), 30.0))
@@ -632,6 +634,13 @@ class _PinnedSocksProxy:
         try:
             client.settimeout(_SOCKS_HANDSHAKE_TIMEOUT_SECONDS)
             host, port = self._read_request(client)
+            if self._authorize_host is not None:
+                try:
+                    allowed = self._authorize_host(host, port)
+                except Exception:
+                    allowed = False
+                if not allowed:
+                    self._reject(client, 2)
             try:
                 pinned_ip = self._pin_target(host, port)
             except _SocksRequestRejected:
@@ -707,6 +716,10 @@ class PlaywrightPageCollector:
                 "--disable-background-networking",
                 "--disable-component-update",
                 "--disable-domain-reliability",
+                # A SOCKS CONNECT exposes the destination only once. Avoid
+                # HTTP/2 origin coalescing that may reuse the encrypted tunnel
+                # for a different authority without a new proxy authorization.
+                "--disable-http2",
                 "--disable-quic",
                 "--disable-sync",
                 "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",

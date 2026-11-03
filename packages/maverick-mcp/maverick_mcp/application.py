@@ -85,6 +85,8 @@ class MCPApplication:
                 ],
             }
         if name == "maverick_facts_get":
+            if (self.dependencies.current_principal() or "").startswith("agent:"):
+                raise PermissionError("tenant-wide facts require an operator")
             with self.dependencies.world_factory() as w:
                 return {"facts": dict(w.get_facts())}
         return None
@@ -218,7 +220,9 @@ class MCPApplication:
         return f"answered #{qid}"
 
     def _tool_skill_install(self, args: dict) -> str:
-        from maverick.skills import install_skill
+        from maverick.skills import install_skill, url_install_allowed
+        if not url_install_allowed():
+            raise PermissionError("Skill installation is disabled by the server administrator")
         # MCP clients are external by definition, and the HTTP transport is
         # network-reachable behind only a shared bearer token. trusted_local
         # must be False so a bare local-path source (e.g. "/etc/passwd") is
@@ -240,6 +244,8 @@ class MCPApplication:
         return "\n".join(lines)
 
     def _tool_fact_set(self, args: dict) -> str:
+        if (self.dependencies.current_principal() or "").startswith("agent:"):
+            raise PermissionError("tenant-wide facts require an operator")
         # Facts are concatenated into the orchestrator's system brief on every
         # future run, so a malicious fact set over MCP is a persistent prompt
         # injection. Scan the value before storing (the orchestrator also
@@ -268,6 +274,8 @@ class MCPApplication:
         return f"set {args['key']}"
 
     def _tool_facts_get(self) -> str:
+        if (self.dependencies.current_principal() or "").startswith("agent:"):
+            raise PermissionError("tenant-wide facts require an operator")
         with self.dependencies.world_factory() as w:
             facts = w.get_facts()
         if not facts:

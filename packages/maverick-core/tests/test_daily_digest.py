@@ -331,7 +331,7 @@ def test_summary_says_why_what_and_by_when_and_links_each_item():
     assert "You get this because you turned on the daily summary in My work." in html
     blocks = digest_blocks(digest, dashboard_url="https://lw.test")
     joined = " ".join(str(block) for block in blocks)
-    assert "<https://lw.test/approvals#approval-12|Open>" in joined
+    assert "<https://lw.test/approvals#approval-12|Open 1>" in joined
     assert "Decide by Sun 04 Oct 2026, 22:05 (Europe/London)" in joined
     assert "You get this because you turned on the daily summary in My work." in joined
     for rendered in (text, html, joined):

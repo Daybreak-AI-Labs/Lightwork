@@ -127,7 +127,7 @@ def _add_routes(app: FastAPI) -> FastAPI:
 def _client(app: FastAPI | None = None) -> TestClient:
     # The dashboard builds its app with these options; see app.py.
     app = app or _app(**request_spans.fastapi_telemetry_kwargs())
-    return TestClient(app, raise_server_exceptions=False)
+    return TestClient(app, base_url="http://127.0.0.1", raise_server_exceptions=False)
 
 
 def _sdk_provider():
@@ -223,7 +223,7 @@ def test_an_invented_method_is_bounded_to_other(tracer):
 
 
 def test_websockets_pass_through_without_a_span(tracer):
-    with _client().websocket_connect("/ws") as websocket:
+    with _client().websocket_connect("ws://127.0.0.1" + "/ws") as websocket:
         websocket.send_text("ping")
         assert websocket.receive_text() == "ping"
     assert tracer.spans == []
@@ -388,3 +388,16 @@ def test_fastapi_own_server_span_is_switched_off_so_no_raw_url_is_exported(monke
     assert "GET /goals/{goal_id}" not in names
     exported = repr([dict(span.attributes) for span in exporter.get_finished_spans()])
     assert "tab=private" not in exported and "/goals/42" not in exported
+
+
+def test_inbound_trace_discards_oversized_tracestate(monkeypatch):
+    propagate = pytest.importorskip("opentelemetry.propagate")
+    seen = []
+    monkeypatch.setattr(propagate, "extract", lambda carrier: seen.append(carrier))
+    parent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+    observability._inbound_context({"traceparent": parent, "tracestate": "x" * 513})
+    assert seen[-1] == {"traceparent": parent}
+    observability._inbound_context({"traceparent": parent, "tracestate": "a" * 512})
+    assert seen[-1]["tracestate"] == "a" * 512
+    observability._inbound_context({"traceparent": parent, "tracestate": "é" * 257})
+    assert "tracestate" not in seen[-1]

@@ -20,7 +20,11 @@ see `/about` in the running app):
   baselines) for a fleet console to roll up.
 * **License key (optional)** — `LIGHTWORK_LICENSE` (+ `LIGHTWORK_LICENSE_PUBKEY`)
   verified via Ed25519. Without a key the app runs in evaluation mode: fully
-  functional, with a cap of 5 open requests.
+  functional, with a cap of 5 open requests. The deployment owner selects the
+  trusted public key; this is not a vendor-enforced restriction on a
+  self-hosted open-source deployment.
+  See the [self-managed demo license guide](../../docs/self-managed-demo-licenses.md)
+  to generate and use your own keys.
 
 **With Lightwork** the same agent additionally mirrors every request into
 the governed privacy workspace registers, lands every step on the signed
@@ -38,7 +42,12 @@ DSAR_OPERATOR_TOKEN=$(openssl rand -hex 24) bash run_standalone.sh
 
 Container + cloud installs: `Dockerfile.standalone` here, and the per-cloud
 guides in [`../pia-concierge/DEPLOYMENT.md`](../pia-concierge/DEPLOYMENT.md)
-apply to this app with the env names below.
+apply to this app with the env names below. For remote access, place the
+loopback-bound container behind an HTTPS proxy: HTTP Basic credentials need
+TLS in transit. Set `DSAR_BASE_URL` to that proxy's public HTTPS URL.
+Operator changes require an Origin or Referer matching the public scheme, host
+and port in `DSAR_BASE_URL`. Configure that URL for the HTTPS proxy's external
+address; API clients performing changes must send the same trusted origin.
 
 ## Environment
 
@@ -49,7 +58,13 @@ apply to this app with the env names below.
 | `DSAR_DATA_DIR` | `.dsar-data` | the request store (mount `/data` in containers) |
 | `DSAR_BASE_URL` | `http://127.0.0.1:8891` | public URL used in verification links |
 | `DSAR_OPERATOR_USER` / `DSAR_OPERATOR_TOKEN` | `operator` / unset | HTTP Basic credentials required for the operator queue, case pages, package downloads, and workflow actions |
+| `DSAR_EMAIL_ALLOWED_DOMAINS` | unset | Required in platform mode: comma-separated exact recipient domains permitted for public intake and verification email. Configure shared rate limiting at the reverse proxy and mail service; the in-process peer, recipient, and global limits are per worker and reset on restart. External ASGI servers must disable proxy-header rewriting so callers cannot spoof the peer. |
 | `DSAR_SLA_DAYS` | `30` | the statutory clock |
 | `EMAIL_USER` / `EMAIL_SMTP_PORT` | — | outbound mail identity (standalone captures locally) |
 | `LIGHTWORK_LICENSE` / `LIGHTWORK_LICENSE_PUBKEY` | unset | signed license token + issuer public key |
 | `VALUE_HOURLY_RATE`, `VALUE_DSAR_*_HOURS` | `$60`, 2.5/2.5/3.0h | the operator's own value inputs |
+
+Public intake limits are best-effort abuse reduction. Recipient aliases can map
+multiple addresses to the same mailbox, and a failed delivery still consumes a
+short-term reservation. Configure recipient-aware quotas at the mail service;
+review failed deliveries through the operator's normal mail monitoring.

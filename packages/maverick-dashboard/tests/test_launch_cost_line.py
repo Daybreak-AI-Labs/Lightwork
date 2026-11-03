@@ -26,7 +26,8 @@ def env(tmp_path, monkeypatch):
     config.reset_config_cache()
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     world = WorldModel(tmp_path / "world.db")
-    from maverick_dashboard import api, auth
+    from maverick_dashboard import api, auth, rbac
+    rbac.set_role(ANA, "operator")
     api._world_cache.clear()
     monkeypatch.setattr(auth, "caller_principal", lambda request: ANA)
     from maverick_dashboard import app as app_module
@@ -34,7 +35,7 @@ def env(tmp_path, monkeypatch):
 
     # The chat page reads the signed-in person through its own import.
     monkeypatch.setattr(app_module, "caller_principal", lambda request: ANA)
-    yield TestClient(app, headers={"Origin": "http://testserver"}), world
+    yield TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}), world
     world.close()
     api._world_cache.clear()
     config.reset_config_cache()

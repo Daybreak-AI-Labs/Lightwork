@@ -32,7 +32,7 @@ def test_page_is_list_driven_plain_and_permission_aware(monkeypatch) -> None:
     )
     app = FastAPI()
     app.include_router(page.create_no_code_grc_studio_page_router(selected_templates))
-    response = TestClient(app).get(page.PAGE_PATH)
+    response = TestClient(app, base_url="http://127.0.0.1").get(page.PAGE_PATH)
     assert response.status_code == 200
     body = response.text
     assert "Compliance studio" in body
@@ -90,7 +90,7 @@ def test_page_rejects_unknown_query_parameters(monkeypatch) -> None:
     app = FastAPI()
     app.include_router(page.create_no_code_grc_studio_page_router(selected_templates))
     assert (
-        TestClient(app).get(page.PAGE_PATH + "?return_to=https://attacker.invalid").status_code
+        TestClient(app, base_url="http://127.0.0.1").get(page.PAGE_PATH + "?return_to=https://attacker.invalid").status_code
         == 404
     )
 
@@ -100,7 +100,7 @@ def test_shipped_app_mounts_page_api_and_private_asset(monkeypatch) -> None:
     monkeypatch.setattr(page, "_tenant_selected", lambda: None)
     from maverick_dashboard.app import app
 
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     assert client.get(page.PAGE_PATH).status_code == 200
     assert client.get(f"{page.API_BASE}/status").status_code == 200
     asset = client.get(page.ASSET_PATH)
@@ -120,7 +120,7 @@ def test_turned_off_studio_shows_its_gate_instead_of_loaders(monkeypatch) -> Non
     app.include_router(page.create_no_code_grc_studio_page_router(templates()))
     for enabled in (False, True):
         monkeypatch.setattr(module_activation, "module_activation_enabled", lambda _section, enabled=enabled: enabled)
-        body = TestClient(app).get(page.PAGE_PATH).text
+        body = TestClient(app, base_url="http://127.0.0.1").get(page.PAGE_PATH).text
         main = body[body.index('<div class="grcs-shell"'):body.index(page.ASSET_PATH)]
         assert f'data-module-enabled="{"true" if enabled else "false"}"' in main
         if enabled:

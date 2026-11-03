@@ -416,25 +416,6 @@ def _adopting(S) -> tuple:
           subgroup=_ADOPT, minimum=0.1, maximum=50, unit="percent", scale=0.01,
           weaker="higher",
           warning="A new answer checker could replace the current one on weaker evidence."),
-        S("self_improvement", "require_signed_approval", "Require signed approval of big changes",
-          "Changes to Lightwork's own code or model weights need a person's cryptographic "
-          "signature, even before approver keys are added.", "toggle", group, False,
-          "maverick.approval_signing", subgroup=_ADOPT,
-          env=("MAVERICK_REQUIRE_SIGNED_APPROVAL",), weaker=False,
-          warning="Code and model changes could be approved without a signature."),
-        S("self_improvement", "approver_keys", "People who may sign big changes",
-          "Only a signature from one of these keys approves a change to Lightwork's own code "
-          "or model weights. Add each approver's public key file.", "keys", group, [],
-          "maverick.approval_signing", subgroup=_ADOPT, weaker="grow",
-          warning="Whoever holds the new key will be able to approve code and model "
-                  "changes."),
-        S("self_improvement", "approver_keys_dir", "Folder of approver key files",
-          "A folder on the server whose key files are also trusted to approve big changes.",
-          "text", group, "", "maverick.approval_signing", subgroup=_ADOPT,
-          env=("MAVERICK_APPROVER_KEYS_DIR",), max_length=400, pattern=_PATH,
-          weaker="change",
-          warning="The key files in the new folder will be trusted to approve code and model "
-                  "changes."),
     )
 
 

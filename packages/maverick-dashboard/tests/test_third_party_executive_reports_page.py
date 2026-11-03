@@ -43,7 +43,7 @@ def client(monkeypatch, permissions=frozenset({"view", "operate", "audit", "admi
     )
     app = FastAPI()
     app.include_router(page.create_third_party_executive_reports_page_router(templates()))
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def test_page_is_store_free_private_csp_closed_and_copilot_enabled(monkeypatch) -> None:

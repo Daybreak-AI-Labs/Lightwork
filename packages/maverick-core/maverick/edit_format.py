@@ -405,7 +405,7 @@ def _is_sensitive_path(path_str: str) -> bool:
 
 def _writes_git_metadata(target: Path) -> bool:
     """True if ``target`` is (or is under) a `.git` directory."""
-    return any(part == ".git" for part in target.parts)
+    return any(part.rstrip(" .").casefold() == ".git" for part in target.parts)
 
 
 def _apply_one(block: SearchReplaceBlock, workdir: Path) -> ApplyResult:  # noqa: C901  -- the added .git/ metadata guard tipped this over the cap; decompose under dedicated review

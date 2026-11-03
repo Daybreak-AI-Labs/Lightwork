@@ -135,6 +135,34 @@ def _op_tool(name, operations, calls, *, confirm=True):
 
 
 class TestWrap:
+    def test_real_registry_refuses_unapproved_default_teams(self, monkeypatch):
+        import maverick.config as cfg
+        import maverick.safety.consent as consent
+        from maverick.tools import teams_tool
+
+        monkeypatch.setattr(cfg, "get_governed_connectors", lambda: {"connectors": [], "approver": ""})
+        monkeypatch.setattr("maverick.governed_tools._enterprise_mode", lambda: False)
+        def deny(*_args, **_kwargs):
+            raise consent.ConsentDenied("not approved")
+        monkeypatch.setattr(consent, "require_operation_consent", deny)
+        monkeypatch.setenv("TEAMS_WEBHOOK_URL", "https://teams.example.test/channel-secret")
+        reg = ToolRegistry()
+        reg.register(teams_tool.teams_tool())
+        assert apply_governed_connectors(reg) == ["teams"]
+        result = asyncio.run(reg.run("teams", {"text": "hello"}))
+        assert "REFUSED (governed)" in result
+
+    def test_default_teams_send_requires_human_decision(self, monkeypatch):
+        from maverick.safety import consent
+        calls = []
+        tool = _teams_style_tool(calls)
+        def deny(*_args, **_kwargs):
+            raise consent.ConsentDenied("not approved")
+        monkeypatch.setattr(consent, "require_operation_consent", deny)
+        result = wrap_connector_tool(tool).fn({"text": "hello"})
+        assert "REFUSED (governed)" in result
+        assert not calls
+
     def test_read_passes_through(self):
         calls = []
         wrapped = wrap_connector_tool(_fake_tool(calls))

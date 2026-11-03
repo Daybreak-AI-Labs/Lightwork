@@ -57,8 +57,14 @@ def _prepare(records, goal_id, directory):
         if record.filename in names and names[record.filename] != record.sha256:
             raise product_error(400, "attachment_name_conflict", "Two different files use the same name. Rename one before answering.")
         names[record.filename] = record.sha256
-    view = _PreparedEvidence(records)
-    attachments.generate_companions(view, goal_id, root=directory)
+    # Give the companion generator verified, content-addressed copies inside
+    # its own private goal root; staged upload paths use unrelated UUID names.
+    copies = [
+        attachments.store(goal_id, record.filename, record.mime, _read_staged(record), root=directory, mirror=False)
+        for record in records
+    ]
+    view = _PreparedEvidence(copies)
+    attachments.generate_companions(view, goal_id, root=directory, mirror=False)
     missing = [item for item in attachments.companion_coverage(view, goal_id) if item["status"] != "ready"]
     if missing:
         raise product_error(409, "attachment_not_ready", "Some document text could not be prepared. Attach a readable PDF or text copy before answering. Your question has not been answered.")

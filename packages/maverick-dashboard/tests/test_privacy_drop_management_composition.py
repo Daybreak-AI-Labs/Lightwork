@@ -45,7 +45,7 @@ def _request(app: FastAPI) -> Request:
             "query_string": b"",
             "headers": [],
             "client": ("127.0.0.1", 1),
-            "server": ("testserver", 443),
+            "server": ("127.0.0.1", 443),
             "app": app,
         }
     )
@@ -339,7 +339,7 @@ def test_strict_api_uses_attached_stock_seams_without_test_dependency_injection(
         return await call_next(request)
 
     app.include_router(drop_api.create_privacy_drop_management_router(), prefix="/api/v1")
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
     status = client.get("/api/v1/privacy/drop/status")
     assert status.status_code == 200

@@ -22,7 +22,7 @@ def test_advertised_script_and_style_routes(monkeypatch, tmp_path):
         names.update(re.findall(r"/static/([a-zA-Z0-9_.-]+\.(?:js|css))", source))
     assert len(names) > 100  # Detect accidental narrowing to a few shell assets.
     failures = []
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     for name in sorted(names):
         response = client.get("/static/" + name)
         expected = "text/css" if name.endswith(".css") else "application/javascript"

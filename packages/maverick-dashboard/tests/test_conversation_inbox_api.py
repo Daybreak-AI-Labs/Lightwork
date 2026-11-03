@@ -58,7 +58,7 @@ def setup(tmp_path, monkeypatch):
         result = entry.execute(request, selection, args, preview.native, body["operation_id"])
         replay = entry.recover(request, selection, args, preview.native, body["operation_id"])
         return {"status": result.status, "recovery": replay.status, "details": result.details}
-    with TestClient(application, headers={"Origin": "http://testserver"}) as client:
+    with TestClient(application, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}) as client:
         yield client, world, goal
     for world in worlds.values():
         world.close()
@@ -282,7 +282,7 @@ def test_reviewed_snapshot_is_exact_and_pending_edit_retains_original_context(se
 
 
 def test_native_inbox_and_project_assets_are_served_as_javascript(setup):
-    client = TestClient(dashboard.app, headers={"Origin": "http://testserver"})
+    client = TestClient(dashboard.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     for name in ("lightwork-conversation-inbox.js", "lightwork-project-workspaces.js"):
         response = client.get("/static/" + name)
         assert response.status_code == 200, response.text

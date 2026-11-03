@@ -130,8 +130,8 @@ def store_path() -> Path:
 
 def default_role() -> str:
     """Role for an authenticated user with no explicit assignment. Defaults to
-    ``operator`` (authenticated users keep today's access); set
-    ``[dashboard] default_role = "viewer"`` for deny-by-default."""
+    ``viewer``; grant operate or admin explicitly, or configure a different
+    first-login role in ``[dashboard] default_role``."""
     try:
         from maverick.config import config_source_errors, load_config
 
@@ -144,7 +144,7 @@ def default_role() -> str:
         if not isinstance(dashboard, dict):
             raise RbacStoreError("RBAC defaults invalid: [dashboard] must be a table")
         if "default_role" not in dashboard:
-            return "operator"
+            return "viewer"
         r = dashboard.get("default_role")
         if isinstance(r, str) and is_known_role(r):
             return r
@@ -738,6 +738,16 @@ def _tenant_removed(tenant: str) -> bool:
         return tenant_retired(tenant)
     except Exception as exc:
         raise RbacStoreError("workspace membership authority is unavailable") from exc
+
+
+def tenant_role_scope_initialized() -> bool:
+    """Whether workspace membership authority has ever been initialized.
+
+    Keep the roster even when its last grant is revoked. A missing recorded
+    roster raises rather than silently restoring installation-wide defaults.
+    """
+    _load_tenant()
+    return tenant_store_path().exists()
 
 
 def get_tenant_role(tenant: str, principal: str) -> str | None:

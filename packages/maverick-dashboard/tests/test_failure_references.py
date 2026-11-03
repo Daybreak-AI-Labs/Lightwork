@@ -9,7 +9,7 @@ from starlette.requests import Request
 def _request():
     return Request({"type": "http", "method": "POST", "path": "/private/customer-name",
                     "query_string": b"token=private-value", "headers": [],
-                    "scheme": "http", "server": ("testserver", 80),
+                    "scheme": "http", "server": ("127.0.0.1", 80),
                     "route": SimpleNamespace(path="/private/{name}")})
 
 

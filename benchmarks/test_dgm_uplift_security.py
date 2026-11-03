@@ -18,6 +18,37 @@ def _load(name: str):
 dgm_uplift = _load("dgm_uplift.py")
 
 
+def test_solver_payload_omits_grader_patches(tmp_path):
+    inst = SimpleNamespace(instance_id="i", gold_patch="gold secret",
+                           test_patch="test secret", brief="public")
+    payload = dgm_uplift._instance_payload(inst, tmp_path)
+    assert "gold_patch" not in payload
+    assert "test_patch" not in payload
+    assert payload["brief"] == "public"
+
+
+def test_hidden_patch_refused_before_solver_or_checkpoint(tmp_path):
+    inst = SimpleNamespace(instance_id="i", test_patch="hidden fixture")
+    checkpoint = tmp_path / "results.jsonl"
+    with pytest.raises(RuntimeError, match="separate trusted grader"):
+        dgm_uplift.run_solver(tmp_path / "absent", [inst], tmp_path / "work",
+                              checkpoint=checkpoint)
+    assert not checkpoint.exists()
+    with pytest.raises(RuntimeError, match="separate trusted grader"):
+        dgm_uplift._solve_in_sandbox(tmp_path / "absent", inst, tmp_path / "work", None)
+
+
+def test_container_agent_hidden_patch_refused_before_materialization(monkeypatch):
+    container = _load("swebench_container_run.py")
+    monkeypatch.setattr(container, "_materialize_repo", lambda *args: pytest.fail("checkout created"))
+    inst = {"instance_id": "i", "test_patch": "hidden fixture"}
+    with pytest.raises(RuntimeError, match="separate trusted grader"):
+        container.agent_patch(inst)
+    with pytest.raises(RuntimeError, match="separate trusted grader"):
+        container.run({"i": inst}, ["i"], None, proposer="agent", keys_dir=None,
+                      ledger=None, namespace="test", timeout=1, check_baseline=False)
+
+
 def test_run_solver_exposes_only_isolated_instance_repo(tmp_path, monkeypatch):
     # Ampersands are command separators in cmd.exe.  Keeping one in both the
     # solver and work paths makes this an end-to-end regression for Windows

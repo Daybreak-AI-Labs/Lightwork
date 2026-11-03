@@ -27,7 +27,7 @@ def test_plan_approval_card_lists_steps_and_outside_actions(monkeypatch, tmp_pat
         "confirm_plan", risk="high", scope="task 41", detail=encode_approval_detail(card), provenance="plan")
     from maverick_dashboard.app import app
 
-    text = TestClient(app, headers={"Origin": "http://testserver"}).get("/approvals").text
+    text = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}).get("/approvals").text
     row = re.search(rf'<article class="approval-item" data-id="{approval_id}".*?</article>', text, flags=re.DOTALL)
     assert row is not None
     html = row.group(0)

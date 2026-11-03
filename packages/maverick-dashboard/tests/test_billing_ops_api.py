@@ -7,7 +7,7 @@ import re
 import pytest
 from fastapi.testclient import TestClient
 
-ORIGIN = {"Origin": "http://testserver"}
+ORIGIN = {"Origin": "http://127.0.0.1"}
 BASE = "/api/v1/admin/billing-ops"
 _BANNED = re.compile(r"\b(tenant|principal|payload|json|toml|webhook|sdk|entitlements?)\b|/api/v1|MAVERICK_",
                      re.IGNORECASE)
@@ -32,7 +32,7 @@ def client(monkeypatch, tmp_path):
     dash_app._world_cache.clear()
     from maverick.tenant.registry import create_tenant
     create_tenant("acme", plan="pro", display_name="Acme")
-    yield TestClient(dash_app.app, headers=ORIGIN)
+    yield TestClient(dash_app.app, base_url="http://127.0.0.1", headers=ORIGIN)
     config.reset_config_cache()
     dash_app._world_cache.clear()
     audit_writer._defaults.clear()
@@ -149,7 +149,7 @@ def test_billing_page_shows_the_new_panels_to_administrators(client):
 def test_stripe_status_shows_where_stripe_sends_payment_notices(client, monkeypatch):
     facts = {row["label"]: row["value"] for row in client.get(BASE + "/stripe").json()["facts"]}
     assert facts["Payment notices from Stripe accepted"] == "No"
-    assert facts["Address for Stripe payment notices"] == "http://testserver/webhook/stripe"
+    assert facts["Address for Stripe payment notices"] == "http://127.0.0.1/webhook/stripe"
     monkeypatch.setenv("MAVERICK_STRIPE_WEBHOOK_SECRET", "whsec_synthetic123")  # pragma: allowlist secret
     facts = {row["label"]: row["value"] for row in client.get(BASE + "/stripe").json()["facts"]}
     assert facts["Payment notices from Stripe accepted"] == "Yes"

@@ -74,12 +74,16 @@ def _fn_slice(a: list) -> Any:
 
 # Python's backtracking ``re`` engine has no match timeout. Keep flow regexes
 # intentionally small and conservative: permit literal/character-class searches
-# and simple capture groups used for extraction, but reject constructs known to
-# create super-linear backtracking (alternation, nested groups, backreferences,
-# lookarounds, and quantified groups whose body is itself quantified).
+# and simple capture groups used for extraction. Allow at most one simple
+# quantifier and no counted repetitions: adjacent or nested repetitions can
+# otherwise make even a short pattern catastrophically expensive.
 _REGEX_MAX_PATTERN = 200
 _REGEX_MAX_SUBJECT = 2000
 _GROUP_QUANTIFIERS = frozenset("*+?")
+
+
+class FlowRegexRefused(ValueError):
+    """A pattern cannot be evaluated within the flow's safe regex subset."""
 
 
 def _regex_is_safe(pattern: str) -> bool:
@@ -88,6 +92,7 @@ def _regex_is_safe(pattern: str) -> bool:
     escaped = False
     groups: list[dict[str, bool]] = []
     last_group_had_quantifier = False
+    quantifiers = 0
 
     for i, ch in enumerate(pattern):
         if escaped:
@@ -122,7 +127,12 @@ def _regex_is_safe(pattern: str) -> bool:
                 return False
             last_group_had_quantifier = groups.pop()["has_quantifier"]
             continue
-        if ch in _GROUP_QUANTIFIERS or ch == "{":
+        if ch in "{}":
+            return False
+        if ch in _GROUP_QUANTIFIERS:
+            quantifiers += 1
+            if quantifiers > 1:
+                return False
             if groups:
                 groups[-1]["has_quantifier"] = True
             elif last_group_had_quantifier:
@@ -136,15 +146,16 @@ def _regex_is_safe(pattern: str) -> bool:
 
 def _fn_regex(a: list) -> str:
     """regex(value, pattern) -- the first match; group 1 if the pattern has a
-    capture group, else the whole match. Empty on no match / bad or unsafe
-    pattern. Guarded against ReDoS: the pattern is length-capped and rejected
-    if it has a nested unbounded quantifier, and the subject is length-capped
-    (Python's ``re`` offers no match timeout, so prevention is the only lever)."""
+    capture group, else the whole match. Empty on no match or invalid syntax;
+    unsupported patterns fail the flow instead of changing its branch result.
+    Guarded against ReDoS: the pattern is length-capped and rejected
+    if it has more than one quantifier or counted repetition, and the subject
+    is length-capped. Existing flows with more complex patterns must be revised."""
     if len(a) < 2:
         return ""
     pattern = str(a[1])
     if len(pattern) > _REGEX_MAX_PATTERN or not _regex_is_safe(pattern):
-        return ""
+        raise FlowRegexRefused("flow regex pattern exceeds the supported safe subset")
     subject = _as_text(a[0])[:_REGEX_MAX_SUBJECT]
     try:
         m = re.search(pattern, subject)
@@ -310,7 +321,7 @@ def _eval_expr(expr: str, data: dict, *, allow_secrets: bool = False) -> Any:
         args = [_arg_value(a, data, allow_secrets=allow_secrets) for a in _split_args(m.group(2))]
         try:
             return funcs[m.group(1)](args)
-        except FlowCredentialRefused:
+        except (FlowCredentialRefused, FlowRegexRefused):
             raise
         except Exception:  # a bad transform never breaks rendering
             return ""

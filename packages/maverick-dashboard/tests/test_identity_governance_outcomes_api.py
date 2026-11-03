@@ -84,7 +84,7 @@ def _client(monkeypatch):
         return True
 
     app.state.identity_governance_asset_binding_authorizer = authorize
-    return TestClient(app, headers={"Origin": "http://testserver"}), registry, authorizations
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}), registry, authorizations
 
 
 def test_outcome_router_is_mounted_under_closed_security_path(monkeypatch):

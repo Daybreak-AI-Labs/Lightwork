@@ -26,7 +26,7 @@ def _isolated(monkeypatch, tmp_path):
 @pytest.fixture
 def client():
     from maverick_dashboard.app import app
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 # Accepting an invitation in local mode sets the colleague's passphrase.
@@ -180,9 +180,9 @@ def test_accept_post_requires_same_origin(client, monkeypatch):
     from maverick_dashboard import invites
     _inv, token = invites.create_invite("bob@corp.com", "viewer", created_by="me")
     from maverick_dashboard.app import app
-    hostile = TestClient(app)                            # no Origin/Referer at all
+    hostile = TestClient(app, base_url="http://127.0.0.1")                            # no Origin/Referer at all
     assert hostile.post(f"/auth/invite/{token}").status_code == 400
-    evil = TestClient(app, headers={"Origin": "http://evil.example"})
+    evil = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://evil.example"})
     assert evil.post(f"/auth/invite/{token}").status_code == 400
     assert invites.peek_invite(token) is not None        # nothing was consumed
 

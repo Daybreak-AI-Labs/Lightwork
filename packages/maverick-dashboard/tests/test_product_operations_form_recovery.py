@@ -55,7 +55,7 @@ def _harness(monkeypatch):
     monkeypatch.setattr(ops, "adapters", lambda: {entry.id: entry for entry in forms.entries()})
     app = FastAPI()
     app.include_router(ops.router)
-    return TestClient(app), current
+    return TestClient(app, base_url="http://127.0.0.1"), current
 
 
 def test_exact_held_decision_requires_review_and_runs_native_recovery_once(monkeypatch):

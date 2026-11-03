@@ -115,7 +115,7 @@ def test_accept_set_passphrase_sign_out_and_sign_back_in_from_another_computer(w
     assert private_path_is_restricted(store)
     assert colleague.get("/api/v1/features/modules").status_code == 200
     # Sign out, then come back the next day.
-    assert colleague.get("/auth/logout").status_code == 303
+    assert colleague.post("/auth/logout", follow_redirects=False).status_code == 303
     assert "mvk_session" not in colleague.cookies
     denied = colleague.get("/goals", headers={"Accept": "text/html"})
     assert denied.status_code in {302, 303} and denied.headers["location"].startswith("/auth/local-login")
@@ -617,7 +617,7 @@ def _idp(monkeypatch, *, roles=None, suites=None):
     monkeypatch.setenv("MAVERICK_SCIM_TOKEN", _SCIM_TOKEN)
     tables = {"group_roles": roles or {}, "group_suites": suites or {}}
     monkeypatch.setattr(scim_groups, "_config_table", lambda key: tables.get(key, {}))
-    idp = TestClient(app, headers={"Origin": "http://testserver"})
+    idp = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     headers = {"Authorization": f"Bearer {_SCIM_TOKEN}"}
 
     def push(email, group):
@@ -643,7 +643,7 @@ def _workspace_member_only(owner):
     registry.create_tenant("acme")
     rbac.set_tenant_role("acme", principal, "viewer")
     rbac.remove_user(principal)
-    assert auth.global_role_for_principal(principal) == "operator"   # the default: nothing is conferred
+    assert auth.global_role_for_principal(principal) is None
     return principal
 
 

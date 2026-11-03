@@ -13,8 +13,13 @@ from __future__ import annotations
 import base64
 import binascii
 import datetime as _dt
+import hashlib
 import os
+import re
 import secrets
+import threading
+import time
+from collections import deque
 from pathlib import Path
 
 import backend
@@ -78,7 +83,23 @@ def _basic_credentials(authorization: str) -> tuple[str, str] | None:
     return username, password
 
 
-def require_operator(authorization: str = Header("")) -> None:
+def _origin(value: str, *, origin_header: bool = False) -> tuple[str, str, int] | None:
+    from urllib.parse import urlsplit
+
+    try:
+        url = urlsplit(value)
+        if (url.scheme.lower() not in {"http", "https"} or not url.hostname
+                or url.username is not None or url.password is not None
+                or (origin_header and (url.path or url.query or url.fragment))):
+            return None
+        port = url.port
+        return (url.scheme.lower(), url.hostname.lower(),
+                port if port is not None else (443 if url.scheme.lower() == "https" else 80))
+    except ValueError:
+        return None
+
+
+def require_operator(request: Request, authorization: str = Header("")) -> None:
     """Protect DSAR operator-only screens and state-changing actions."""
     if not OPERATOR_TOKEN:
         raise _auth_error(
@@ -93,6 +114,13 @@ def require_operator(authorization: str = Header("")) -> None:
             and secrets.compare_digest(password.encode("utf-8", "surrogatepass"),
                                        OPERATOR_TOKEN.encode("utf-8", "surrogatepass"))):
         raise _auth_error(401, "Operator authentication required.")
+    if request.method not in {"GET", "HEAD", "OPTIONS"}:
+        origin_header = request.headers.get("origin")
+        origin = origin_header or request.headers.get("referer") or ""
+        expected = _origin(BASE_URL)
+        if (not expected or _origin(origin, origin_header=origin_header is not None) != expected
+                or request.headers.get("sec-fetch-site", "").lower() == "cross-site"):
+            raise HTTPException(status_code=403, detail="Same-origin operator request required.")
 
 
 def _license_gate() -> str | None:
@@ -110,6 +138,65 @@ def _license_gate() -> str | None:
     return None
 
 
+# Public intake can cause platform email. Fail closed until the operator sets
+# an explicit recipient-domain policy, and bound per-peer request volume.
+_INTAKE_EMAIL = re.compile(r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?\Z")
+_intake_attempts: dict[str, deque[float]] = {}
+_intake_lock = threading.Lock()
+_intake_recipients: dict[str, float] = {}
+_intake_global: deque[float] = deque()
+
+
+def _intake_subject(subject: str) -> str:
+    subject = (subject or "").strip()
+    if len(subject) > 200 or not _INTAKE_EMAIL.fullmatch(subject):
+        raise ValueError("A valid email address is required.")
+    if not STANDALONE:
+        domains = {domain.strip().lower() for domain in
+                   os.environ.get("DSAR_EMAIL_ALLOWED_DOMAINS", "").split(",")
+                   if domain.strip()}
+        if subject.rsplit("@", 1)[1].lower() not in domains:
+            raise ValueError("This email domain is not enabled for public intake.")
+    return subject
+
+
+def _intake_rate_limit(request: Request) -> None:
+    # Use only the socket peer; forwarded headers are untrusted. Reverse proxies
+    # must enforce their own shared per-client and global limits as well.
+    peer = request.client.host if request.client else "unknown"
+    now = time.monotonic()
+    with _intake_lock:
+        for key in list(_intake_attempts):
+            timestamps = _intake_attempts[key]
+            while timestamps and timestamps[0] <= now - 60:
+                timestamps.popleft()
+            if not timestamps:
+                del _intake_attempts[key]
+        if peer not in _intake_attempts and len(_intake_attempts) >= 8192:
+            raise HTTPException(status_code=429, detail="Intake rate limit reached.")
+        timestamps = _intake_attempts.setdefault(peer, deque())
+        if len(timestamps) >= 30:
+            raise HTTPException(status_code=429, detail="Intake rate limit reached.")
+        timestamps.append(now)
+
+
+def _reserve_intake_email(subject: str) -> None:
+    # These bounded in-process limits supplement, but do not replace, a shared
+    # ingress/mail quota when several workers or replicas are deployed.
+    recipient = hashlib.sha256(subject.casefold().encode("utf-8")).hexdigest()
+    now = time.monotonic()
+    with _intake_lock:
+        while _intake_global and _intake_global[0] <= now - 3600:
+            _intake_global.popleft()
+        for key, timestamp in list(_intake_recipients.items()):
+            if timestamp <= now - 3600:
+                del _intake_recipients[key]
+        if recipient in _intake_recipients or len(_intake_global) >= 100:
+            raise HTTPException(status_code=429, detail="Intake email limit reached.")
+        _intake_recipients[recipient] = now
+        _intake_global.append(now)
+
+
 def _send_verification(rec: dict) -> None:
     link = f"{BASE_URL}/verify/{rec['verify_token']}"
     backend.send_email(
@@ -122,6 +209,10 @@ def _send_verification(rec: dict) -> None:
 
 def _open_request(subject: str, kind: str, *, channel: str, note: str = "",
                   intake: dict | None = None) -> dict:
+    subject = _intake_subject(subject)
+    if kind not in engine.KINDS:
+        raise ValueError(f"kind must be one of {engine.KINDS}")
+    _reserve_intake_email(subject)
     rec = engine.open_request(subject, kind, channel=channel, note=note,
                               intake=intake)
     rec["platform_id"] = backend.mirror_open(rec)
@@ -145,6 +236,7 @@ async def request_submit(request: Request,
                          subject_id: str = Form(...),
                          kind: str = Form("access"),
                          note: str = Form("")) -> HTMLResponse:
+    _intake_rate_limit(request)
     gate = _license_gate()
     if gate:
         return _page(request, "request.html", submitted=None, error=gate)
@@ -161,13 +253,22 @@ async def webhook_message(request: Request) -> JSONResponse:
     """Inbound message triage (email gateway, chat bridge, curl...). A
     message that does not read as a subject request — or names no subject —
     is a 422, never a silently-opened case."""
+    _intake_rate_limit(request)
     gate = _license_gate()
     if gate:
         return JSONResponse({"ok": False, "error": gate}, status_code=403)
     body = await request.json()
     text = str(body.get("text", ""))
     sender = str(body.get("sender", ""))
-    probe = engine.from_message(text, sender=sender)
+    def reserve_subject(subject: str) -> str:
+        subject = _intake_subject(subject)
+        _reserve_intake_email(subject)
+        return subject
+
+    try:
+        probe = engine.from_message(text, sender=sender, before_open=reserve_subject)
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=422)
     if probe is None:
         return JSONResponse(
             {"ok": False,

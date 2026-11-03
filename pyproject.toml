@@ -111,7 +111,8 @@ paths = ["packages", "apps", "benchmarks"]
 # Protocol method parameters are interface, not dead code: the stub body is
 # ``...`` so the name is never read in the file that declares it.
 ignore_names = ["stage_receipt"]
-exclude = ["*/tests/*", "*/test_*.py"]
+# Ignore generated package copies so local scans match a clean CI checkout.
+exclude = ["*/tests/*", "*/test_*.py", "*/build/*", "*/dist/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["packages", "apps", "benchmarks"]

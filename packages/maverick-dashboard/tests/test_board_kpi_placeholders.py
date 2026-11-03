@@ -30,7 +30,7 @@ def client(monkeypatch, tmp_path):
     world = world_model.WorldModel(world_model.DEFAULT_DB)
     world.create_goal("Vendor DPA review", domain="legal_privacy")  # Overview shows its board once work exists
     world.close()
-    return TestClient(dash_app.app, headers={"Origin": "http://testserver"})
+    return TestClient(dash_app.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def _row(page):

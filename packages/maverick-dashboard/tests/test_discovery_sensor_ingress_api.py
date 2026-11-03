@@ -6,6 +6,7 @@ import time
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from maverick import agent_trust, ai_discovery_sensors, config
 from maverick.ai_discovery_sensor_clients import (
@@ -17,7 +18,7 @@ from maverick.paths import tenant_scope
 from maverick_dashboard import external_gateway
 from maverick_dashboard.app import app
 
-client = TestClient(app)
+client = TestClient(app, base_url="http://127.0.0.1")
 
 _TENANT = "tenant-a"
 _AGENT_ID = "network-sensor"
@@ -36,6 +37,8 @@ def _isolated(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(external_gateway, "_rate_times", {})
     config.reset_config_cache()
+    from maverick.tenant.registry import create_tenant
+    create_tenant(_TENANT)
     yield
     config.reset_config_cache()
 
@@ -58,6 +61,9 @@ def _provision(
     allow_sensor: bool = True,
     sensor_type: str = "network_egress",
 ):
+    from maverick.tenant.registry import create_tenant, get_tenant
+    if get_tenant(tenant) is None:
+        create_tenant(tenant)
     with tenant_scope(tenant=tenant):
         service = ai_discovery_sensors.default_service()
         sensor = service.register_sensor(
@@ -127,6 +133,33 @@ def test_signed_machine_sensor_ingress_roundtrip_and_replay_refusal() -> None:
     assert replay.json()["detail"] == "invalid credentials"
     with tenant_scope(tenant=_TENANT):
         assert len(ai_discovery_sensors.default_service().list_observations()) == 1
+
+
+def test_unknown_tenant_cannot_create_namespace_claims(tmp_path):
+    claims = tmp_path / ".tenant-namespaces"
+    before = set(claims.rglob("*.json")) if claims.exists() else set()
+    for index in range(10):
+        response = client.post(
+            f"/api/v1/external/discovery-sensors/DSN-{'c' * 32}/observations",
+            json={"tenant_ref": f"unknown-{index}"},
+        )
+        assert response.status_code == 401
+    after = set(claims.rglob("*.json")) if claims.exists() else set()
+    assert after == before
+
+
+def test_legacy_implicit_tenant_is_admitted_without_creating_a_claim(tmp_path, monkeypatch):
+    from maverick.tenant import registry
+
+    registry._registry_path().unlink()
+    monkeypatch.setenv("MAVERICK_TENANT", "legacy")
+    claims = tmp_path / ".tenant-namespaces"
+    before = set(claims.rglob("*.json")) if claims.exists() else set()
+    external_gateway._require_registered_external_tenant("legacy")
+    with pytest.raises(HTTPException):
+        external_gateway._require_registered_external_tenant("other")
+    after = set(claims.rglob("*.json")) if claims.exists() else set()
+    assert after == before
 
 
 def test_machine_sensor_requires_explicit_sensor_capability() -> None:

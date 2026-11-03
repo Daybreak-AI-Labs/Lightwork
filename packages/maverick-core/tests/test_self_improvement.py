@@ -165,7 +165,7 @@ def test_code_rung_requires_human_approval():
     assert not v.ok
     assert any(g.gate == "human_approval" and not g.ok for g in v.gates)
     v2 = _ctrl().evaluate(_cand(rung="code", samples=10, capability_widens=False, approved=True))
-    assert v2.ok
+    assert not v2.ok  # a self-settable boolean is not a cryptographic approval
 
 
 def test_max_auto_rung_ceiling_forces_human_above_it():

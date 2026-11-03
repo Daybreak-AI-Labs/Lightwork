@@ -656,9 +656,13 @@ def test_voice_transcribe_requires_source():
     assert "source is required" in out
 
 
-def test_voice_transcribe_missing_file():
+def test_voice_transcribe_missing_file(tmp_path):
+    from types import SimpleNamespace
+
     from maverick.tools.voice import transcribe_audio
-    out = transcribe_audio().fn({"source": "/no/such/audio.mp3"})
+    out = transcribe_audio(sandbox=SimpleNamespace(workdir=tmp_path)).fn(
+        {"source": str(tmp_path / "missing.mp3")}
+    )
     assert "not found" in out
 
 

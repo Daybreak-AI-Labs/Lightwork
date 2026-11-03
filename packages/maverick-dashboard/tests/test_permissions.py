@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 def _client():
     from maverick_dashboard.app import app
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def _isolate(monkeypatch, tmp_path):
@@ -37,7 +37,7 @@ def test_permissions_corrupt_policy_returns_sanitized_503(monkeypatch, tmp_path)
 
     from maverick_dashboard.app import app
 
-    client = TestClient(app, raise_server_exceptions=False)
+    client = TestClient(app, base_url="http://127.0.0.1", raise_server_exceptions=False)
     response = client.get(
         "/api/v1/permissions",
         headers={"Accept": "application/json"},
@@ -108,7 +108,7 @@ def test_disable_tool_then_shows_disabled(monkeypatch, tmp_path):
     assert before["shell"]["policy_allowed"] is True
     assert before["shell"]["enabled"] is False
 
-    r = client.post("/api/v1/permissions/tools/shell/disable", headers={"Origin": "http://testserver"})
+    r = client.post("/api/v1/permissions/tools/shell/disable", headers={"Origin": "http://127.0.0.1"})
     assert r.status_code == 204
 
     after = {
@@ -125,8 +125,8 @@ def test_disable_tool_then_shows_disabled(monkeypatch, tmp_path):
 def test_enable_tool_clears_override(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     client = _client()
-    client.post("/api/v1/permissions/tools/shell/disable", headers={"Origin": "http://testserver"})
-    r = client.post("/api/v1/permissions/tools/shell/enable", headers={"Origin": "http://testserver"})
+    client.post("/api/v1/permissions/tools/shell/disable", headers={"Origin": "http://127.0.0.1"})
+    r = client.post("/api/v1/permissions/tools/shell/enable", headers={"Origin": "http://127.0.0.1"})
     assert r.status_code == 200
     assert r.json()["tool"]["policy_allowed"] is True
     assert r.json()["tool"]["usable"] is False
@@ -155,11 +155,11 @@ def test_enable_reports_when_base_policy_still_denies_tool(monkeypatch, tmp_path
     # effective config ACL result.
     client.post(
         "/api/v1/permissions/tools/shell/disable",
-        headers={"Origin": "http://testserver"},
+        headers={"Origin": "http://127.0.0.1"},
     )
     response = client.post(
         "/api/v1/permissions/tools/shell/enable",
-        headers={"Origin": "http://testserver"},
+        headers={"Origin": "http://127.0.0.1"},
     )
 
     assert response.status_code == 200
@@ -175,7 +175,7 @@ def test_enable_reports_when_base_policy_still_denies_tool(monkeypatch, tmp_path
 def test_disable_tool_rejects_invalid_name(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     client = _client()
-    r = client.post('/api/v1/permissions/tools/bad"name/disable', headers={"Origin": "http://testserver"})
+    r = client.post('/api/v1/permissions/tools/bad"name/disable', headers={"Origin": "http://127.0.0.1"})
     assert r.status_code == 400
 
 

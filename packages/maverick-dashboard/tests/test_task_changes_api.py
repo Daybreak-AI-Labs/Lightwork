@@ -68,7 +68,7 @@ def env(tmp_path, monkeypatch):
     application.include_router(recovery_api.router)
     application.include_router(changes_api.router)
     application.include_router(page_assets.router)
-    with TestClient(application, headers={"Origin": "http://testserver"}) as client:
+    with TestClient(application, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}) as client:
         yield SimpleNamespace(client=client, goal=goal, work=work, outside=outside, home=home, cfg=cfg,
                               url=f"/api/v1/task-files/{goal}/changes")
     config.reset_config_cache()

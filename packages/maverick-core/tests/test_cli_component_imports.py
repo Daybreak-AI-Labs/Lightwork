@@ -29,6 +29,15 @@ def test_dashboard_reports_broken_dependency_not_missing_dashboard(monkeypatch):
     assert "Install the dashboard" not in result.output
 
 
+def test_dashboard_refuses_token_in_command_line(monkeypatch):
+    monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
+    result = CliRunner().invoke(main, ["dashboard", "--token", "sensitive-value"])
+    assert result.exit_code != 0
+    assert "sensitive-value" not in result.output
+    import os
+    assert "MAVERICK_DASHBOARD_TOKEN" not in os.environ
+
+
 def test_installer_reports_broken_dependency_not_missing_installer(monkeypatch):
     _break_import(monkeypatch, "maverick_installer.wizard", ModuleNotFoundError(
         "No module named 'rich'", name="rich"

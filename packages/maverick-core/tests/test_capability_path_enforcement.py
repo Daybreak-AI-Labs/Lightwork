@@ -16,6 +16,50 @@ from maverick.capability import Capability
 from maverick.tools import Tool
 
 
+@pytest.mark.parametrize("name", ["repo_map", "dep_graph", "file_watcher", "semantic_code_search", "cross_repo_deps", "preview_diff", "test_impact", "lsp_bridge", "shell", "git_advanced", "notebook_exec", "container_build", "wasm_run", "model3d_inspect", "openapi_runner", "repl_exec", "audio_understanding", "office_convert", "a11y", "embedded_device", "workspace_snapshot", "html_to_app", "list_dir", "str_replace_editor", "obsidian", "ocr", "memory"])
+def test_unscoped_workspace_enumerator_refused(tmp_path, name):
+    agent = _agent(tmp_path)
+    capability = Capability(principal="agent:coder-1", allow_paths=frozenset({"allowed/*"}))
+    assert "DENIED" in agent._capability_path_denial(name, {}, capability)
+
+
+@pytest.mark.parametrize("name", ["read_pdf", "pandas_query", "view_video"])
+def test_readers_obey_path_restrictions(tmp_path, name):
+    agent = _agent(tmp_path)
+    capability = Capability(principal="agent:coder-1", allow_paths=frozenset({"allowed/*"}))
+    assert "DENIED" in agent._capability_path_denial(name, {"source": "private/data"}, capability)
+
+
+@pytest.mark.parametrize("name", ["read_pdf", "pandas_query", "view_image", "view_video", "transcribe_audio"])
+def test_reader_scope_uses_the_trimmed_source(tmp_path, name):
+    agent = _agent(tmp_path)
+    capability = Capability(principal="agent:coder-1", allow_paths=frozenset({" allowed/*"}))
+    assert "DENIED" in agent._capability_path_denial(name, {"source": " allowed/data"}, capability)
+
+
+@pytest.mark.parametrize("name", ["read_pdf", "view_image"])
+def test_reader_scope_expands_home_before_checking(tmp_path, monkeypatch, name):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    agent = _agent(tmp_path)
+    capability = Capability(principal="agent:coder-1", allow_paths=frozenset({"~/*"}))
+    assert "DENIED" in agent._capability_path_denial(name, {"source": "~/private"}, capability)
+
+
+@pytest.mark.parametrize(("name", "args"), [
+    ("sql_query", {"database": " allowed/data.db"}),
+    ("sql_query_read", {"database": " allowed/data.db"}),
+    ("ocr", {"op": "extract", "path": " allowed/image.png"}),
+    ("pandoc", {"op": "convert", "input_path": " allowed/file.md"}),
+    ("imagemagick", {"op": "identify", "input_path": " allowed/image.png"}),
+    ("ffmpeg", {"op": "info", "input_path": " allowed/video.mp4"}),
+    ("image_edit", {"op": "crop", "input_path": " allowed/image.png"}),
+])
+def test_tool_path_scope_matches_whitespace_normalization(tmp_path, name, args):
+    agent = _agent(tmp_path)
+    capability = Capability(principal="agent:coder-1", allow_paths=frozenset({" allowed/*"}))
+    assert "DENIED" in agent._capability_path_denial(name, args, capability)
+
+
 def _agent(tmp_path):
     from maverick.agent import Agent
     from maverick.blackboard import Blackboard
@@ -95,9 +139,8 @@ async def test_image_classifier_file_path_scope_denied(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_tool_not_in_map_never_path_denied(tmp_path):
-    # A tool with a `path` arg that is NOT a known file tool must never be
-    # path-denied, even when the path is outside the scope.
+async def test_unclassified_tool_is_denied_for_restricted_paths(tmp_path):
+    # An unclassified tool might touch files through hidden inputs.
     agent = _agent(tmp_path)
     agent.capability = Capability(principal="agent:coder-1",
                                   allow_paths=frozenset({"repo/*"}))
@@ -105,8 +148,8 @@ async def test_tool_not_in_map_never_path_denied(tmp_path):
     agent.tools.register(_spy_tool("not_a_file_tool", calls))
 
     out = await agent._run_tool("not_a_file_tool", {"path": "etc/passwd"})
-    assert "DENIED" not in out
-    assert calls == ["etc/passwd"]
+    assert "DENIED" in out
+    assert not calls
 
 
 @pytest.mark.asyncio
@@ -198,7 +241,7 @@ async def test_list_dir_missing_path_checks_default_root(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_apply_patch_checks_every_patch_path(tmp_path):
+async def test_apply_patch_is_refused_for_restricted_paths(tmp_path):
     import subprocess
 
     subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
@@ -218,8 +261,15 @@ async def test_apply_patch_checks_every_patch_path(tmp_path):
     out = await agent._run_tool("apply_patch", {"patch": patch})
 
     assert "DENIED by capability" in out
-    assert "secret.txt" in out
+    assert "cannot enforce" in out
     assert (tmp_path / "secret.txt").read_text(encoding="utf-8") == "old\n"
+
+
+def test_mode_only_patch_is_refused_for_restricted_paths(tmp_path):
+    agent = _agent(tmp_path)
+    capability = Capability(principal="agent:coder-1", allow_paths=frozenset({"allowed/*"}))
+    patch = "diff --git a/private/script b/private/script\nold mode 100644\nnew mode 100755\n"
+    assert "DENIED" in agent._capability_path_denial("apply_patch", {"patch": patch}, capability)
 
 
 @pytest.mark.asyncio
@@ -963,7 +1013,7 @@ async def test_wasm_run_preopen_dirs_outside_scope_denied(tmp_path):
     )
 
     assert "DENIED by capability" in out
-    assert "secret" in out
+    assert "cannot enforce" in out
     assert calls == []
 
 
@@ -989,5 +1039,5 @@ async def test_wasm_run_module_outside_scope_denied(tmp_path):
     )
 
     assert "DENIED by capability" in out
-    assert "secret/module.wasm" in out
+    assert "cannot enforce" in out
     assert calls == []

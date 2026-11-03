@@ -15,7 +15,6 @@ help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-10s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 install: ## Install Lightwork from source into the active virtual environment
-	$(PYTHON) -m pip install --upgrade pip
 	$(PYTHON) scripts/install_release_cohort.py --core-extra release-runtime,evidence-analysis
 
 dev: ## Create .venv with editable packages and the development tools

@@ -137,11 +137,12 @@ async def earned_autonomy(request: Request) -> dict:
         policy = policy_from_config()
         return {
             "enabled": bool(enabled()),
-            "auto_grant_on": bool(policy.armed),
+            "auto_grant_on": False,
             "needs": {"outcomes": int(policy.min_samples), "streak": int(policy.min_streak),
                       "accuracy_pct": round(float(policy.min_accuracy) * 100)},
             "actions": [
-                {"action": s.action, "name": _words(s.action), "auto_approved": bool(s.graduated),
+                {"action": s.action, "name": _words(s.action), "auto_approved": False,
+                 "evidence_qualified": bool(s.graduated),
                  "confirmed": int(s.hits), "missed": int(s.misses), "streak": int(s.streak)}
                 for s in engine.status()[:200]
             ],

@@ -25,7 +25,7 @@ def space(tmp_path, monkeypatch):
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     dashboard._world_cache.clear()
     world = world_model.WorldModel(tmp_path / "world.db")
-    yield TestClient(app, headers={"Origin": "http://testserver"}), world
+    yield TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}), world
     world.close()
 
 
@@ -78,7 +78,7 @@ def test_full_conversation_is_an_explicit_reviewed_choice_with_revocation(space)
     created = _mint(client, latest, reviewed)
     assert created.status_code == 201, created.text
     token = created.json()["url"].split("/share/")[1]
-    page = TestClient(app).get(f"/share/{token}")
+    page = TestClient(app, base_url="http://127.0.0.1").get(f"/share/{token}")
     assert page.status_code == 200, page.text
     assert "Plan the launch" in page.text
     assert "First answer" in page.text and "Final answer" in page.text
@@ -90,7 +90,7 @@ def test_full_conversation_is_an_explicit_reviewed_choice_with_revocation(space)
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in page.text
     assert "data-markdown" in page.text
     assert client.post(f"/api/v1/goals/{latest}/share/{created.json()['id']}/revoke").json()["ok"]
-    assert TestClient(app).get(f"/share/{token}").status_code == 404
+    assert TestClient(app, base_url="http://127.0.0.1").get(f"/share/{token}").status_code == 404
     assert root != latest
 
 
@@ -128,7 +128,7 @@ def test_public_release_waits_for_audit_receipt_and_retry_mints_a_new_link(space
     recovered = _mint(client, latest, preview)
     assert recovered.status_code == 201
     assert recovered.json()["id"] != failed_links[0]["id"]
-    assert client.get(recovered.json()["url"].replace("http://testserver", "")).status_code == 200
+    assert client.get(recovered.json()["url"].replace("http://127.0.0.1", "")).status_code == 200
     assert next(row for row in world.share_links_for_goal(latest)
                 if row["id"] == failed_links[0]["id"])["revoked"]
 
@@ -182,7 +182,7 @@ def test_public_conversation_scans_once_but_rechecks_revocation_during_read(spac
         return original_snapshot(*args, **kwargs)
 
     monkeypatch.setattr(sharing, "conversation_snapshot", counted_snapshot)
-    public = TestClient(app)
+    public = TestClient(app, base_url="http://127.0.0.1")
     assert public.get(f"/share/{token}").status_code == 200
     assert len(scans) == 1
 
@@ -227,7 +227,7 @@ def test_public_conversation_refuses_source_change_after_single_scan(space, monk
         return original_render(goal)
 
     monkeypatch.setattr(dashboard, "_goal_deliverable", edit_during_render)
-    assert TestClient(app).get(f"/share/{token}").status_code == 404
+    assert TestClient(app, base_url="http://127.0.0.1").get(f"/share/{token}").status_code == 404
     assert len(scans) == 1
 
 
@@ -266,7 +266,7 @@ def test_public_conversation_detects_same_reader_connection_write(space, monkeyp
         return original_render(goal)
 
     monkeypatch.setattr(dashboard, "_goal_deliverable", same_connection_edit)
-    assert TestClient(app).get(f"/share/{token}").status_code == 404
+    assert TestClient(app, base_url="http://127.0.0.1").get(f"/share/{token}").status_code == 404
     assert len(scans) == 1
 
 
@@ -306,7 +306,7 @@ def test_public_conversation_rechecks_prior_member_policy_without_second_scan(sp
         return result
 
     monkeypatch.setattr(dashboard, "_goal_deliverable", remove_policy_during_render)
-    assert TestClient(app).get(f"/share/{token}").status_code == 404
+    assert TestClient(app, base_url="http://127.0.0.1").get(f"/share/{token}").status_code == 404
     assert len(scans) == 1
 
 
@@ -316,14 +316,14 @@ def test_changed_included_message_or_clarification_invalidates_link(space):
     created = _mint(client, latest, _preview(client, latest).json())
     token = created.json()["url"].split("/share/")[1]
     world.set_goal_status(root, "done", result="Revised earlier answer")
-    assert TestClient(app).get(f"/share/{token}").status_code == 404
+    assert TestClient(app, base_url="http://127.0.0.1").get(f"/share/{token}").status_code == 404
     assert client.get(f"/api/v1/goals/{latest}/share").json()["links"][0]["state"] == "source changed"
 
     fresh = _mint(client, latest, _preview(client, latest).json())
     fresh_token = fresh.json()["url"].split("/share/")[1]
     question_id = world.all_questions(root)[0].id
     world.answer(question_id, "Another market")
-    assert TestClient(app).get(f"/share/{fresh_token}").status_code == 404
+    assert TestClient(app, base_url="http://127.0.0.1").get(f"/share/{fresh_token}").status_code == 404
 
 
 def test_selected_message_uses_exact_saved_turn_and_changed_review_never_revives_link(space, monkeypatch):
@@ -340,16 +340,16 @@ def test_selected_message_uses_exact_saved_turn_and_changed_review_never_revives
     assert "Use the local market" not in str(reviewed["source"]["transcript"])
     created = _mint(client, latest, reviewed)
     token = created.json()["url"].split("/share/")[1]
-    assert TestClient(app).get(f"/share/{token}").status_code == 200
+    assert TestClient(app, base_url="http://127.0.0.1").get(f"/share/{token}").status_code == 200
     original_review_time = world.signoff_for(root)["created_at"]
     with monkeypatch.context() as frozen:
         frozen.setattr(world_model, "time", SimpleNamespace(time=lambda: original_review_time))
         world.record_signoff(root, "rejected", decided_by="reviewer")
         rejected_time = world.signoff_for(root)["created_at"]
-        assert TestClient(app).get(f"/share/{token}").status_code == 404
+        assert TestClient(app, base_url="http://127.0.0.1").get(f"/share/{token}").status_code == 404
         world.record_signoff(root, "approved", decided_by="reviewer")
     assert world.signoff_for(root)["created_at"] > rejected_time > original_review_time
-    assert TestClient(app).get(f"/share/{token}").status_code == 404
+    assert TestClient(app, base_url="http://127.0.0.1").get(f"/share/{token}").status_code == 404
 
     next_goal = world.create_goal("First line", "First line\nSecond line", parent_id=root)
     world.set_goal_status(next_goal, "done", result="A reply")
@@ -368,7 +368,7 @@ def test_later_messages_do_not_expand_an_existing_conversation_link(space):
     world.set_goal_status(newer, "done", result="A later private answer")
     world.append_turn(conversation_id, "user", "A later private question", goal_id=newer)
     world.append_turn(conversation_id, "assistant", "A later private answer", goal_id=newer)
-    page = TestClient(app).get(f"/share/{token}")
+    page = TestClient(app, base_url="http://127.0.0.1").get(f"/share/{token}")
     assert page.status_code == 200
     assert "Final answer" in page.text
     assert "A later private question" not in page.text
@@ -394,7 +394,7 @@ def test_earlier_stopped_message_without_answer_is_visible_without_technical_det
     assert "couldn't reach the AI service" in turns[1]["text"]
     assert "C:\\private\\service" not in str(turns)
     created = _mint(client, latest, preview.json())
-    page = TestClient(app).get(created.json()["url"])
+    page = TestClient(app, base_url="http://127.0.0.1").get(created.json()["url"])
     assert page.status_code == 200
     assert "Lightwork · stopped" in page.text
     assert "C:\\private\\service" not in page.text
@@ -419,7 +419,7 @@ def test_earlier_stopped_saved_answer_is_labeled_as_stopped(space):
     assert "couldn't reach the AI service" in stopped["text"]
     assert "Raw provider detail" not in str(preview.json())
     created = _mint(client, latest, preview.json())
-    page = TestClient(app).get(created.json()["url"])
+    page = TestClient(app, base_url="http://127.0.0.1").get(created.json()["url"])
     assert page.status_code == 200
     assert "Lightwork · stopped" in page.text
     assert "Raw provider detail" not in page.text
@@ -474,7 +474,7 @@ def test_turn_and_byte_limits_fail_closed_even_for_an_existing_link(space, monke
     created = _mint(client, latest, reviewed)
     assert created.status_code == 201
     token = created.json()["url"].split("/share/")[1]
-    public = TestClient(app)
+    public = TestClient(app, base_url="http://127.0.0.1")
 
     # Two historical turns plus the selected message's user/assistant pair.
     monkeypatch.setattr(sharing, "MAX_CONVERSATION_TURNS", 4)

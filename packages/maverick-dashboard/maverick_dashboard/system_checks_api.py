@@ -143,6 +143,23 @@ async def readiness(request: Request) -> dict:
     return {"ready": all(r["ok"] for r in rows), "checks": rows}
 
 
+@router.get("/probe-details")
+async def probe_details(request: Request) -> JSONResponse:
+    _admin(request)
+    if not auth.caller_principal(request) and not auth._dashboard_token_authenticated(request):
+        raise HTTPException(401, "Sign in as an administrator to view probe details.")
+    from . import app as app_module
+    from .health_routes import readiness_response
+    from .provider_readiness import public_verdict, workspace_readiness
+
+    response = await readiness_response(
+        world_provider=app_module._world, provider_key_set=app_module._any_provider_key_set,
+        include_details=True, provider_verdict=lambda: public_verdict(workspace_readiness()),
+    )
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
+
+
 # ---- installation health (maverick doctor) ---------------------------------
 
 def installation_health_context(request: Request, expected: str | None = None) -> dict[str, str]:

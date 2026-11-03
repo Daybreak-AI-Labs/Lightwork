@@ -69,6 +69,41 @@ def test_http_json_source_with_injected_fetch(monkeypatch):
     assert r.events[0]["who"] == "acme" and ev._decode_cursor(r.cursor, "feed") == "9"
 
 
+@pytest.mark.parametrize("source", [ev.HttpJsonSource, ev.RssSource])
+@pytest.mark.parametrize("addresses", [["127.0.0.1"], ["8.8.8.8", "10.0.0.5"]])
+def test_event_pollers_reject_private_dns_even_when_private_fetch_is_enabled(monkeypatch, source, addresses):
+    import httpx
+
+    monkeypatch.setenv("MAVERICK_FETCH_ALLOW_PRIVATE", "1")
+    monkeypatch.setattr("socket.getaddrinfo", lambda *args, **kwargs: [
+        (2, 1, 6, "", (address, 0)) for address in addresses
+    ])
+    monkeypatch.setattr(httpx, "HTTPTransport", lambda **kwargs: pytest.fail("network transport constructed"))
+    with pytest.raises(ev.EventSourceError, match="blocked by SSRF guard"):
+        source().poll({"url": "https://feed.example/data"}, cursor="")
+
+
+def test_event_pagination_rechecks_public_dns_for_each_page(monkeypatch):
+    import httpx
+
+    monkeypatch.setenv("MAVERICK_FETCH_ALLOW_PRIVATE", "1")
+    addresses = iter(("8.8.8.8", "10.0.0.5"))
+    monkeypatch.setattr("socket.getaddrinfo", lambda *args, **kwargs: [
+        (2, 1, 6, "", (next(addresses), 0))
+    ])
+    requests = []
+
+    def response(request):
+        requests.append(request)
+        return httpx.Response(200, json={"items": [], "next": "/page2"})
+
+    monkeypatch.setattr(httpx, "HTTPTransport", lambda **kwargs: httpx.MockTransport(response))
+    with pytest.raises(ev.EventSourceError, match="blocked by SSRF guard"):
+        ev.HttpJsonSource().poll({"url": "https://feed.example/page1", "items_path": "items",
+                                 "next_path": "next", "max_pages": 2}, cursor="")
+    assert len(requests) == 1
+
+
 def test_http_json_rejects_large_content_length(monkeypatch):
     class _Resp:
         status_code = 200
@@ -162,7 +197,7 @@ def test_oauth_http_json_uses_a_vaulted_bearer_token(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_OAUTH_VAULT", "1")
     from maverick import oauth_vault
-    oauth_vault.get_vault().put("acme", {"access_token": "T0K3N", "expires_in": 3600})
+    oauth_vault.get_vault().put("github", {"access_token": "T0K3N", "expires_in": 3600})
     seen = {}
 
     def _fake(url, headers=None, timeout=15.0):
@@ -170,7 +205,7 @@ def test_oauth_http_json_uses_a_vaulted_bearer_token(monkeypatch, tmp_path):
         return {"data": [{"id": "9", "who": "acme"}]}
     monkeypatch.setattr(ev, "_http_get_json", _fake)
     r = ev.OAuthHttpJsonSource().poll(
-        {"provider": "acme", "url": "https://x/api", "items_path": "data", "id_field": "id"},
+        {"provider": "github", "url": "https://api.github.com/api", "items_path": "data", "id_field": "id"},
         cursor="8")
     assert seen["auth"] == "Bearer T0K3N"
     assert r.events[0]["who"] == "acme" and ev._decode_cursor(r.cursor, "feed") == "9"
@@ -210,17 +245,21 @@ def test_oauth_refresher_none_for_unknown_provider(monkeypatch):
     assert ev._oauth_refresher({"provider": "totally-unknown"}) is None
 
 
-def test_oauth_refresher_prefers_explicit_config(monkeypatch):
-    # An explicit token_url + client_id wins over any preset lookup.
-    seen = {}
-    monkeypatch.setattr(
-        "maverick.tools.oauth_helper._post_form",
-        lambda url, data: seen.update(url=url) or {"access_token": "AT"},
-    )
-    refresher = ev._oauth_refresher(
-        {"provider": "slack", "token_url": "https://custom/token", "client_id": "c"})
-    refresher({"refresh_token": "r"})
-    assert seen["url"] == "https://custom/token"
+@pytest.mark.parametrize("override", [
+    {"token_url": "https://attacker.example/token"},
+    {"client_id": "attacker-client"}, {"client_secret_env": "HOST_SECRET"},
+])
+def test_oauth_refresher_rejects_trigger_credential_overrides(override):
+    with pytest.raises(ev.EventSourceError, match="overrides"):
+        ev._oauth_refresher({"provider": "slack", **override})
+
+
+@pytest.mark.parametrize("url", ["https://attacker.example/api", "https://api.github.com.attacker.example/",
+                                  "http://api.github.com/", "https://api.github.com:444/"])
+def test_oauth_source_refuses_wrong_destination_before_vault_access(monkeypatch, url):
+    monkeypatch.setattr(ev, "_oauth_bearer", lambda config: pytest.fail("vault accessed"))
+    with pytest.raises(ev.EventSourceError, match="approved endpoint"):
+        ev.OAuthHttpJsonSource().poll({"provider": "github", "url": url}, cursor="")
 
 
 def test_github_issues_source_dedups_by_number_and_drops_prs(monkeypatch):

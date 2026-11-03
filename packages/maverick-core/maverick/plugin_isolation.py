@@ -42,13 +42,13 @@ _TIMEOUT_S = 60.0
 
 def _enterprise_default_mode() -> str:
     """The isolation default when nothing is configured: ``subprocess`` (out-of-
-    process) under enterprise mode so a regulated deployment doesn't run third-
-    party plugin code in-process by default; ``none`` for single-tenant/dev."""
+    process) under enterprise mode for tool calls; plugin import and factories
+    still run in-process. ``none`` for single-tenant/dev."""
     try:
         from .enterprise import enterprise_enabled
         return "subprocess" if enterprise_enabled() else "none"
-    except Exception:  # pragma: no cover -- never block plugin exec on a lookup
-        return "none"
+    except Exception as exc:
+        raise RuntimeError("plugin isolation policy is unavailable") from exc
 
 
 def isolation_mode() -> str:
@@ -58,18 +58,32 @@ def isolation_mode() -> str:
     When neither is set the default depends on the deployment profile: enterprise
     mode defaults to ``subprocess`` (see :func:`_enterprise_default_mode`), dev to
     ``none`` (today's in-process behavior). An explicit setting always wins."""
-    env = os.environ.get("MAVERICK_PLUGIN_ISOLATION", "").strip().lower()
-    if env in _MODES:
-        return env
-    try:
-        from .config import load_config
-        raw = ((load_config() or {}).get("plugins") or {}).get("isolation")
-    except Exception:  # pragma: no cover -- config never blocks plugin exec
-        return _enterprise_default_mode()
-    if raw is not None:
-        mode = str(raw).strip().lower()
+    env = os.environ.get("MAVERICK_PLUGIN_ISOLATION")
+    if env is not None:
+        mode = env.strip().lower()
         if mode in _MODES:
             return mode
+        raise ValueError("invalid plugin isolation mode")
+    try:
+        from .config import config_source_errors, load_config, single_read
+        with single_read(fresh=True):
+            root = load_config()
+            if config_source_errors():
+                raise ValueError("plugin configuration source is unreadable")
+        if root is None:
+            root = {}
+        if not isinstance(root, dict):
+            raise ValueError("invalid plugin configuration")
+        config = root.get("plugins", {})
+        if not isinstance(config, dict):
+            raise ValueError("invalid plugin configuration")
+    except Exception as exc:
+        raise RuntimeError("plugin isolation policy is unavailable") from exc
+    if "isolation" in config:
+        mode = str(config["isolation"]).strip().lower()
+        if mode in _MODES:
+            return mode
+        raise ValueError("invalid plugin isolation mode")
     return _enterprise_default_mode()
 
 
@@ -145,7 +159,12 @@ def run_isolated(entry: str, args: dict, *, mode: str | None = None,
     and cannot be safely interrupted, so it does NOT enforce ``timeout_s`` — use
     the subprocess backend when a hard wall-clock bound is required.
     """
-    mode = mode if mode in _MODES else isolation_mode()
+    try:
+        mode = isolation_mode() if mode is None else mode
+        if mode not in _MODES:
+            raise ValueError("invalid plugin isolation mode")
+    except (RuntimeError, ValueError):
+        return "ERROR: plugin isolation policy is unavailable or invalid"
     try:
         args_json = json.dumps(args or {})
     except (TypeError, ValueError):

@@ -97,7 +97,8 @@ def test_exec_builds_mkdir_cd_and_quotes_command(monkeypatch):
     quoted = shlex.quote("/home/me/ws")
     # cmd runs as a single quoted arg inside sh -c so it can't escape the cd.
     inner = shlex.quote("echo $HOME")
-    assert remote == f"mkdir -p {quoted} && cd {quoted} && sh -c {inner}"
+    command = f"mkdir -p {quoted} && cd {quoted} && sh -c {inner}"
+    assert remote == f"timeout --signal=KILL 60.000000s sh -c {shlex.quote(command)}"
     assert kwargs["capture_output"] is True
     assert kwargs["text"] is True
     assert result.stdout == "hi"
@@ -126,8 +127,8 @@ def test_exec_cmd_injection_stays_single_arg(monkeypatch):
     quoted = shlex.quote("/home/me/ws")
     # The whole evil string is one quoted arg to `sh -c` -- it never appears
     # as a bare `; rm -rf /` spliced after the cd.
-    assert remote == f"mkdir -p {quoted} && cd {quoted} && sh -c {shlex.quote(evil)}"
-    assert remote.endswith(shlex.quote(evil))
+    command = f"mkdir -p {quoted} && cd {quoted} && sh -c {shlex.quote(evil)}"
+    assert remote == f"timeout --signal=KILL 60.000000s sh -c {shlex.quote(command)}"
 
 
 def test_exec_uses_default_timeout_then_override(monkeypatch):

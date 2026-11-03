@@ -116,7 +116,7 @@ def environment(monkeypatch: pytest.MonkeyPatch):
         return await call_next(request)
 
     app.include_router(api.create_consent_custom_index_router(deps), prefix="/api/v1")
-    return TestClient(app, headers={"Origin": "http://testserver"}), state, runtime
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}), state, runtime
 
 
 def test_status_is_store_free_literal_and_no_store(environment) -> None:

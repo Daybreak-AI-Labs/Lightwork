@@ -67,6 +67,9 @@ def _registry(journal: Path):
 def native(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_FLOWS", "1")
     monkeypatch.setenv("MAVERICK_AUDIT_SIGN", "1")
+    from test_support.audit_child_process import configure_test_audit_signer
+
+    configure_test_audit_signer(monkeypatch)
     # Retained action evidence refuses plaintext; pin encryption at rest so the
     # fixture holds under the suite's ordinary posture as well as the secure one.
     monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")

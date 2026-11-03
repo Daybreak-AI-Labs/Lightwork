@@ -88,8 +88,8 @@ def test_admin_io_yields_to_another_request_and_preserves_tenant(monkeypatch, op
 
     async def exercise():
         async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://testserver",
-            headers={"Origin": "http://testserver"},
+            transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1",
+            headers={"Origin": "http://127.0.0.1"},
         ) as client:
             with tenant_scope(tenant="client-a"):
                 failsafe = threading.Timer(3, release.set)
@@ -117,7 +117,7 @@ def settings_client(monkeypatch, tmp_path):
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     dashboard._world_cache.clear()
-    return TestClient(dashboard.app, headers={"Origin": "http://testserver"}, raise_server_exceptions=False)
+    return TestClient(dashboard.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}, raise_server_exceptions=False)
 
 
 @pytest.mark.parametrize("section", ["capabilities"])

@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock
 
+import pytest as _workspace_guard_pytest
+
 # ---------- devcontainer sandbox ----------
 
 def _stub_subprocess_ok(monkeypatch):
@@ -91,6 +93,8 @@ def test_devcontainer_rejects_run_args(tmp_path, monkeypatch):
     raise AssertionError("expected RuntimeError")
 
 def test_devcontainer_exec_builds_docker_run(tmp_path, monkeypatch):
+    monkeypatch.delenv("MAVERICK_SANDBOX_ALLOW_ROOT", raising=False)
+    monkeypatch.setattr("maverick.sandbox.devcontainer.container_user_args", lambda _allow_root: ["--user", "1000:1000"])
     (tmp_path / ".devcontainer").mkdir()
     (tmp_path / ".devcontainer" / "devcontainer.json").write_text(
         json.dumps({
@@ -113,7 +117,8 @@ def test_devcontainer_exec_builds_docker_run(tmp_path, monkeypatch):
     result = backend.exec("echo hi")
     assert result.ok
     args = captured["args"]
-    assert "--user" in args and "node" in args
+    assert args[args.index("--user"):args.index("--user") + 2] == ["--user", "1000:1000"]
+    assert "node" not in args
     assert "-e" in args and any("NODE_ENV=test" in s for s in args)
     assert "alpine" in args
     # DoS parity with DockerBackend: RAM is capped and swap pinned to it so the
@@ -362,3 +367,12 @@ def test_notify_and_diagnose_register(tmp_path):
     names = {t.name for t in reg.all()}
     assert "notify" in names
     assert "diagnose" in names
+
+
+# Container argv tests use a workspace separate from the operator's state.
+@_workspace_guard_pytest.fixture(autouse=True)
+def _separate_container_test_home(tmp_path, monkeypatch, _isolate_dynamic_maverick_home):
+    operator_home = tmp_path.parent / (tmp_path.name + "-operator")
+    monkeypatch.setenv("HOME", str(operator_home))
+    monkeypatch.setenv("USERPROFILE", str(operator_home))
+    monkeypatch.setenv("MAVERICK_HOME", str(operator_home / ".maverick"))

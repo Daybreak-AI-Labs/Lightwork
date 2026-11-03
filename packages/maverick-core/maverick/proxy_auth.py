@@ -173,9 +173,10 @@ def uvicorn_launch_kwargs() -> dict:
     trusts a peer it substitutes the *forwarded* address for it, which is the
     opposite of what a peer-identity check needs.
     """
-    if proxy_auth_enabled():
-        return {"proxy_headers": False}
-    return {}
+    # Rate limits and anonymous local-access checks also require the true peer
+    # even when proxy SSO is disabled. Forwarded addresses are interpreted
+    # separately only after the peer matches the configured trusted proxies.
+    return {"proxy_headers": False}
 
 
 def principal_from_proxy(value: str):

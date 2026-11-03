@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 
 def _client():
     from maverick_dashboard.app import app
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def _isolate(monkeypatch, tmp_path):
@@ -262,6 +262,9 @@ def test_oversight_audit_events_are_owner_scoped(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     _enable_oidc_principal_map(monkeypatch)
     monkeypatch.delenv("MAVERICK_DASHBOARD_ADMINS", raising=False)
+    from maverick_dashboard import rbac
+
+    rbac.set_role("user:alice", "operator")
 
     from maverick.audit import record
     from maverick.world_model import WorldModel

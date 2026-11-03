@@ -379,6 +379,23 @@ class TestWriteFileRefusesDotGitOutsideBenchmarkMode:
         assert out.startswith("ERROR")
         assert "fsmonitor" not in (repo / ".git" / "config").read_text()
 
+    @pytest.mark.parametrize("name", [".GIT", ".Git", ".git.", ".git "])
+    def test_write_file_refuses_git_aliases(self, tmp_path, name):
+        from maverick.tools.fs import write_file
+
+        out = write_file(_SB(tmp_path)).fn({"path": f"{name}/config", "content": "bad"})
+        assert out.startswith("ERROR")
+        assert not (tmp_path / name / "config").exists()
+
+    @pytest.mark.parametrize("name", [".GIT", ".Git", ".git.", ".git "])
+    def test_patch_and_editor_refuse_git_aliases(self, tmp_path, name):
+        from maverick.edit_format import _writes_git_metadata
+        from maverick.tools.apply_patch import _is_safe_path
+
+        assert _writes_git_metadata(tmp_path / name / "config")
+        assert not _is_safe_path(f"{name}/config", tmp_path.resolve())
+        assert _is_safe_path("notes.txt", tmp_path.resolve())
+
     def test_write_file_still_writes_ordinary_files(self, tmp_path, monkeypatch):
         from maverick.tools.fs import write_file
         monkeypatch.delenv("MAVERICK_BENCHMARK_OPAQUE", raising=False)

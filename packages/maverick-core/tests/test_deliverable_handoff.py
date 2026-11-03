@@ -37,13 +37,13 @@ def test_configured_endpoint_fires_signed_event(monkeypatch):
     assert captured["payload"]["goal_id"] == 7
 
 
-def test_env_referenced_url_is_expanded(monkeypatch):
+def test_env_referenced_url_is_not_expanded(monkeypatch):
     monkeypatch.setenv("MY_SOR_URL", "https://treasury.internal/deliverables")
     _set_config(monkeypatch, {
         "deliverables": {"handoff_webhook": "${MY_SOR_URL}"},
     })
     url, _ = webhooks._load_handoff_target()
-    assert url == "https://treasury.internal/deliverables"
+    assert url is None
 
 
 def test_unset_env_reference_yields_no_target(monkeypatch):

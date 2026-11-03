@@ -165,7 +165,8 @@ hardened config; an auditor should still try to escalate each.
 - **Plugin permissions are enforced by default.** A plugin requesting an
   ungranted permission is skipped (not loaded) unless `enforce_permissions =
   false` downgrades it to advisory; the default-deny load allowlist is a second,
-  independent gate.
+  independent gate. These checks do not confine granted plugin code; import
+  and factory execution remain in-process and require trusted plugins.
 
 ---
 

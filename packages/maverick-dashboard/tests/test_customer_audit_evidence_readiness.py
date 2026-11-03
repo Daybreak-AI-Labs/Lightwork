@@ -41,7 +41,7 @@ def customer_audit(tmp_path, monkeypatch, request):
         "sod": {"conflicts": 0}, "licenses": {},
     })
     try:
-        yield TestClient(app.app, headers={"Origin": "http://testserver"}), world, log
+        yield TestClient(app.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}), world, log
     finally:
         world.close()
         # Production intentionally retains an injected key after consuming its
@@ -266,7 +266,7 @@ def test_replay_malformed_event_metadata_preserves_valid_rows(customer_audit, fi
     from maverick.audit.signing import AuditSigner
 
     _client, world, log = customer_audit
-    client = TestClient(app.app, headers={"Origin": "http://testserver"}, raise_server_exceptions=False)
+    client = TestClient(app.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}, raise_server_exceptions=False)
     goal = world.create_goal("Damaged event metadata")
     stamp = dt.datetime.now(dt.timezone.utc).timestamp()
     assert log.record(AuditEvent(ts=stamp, kind="tool_call", goal_id=goal, payload={"name": "readable-payment"}))

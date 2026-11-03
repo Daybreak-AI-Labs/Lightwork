@@ -22,6 +22,7 @@ import secrets
 import sys
 import threading
 import time
+import weakref
 from collections import deque
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
@@ -1384,6 +1385,11 @@ def enforce_page_visibility(
     # no dashboard role to compare against the page policy of its parent page.
     if auth_boundary._self_authenticated_path(route_path(request)):
         return
+    if route_path(request) == "/workspace/tenant":
+        # The picker is the recovery path for authenticated workspace members
+        # who intentionally have no authority in the unbound namespace.
+        auth_boundary.require_workspace_picker_access(request)
+        return
     require_page_visible(request, route_path(request))
 
 
@@ -1447,6 +1453,8 @@ async def enforce_expected_workspace_tenant(
 app = FastAPI(
     title="Lightwork Dashboard + REST API",
     docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
     description="Local browser UI plus REST API for programmatic access.",
     version="0.1.0",
     # Global authentication dependency, applied to every route. It composes
@@ -2553,10 +2561,6 @@ _AUTH_EXEMPT = {
     "/healthz",
     "/livez",
     "/readyz",
-    "/openapi.json",
-    "/docs",
-    "/redoc",
-    "/docs/oauth2-redirect",
     "/.well-known/agent-card.json",
     "/.well-known/agent.json",
     # The A2A task endpoint enforces its own shared/per-agent bearer and trust
@@ -2619,6 +2623,20 @@ _MAX_EVIDENCE_GATEWAY_DELIVERY_BODY_BYTES = 34 * 1024 * 1024
 _MAX_PUBLIC_CONSENT_BODY_BYTES = 64 * 1024
 _MAX_NATIVE_CONSENT_BODY_BYTES = 256 * 1024
 _MAX_THIRD_PARTY_COLLABORATION_BODY_BYTES = 2 * 1024 * 1024
+_EXTERNAL_BODY_SLOTS = 32
+_EXTERNAL_BODY_TIMEOUT_SECONDS = 10.0
+_external_body_limiters: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+_external_body_limiter_lock = threading.Lock()
+
+
+def _external_body_limiter() -> asyncio.Semaphore:
+    loop = asyncio.get_running_loop()
+    with _external_body_limiter_lock:
+        limiter = _external_body_limiters.get(loop)
+        if limiter is None:
+            limiter = asyncio.Semaphore(_EXTERNAL_BODY_SLOTS)
+            _external_body_limiters[loop] = limiter
+        return limiter
 _EVIDENCE_GATEWAY_PREFIX = "/api/v1/security/assurance/gateway/"
 # Owner passphrase and authenticator-code steps: their bodies hold both secrets, so a 422 names
 # the field and never echoes the value.
@@ -2658,24 +2676,46 @@ async def _read_limited_request_body(
             declared = int(content_length)
         except ValueError:
             raise HTTPException(status_code=400, detail="invalid Content-Length") from None
+        if declared < 0:
+            raise HTTPException(status_code=400, detail="invalid Content-Length")
         if declared > max_bytes:
             raise HTTPException(status_code=413, detail=too_large_detail)
 
     body = bytearray()
     async for chunk in request.stream():
-        body.extend(chunk)
-        if len(body) > max_bytes:
+        if len(chunk) > max_bytes - len(body):
             raise HTTPException(status_code=413, detail=too_large_detail)
+        body.extend(chunk)
     return bytes(body)
+
+
+def _external_body_max(path: str) -> int:
+    from .external_gateway import (
+        _MAX_DISCOVERY_SENSOR_HTTP_BODY_BYTES,
+        _MAX_RED_TEAM_HTTP_BODY_BYTES,
+        _MAX_RUNTIME_HTTP_BODY_BYTES,
+        _MAX_VENDOR_PORTAL_HTTP_BODY_BYTES,
+    )
+
+    route = path.rstrip("/")
+    if route == "/api/v1/external/runtime/evaluate":
+        return _MAX_RUNTIME_HTTP_BODY_BYTES
+    if route.startswith("/api/v1/external/discovery-sensors/"):
+        return _MAX_DISCOVERY_SENSOR_HTTP_BODY_BYTES
+    if route.startswith("/api/v1/external/ai-vendor/"):
+        return _MAX_VENDOR_PORTAL_HTTP_BODY_BYTES
+    if re.fullmatch(r"/api/v1/external/red-team/[^/]+/results", route):
+        return _MAX_RED_TEAM_HTTP_BODY_BYTES
+    return 256 * 1024
 
 
 @app.middleware("http")
 async def bound_public_governance_body(request: Request, call_next):
     """Cap self-authenticating public JSON before FastAPI model parsing."""
 
-    if request.method not in {"POST", "PUT", "PATCH"}:
-        return await call_next(request)
     path = route_path(request)
+    if request.method not in {"POST", "PUT", "PATCH"} and not path.startswith("/api/v1/external/"):
+        return await call_next(request)
     if path.startswith("/api/v1/public/consent/native/"):
         maximum = _MAX_NATIVE_CONSENT_BODY_BYTES
         detail = "native consent request body too large"
@@ -2699,16 +2739,35 @@ async def bound_public_governance_body(request: Request, call_next):
             return await call_next(request)
         maximum = _MAX_THIRD_PARTY_COLLABORATION_BODY_BYTES
         detail = "third-party collaboration request body too large"
+    elif path.startswith("/api/v1/external/"):
+        maximum = _external_body_max(path)
+        detail = "external request body too large"
     else:
         return await call_next(request)
+    limiter = _external_body_limiter() if path.startswith("/api/v1/external/") else None
+    acquired = False
     try:
-        body = await _read_limited_request_body(
-            request,
-            max_bytes=maximum,
-            too_large_detail=detail,
-        )
+        if limiter is not None:
+            try:
+                await asyncio.wait_for(limiter.acquire(), timeout=1.0)
+            except TimeoutError:
+                return JSONResponse({"detail": "external request capacity is busy"}, status_code=503)
+            acquired = True
+        reader = _read_limited_request_body(request, max_bytes=maximum, too_large_detail=detail)
+        try:
+            body = await asyncio.wait_for(reader, timeout=_EXTERNAL_BODY_TIMEOUT_SECONDS) if limiter else await reader
+        except TimeoutError:
+            if acquired:
+                limiter.release()
+            return JSONResponse({"detail": "external request body timed out"}, status_code=408)
     except HTTPException as exc:
+        if acquired:
+            limiter.release()
         return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+    except BaseException:
+        if acquired:
+            limiter.release()
+        raise
 
     delivered = False
 
@@ -2721,7 +2780,11 @@ async def bound_public_governance_body(request: Request, call_next):
 
     request._body = body  # noqa: SLF001 - bounded ASGI body replay
     request._receive = replay_receive  # noqa: SLF001 - bounded ASGI body replay
-    return await call_next(request)
+    try:
+        return await call_next(request)
+    finally:
+        if acquired:
+            limiter.release()
 
 
 @app.middleware("http")
@@ -2876,15 +2939,22 @@ async def _verify_maverick_webhook(request: Request) -> dict:
     return the parsed JSON object. Shared by /webhook/start and /webhook/run,
     which had byte-identical preambles. Raises HTTPException (401 unconfigured,
     403 bad signature, 400 bad body) and enforces a configured LLM provider."""
-    from maverick.webhooks import inbound_secret, read_signature_headers, verify_signature
+    from maverick.webhooks import (
+        inbound_secret,
+        read_signature_headers,
+        separate_webhook_credential,
+        verify_signature,
+    )
 
     secret = inbound_secret()
+    if not separate_webhook_credential(secret, "control"):
+        secret = None
     if not secret:
         raise HTTPException(
             status_code=401,
             detail=(
                 "Inbound webhooks aren't set up yet — an administrator must "
-                "set up the signing secret in Settings."
+                "configure a distinct MAVERICK_INBOUND_WEBHOOK_SECRET."
             ),
         )
     try:
@@ -2995,7 +3065,7 @@ def _is_loopback_request_host(request: Request) -> bool:
     pair, which would otherwise satisfy Host-derived same-origin checks.
     """
     host = (request.url.hostname or "").rstrip(".").lower()
-    if host in ("localhost", "testserver"):
+    if host == "localhost":
         return True
     try:
         return ipaddress.ip_address(host).is_loopback
@@ -4002,6 +4072,30 @@ async def tenant_pinning(request: Request, call_next):
 _goal_times: dict[str, deque[float]] = {}
 _goal_times_global: deque[float] = deque()
 _goal_rl_lock = threading.Lock()
+_dsar_response_times: dict[str, deque[float]] = {}
+_dsar_response_lock = threading.Lock()
+
+
+def _check_dsar_response_rate(request: Request) -> None:
+    """Limit anonymous response links per client without consuming goal quota."""
+    from .ip_allowlist import client_ip
+
+    key = str(client_ip(request) or "unknown")
+    now = time.monotonic()
+    with _dsar_response_lock:
+        if key not in _dsar_response_times and len(_dsar_response_times) >= 10_000:
+            for old_key, events in list(_dsar_response_times.items()):
+                if not events or events[-1] <= now - 60:
+                    del _dsar_response_times[old_key]
+            if len(_dsar_response_times) >= 10_000:
+                raise HTTPException(status_code=429, detail="response request limit reached")
+        events = _dsar_response_times.setdefault(key, deque())
+        while events and events[0] <= now - 60:
+            events.popleft()
+        if len(events) >= 30:
+            raise HTTPException(status_code=429, detail="response request limit reached",
+                                headers={"Retry-After": "60"})
+        events.append(now)
 
 
 def _max_goals_per_min() -> int:
@@ -4243,14 +4337,7 @@ def overview(request: Request) -> HTMLResponse:
     # only -- see value_views).
     value_view = value_scope(request)
     owner = value_view["owner"]
-    if owner is None:
-        rows = w.query("SELECT status, COUNT(*) FROM goals GROUP BY status")
-    else:
-        rows = w.query(
-            "SELECT status, COUNT(*) FROM goals WHERE owner = ? GROUP BY status",
-            (owner,),
-        )
-    by_status = {r[0]: int(r[1]) for r in rows}
+    by_status = w.goal_status_counts(owner=owner)
     counts = {
         "total": sum(by_status.values()),
         "active": by_status.get("active", 0),
@@ -12780,7 +12867,7 @@ async def dsar_response_page(request: Request, token: str) -> JSONResponse:
     from maverick import dsar_fulfillment
     if not dsar_fulfillment.enabled():
         raise HTTPException(status_code=404, detail="no such response")
-    check_goal_rate_limit(request, source="dsar-response")
+    _check_dsar_response_rate(request)
     response = await run_in_threadpool(
         dsar_fulfillment.response_for_token, token)
     if response is None:
@@ -12835,24 +12922,20 @@ async def webhook_jira(request: Request, bg: BackgroundTasks) -> JSONResponse:
 
 @app.post("/webhook/github")
 async def webhook_github(request: Request, bg: BackgroundTasks) -> JSONResponse:
-    """GitHub App webhook -> issue→PR. A labeled/`/maverick`-commented issue
-    drives a swarm that clones the repo, fixes it, and opens a PR
-    (``maverick.github_app``). HMAC-verified via ``X-Hub-Signature-256`` against
-    ``MAVERICK_GH_APP_WEBHOOK_SECRET`` or the sealed secret saved in All
-    settings (fails closed)."""
+    """Verify GitHub events and report that issue automation is unavailable."""
     import json as _json
 
     from maverick.github_app import (
         parse_webhook,
-        process_issue,
         verify_signature,
         webhook_secret,
     )
-    from maverick.issue_webhooks import canonical_signature, replay_window_seconds
-
     signature = request.headers.get("X-Hub-Signature-256")
     body = await _read_limited_webhook_body(request)
     secret = await run_in_threadpool(webhook_secret)
+    from maverick.webhooks import separate_webhook_credential
+    if not await run_in_threadpool(separate_webhook_credential, secret, "github"):
+        secret = None
     if not verify_signature(body, signature, secret):
         return JSONResponse({"detail": "invalid signature"}, status_code=401)
     try:
@@ -12862,28 +12945,15 @@ async def webhook_github(request: Request, bg: BackgroundTasks) -> JSONResponse:
     if payload is None:
         return JSONResponse({"status": "ignored"})
 
-    # GitHub signs only the raw body, not a freshness timestamp.  Require its
-    # delivery id for operator traceability, but key replay rejection on the
-    # canonical body HMAC so a captured delivery cannot be resent with a
-    # different X-GitHub-Delivery value to re-run the paid issue→PR workflow.
+    # Preserve delivery validation, but do not consume replay or goal quotas
+    # for a workflow that cannot start.
     if not (request.headers.get("X-GitHub-Delivery") or "").strip():
         return JSONResponse({"detail": "missing delivery id"}, status_code=403)
-    dedup_signature = canonical_signature(signature)
-    if not dedup_signature:
-        return JSONResponse({"detail": "bad webhook signature"}, status_code=403)
-    if _issue_webhook_replay_seen(dedup_signature, replay_window_seconds()):
-        return JSONResponse({"detail": "duplicate webhook delivery"}, status_code=409)
 
-    check_goal_rate_limit(request, source="webhook:github")
-
-    async def _run() -> None:
-        try:
-            await process_issue(payload)
-        except Exception:  # pragma: no cover -- never crash the worker
-            log.exception("github_app: issue→PR run failed")
-
-    bg.add_task(_run)
-    return JSONResponse({"status": "accepted", "issue": payload.issue_number})
+    return JSONResponse(
+        {"detail": "GitHub issue automation is unavailable until checkout isolation is implemented"},
+        status_code=503,
+    )
 
 
 @app.post("/webhook/gitlab")
@@ -12904,6 +12974,9 @@ async def webhook_gitlab(request: Request, bg: BackgroundTasks) -> JSONResponse:
     )
 
     secret = await run_in_threadpool(gitlab_webhook_token)
+    from maverick.webhooks import separate_webhook_credential
+    if not await run_in_threadpool(separate_webhook_credential, secret, "gitlab"):
+        secret = None
     if not secret:
         raise HTTPException(
             status_code=401,
@@ -13066,7 +13139,7 @@ async def _handle_issue_webhook(
 ) -> JSONResponse:
     """Shared handler for inbound issue-assigned webhooks (Linear/Jira).
 
-    HMAC-signed like ``/webhook/start`` (fail-closed: no secret -> 401, bad
+    HMAC-signed with a provider-specific secret (no secret -> 401, bad
     signature -> 403). When the payload isn't an issue assigned to the
     configured bot, acknowledge with ``{"ignored": true}`` instead of
     spawning a goal. On a real assignment, create a goal from the issue and
@@ -13080,17 +13153,15 @@ async def _handle_issue_webhook(
         replay_window_seconds,
         verify_signature,
     )
-    from maverick.webhooks import inbound_secret
+    from maverick.webhooks import issue_webhook_secret
 
-    secret = inbound_secret()
+    secret = issue_webhook_secret(provider)
     if not secret:
         raise HTTPException(
             status_code=401,
             detail=(
                 "Inbound webhooks aren't set up yet — an administrator must "
-                "configure a signing secret (a [webhooks] secret in the server "
-                "configuration, or the MAVERICK_WEBHOOK_SECRET environment "
-                "variable)."
+                f"configure a distinct MAVERICK_{provider.upper()}_WEBHOOK_SECRET."
             ),
         )
     signature = request.headers.get(sig_header) or ""

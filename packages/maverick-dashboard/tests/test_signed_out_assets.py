@@ -66,7 +66,7 @@ def isolated(monkeypatch, tmp_path):
 def _anonymous():
     from maverick_dashboard.app import app
 
-    return TestClient(app)  # no bearer, no cookie, no Origin: a signed-out visitor
+    return TestClient(app, base_url="http://127.0.0.1")  # no bearer, no cookie, no Origin: a signed-out visitor
 
 
 def _all_referenced_assets() -> set[str]:

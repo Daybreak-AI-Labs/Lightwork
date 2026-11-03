@@ -17,9 +17,9 @@ Quick triage for the alerts in `prometheus-rules.yaml`. Pair with
 1. `kubectl get pods -l app.kubernetes.io/name=maverick` — crashloop? OOMKilled?
 2. `kubectl logs deploy/<release>-maverick --tail=200` (logs are JSON when
    `MAVERICK_LOG_FORMAT=json`; each goal line carries `goal_id`/`conversation_id`).
-3. Hit `/healthz` from inside the cluster — a 503 body names the failing check
-   (DB / provider key / runner). Note: the body redacts paths when a dashboard
-   token is set.
+3. Hit `/healthz` from inside the cluster. A 503 signals degradation; use the
+   authenticated administrator endpoint `/api/v1/admin/system/probe-details`
+   to inspect the failing checks.
 4. If OOMKilled, raise `resources.limits.memory` (chart values).
 
 ## Alert: MaverickConcurrencySaturated
@@ -45,7 +45,7 @@ Quick triage for the alerts in `prometheus-rules.yaml`. Pair with
 
 ## Alert: MaverickGoalFailureRate
 
-1. Provider outage? Check `/healthz` provider-key check and provider status.
+1. Provider outage? Check the authenticated probe details and provider status.
 2. Shield over-blocking? Failures with "Output blocked" in logs.
 3. A bad recent deploy? Correlate with rollout time; `helm rollback` if needed.
 

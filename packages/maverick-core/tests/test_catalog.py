@@ -64,7 +64,7 @@ def test_entry_round_trips():
     d = e.to_dict()
     assert d["name"] == "summarize-url"
     assert d["sha256"] == _SKILL_SHA
-    assert d["verified"] is True
+    assert d["verified"] is False  # index claims are not independent verification
 
 
 def test_malformed_statistics_and_entries_do_not_hide_valid_catalog(monkeypatch):

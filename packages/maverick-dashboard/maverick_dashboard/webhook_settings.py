@@ -90,7 +90,7 @@ def _snapshot() -> dict:
     source = fallback_source = "none"
     dashboard_set = False
     for name, path in layers:
-        loaded = config._load_config_file(path)
+        loaded = config._load_config_file(path, interpolate=name != "tenant")
         section = loaded.get("webhooks", {})
         if not isinstance(section, dict):
             raise WebhookSettingsUnavailable("Webhook settings could not be read safely. Refresh status before making a change.")
@@ -115,8 +115,11 @@ def _snapshot() -> dict:
     outbound, outbound_fallback = value, fallback
     if external:
         value = fallback = external
+        outbound = outbound_fallback = external
         source = fallback_source = "external_secret"
-    observed = webhooks.inbound_secret()
+    # This panel manages the legacy outbound credential; inbound control
+    # requests use their independently configured startup secret.
+    observed = external or webhooks._load_config_outbound()[1]
     if observed != value or webhooks._load_config_outbound()[1] != outbound or files[:len(layers)] != [(name, _file_identity(path)) for name, path in layers]:
         raise WebhookSettingsConflict("Webhook settings changed while they were being checked. Refresh status and review again.")
     material = {"files": files, "value": value, "source": source,

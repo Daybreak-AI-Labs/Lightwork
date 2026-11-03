@@ -145,8 +145,8 @@ def _verify_days(
 
     Mirrors ``maverick audit verify``: a clean signed chain and tip ledger is
     ``verified``; any structural/signature/anchor break is ``broken``; a chain
-    that was simply never signed (every row flagged ``unsigned``) reports
-    ``unsigned`` (not tamper); no day-file present is ``no_log``. Replay passes
+    that was never signed reports ``unsigned`` only when signing is not
+    expected; no day-file present is ``no_log``. Replay passes
     verdicts over its captured lines, so this function must not reopen those
     segments. Anchor verification remains a separate check of current files.
     """
@@ -154,6 +154,11 @@ def _verify_days(
     from maverick.paths import data_dir
 
     audit_dir = data_dir("audit")
+    try:
+        from maverick.soc2 import _audit_signing_expected
+        signing_expected = _audit_signing_expected()
+    except Exception:
+        signing_expected = True
     real_breaks: list[Any] = []
     unsigned = 0
     present: list[str] = []
@@ -174,7 +179,7 @@ def _verify_days(
                 real_breaks.append(type("B", (), {"line_no": 0, "reason": "unreadable", "detail": d})())
                 continue
         for b in breaks:
-            if getattr(b, "reason", "") == "unsigned":
+            if getattr(b, "reason", "") == "unsigned" and not signing_expected:
                 unsigned += 1
             else:
                 real_breaks.append(b)
@@ -208,7 +213,7 @@ def _verify_days(
             "status": "broken",
             "break_count": len(real_breaks),
             "days": present,
-            "signed": True,
+            "signed": not any(getattr(b, "reason", "") == "unsigned" for b in real_breaks),
             "breaks": [
                 {"line": getattr(b, "line_no", 0), "reason": getattr(b, "reason", "?"),
                  "detail": getattr(b, "detail", "")}

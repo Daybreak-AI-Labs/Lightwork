@@ -12,7 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 from maverick_dashboard.app import app
 
-client = TestClient(app, headers={"Origin": "http://testserver"})
+client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 BASE = "/api/v1/agent-control-plane"
 
 
@@ -1239,7 +1239,7 @@ def test_halt_get_does_not_read_oversized_incident_detail(monkeypatch, tmp_path)
 
 def test_cross_origin_mutations_are_refused_by_the_csrf_check():
     from maverick.revocation import is_revoked
-    foreign = TestClient(app, headers={"Origin": "http://evil.example"})
+    foreign = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://evil.example"})
     r = foreign.post(f"{BASE}/agents/user:local/suspend", json={"reason": "x"})
     assert r.status_code == 403
     assert not is_revoked("user:local")

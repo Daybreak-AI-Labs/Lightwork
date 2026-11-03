@@ -31,11 +31,15 @@ from .continuation_frame import ContinuationFrame
 from .expressions import (
     _CREDENTIAL_REPAIR,
     _FN_CALL,
+    FlowRegexRefused,
     _as_text,
     _dig,
     _split_args,
     eval_condition,
     render,
+)
+from .expressions import (
+    _regex_is_safe as _regex_is_safe,
 )
 from .ir import (
     MAX_FLOW_NODE_RETRY_SLEEP,
@@ -539,7 +543,7 @@ def _run_work(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
         try:
             result, outcome = _invoke_work(node, data, ctx)
             last_exc = None
-        except (BudgetExceeded, Halted, FlowApprovalStale, AuditRefused, FlowCredentialRefused):
+        except (BudgetExceeded, Halted, FlowApprovalStale, AuditRefused, FlowCredentialRefused, FlowRegexRefused):
             raise
         except Exception as e:   # a raising executor is a retryable failure, not instant death
             last_exc, outcome = e, 0.0
@@ -1148,7 +1152,7 @@ def _run_chain(flow: Flow, data: dict, ctx: _Ctx, start: str | None) -> None:
                         following, data, ctx, following.recipe_step, record=False,
                     )
             cursor = _run_node(node, data, ctx)
-        except (BudgetExceeded, Halted, FlowApprovalStale, AuditRefused, FlowCredentialRefused) as exc:
+        except (BudgetExceeded, Halted, FlowApprovalStale, AuditRefused, FlowCredentialRefused, FlowRegexRefused) as exc:
             ctx.control_stop.append(exc)
             raise
         except (_Pause, _Reject, _NodeError, _Indeterminate):

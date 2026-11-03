@@ -23,7 +23,7 @@ def _client():
     # Mutating /api/v1 requests in no-token mode need the same-origin CSRF header;
     # the HMAC-exempt /webhook/run ignores it.
     from maverick_dashboard.app import app
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def _sign_headers(body: bytes) -> dict:
@@ -38,7 +38,7 @@ def _isolate(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_CONFIG", raising=False)
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
-    monkeypatch.delenv("MAVERICK_WEBHOOK_SECRET", raising=False)
+    monkeypatch.delenv("MAVERICK_INBOUND_WEBHOOK_SECRET", raising=False)
     from maverick import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     import maverick.templates as tpl
@@ -65,7 +65,7 @@ def _no_real_run(monkeypatch):
 
 
 def _configured(monkeypatch):
-    monkeypatch.setenv("MAVERICK_WEBHOOK_SECRET", SECRET)
+    monkeypatch.setenv("MAVERICK_INBOUND_WEBHOOK_SECRET", SECRET)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")  # pragma: allowlist secret
 
 
@@ -616,7 +616,8 @@ def test_create_trigger_cannot_overwrite_another_owner(monkeypatch, tmp_path):
     # its slug; the existing trigger stays intact.
     _isolate(monkeypatch, tmp_path)
     from maverick import templates
-    from maverick_dashboard import api, auth, triggers_store
+    from maverick_dashboard import api, auth, rbac, triggers_store
+    rbac.set_role("user:alice", "operator")
     template = templates.USER_TEMPLATES / "weekly-report.md"
     template.write_text(template.read_text(encoding="utf-8").replace(
         "owner: local", "owner: user:alice"), encoding="utf-8")
@@ -631,32 +632,28 @@ def test_create_trigger_cannot_overwrite_another_owner(monkeypatch, tmp_path):
     assert got["owner"] == "user:bob" and got["params"] == {"topic": "x"}   # untouched
 
 
-def test_static_token_operator_manages_the_triggers_it_created(monkeypatch, tmp_path):
-    """With a static dashboard token the owner is stored as ``user:local`` but the
-    list, re-save and delete filtered by the token's empty owner, so a created
-    trigger vanished from the list, could not be replaced and could not be deleted."""
+def test_static_token_cannot_create_unrunnable_trigger_but_can_manage_existing(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "static-operator-token-for-tests")  # pragma: allowlist secret
     monkeypatch.setattr("maverick.audit.audit_event", lambda *a, **k: True)
     from maverick_dashboard import triggers_store
     from maverick_dashboard.app import app
-    c = TestClient(app, headers={"Origin": "http://testserver",
-                                 "Authorization": "Bearer static-operator-token-for-tests"})
+
+    c = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1",
+                   "Authorization": "Bearer static-operator-token-for-tests"})  # pragma: allowlist secret
     body = {"template": "weekly-report", "params": {"topic": "rivals"}}
+    refused = c.post("/api/v1/triggers", json=body)
+    assert refused.status_code == 409
+    assert "named account" in refused.json()["detail"]
+    assert triggers_store.get_trigger("weekly-report") is None
 
-    assert c.post("/api/v1/triggers", json=body).status_code == 201
-    assert triggers_store.get_trigger("weekly-report")["owner"] == "user:local"
-    assert [t["name"] for t in c.get("/api/v1/triggers").json()["triggers"]] == ["weekly-report"]
-    again = c.post("/api/v1/triggers", json={**body, "params": {"topic": "partners"}})
-    assert again.status_code == 201, again.text
-    assert triggers_store.get_trigger("weekly-report")["params"] == {"topic": "partners"}
-    assert c.delete("/api/v1/triggers/weekly-report").status_code == 200
-    assert c.get("/api/v1/triggers").json()["triggers"] == []
-
-    # Another owner's trigger stays hidden from, and untouchable by, the token.
+    triggers_store.set_trigger("legacy", "weekly-report", {"topic": "x"}, owner="user:local")
+    assert [t["name"] for t in c.get("/api/v1/triggers").json()["triggers"]] == ["legacy"]
+    assert c.post("/api/v1/triggers", json={**body, "name": "legacy"}).status_code == 409
+    assert triggers_store.get_trigger("legacy")["params"] == {"topic": "x"}
+    assert c.delete("/api/v1/triggers/legacy").status_code == 200
     triggers_store.set_trigger("theirs", "weekly-report", {"topic": "y"}, owner="user:bob")
     assert c.get("/api/v1/triggers").json()["triggers"] == []
     assert c.delete("/api/v1/triggers/theirs").status_code == 404
-    taken = c.post("/api/v1/triggers", json={**body, "name": "theirs"})
-    assert taken.status_code == 409
+    assert c.post("/api/v1/triggers", json={**body, "name": "theirs"}).status_code == 409
     assert triggers_store.get_trigger("theirs")["owner"] == "user:bob"

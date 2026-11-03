@@ -665,7 +665,7 @@ def test_a_multiline_reply_keeps_its_lines_and_paragraphs_on_the_card():
     from maverick_channels.teams_cards import result_card
     card = result_card("Summary\n\n- a\n- b\r\n```\ncode\n```")
     blocks = [b for b in card["body"] if b["type"] == "TextBlock"]
-    assert [b["text"] for b in blocks] == ["Lightwork", "Summary", "- a", "- b", "```", "code", "```"]
+    assert [b["text"] for b in blocks] == ["Lightwork", "Summary", "- a", "- b", r"\`\`\`", "code", r"\`\`\`"]
     assert blocks[2].get("spacing") == "medium"                 # the blank line before the list
     assert blocks[3].get("spacing") is None
 

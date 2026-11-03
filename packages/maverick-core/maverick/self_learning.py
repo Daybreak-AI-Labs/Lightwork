@@ -45,7 +45,6 @@ import hashlib
 import json
 import logging
 import math
-import os
 import re
 import secrets
 import tempfile
@@ -57,7 +56,7 @@ from dataclasses import asdict, dataclass, fields, is_dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from .config import env_flag, governed_learning_env_flag
+from .config import governed_learning_env_flag
 from .file_lock import (
     atomic_read_text,
     atomic_write_text,
@@ -590,9 +589,7 @@ def add_mcp_server(
     job (it needs the running event loop).
 
     NOTE: this is the low-level persistence primitive. It is NOT the
-    agent-facing entry point — ``learn_capability`` routes through
-    ``acquire_mcp_server`` (catalog-pinned + operator consent), never here
-    with a model-supplied free-text command.
+    agent-facing entry point — catalog acquisition is currently disabled.
     """
     from .config import config_path
     from .file_lock import atomic_write_text, cross_process_lock, ensure_private_file
@@ -648,26 +645,9 @@ def add_mcp_server(
     return spec
 
 
-# Maximum command tokens we'll accept from a catalog ``source``. A directly
-# pinnable MCP launch line should be short; a huge token list signals a
-# malformed/abusive entry.
-_MCP_SOURCE_MAX_TOKENS = 32
-_MCP_CATALOG_PIN_RE = re.compile(r"^[0-9a-f]{64}$")
-
-
 def mcp_acquisition_enabled() -> bool:
-    """Whether agent-driven MCP-server acquisition (#422) is allowed.
-
-    OFF by default and independent of the self-learning master switch: it
-    re-enables the capability #392 disabled, so it's a separate, explicit
-    trust decision. ``MAVERICK_ALLOW_MCP_ACQUISITION`` overrides config.
-    """
-    # Presence means the operator attempted to manage this authority. An
-    # unrecognized value must fail closed instead of falling through to a
-    # permissive config value.
-    if "MAVERICK_ALLOW_MCP_ACQUISITION" in os.environ:
-        return env_flag("MAVERICK_ALLOW_MCP_ACQUISITION") is True
-    return settings().get("allow_mcp_acquisition") is True
+    """Catalog acquisition remains disabled pending publisher authentication."""
+    return False
 
 
 def provider_egress_enabled() -> bool:
@@ -675,203 +655,12 @@ def provider_egress_enabled() -> bool:
     return settings().get("allow_provider_egress") is True
 
 
-def _parse_catalog_mcp_source(source: str) -> tuple[str, list[str]]:
-    """Split a catalog ``mcp`` entry ``source`` into (command, args).
-
-    Convention (this module is the only consumer; catalog.py stays
-    read-only): the ``source`` field of an ``mcp`` CatalogEntry is the
-    launch command line, e.g. ``"weather-mcp --stdio"``. We shlex-split
-    it — argv[0] is the command, the rest are args. The result is fed to
-    MCPServerSpec, whose __post_init__ runs the full shell-meta / NUL /
-    newline validation, so nothing here weakens those defenses.
-    """
-    import shlex
-
-    try:
-        tokens = shlex.split(source or "", posix=True)
-    except ValueError as e:
-        raise ValueError(f"catalog mcp source is not a valid command line: {e}") from e
-    if not tokens:
-        raise ValueError("catalog mcp entry has an empty command source")
-    if len(tokens) > _MCP_SOURCE_MAX_TOKENS:
-        raise ValueError("catalog mcp source has too many tokens")
-    return tokens[0], tokens[1:]
-
-
-def _canonical_mcp_spec_digest(spec: Any) -> str:
-    """Digest the exact validated runtime authority shown to the operator."""
-    payload = {
-        "schema": "maverick.catalog-mcp-consent.v1",
-        "name": spec.name,
-        "spec": spec.to_dict(),
-    }
-    canonical = json.dumps(
-        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
-    )
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
-
-def _mcp_consent_scope(tenant: str, name: str, spec_digest: str) -> str:
-    return f"{tenant}:{name}:{spec_digest}"
-
-
 def acquire_mcp_server(name: str, *, need: str = "") -> Any:
-    """Catalog-pinned, consent-gated MCP-server acquisition (#422).
-
-    The ONLY agent-reachable path to add an MCP server. Restores the
-    capability #392 removed without re-opening the RCE/supply-chain hole:
-
-      1. Resolve ``name`` against the curated ``mcp`` catalog index
-         (read-only ``catalog.resolve``). A name with no catalog entry is
-         rejected — there is NO free-text ``command``/``args`` input.
-      2. Require a canonical lowercase 64-hex executable pin and reject
-         package launchers whose argv[0] hash says nothing about downloaded
-         package bytes. MCPServerSpec validation runs before consent.
-      3. Bind approval to the active tenant and canonical validated runtime
-         spec digest. Denied / uncertain approval, tenant drift, or a changed
-         command/args/pin leaves configuration untouched.
-
-    Returns the validated ``MCPServerSpec`` (persisted to config). The
-    caller hot-starts the client via the normal validated launch path.
-    Raises ValueError (no/invalid catalog entry) or ConsentDenied.
-    """
-    from . import catalog as _catalog
-    from .config import config_path, tenant_config_path
-    from .mcp_client import MCPServerSpec
-    from .mcp_registry import is_indirect_stdio_command
-    from .paths import current_tenant_id
-    from .safety.consent import (
-        consume_operation_consent,
-        require_operation_consent,
+    """Refuse unauthenticated catalog server configurations."""
+    raise ValueError(
+        "Catalog MCP server acquisition is unavailable until publisher authentication is implemented; "
+        "an operator can independently review and configure a server."
     )
-
-    check_learning_halt("self_learning", "mcp_acquisition_start")
-    if not _NAME_RE.match(name):
-        raise ValueError(
-            f"mcp server name {name!r} must be lowercase id (a-z0-9_), "
-            "3-42 chars, starting with a letter"
-        )
-    entry = _catalog.resolve(name, "mcp")
-    if entry is None:
-        raise ValueError(
-            f"no catalog 'mcp' entry named {name!r}. Agent-driven MCP "
-            "acquisition only installs curated, hash-pinned catalog entries "
-            "(a free-text command is not accepted)."
-        )
-    pin = str(entry.sha256 or "")
-    if not _MCP_CATALOG_PIN_RE.fullmatch(pin):
-        raise ValueError(
-            f"catalog mcp entry {name!r} requires a canonical lowercase "
-            "64-hex sha256 executable pin"
-        )
-    command, args = _parse_catalog_mcp_source(entry.source)
-    if is_indirect_stdio_command(command):
-        raise ValueError(
-            f"catalog mcp entry {name!r} uses an indirect interpreter or launcher; "
-            "pin_sha256 authenticates argv[0], not the downloaded package bytes, "
-            "script, module, image, or remote workload, so autonomous acquisition "
-            "requires a directly pinnable executable"
-        )
-    # Validate the complete subprocess authority before presenting consent. A
-    # malformed catalog row must never create an approval artifact that looks
-    # reusable for a different valid spec.
-    spec = MCPServerSpec(
-        name=name, command=command, args=args, pin_sha256=pin,
-    )
-    tenant = current_tenant_id() or "shared"
-    spec_digest = _canonical_mcp_spec_digest(spec)
-    consent_scope = _mcp_consent_scope(tenant, name, spec_digest)
-    target_path = tenant_config_path() or config_path()
-
-    def current_target() -> dict[str, Any]:
-        current_entry = _catalog.resolve(name, "mcp")
-        if current_entry is None:
-            raise ValueError("catalog MCP entry disappeared during approval")
-        return {
-            "tenant": current_tenant_id() or "shared",
-            "name": name,
-            "config_path": str(tenant_config_path() or config_path()),
-            "catalog_source": current_entry.source,
-            "catalog_sha256": current_entry.sha256,
-        }
-
-    # Operator gate BEFORE any persistence/launch. The detail surfaces the
-    # exact pinned command + digest so the approver sees what will run. The
-    # durable grant is bound to both the active tenant and canonical spec bytes,
-    # so changing argv or pin forces a fresh decision.
-    detail = (
-        f"Add MCP server {name!r} for tenant {tenant!r} from catalog: "
-        f"{command} {' '.join(args)} (executable_sha256={pin}; "
-        f"spec_sha256={spec_digest})"
-    )
-    permit = require_operation_consent(
-        "add-mcp-server",
-        risk="high",
-        scope=consent_scope,
-        detail=detail,
-        provenance=(
-            f"self-learning:{tenant}:mcp:{name}:spec-sha256={spec_digest}"
-        ),
-        target=current_target(),
-        parameters={"server": spec.to_dict(), "need": need or name},
-        parameter_summary=[
-            "Persist the exact catalog-pinned MCP server specification for this tenant."
-        ],
-        known_effects=[
-            "Adds the reviewed MCP server to the active tenant configuration."
-        ],
-        unresolved_assumptions=[
-            "The pinned executable is launched only later through the normal MCP start checks."
-        ],
-        before="The tenant configuration does not contain this MCP server entry.",
-        after="The tenant configuration contains this reviewed MCP server entry.",
-        irreversible=False,
-        target_provider=current_target,
-        parameters_provider=lambda: {
-            "server": spec.to_dict(),
-            "need": need or name,
-        },
-        input_versions_provider=lambda: {
-            "spec_sha256": _canonical_mcp_spec_digest(spec),
-            "catalog_entry_sha256": hashlib.sha256(
-                json.dumps(
-                    {
-                        "source": (_catalog.resolve(name, "mcp") or entry).source,
-                        "sha256": (_catalog.resolve(name, "mcp") or entry).sha256,
-                    },
-                    sort_keys=True,
-                    separators=(",", ":"),
-                ).encode("utf-8")
-            ).hexdigest(),
-        },
-        credential_versions_provider=lambda: {
-            "executable_sha256": spec.pin_sha256,
-            "server_spec_sha256": _canonical_mcp_spec_digest(spec),
-        },
-        budget_provider=lambda: {
-            "config_bytes": len(
-                json.dumps(spec.to_dict(), sort_keys=True).encode("utf-8")
-            )
-        },
-        allow_auto_approve=False,
-        consult_ledger=False,
-    )
-
-    def tenant_authority_check() -> None:
-        if (current_tenant_id() or "shared") != tenant:
-            raise ValueError("active tenant changed during MCP persistence")
-
-    # Existing config loading already merges this highest-precedence tenant
-    # overlay. Use it rather than granting a tenant-scoped approval that mutates
-    # deployment-global config authority. Shared/single-tenant mode retains the
-    # historical global config target.
-    with consume_operation_consent(permit):
-        return add_mcp_server(
-            name, command, args=args, pin_sha256=pin,
-            need=need or name,
-            path=target_path,
-            authority_check=tenant_authority_check,
-        )
 
 
 # --------------------------------------------------------------------------

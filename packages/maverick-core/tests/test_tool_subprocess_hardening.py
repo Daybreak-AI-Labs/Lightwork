@@ -261,11 +261,210 @@ import importlib  # noqa: E402
 def test_safe_path_blocks_leading_dash_without_sandbox(mod):
     """When sandbox is None, _safe_path returned the path verbatim -- so
     input_path="-i" / "-write ..." became a flag to ffmpeg/convert/pandoc.
-    A leading-dash path must now be rejected; benign paths still pass."""
+    A leading-dash path must now be rejected. Pandoc also needs a workspace."""
     m = importlib.import_module(f"maverick.tools.{mod}")
     with pytest.raises(ValueError, match="may not begin with '-'"):
         m._safe_path(None, "-i")
-    assert m._safe_path(None, "in.png") == "in.png"
+    if mod in {"pandoc_tool", "imagemagick_tool", "ffmpeg_tool"}:
+        with pytest.raises(ValueError, match="requires a workspace"):
+            m._safe_path(None, "in.png")
+    else:
+        assert m._safe_path(None, "in.png") == "in.png"
+
+
+@pytest.mark.parametrize("overrides", [
+    {"from_": "reader.lua"}, {"to": "writer.lua"}, {"from_": "markdown+raw_tex"},
+    {"args": ["-L", "filter.lua"]}, {"args": ["--defaults=evil.yml"]},
+    {"args": ["-H", "/etc/passwd"]}, {"args": ["-o", "/tmp/evil"]},
+    {"args": ["--embed-resources"]}, {"args": ["/tmp/evil"]},
+    {"args": "--standalone"}, {"args": ["--output=/tmp/evil"]},
+    {"input_path": "input.unknown"}, {"output_path": "result.unknown"}, {"to": "pdf"},
+    {"output_path": "result.PDF"}, {"output_path": "result.pdf", "to": "html"},
+])
+def test_pandoc_refuses_unreviewed_writers_flags_and_pdf(tmp_path, monkeypatch, overrides):
+    from maverick.tools.pandoc_tool import pandoc_tool
+
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/pandoc")
+    monkeypatch.setenv("MAVERICK_ALLOW_RAW_MEDIA_ARGS", "1")
+    sandbox = _RecordingSandbox(tmp_path)
+    params = {"op": "convert", "input_path": "input.md", "output_path": "output.html", **overrides}
+    assert pandoc_tool(sandbox).fn(params).startswith("ERROR:")
+    assert sandbox.commands == []
+
+
+def test_pandoc_allows_builtin_conversion_with_basic_options(tmp_path, monkeypatch):
+    from maverick.tools.pandoc_tool import pandoc_tool
+
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/pandoc")
+    sandbox = _RecordingSandbox(tmp_path)
+    result = pandoc_tool(sandbox).fn({
+        "op": "convert", "input_path": "input.md", "output_path": "output.html",
+        "args": ["--standalone"],
+    })
+    assert result.startswith("wrote ")
+    assert len(sandbox.commands) == 1 and "--standalone" in sandbox.commands[0]
+
+
+def test_pandoc_converts_simple_markdown_to_html_and_docx(tmp_path):
+    import shutil
+    import zipfile
+
+    from maverick.sandbox import LocalBackend
+    from maverick.tools.pandoc_tool import pandoc_tool
+
+    if shutil.which("pandoc") is None:
+        pytest.skip("pandoc is unavailable")
+    (tmp_path / "input.md").write_text("# Hello\n\nA plain document.\n", encoding="utf-8")
+    tool = pandoc_tool(LocalBackend(workdir=tmp_path))
+    for output in ("output.html", "output.docx"):
+        assert tool.fn({"op": "convert", "input_path": "input.md", "output_path": output}).startswith("wrote ")
+    assert "A plain document." in (tmp_path / "output.html").read_text(encoding="utf-8")
+    with zipfile.ZipFile(tmp_path / "output.docx") as archive:
+        assert b"A plain document." in archive.read("word/document.xml")
+
+
+@pytest.mark.parametrize("options", [
+    ["-write", "/tmp/out"], ["text:/etc/passwd"], ["-script", "@bad"],
+    ["-format", "info:"], ["-resize", "@secret"], ["-quality", "101"],
+    ["-rotate", "nan"], ["-strip", "/tmp/out"],
+])
+def test_imagemagick_refuses_file_and_operator_injection(tmp_path, monkeypatch, options):
+    from maverick.tools.imagemagick_tool import imagemagick_tool
+
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/magick")
+    monkeypatch.setenv("MAVERICK_ALLOW_RAW_MEDIA_ARGS", "1")
+    sandbox = _RecordingSandbox(tmp_path)
+    result = imagemagick_tool(sandbox).fn({"op": "convert", "input_path": "input.png",
+                                           "output_path": "output.png", "args": options})
+    assert result.startswith("ERROR:")
+    assert sandbox.commands == []
+
+
+def test_imagemagick_accepts_bounded_options(tmp_path, monkeypatch):
+    from maverick.tools.imagemagick_tool import imagemagick_tool
+
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/magick")
+    sandbox = _RecordingSandbox(tmp_path)
+    result = imagemagick_tool(sandbox).fn({"op": "convert", "input_path": "input.png",
+                                           "output_path": "output.png",
+                                           "args": ["-resize", "800x600", "-quality", "80", "-strip"]})
+    assert result.startswith("wrote ") and len(sandbox.commands) == 1
+
+
+def test_imagemagick_converts_a_simple_raster_in_workspace(tmp_path):
+    import shutil
+
+    from maverick.sandbox import LocalBackend
+    from maverick.tools.imagemagick_tool import imagemagick_tool
+
+    if not (shutil.which("magick") or shutil.which("convert")):
+        pytest.skip("ImageMagick is unavailable")
+    (tmp_path / "input.ppm").write_text("P3\n1 1\n255\n255 0 0\n", encoding="ascii")
+    result = imagemagick_tool(LocalBackend(workdir=tmp_path)).fn({
+        "op": "convert", "input_path": "input.ppm", "output_path": "output.png",
+        "args": ["-resize", "200%", "-rotate", "90", "-strip"],
+    })
+    assert result.startswith("wrote ")
+    assert (tmp_path / "output.png").read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+
+
+@pytest.mark.parametrize("geometry", ["-write", "@secret", "+1", "1x2+3", "+0+0 -write /tmp/x"])
+def test_imagemagick_composite_rejects_invalid_geometry(tmp_path, monkeypatch, geometry):
+    from maverick.tools.imagemagick_tool import imagemagick_tool
+
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/magick")
+    sandbox = _RecordingSandbox(tmp_path)
+    result = imagemagick_tool(sandbox).fn({"op": "composite", "base_path": "base.png",
+                                           "overlay_path": "overlay.png", "output_path": "out.png",
+                                           "geometry": geometry})
+    assert result.startswith("ERROR:") and sandbox.commands == []
+
+
+@pytest.mark.parametrize("options", [
+    ["-filter:v", "drawtext=textfile=/etc/passwd"], ["-filter_script:v", "/tmp/script"],
+    ["-passlogfile", "/tmp/out"], ["-protocol_whitelist", "http"],
+    ["/tmp/extra"], ["-c:v", "@file"], ["-crf", "NaN"], ["-b:a", "999999m"],
+])
+def test_ffmpeg_rejects_untrusted_options(tmp_path, monkeypatch, options):
+    from maverick.tools.ffmpeg_tool import ffmpeg_tool
+
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/ffmpeg")
+    monkeypatch.setenv("MAVERICK_ALLOW_RAW_MEDIA_ARGS", "1")
+    sandbox = _RecordingSandbox(tmp_path)
+    result = ffmpeg_tool(sandbox).fn({"op": "convert", "input_path": "input.mp4",
+                                     "output_path": "output.mp4", "args": options})
+    assert result.startswith("ERROR:") and sandbox.commands == []
+
+
+@pytest.mark.parametrize("time_value,width", [("-i", 640), ("1; rm", 640), ("00:60:00", 640), ("1", 99999)])
+def test_ffmpeg_thumbnail_rejects_unsafe_parameters(tmp_path, monkeypatch, time_value, width):
+    from maverick.tools.ffmpeg_tool import ffmpeg_tool
+
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/ffmpeg")
+    sandbox = _RecordingSandbox(tmp_path)
+    result = ffmpeg_tool(sandbox).fn({"op": "thumbnail", "input_path": "in.mp4",
+                                     "output_path": "out.png", "time": time_value, "width": width})
+    assert result.startswith("ERROR:") and sandbox.commands == []
+
+
+def test_ffmpeg_converts_simple_audio_in_workspace(tmp_path):
+    import shutil
+    import wave
+
+    from maverick.sandbox import LocalBackend
+    from maverick.tools.ffmpeg_tool import ffmpeg_tool
+
+    if shutil.which("ffmpeg") is None:
+        pytest.skip("ffmpeg is unavailable")
+    with wave.open(str(tmp_path / "input.wav"), "wb") as source:
+        source.setnchannels(1)
+        source.setsampwidth(2)
+        source.setframerate(8000)
+        source.writeframes(b"\0\0" * 80)
+    result = ffmpeg_tool(LocalBackend(workdir=tmp_path)).fn({
+        "op": "convert", "input_path": "input.wav", "output_path": "output.wav",
+        "args": ["-c:a", "pcm_s16le"],
+    })
+    assert result.startswith("wrote ")
+    with wave.open(str(tmp_path / "output.wav"), "rb") as output:
+        assert output.getnchannels() == 1 and output.getnframes() == 80
+
+
+@pytest.mark.parametrize("tool_name,source,output", [
+    ("pandoc", "input.md", ".GIT/config.html"),
+    ("imagemagick", "input.png", ".Git /config.png"),
+    ("ffmpeg", "input.wav", ".git/config.wav"),
+])
+def test_media_tools_refuse_git_metadata_writes(tmp_path, monkeypatch, tool_name, source, output):
+    from maverick.tools.ffmpeg_tool import ffmpeg_tool
+    from maverick.tools.imagemagick_tool import imagemagick_tool
+    from maverick.tools.pandoc_tool import pandoc_tool
+
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/tool")
+    sandbox = _RecordingSandbox(tmp_path)
+    tool = {"pandoc": pandoc_tool, "imagemagick": imagemagick_tool, "ffmpeg": ffmpeg_tool}[tool_name](sandbox)
+    result = tool.fn({"op": "convert", "input_path": source, "output_path": output})
+    assert "refusing to write under .git" in result
+    assert sandbox.commands == []
+
+
+@pytest.mark.parametrize("tool_name,source", [("pandoc", "input.md"), ("imagemagick", "input.png"),
+                                              ("ffmpeg", "input.wav")])
+def test_media_tools_refuse_git_symlink_destination(tmp_path, monkeypatch, tool_name, source):
+    from maverick.tools.ffmpeg_tool import ffmpeg_tool
+    from maverick.tools.imagemagick_tool import imagemagick_tool
+    from maverick.tools.pandoc_tool import pandoc_tool
+
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/tool")
+    (tmp_path / "git-data").mkdir()
+    try:
+        (tmp_path / ".git").symlink_to(tmp_path / "git-data", target_is_directory=True)
+    except OSError:
+        pytest.skip("symlinks are unavailable")
+    sandbox = _RecordingSandbox(tmp_path)
+    tool = {"pandoc": pandoc_tool, "imagemagick": imagemagick_tool, "ffmpeg": ffmpeg_tool}[tool_name](sandbox)
+    result = tool.fn({"op": "convert", "input_path": source, "output_path": ".git/config.html"})
+    assert "refusing to write under .git" in result and sandbox.commands == []
 
 
 def _capture_sandbox_run(monkeypatch, *, ret=(0, "", "")):

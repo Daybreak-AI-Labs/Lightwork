@@ -23,7 +23,7 @@ def share_env(tmp_path, monkeypatch):
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     app._world_cache.clear()
-    return TestClient(app.app, headers={"Origin": "http://testserver"})
+    return TestClient(app.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def _create(client, goal_id):
@@ -54,7 +54,7 @@ def test_selected_workspace_link_reaches_external_reader_and_revokes(share_env):
     finally:
         reset_tenant(scope)
     token = data["url"].rsplit("/", 1)[1]
-    public = TestClient(app.app).get(f"/share/{token}")
+    public = TestClient(app.app, base_url="http://127.0.0.1").get(f"/share/{token}")
     assert public.status_code == 200
     assert "selected-workspace content" in public.text
     assert "default-only content" not in public.text
@@ -64,7 +64,7 @@ def test_selected_workspace_link_reaches_external_reader_and_revokes(share_env):
         assert client.post(f"/api/v1/goals/{gid}/share/{data['id']}/revoke").json()["ok"]
     finally:
         reset_tenant(scope)
-    assert TestClient(app.app).get(f"/share/{token}").status_code == 404
+    assert TestClient(app.app, base_url="http://127.0.0.1").get(f"/share/{token}").status_code == 404
 
 
 def test_unknown_and_malformed_tokens_create_no_routing_or_world_files(share_env, monkeypatch):

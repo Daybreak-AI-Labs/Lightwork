@@ -21,7 +21,8 @@ test('an interrupted signing-secret publication is recovered without republishin
   expect((await request.post(base+'/'+row.id+'/check',{data:{context:'0'.repeat(64),review:row.review,confirm:true}})).status()).toBe(409);
   const body=JSON.stringify({description:'No title: do not create work'}),timestamp=String(Math.floor(Date.now()/1000));
   const sign=value=>'sha256='+crypto.createHmac('sha256',value).update(timestamp+'.'+body).digest('hex');
-  expect((await request.post('/webhook/start',{data:body,headers:{'Content-Type':'application/json','X-Maverick-Timestamp':timestamp,'X-Maverick-Signature':sign(secret)}})).status()).toBe(400);
+  expect((await request.post('/webhook/start',{data:body,headers:{'Content-Type':'application/json','X-Maverick-Timestamp':timestamp,'X-Maverick-Signature':sign(secret)}})).status()).toBe(403);
+  expect((await request.post('/webhook/start',{data:body,headers:{'Content-Type':'application/json','X-Maverick-Timestamp':timestamp,'X-Maverick-Signature':sign('synthetic-fixture-control-key')}})).status()).toBe(400);
   expect((await request.post('/webhook/start',{data:body,headers:{'Content-Type':'application/json','X-Maverick-Timestamp':timestamp,'X-Maverick-Signature':sign('synthetic-wrong-key')}})).status()).toBe(403);
   await panel.getByRole('button',{name:'Refresh saved changes',exact:true}).click();await panel.getByRole('combobox').selectOption(row.id);
   await arm('refuse');await panel.getByRole('button',{name:'Record verified check',exact:true}).click();

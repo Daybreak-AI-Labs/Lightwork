@@ -24,7 +24,7 @@ def browser(tmp_path, monkeypatch):
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.setattr(workspace_recovery, "_key", lambda: bytes(range(32)))
     monkeypatch.setattr(audit, "record", lambda *a, **kw: True)
-    test = TestClient(app, headers={"Origin": "http://testserver"})
+    test = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     yield test
     config.reset_config_cache()
     client.reset_client_cache()

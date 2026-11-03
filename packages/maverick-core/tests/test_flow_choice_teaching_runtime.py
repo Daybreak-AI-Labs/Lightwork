@@ -249,7 +249,9 @@ def test_teaching_request_and_selection_require_literal_receipt_acknowledgement(
 
 def test_run_detail_exposes_complete_verified_question_and_withholds_invalid_preview(teaching, monkeypatch):
     from maverick.flow import payloads
-    from maverick_dashboard import api
+    from maverick_dashboard import api, rbac
+
+    rbac.set_tenant_role(TENANT, OWNER, "operator")
 
     run = paused(teaching)
     retained = store.load_run(run.run_id)

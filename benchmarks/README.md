@@ -237,3 +237,19 @@ numbers sit side by side.
 Distillation quality (whether auto-generated SKILL.md files actually help
 future runs) **is** measured — see "Does the learning actually help?"
 above (`recall_precision.py` + `moat_rigorous.py`).
+
+# Hidden-test execution boundary
+
+Agent-driven governed SWE-bench and DGM solver runs refuse instances containing
+a hidden `test_patch`. The former opaque-mode filters do not isolate the agent
+from grader material, host tools, or checkout history. Restoring these runs
+requires a separately confined solver and trusted grader, including a review of
+the feedback and network channels. Oracle grading remains available for trusted
+pipeline validation; it does not measure hidden-test secrecy. DGM solver
+payloads also omit the canonical `gold_patch` and `test_patch` fields. Custom
+instance fields must not contain secrets: they are passed to the solver.
+Existing benchmark results and checkpoints made with solver-visible hidden tests
+should not be treated as evidence of hidden-test performance.
+The standalone `swe_bench.py` runner also refuses manifests with a `test_patch`,
+but it cannot identify grader material already present in a checkout, history,
+or other host-accessible files. Do not use it to protect hidden tests.

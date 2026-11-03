@@ -170,7 +170,7 @@ def test_shared_review_token_recovers_removed_selection_without_repeating(state,
     application = FastAPI()
     application.include_router(registry.router)
     selected = selection("hours")
-    with TestClient(application, headers={"Origin": "http://testserver"}) as client:
+    with TestClient(application, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}) as client:
         body = {"page": "/facts", "selection": selected, "operation": "facts.remove", "context": state.context,
                 "revision": ops.snapshot(None, selected, action="remove").revision, "arguments": {}}
         response = client.post("/api/v1/copilot/product-operations/prepare", json=body)

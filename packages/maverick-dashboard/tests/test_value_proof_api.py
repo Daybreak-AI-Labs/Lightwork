@@ -8,7 +8,7 @@ import re
 import pytest
 from fastapi.testclient import TestClient
 
-ORIGIN = {"Origin": "http://testserver"}
+ORIGIN = {"Origin": "http://127.0.0.1"}
 API = "/api/v1/value-proof"
 _BANNED = re.compile(
     r"\b(tenant|principal|payload|endpoint|schema|uuid|sha-?256|digest|json|revision|"
@@ -33,7 +33,7 @@ def client(monkeypatch, tmp_path):
         monkeypatch.delenv(name, raising=False)
     config.reset_config_cache()
     dash_app._world_cache.clear()
-    yield TestClient(dash_app.app, headers=ORIGIN)
+    yield TestClient(dash_app.app, base_url="http://127.0.0.1", headers=ORIGIN)
     config.reset_config_cache()
     dash_app._world_cache.clear()
     audit_writer._defaults.clear()
@@ -123,7 +123,7 @@ def test_earned_autonomy_withdraw_is_admin_checked_and_recorded(client, monkeypa
 
     monkeypatch.setattr(earned_autonomy, "shared", lambda: _Engine())
     listed = client.get(API + "/earned-autonomy").json()
-    assert listed["actions"][0]["name"] == "Send invoice" and listed["actions"][0]["auto_approved"] is True
+    assert listed["actions"][0]["name"] == "Send invoice" and listed["actions"][0]["auto_approved"] is False and listed["actions"][0]["evidence_qualified"] is True
     assert client.post(API + "/earned-autonomy/revoke", json={"action": "unknown"}).status_code == 404
     assert client.post(API + "/earned-autonomy/revoke", json={"action": "send_invoice"}).json()["revoked"] is True
     assert calls == [("send_invoice", "local:dashboard")]

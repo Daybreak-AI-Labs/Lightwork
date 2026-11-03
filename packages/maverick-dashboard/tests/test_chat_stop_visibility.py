@@ -17,7 +17,7 @@ def chat_env(monkeypatch, tmp_path):
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     dashboard._world_cache.clear()
     world = world_model.WorldModel(world_model.DEFAULT_DB)
-    yield TestClient(dashboard.app, headers={"Origin": "http://testserver"}), world
+    yield TestClient(dashboard.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}), world
     world.close()
 
 

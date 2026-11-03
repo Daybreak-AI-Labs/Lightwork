@@ -33,8 +33,7 @@ def install(monkeypatch, tmp_path):
         if name.startswith(("MAVERICK_", "LIGHTWORK_")):
             monkeypatch.delenv(name, raising=False)
     config_path = tmp_path / "config.toml"
-    config_path.write_text('[client]\nid="departures-invited"\n[features]\nemployee_departures = true\n',
-                           encoding="utf-8")
+    config_path.write_text('[features]\nemployee_departures = true\n', encoding="utf-8")
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_CONFIG", str(config_path))
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
@@ -73,9 +72,12 @@ def _invite_to_workspace():
 
 
 def _join(browser):
-    joined = browser.post(_invite_to_workspace(), data={"password": PASSPHRASE, "password2": PASSPHRASE})
+    invite = _invite_to_workspace()
+    joined = browser.post(invite, data={"password": PASSPHRASE, "password2": PASSPHRASE})
     assert joined.status_code == 303, joined.text
     assert "mvk_session" in browser.cookies
+    opened = browser.post(invite + "/workspace")
+    assert opened.status_code == 303, opened.text
 
 
 def _people(owner):
@@ -113,18 +115,23 @@ def test_a_workspace_invited_person_is_offered_for_departure(install):
 
 
 def test_departing_a_workspace_invited_person_ends_every_way_in(install):
+    from maverick.paths import tenant_scope
     from maverick_dashboard import api_keys, approval_decisions, rbac, scim_groups
 
     sam = _browser()
     _join(sam)
-    _key, secret = api_keys.create_key(label="sam script", scopes=["tasks:read"], owner=SAM_PRINCIPAL,
-                                       created_by=SAM_PRINCIPAL)
+    with tenant_scope(tenant=WORKSPACE):
+        _key, secret = api_keys.create_key(
+            label="sam script", scopes=["tasks:read"], owner=SAM_PRINCIPAL,
+            created_by=SAM_PRINCIPAL, workspace=WORKSPACE,
+        )
     bearer = {"Authorization": f"Bearer {secret}"}
     check = "/api/v1/features/modules"
     assert sam.get(check).status_code == 200
     assert _browser().get(check, headers=bearer).status_code == 200
     assert rbac.get_tenant_role(WORKSPACE, SAM_PRINCIPAL) == "operator"
-    assert approval_decisions._may_decide(SAM_PRINCIPAL) is True
+    with tenant_scope(tenant=WORKSPACE):
+        assert approval_decisions._may_decide(SAM_PRINCIPAL) is True
 
     reviewed, begun = _depart(install)
     kinds = {(item["kind"], item.get("tenant")) for item in reviewed["items"]}

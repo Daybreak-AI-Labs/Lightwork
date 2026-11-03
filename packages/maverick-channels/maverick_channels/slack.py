@@ -389,13 +389,13 @@ class SlackChannel(Channel):
     async def post_approval_card(self, channel: str, approval, *, dashboard_url: str = ""):
         """Post one approval as a Block Kit card with decision buttons."""
         from maverick.channel_approvals import card_content
-        from maverick.slack_interactive import approval_blocks
+        from maverick.slack_interactive import _slack_literal, approval_blocks
 
         content = card_content(approval)
         blocks = approval_blocks(content, dashboard_url=dashboard_url)
         result = await self._web.chat_postMessage(
-            channel=channel, text=f"Approval needed: {content['action']} (#{content['id']})",
-            blocks=blocks,
+            channel=channel, text=_slack_literal(f"Approval needed: {content['action']} (#{content['id']})"),
+            blocks=blocks, mrkdwn=False, parse="none", link_names=False,
         )
         return result.get("ts") if isinstance(result, dict) or hasattr(result, "get") else None
 
@@ -481,15 +481,18 @@ class SlackChannel(Channel):
     async def send_threaded(
         self, user_id: str, text: str, *, reply_to: str | None = None,
     ) -> None:
-        from .formatting import split_for_discord, to_slack_mrkdwn
+        from maverick.slack_interactive import _slack_literal_chunks
         rejected = {"not_authed", "invalid_auth", "account_inactive", "token_revoked",
                     "missing_scope", "channel_not_found", "not_in_channel", "is_archived",
                     "msg_too_long", "no_text", "restricted_action", "ratelimited"}
         receipt = None
+        if not text:
+            raise DeliveryNotSent("Slack cannot deliver an empty reply")
         # Format before splitting so escaping cannot expand a chunk past its
         # bound. Slack otherwise silently truncates a long successful post.
-        for index, chunk in enumerate(split_for_discord(to_slack_mrkdwn(text), limit=4000)):
-            kwargs = {"channel": user_id, "text": chunk, "mrkdwn": True}
+        for index, chunk in enumerate(_slack_literal_chunks(text, limit=4000)):
+            kwargs = {"channel": user_id, "text": chunk, "mrkdwn": False,
+                      "parse": "none", "link_names": False}
             if reply_to:
                 kwargs["thread_ts"] = reply_to
             async def post(kwargs=kwargs):

@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 def _client():
     from maverick_dashboard.app import app
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def _stub_catalog(monkeypatch, entries):
@@ -76,7 +76,7 @@ def test_catalog_install_requires_opt_in(monkeypatch):
     r = client.post(
         "/api/v1/catalog/skills/install",
         json={"name": "summarize-url"},
-        headers={"Origin": "http://testserver"},
+        headers={"Origin": "http://127.0.0.1"},
     )
     assert r.status_code == 403
     assert "MAVERICK_ALLOW_SKILL_INSTALL" in r.json()["detail"]
@@ -95,7 +95,7 @@ def test_catalog_install_hash_mismatch_400(monkeypatch):
     r = client.post(
         "/api/v1/catalog/skills/install",
         json={"name": "x"},
-        headers={"Origin": "http://testserver"},
+        headers={"Origin": "http://127.0.0.1"},
     )
     assert r.status_code == 400
     assert "hash mismatch" in r.json()["detail"]
@@ -109,7 +109,7 @@ def test_free_text_skill_install_still_gated(monkeypatch):
     r = client.post(
         "/api/v1/skills",
         json={"source": "gh:attacker/repo"},
-        headers={"Origin": "http://testserver"},
+        headers={"Origin": "http://127.0.0.1"},
     )
     assert r.status_code == 403
 

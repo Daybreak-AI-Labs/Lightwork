@@ -23,7 +23,7 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(auth, "caller_principal", lambda _request: "user:customer")
     config.reset_config_cache()
     api._world_cache.clear()
-    yield TestClient(app.app, headers={"Origin": "http://testserver"})
+    yield TestClient(app.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     config.reset_config_cache()
     api._world_cache.clear()
 

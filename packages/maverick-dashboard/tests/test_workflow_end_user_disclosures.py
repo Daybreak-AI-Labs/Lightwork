@@ -51,7 +51,7 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.setattr(automation_import, "enabled", lambda: True)
     monkeypatch.setattr(automation_events, "enabled", lambda: True)
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def test_flow_technical_values_are_optional_and_primary_actions_stay_outside(client):

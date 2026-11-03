@@ -4,10 +4,11 @@ The governed ladder gates ``code``/``weights`` behind a human. A self-settable
 boolean is not a real control for a self-modifying agent, so these tests pin
 that (a) a valid Ed25519 signature over (candidate, rung, payload) authorises,
 (b) the signature is bound to the payload (an approval can't be replayed onto a
-swapped one), (c) forgery/absence fails closed, and (d) with no keys configured
-the legacy boolean path is untouched.
+swapped one), and (c) forgery or absence fails closed.
 """
 from __future__ import annotations
+
+import os
 
 import pytest
 from maverick import approval_signing as ap
@@ -124,7 +125,7 @@ class TestEnforcement:
 
         _priv, global_pub = _keypair()
         _priv, tenant_pub = _keypair()
-        monkeypatch.delenv("MAVERICK_APPROVER_KEYS", raising=False)
+        monkeypatch.setattr("maverick._STARTUP_APPROVER_KEYS", global_pub)
         monkeypatch.delenv("MAVERICK_APPROVER_KEYS_DIR", raising=False)
         monkeypatch.setattr(
             config,
@@ -139,6 +140,13 @@ class TestEnforcement:
         monkeypatch.setattr(config, "config_source_errors", dict)
 
         assert ap.trusted_global_approver_keys() == [global_pub]
+
+        # A same-uid writer can alter either config layer, but cannot add a
+        # trusted key without changing the supervisor's startup environment.
+        monkeypatch.setattr("maverick._STARTUP_APPROVER_KEYS", "")
+        assert ap.trusted_global_approver_keys() == []
+        monkeypatch.setattr(ap, "_config_approval", lambda: {"approver_keys": [tenant_pub]})
+        assert ap.trusted_approver_keys() == []
 
     def test_global_trust_roots_reject_malformed_keys(self, monkeypatch):
         from maverick import config
@@ -155,16 +163,56 @@ class TestEnforcement:
         with pytest.raises(RuntimeError, match="malformed key"):
             ap.trusted_global_approver_keys()
 
-    def test_not_enforced_without_keys(self, monkeypatch):
+    def test_signatures_required_without_keys(self, monkeypatch):
         monkeypatch.delenv("MAVERICK_APPROVER_KEYS", raising=False)
         monkeypatch.delenv("MAVERICK_APPROVER_KEYS_DIR", raising=False)
         monkeypatch.delenv("MAVERICK_REQUIRE_SIGNED_APPROVAL", raising=False)
         monkeypatch.setattr(ap, "_config_approval", dict)
-        assert ap.signing_enforced() is False
+        assert ap.signing_enforced() is True
+
+    def test_writable_wizard_env_cannot_set_trust_roots_or_disable_signatures(self, tmp_path, monkeypatch):
+        from maverick import config
+
+        _private, attacker = _keypair()
+        path = tmp_path / ".env"
+        path.write_text(f"MAVERICK_APPROVER_KEYS={attacker}\nMAVERICK_REQUIRE_SIGNED_APPROVAL=0\n")
+        monkeypatch.setattr("maverick._STARTUP_APPROVER_KEYS", "")
+        monkeypatch.delenv("MAVERICK_APPROVER_KEYS", raising=False)
+        monkeypatch.delenv("MAVERICK_REQUIRE_SIGNED_APPROVAL", raising=False)
+        monkeypatch.setattr(ap, "_config_approval", dict)
+        config._load_env_file(path)
+        assert "MAVERICK_APPROVER_KEYS" not in os.environ
+        assert "MAVERICK_REQUIRE_SIGNED_APPROVAL" not in os.environ
+        assert ap.trusted_approver_keys() == []
+        assert ap.signing_enforced() is True
+
+    def test_startup_roots_survive_later_environment_and_file_changes(self, tmp_path):
+        import subprocess
+        import sys
+
+        env = os.environ.copy()
+        env["MAVERICK_HOME"] = str(tmp_path)
+        env["MAVERICK_CONFIG"] = str(tmp_path / "config.toml")
+        env["MAVERICK_APPROVER_KEYS"] = "11" * 32
+        script = '''
+import os
+from pathlib import Path
+import maverick
+from maverick import approval_signing, config
+os.environ["MAVERICK_APPROVER_KEYS"] = "22" * 32
+Path(os.environ["MAVERICK_HOME"], ".env").write_text("MAVERICK_APPROVER_KEYS=" + "33" * 32)
+config.reset_config_cache()
+assert approval_signing.trusted_approver_keys() == ["11" * 32]
+assert approval_signing.trusted_global_approver_keys() == ["11" * 32]
+assert approval_signing.signing_enforced()
+'''
+        result = subprocess.run([sys.executable, "-c", script], env=env,
+                                capture_output=True, text=True, timeout=30)
+        assert result.returncode == 0, result.stderr
 
     def test_enforced_with_env_keys(self, monkeypatch):
         _priv, pub = _keypair()
-        monkeypatch.setenv("MAVERICK_APPROVER_KEYS", pub)
+        monkeypatch.setattr("maverick._STARTUP_APPROVER_KEYS", pub)
         monkeypatch.setattr(ap, "_config_approval", dict)
         assert ap.signing_enforced() is True
         assert pub in ap.trusted_approver_keys()
@@ -176,9 +224,7 @@ class TestEnforcement:
         monkeypatch.setattr(ap, "_config_approval", dict)
         assert ap.signing_enforced() is True
 
-    def test_keys_loaded_from_dir_and_used_to_verify(self, tmp_path, monkeypatch):
-        # A raw 32-byte *.pub in the approver dir (the audit key-dir format) is
-        # picked up, and a signature under its key verifies end-to-end.
+    def test_writable_directory_cannot_create_approver_trust(self, tmp_path, monkeypatch):
         priv = ed25519.Ed25519PrivateKey.generate()
         priv_hex = priv.private_bytes(
             encoding=serialization.Encoding.Raw,
@@ -194,26 +240,27 @@ class TestEnforcement:
         monkeypatch.setattr(ap, "_config_approval", dict)
 
         keys = ap.trusted_approver_keys()
-        assert keys == [pub_bytes.hex()]  # only the valid 32-byte key
+        assert keys == []
         assert ap.signing_enforced() is True
         cand = _candidate()
         cand.approval_signature = ap.sign_request(
             ap.ApprovalRequest.for_candidate(cand), priv_hex)
+        assert ap.verify_candidate(cand) is None
+        monkeypatch.setattr("maverick._STARTUP_APPROVER_KEYS", pub_bytes.hex())
         assert ap.verify_candidate(cand) == ap.key_id(pub_bytes.hex())
 
-    def test_hex_text_keys_loaded_from_dir_enforce_signatures(
+    def test_untrusted_directory_still_enforces_signatures(
         self, tmp_path, monkeypatch
     ):
-        # Regression: legacy deployments may store approver keys as 64-character
-        # hex text in *.pub files. Loading them must still enable enforcement so
-        # the human gate cannot fall back to the self-settable approved boolean.
+        # A configured directory signals enforcement intent, even when its
+        # contents are not independently trusted.
         _priv, pub = _keypair()
         (tmp_path / "approver.pub").write_text(pub, encoding="ascii")
         monkeypatch.delenv("MAVERICK_APPROVER_KEYS", raising=False)
         monkeypatch.setenv("MAVERICK_APPROVER_KEYS_DIR", str(tmp_path))
         monkeypatch.setattr(ap, "_config_approval", dict)
 
-        assert ap.trusted_approver_keys() == [pub]
+        assert ap.trusted_approver_keys() == []
         assert ap.signing_enforced() is True
 
     @pytest.mark.parametrize(
@@ -295,15 +342,14 @@ class TestGateIntegration:
         assert human.ok is False
         assert verdict.promote is False
 
-    def test_boolean_still_works_when_not_enforced(self, monkeypatch):
-        # Backward compatibility: no keys -> the legacy boolean authorises.
+    def test_boolean_cannot_bypass_signature_requirement(self, monkeypatch):
         monkeypatch.setattr(ap, "signing_enforced", lambda: False)
         ctrl = self._controller()
         approved = ctrl.evaluate(_candidate(approved=True))
         refused = ctrl.evaluate(_candidate(approved=False))
         h_ok = [g for g in approved.gates if g.gate == "human_approval"][0]
         h_no = [g for g in refused.gates if g.gate == "human_approval"][0]
-        assert h_ok.ok is True and h_no.ok is False
+        assert h_ok.ok is False and h_no.ok is False
 
     @pytest.mark.parametrize("source_outage", [False, True])
     def test_signed_code_candidate_is_refused_when_policy_is_untrusted(
@@ -336,3 +382,69 @@ class TestGateIntegration:
         assert verdict.promote is False
         assert human.ok is False
         assert "policy is unavailable" in human.reason
+
+
+def test_startup_pinned_operator_can_sign_exact_promotion_in_new_process(tmp_path):
+    """A separately held test key authorizes only the exact recorded payload."""
+    import json
+    import subprocess
+    import sys
+
+    private, public = _keypair()
+    wrong_private, _ = _keypair()
+    candidate = _candidate(id="startup-signed-test")
+    request = ap.ApprovalRequest.for_candidate(candidate)
+    signature = ap.sign_request(request, private)
+    wrong_signature = ap.sign_request(request, wrong_private)
+    env = os.environ.copy()
+    env.update({
+        "MAVERICK_HOME": str(tmp_path),
+        "MAVERICK_CONFIG": str(tmp_path / "config.toml"),
+        "MAVERICK_APPROVER_KEYS": public,
+        "MAVERICK_SELF_IMPROVEMENT": "1",
+    })
+    env.pop("MAVERICK_APPROVER_KEYS_DIR", None)
+    script = '''
+import json
+import sys
+from pathlib import Path
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+from maverick import approval_signing as ap
+from maverick import self_improvement as si
+
+data = json.load(sys.stdin)
+base = dict(id="startup-signed-test", rung="code", summary="s", baseline_score=0.5,
+            candidate_score=0.9, samples=20, payload={"diff": "x"},
+            capability_widens=False, rollback="snap-1")
+ledger = si.PromotionLedger(path=Path(data["ledger"]))
+controller = si.SelfImprovementController(
+    ledger=ledger, frozen_fn=lambda: False, audit_fn=lambda **kw: None,
+    model_risk_verifier=lambda **kw: (True, ""))
+for change in ({"payload": {"diff": "changed"}, "approval_signature": data["signature"]},
+               {"approval_signature": data["wrong_signature"]}):
+    verdict = controller.promote(si.Candidate(**(base | change)))
+    assert not verdict.promote, verdict
+    assert not ledger.all()
+candidate = si.Candidate(**(base | {"approval_signature": data["signature"],
+                                  "payload_sha256": data["payload_sha256"]}))
+verdict = controller.promote(candidate)
+assert verdict.promote, verdict
+records = ledger.all()
+assert len(records) == 1
+record = records[0]
+request = ap.ApprovalRequest.for_candidate(candidate)
+assert record.id == candidate.id
+assert record.payload_sha256 == request.payload_sha256
+assert record.approval_signature == data["signature"]
+assert record.approver_id == ap.key_id(data["public"])
+Ed25519PublicKey.from_public_bytes(bytes.fromhex(data["public"])).verify(
+    bytes.fromhex(record.approval_signature), request.message())
+'''
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        input=json.dumps({"signature": signature, "wrong_signature": wrong_signature,
+                          "public": public, "payload_sha256": request.payload_sha256,
+                          "ledger": str(tmp_path / "ledger.json")}),
+        env=env, capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stderr

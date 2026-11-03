@@ -9,7 +9,7 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-ORIGIN = {"Origin": "http://testserver"}
+ORIGIN = {"Origin": "http://127.0.0.1"}
 
 
 @pytest.fixture
@@ -44,7 +44,7 @@ def client(monkeypatch, tmp_path):
     dash_app._world_cache.clear()
     repl_ops_api._open.clear()
     try:
-        yield TestClient(dash_app.app, headers=ORIGIN)
+        yield TestClient(dash_app.app, base_url="http://127.0.0.1", headers=ORIGIN)
     finally:
         repl_ops_api.close_all_sessions(timeout=5)
         config.reset_config_cache()

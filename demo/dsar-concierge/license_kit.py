@@ -1,9 +1,10 @@
 """License verification for the standalone agent — the seam's gatekeeper.
 
-The agent ships with the issuer's PUBLIC key only; the token arrives via
-``LIGHTWORK_LICENSE`` (the key itself or a file path) and the key via
-``LIGHTWORK_LICENSE_PUBKEY`` (PEM text or a file path). Verification is
-Ed25519 over the exact token format ``maverick.licensing`` mints.
+The deployment owner chooses the issuer's public key via
+``LIGHTWORK_LICENSE_PUBKEY`` (PEM text or a file path), and supplies the token
+via ``LIGHTWORK_LICENSE``. Verification uses Ed25519 over the exact token format
+``maverick.licensing`` mints. A deployment owner can choose another issuer or
+modify the open-source code, so this is not a vendor-enforced licensing boundary.
 
 No license, a bad license, or an expired one all mean EVALUATION MODE:
 the agent stays fully functional but caps concurrent open cases — bounded

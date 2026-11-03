@@ -9,10 +9,7 @@ Ops:
                       catalog that match a need, plus already-loaded tools.
   - acquire_skill   : install a catalog skill by name (hash-verified) and
                       return its steps so they're usable immediately.
-  - add_mcp_server  : add an MCP server BY CATALOG NAME (command + sha
-                      come from the curated, hash-pinned catalog entry —
-                      never a model-supplied command), gated behind an
-                      explicit opt-in AND operator consent. Off by default.
+  - add_mcp_server  : unavailable until catalog publishers can be authenticated.
   - create_tool     : GENERATE a Python tool from a spec, validate it, and
                       register it live (full-autonomy; gated by settings).
   - find_api        : discover an API's OpenAPI spec (probe a base_url or
@@ -54,9 +51,8 @@ def _op_search(agent: Agent, self_learning, need: str) -> str:
     return (
         f"Catalog matches for {need!r}:\n{_fmt_candidates(cands)}\n\n"
         f"Already-loaded tools that may fit: {', '.join(local) or '(none)'}\n\n"
-        "Next: acquire_skill <name> for a [skill], add_mcp_server "
-        "<name> for an [mcp] entry (catalog-pinned; needs operator "
-        "approval and may be disabled), or create_tool to build a new one."
+        "Next: acquire_skill <name> for a [skill], or create_tool to build a new one. "
+        "Catalog MCP acquisition is unavailable until publisher authentication exists."
     )
 
 
@@ -75,61 +71,9 @@ def _op_acquire_skill(agent: Agent, bb, self_learning, args: dict, need: str) ->
 
 
 async def _op_add_mcp_server(agent: Agent, ctx, bb, self_learning, args: dict, need: str) -> str:
-    # A free-text command/args is exactly what #392 closed — keep it
-    # closed. Only a curated, hash-pinned catalog name is accepted.
-    if args.get("command") is not None or args.get("args") is not None:
-        return (
-            "ERROR: a free-text command/args is not accepted (RCE / "
-            "supply-chain risk). Pass a catalog 'name' instead; the "
-            "command + sha are taken from the curated catalog entry. "
-            "Use op=search to find an [mcp] catalog entry first."
-        )
-    if not self_learning.mcp_acquisition_enabled():
-        return (
-            "ERROR: agent-driven MCP server acquisition is disabled for safety. "
-            "An operator can enable it ([self_learning] allow_mcp_acquisition "
-            "= true, or MAVERICK_ALLOW_MCP_ACQUISITION=1); it still installs "
-            "only curated, hash-pinned catalog servers and requires operator "
-            "approval. Otherwise add a trusted [mcp_servers.<name>] block to "
-            "the Lightwork config and restart the run."
-        )
-    name = (args.get("name") or "").strip()
-    if not name:
-        return "ERROR: 'name' (catalog mcp server name) is required"
-    from ..safety.consent import ConsentDenied
-    try:
-        spec = self_learning.acquire_mcp_server(name, need=need)
-    except ConsentDenied:
-        return (
-            f"NOT ADDED: operator did not approve MCP server {name!r}. "
-            "It was not persisted or started."
-        )
-    except Exception as e:
-        return f"ERROR: could not add MCP server {name!r}: {e}"
-    # Approved + persisted. Hot-start through the existing validated
-    # launch path (MCPClient.start() re-verifies pin_sha256) and
-    # register its tools into the live registry. A start failure
-    # leaves the (approved) config block in place for next run.
-    from ..mcp_client import MCPClient
-    from ..mcp_tools import tools_from_mcp
-    client = MCPClient(spec)
-    try:
-        await client.start()
-    except Exception as e:
-        bb.post(agent.name, "observation", f"added MCP server (start failed): {name}")
-        return (
-            f"Added MCP server {name!r} to config (operator-approved), but "
-            f"it failed to start now: {e}. It will be started on the next run."
-        )
-    ctx.mcp_clients.append(client)
-    new_tools = tools_from_mcp(client)
-    for t in new_tools:
-        agent.tools.register(t)
-    bb.post(agent.name, "observation", f"added MCP server: {name}")
-    names = ", ".join(t.name for t in new_tools) or "(none)"
     return (
-        f"Added and started MCP server {name!r} (operator-approved, "
-        f"catalog-pinned). New tools available now: {names}"
+        "ERROR: catalog MCP acquisition is unavailable until publisher authentication "
+        "is implemented. An operator can independently review and configure the server."
     )
 
 
@@ -261,10 +205,8 @@ def learn_capability(agent: Agent) -> Tool:
             "op=acquire_skill to install one; op=create_tool to generate a new "
             "tool from a description (persists for future runs); op=find_api to "
             "discover an API's OpenAPI spec (pass base_url or let it web-search) "
-            "and drive it via openapi_runner; op=add_mcp_server to add a "
-            "catalog MCP server BY NAME (command/sha come from the curated, "
-            "hash-pinned catalog entry — no free-text command; requires "
-            "operator approval and is off unless enabled). Prefer search first."
+            "and drive it via openapi_runner. Catalog MCP acquisition is "
+            "unavailable until publisher authentication exists. Prefer search first."
         ),
         input_schema={
             "type": "object",

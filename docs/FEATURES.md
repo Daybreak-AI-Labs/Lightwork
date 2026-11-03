@@ -2168,50 +2168,13 @@ Settings and the installation wizard.
   grading its own work. Newest outcome wins, clamped to [0,1]; when disabled the
   verifier proxy passes through unchanged. The HTTP entry point a CRM/ERP/ticketing
   connector calls once reality reports back.
-- **Earned Autonomy — consequence-proven trust** (`earned_autonomy.py`,
-  `maverick earned-autonomy`, opt-in `[earned_autonomy] enable` /
-  `MAVERICK_EARNED_AUTONOMY`; graduation additionally requires arming
-  `auto_graduate`, strict-parsed) — agents earn the right to act, action type
-  by action type, by proving they predict consequences correctly. Each
-  rehearsed high-stakes action that PROCEEDS pins a **consequence card**
-  (hash-chained, append-only, multi-writer safe) with the predicted outcome
-  BEFORE it runs; when reality reports back through the Consequence Engine,
-  `reconcile` scores predicted-vs-actual **per action type** — the same unit
-  the enforcement surface grants at, so authority is never wider than its
-  evidence — with the acting agent kept on every event for provenance, and
-  same-episode duplicates collapsed so one observed outcome grades one
-  prediction. A proven streak (default 10 consecutive accurate, ≥90% overall)
-  **graduates** the action from "a human approves" to "policy auto-approves"
-  — implemented as a revocable standing consent-ledger grant the existing
-  approval path already honours — and one miss by ANY agent **demotes
-  the local action state** (withdrawal attempted before recording, retried on
-  every later miss plus a stale-grant sweep each reconcile). Standing consent
-  withdrawal is scoped to the current identity and policy; a demoted local
-  action state does not establish that every identity's grant was withdrawn.
-  Interlocks fail toward the human: no graduation while `calibration` is
-  frozen or a learning HALT is active, `max_auto_risk` defaults to `medium`
-  (graduating irreversible high-risk types is an explicit operator decision;
-  the action's risk is recomputed live, never trusted from the card, and an
-  unknown level ranks above every ceiling), and `require_reversible` demands
-  every card declare an inverse. Disabling the feature stops evidence and
-  demotion but not grants already minted — `maverick earned-autonomy --revoke
-  ACTION` works while disabled, confirms current-authority withdrawal and
-  local recording separately, and reports incomplete results non-zero.
-  Other identities' grants require separate withdrawal. The central audit
-  remains best-effort and records both withdrawal and local-record outcomes
-  when available. `run_saga`
-  is the compensating half: steps ship their undo, an irreversible step
-  refuses to start, and a mid-saga failure rolls the completed prefix back in
-  reverse. **Shadow Mode** (`shadow_execute`) is the centerpiece that ties it
-  together: a `ConsequencePreview` from a connector's `preview_write` ("this
-  would move $240k, touch these records") is gated — auto-approved if the
-  action type has *earned* it, otherwise routed to a human — then executed
-  inside the compensating saga, with a consequence card pinned **only when the
-  effect commits** (a denied, refused, or rolled-back action never becomes a
-  mis-gradeable prediction), and the whole sim → approve → execute chain
-  signed. Every card, hit/miss, graduation, demotion, and shadow execution is
-  a signed audit event (`consequence_card`, `autonomy_graduation`,
-  `shadow_execution`).
+- **Earned Autonomy — prediction evidence** (`earned_autonomy.py`,
+  `maverick earned-autonomy`, opt-in `[earned_autonomy] enable`) records and
+  scores action-level consequence predictions. Qualification is advisory: it
+  does not grant standing consent or authorize a specific operation. Shadow
+  execution continues to require a human decision and uses compensating steps.
+  Existing unscoped standing consent grants must be explicitly reauthorized;
+  scoped grants retain their prior binding.
 - **Connector consequence adapters — reversibility that is earned, not
   asserted** (`connector_previews.py`, `maverick connectors plan`, gated by
   `[governed_connectors] restore_points` / `MAVERICK_GOVERNED_RESTORE_POINTS`)
@@ -2545,6 +2508,14 @@ Settings and the installation wizard.
   data when the trigger polls. Its per-token queue is capped at
   5,000 submissions / 32 MiB; a full queue refuses new submissions with 507
   rather than accepting data that cannot be retained.
+
+  OAuth event triggers refresh only through registered provider presets and
+  send vaulted tokens only to approved API origins for that provider. Existing
+  triggers with custom token endpoints, credential environment names, or
+  unsupported resource origins must be reconfigured before polling resumes.
+  Salesforce and custom provider domains are not currently in the approved
+  origin list. Remove saved credential overrides and configure the preset's
+  environment credentials for supported providers.
   An owner can replace a form link in Automations after every accepted
   submission has been checked. The old link stops accepting submissions, the
   new link starts with an empty queue, and the old submission file is retained.
@@ -2863,16 +2834,13 @@ Built-in tool modules. Highlights by group (all under `tools/`):
   any S3-compatible bucket + `s3_fetch` pulls it down on another worker host;
   local disk stays the source tools read, mirror is fail-open), `license_scan`
   (classify deps + flag copyleft), `self_capability` (report the run's capability
-  grant), `oidc` (OIDC authorization-code client), `oauth_helper` (generic OAuth2 for
-  any provider — PKCE authorize URL / code exchange / refresh; token responses
-  summarised with a sha fingerprint and never echoed into context; full tokens
-  seal into the per-tenant OAuth vault — `oauth_vault.py`, AES-256-GCM under the
-  tenant DEK, refresh-aware via a caller-supplied refresher — when `[oauth] vault`
-  is on, else a 0600 MAVERICK_OAUTH_OUT file; the Automations page's **Connected
+  grant), `oidc` (OIDC authorization-code client), `oauth_helper` (builds a PKCE authorization URL; token exchange and refresh
+  are handled through the operator-facing connection flow rather than agent
+  tool calls); the Automations page's **Connected
   accounts** panel lists each provider's token-free health (expiry, granted
   scope, auto-refresh) and a **Test** action that forces a live refresh through
   the preset's token endpoint so a stale connection surfaces before a flow hits
-  it — `oauth_vault.status()` and `POST /oauth/{provider}/test`), `cost_curve` (per-provider cost
+  it — `oauth_vault.status()` and `POST /oauth/{provider}/test`; `cost_curve` (per-provider cost
   model), `bench_track` (record benchmark scores + flag regressions), `teams`
   (Microsoft Teams webhook), `knowledge_graph` (extract/query/render
   subject-relation-object triples; no external graph DB), `cross_repo_deps`
@@ -3481,7 +3449,8 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   `decide_inbound` / `decide_outbound` / `decide_memory_access` are the gate
   every transport consults: **default-deny at the company boundary** when
   engaged (an unregistered agent is refused even with a valid shared token), a
-  strict **no-op when disengaged** (kernel rule 1 preserved). Entries carry a
+  no default-deny admission when disengaged. Per-agent credentials still enforce
+  their registered memory scopes. Entries carry a
   **key lifecycle** (`not_before` / `expires_at` / `revoked`, propagated onto
   the issued capability). Wired into federation (inbound + outbound + `hello` /
   `status`, registry ceiling intersected into capability boot, **wall-clock AND
@@ -4235,7 +4204,8 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   another process reaches agents already mid-run; `revoke_subtree` walks the
   delegation graph to revoke a principal and every descendant it spawned
   (fail-open, like the opt-in capability layer), **approval delegation rules**
-  (risk/scope-based routing, `approval_delegation.py`), per-tool network egress
+  (risk/scope-based suggested reviewers, not enforced decision authority,
+  `approval_delegation.py`), per-tool network egress
   policy (`sandbox/network_policy.py`), `maverick whoami`.
 - **Out-of-process model proxy** — `model_proxy.py` (`python -m
   maverick.model_proxy`, `[model_proxy] upstream/auth_style/client_token`): a
@@ -5200,9 +5170,9 @@ tested without spawning py-spy.
   sections/keys + obvious type mistakes with closest-match suggestions;
   `config_lint.py`), and `maverick costs` (cross-run per-day spend from the
   recorded episode ledger; `cost_report.py`).
-- **GitHub App** — `/webhook/github` (dashboard): a labeled or `/maverick`-mentioned
-  issue drives a swarm that clones the repo, fixes it, and opens a PR
-  (`github_app.py`, HMAC-verified). **GitLab Issues** — `/webhook/gitlab`:
+- **GitHub App** — `/webhook/github` verifies event signatures, but automated
+  issue-to-PR execution is unavailable until agent checkout and publication
+  are isolated. **GitLab Issues** — `/webhook/gitlab`:
   assign an issue to the bot, get a goal (`X-Gitlab-Token` constant-time
   verify, `X-Gitlab-Event-UUID` replay dedup), completing the
   Linear/Jira/GitHub/GitLab issue-trigger family (`issue_webhooks.py`).
@@ -5351,13 +5321,9 @@ tested without spawning py-spy.
   browser tool): drive the page via the accessibility tree — `snapshot`
   (stable node ids), `find` (role+name), `activate` (click/focus by node) —
   the live counterpart to the static `a11y_tree` extractor.
-- **WebRTC tool** (`tools/webrtc_tool.py`, `[webrtc]` extra): data-channel
-  offer/answer/send/close over lazily-imported aiortc (signalling is the
-  caller's; media tracks out of scope, stated honestly). **Built but not
-  registered by default** — nothing in production imports it; a caller opts in
-  by registering the factory. It holds a bidirectional channel to an arbitrary
-  peer, so it is tiered `high` risk and containment-denied alongside
-  `websocket`.
+- **WebRTC tool** (`tools/webrtc_tool.py`): the factory is not registered by
+  default. Offer, answer and send are disabled until ICE traffic can enforce
+  network policy; close remains available to release an existing connection.
 - **Audio understanding** (`tools/audio_understanding.py`, `[clap]` extra):
   zero-shot NON-SPEECH classification — a CLAP model embeds the clip and
   free-text labels ("glass breaking", "dog barking", "fire alarm") into one

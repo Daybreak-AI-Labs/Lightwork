@@ -33,7 +33,7 @@ def _app(monkeypatch: pytest.MonkeyPatch, *, permitted: bool = True) -> TestClie
     monkeypatch.setattr(page, "require_permission", require)
     app = FastAPI()
     app.include_router(page.create_evolution_ledger_page_router(_templates()))
-    return TestClient(app, headers={"Origin": "http://testserver"})
+    return TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def test_page_is_audit_gated_csp_hardened_and_copilot_bound(
@@ -126,7 +126,7 @@ def test_client_is_bounded_and_uses_safe_dom_only() -> None:
 def test_main_dashboard_mounts_page_api_static_asset_and_context() -> None:
     from maverick_dashboard.app import app
 
-    client = TestClient(app, headers={"Origin": "http://testserver"})
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     paths = set(app.openapi()["paths"])
     # The dashboard's FastAPI version retains included routers as lazy wrapper
     # objects rather than flattening every path into ``app.routes``. Exercise

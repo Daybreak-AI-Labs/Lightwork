@@ -49,7 +49,9 @@ def test_first_owner_can_find_sign_out_and_return_to_sign_in(customer):
     page = customer.get("/start")
     assert page.status_code == 200
     assert 'href="/auth/logout"' in page.text
-    response = customer.get("/auth/logout", follow_redirects=False)
+    confirmation = customer.get("/auth/logout", follow_redirects=False)
+    assert confirmation.status_code == 200 and "mvk_session" in customer.cookies
+    response = customer.post("/auth/logout", follow_redirects=False)
     assert response.status_code == 303
     assert "mvk_session" not in customer.cookies
     denied = customer.get("/goals", headers={"Accept": "text/html"}, follow_redirects=False)
@@ -78,7 +80,7 @@ def test_each_browser_session_type_can_sign_out(customer, monkeypatch, mode, all
         customer.cookies.set("mvk_session", saml.mint_session_cookie(EMAIL),
                              domain="127.0.0.1", path="/")
     assert 'href="/auth/logout"' in customer.get("/start").text
-    response = customer.get("/auth/logout" + ("?all=1" if all_sessions else ""),
+    response = customer.post("/auth/logout" + ("?all=1" if all_sessions else ""),
                             follow_redirects=False)
     assert response.status_code == 303
     assert response.headers["location"] == "/"
@@ -95,11 +97,12 @@ def test_local_global_sign_out_requires_same_origin_and_verified_cookie(customer
         raw = sign_session({"sub": EMAIL, "iat": int(time.time()) - 60,
                             "exp": int(time.time()) - 1}, invites.local_session_secret())
         customer.cookies.set("mvk_session", raw, domain="127.0.0.1", path="/")
-    response = customer.get("/auth/logout?all=1", follow_redirects=False,
+    response = customer.post("/auth/logout?all=1", follow_redirects=False,
                             headers={"Origin": "https://elsewhere.example.test",
                                      "Referer": "https://elsewhere.example.test/"} if cookie == "valid" else {})
-    assert response.status_code == 303
-    assert "mvk_session" not in customer.cookies
+    assert response.status_code == (403 if cookie == "valid" else 303)
+    if cookie == "valid":
+        assert "mvk_session" in customer.cookies
     assert session_revocation.revocation_epoch(EMAIL) == 0
 
 
@@ -107,7 +110,7 @@ def test_local_global_sign_out_can_revoke_again_after_prior_revocation(customer)
     enroll(customer)
     session_revocation.revoke_principal(EMAIL, at=time.time() - 5)
     before = session_revocation.revocation_epoch(EMAIL)
-    response = customer.get("/auth/logout?all=1", follow_redirects=False)
+    response = customer.post("/auth/logout?all=1", follow_redirects=False)
     assert response.status_code == 303
     assert session_revocation.revocation_epoch(EMAIL) > before
 

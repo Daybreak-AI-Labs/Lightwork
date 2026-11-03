@@ -17,7 +17,7 @@ from maverick_dashboard.app import app
 
 from test_support.settings_pages import every_group, save_catalog
 
-client = TestClient(app, headers={"Origin": "http://testserver"})
+client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 API = "/api/v1/settings/catalog"
 
 
@@ -368,9 +368,8 @@ def test_existing_overlay_settings_survive_a_catalog_save(audit_rows):
     cfg = _loaded()
     assert cfg["sandbox"] == {"backend": "docker", "timeout": 90}
     assert cfg["features"]["skills"] is False
-    from maverick.webhooks import inbound_secret
-
-    assert inbound_secret() == "keep-me-secret"  # pragma: allowlist secret
+    from maverick.webhooks import _load_config_outbound
+    assert _load_config_outbound()[1] == "keep-me-secret"  # pragma: allowlist secret
     assert config.config_source_errors() == {}
 
 
@@ -396,7 +395,7 @@ def test_deployment_controlled_settings_are_locked(monkeypatch, audit_rows):
 
 # ---------------------------------------------------------- permissions
 def test_cross_origin_writes_are_refused(audit_rows):
-    bare = TestClient(app)
+    bare = TestClient(app, base_url="http://127.0.0.1")
     r = _save([{"id": "ifc.mode", "value": "block"}], http=bare)
     assert r.status_code == 403
     assert "ifc" not in _loaded()

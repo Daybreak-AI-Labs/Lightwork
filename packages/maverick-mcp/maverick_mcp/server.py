@@ -160,14 +160,22 @@ def _bounded_int(value: Any, *, default: int, ceiling: float) -> int:
 def _task_budget(args: dict):
     """Optional caller limits, constrained by current operator authority."""
     from maverick.budget import budget_from_config, resolve_budget_caps
-    from maverick.runner import clamp_task_limit
+    from maverick.runner import (
+        DEFAULT_MAX_DOLLARS,
+        DEFAULT_MAX_WALL_SECONDS,
+        clamp_task_limit,
+        configured_goal_ceiling_dollars,
+        configured_goal_ceiling_wall_seconds,
+    )
 
     configured = resolve_budget_caps()
     overrides = {}
     # MAVERICK_MCP_MAX_DOLLARS / MAVERICK_MCP_MAX_WALL_SECONDS, else [mcp].
     for key in ("max_dollars", "max_wall_seconds"):
         limits = []
-        for raw in (args.get(key), mcp_setting(key), configured.get(key)):
+        runner_limit = (configured_goal_ceiling_dollars() if key == "max_dollars"
+                        else configured_goal_ceiling_wall_seconds())
+        for raw in (args.get(key), mcp_setting(key), configured.get(key), runner_limit):
             if raw is None:
                 limits.append(None)
                 continue
@@ -178,7 +186,10 @@ def _task_budget(args: dict):
             except (TypeError, ValueError, OverflowError):
                 raise ValueError(f"{key} must be a finite non-negative limit") from None
             limits.append(value)
-        overrides[key] = clamp_task_limit(limits[0], clamp_task_limit(limits[1], limits[2]))
+        ceiling = clamp_task_limit(clamp_task_limit(limits[1], limits[2]), limits[3])
+        if ceiling is None:
+            ceiling = DEFAULT_MAX_DOLLARS if key == "max_dollars" else DEFAULT_MAX_WALL_SECONDS
+        overrides[key] = clamp_task_limit(limits[0], ceiling)
     return budget_from_config(**overrides)
 
 

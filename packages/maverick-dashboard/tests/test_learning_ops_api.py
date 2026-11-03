@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 
 from test_support.settings_pages import every_group
 
-ORIGIN = {"Origin": "http://testserver"}
+ORIGIN = {"Origin": "http://127.0.0.1"}
 LO = "/api/v1/learning-ops"
 TO = "/api/v1/training-ops"
 _BANNED = re.compile(
@@ -48,7 +48,7 @@ def client(monkeypatch, tmp_path):
     config.reset_config_cache()
     dash_app._world_cache.clear()
     learning_jobs.clear_for_tests()
-    yield TestClient(dash_app.app, headers=ORIGIN)
+    yield TestClient(dash_app.app, base_url="http://127.0.0.1", headers=ORIGIN)
     learning_jobs.clear_for_tests()
     config.reset_config_cache()
     dash_app._world_cache.clear()
@@ -78,6 +78,35 @@ def _as(monkeypatch, role: str, who: str = "user:someone"):
     from maverick_dashboard import auth, rbac
     rbac.set_role(who, role)
     monkeypatch.setattr(auth, "caller_principal", lambda request: who)
+
+
+@pytest.mark.parametrize("role", ["viewer", "operator"])
+@pytest.mark.parametrize("action", ["compare", "adopt", "restore"])
+def test_factory_review_checks_authority_before_nested_values(client, monkeypatch, role, action):
+    _as(monkeypatch, role)
+    response = client.post(f"{LO}/factory/review", json={"action": action, "values": {}})
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize("action,values", [
+    ("compare", {}), ("restore", {}), ("adopt", {}),
+    ("adopt", {"operation": 4}), ("adopt", {"operation": "a" * 32, "extra": True}),
+])
+def test_factory_review_invalid_nested_values_return_422(client, monkeypatch, action, values):
+    _as(monkeypatch, "admin")
+    response = client.post(f"{LO}/factory/review", json={"action": action, "values": values})
+    assert response.status_code == 422
+
+
+def test_factory_review_authenticates_before_parsing_json(client, monkeypatch):
+    _as(monkeypatch, "viewer")
+    assert client.post(f"{LO}/factory/review", content="{", headers={"Content-Type": "application/json"}).status_code == 403
+    _as(monkeypatch, "admin")
+    assert client.post(f"{LO}/factory/review", content="{", headers={"Content-Type": "application/json"}).status_code == 422
+    assert client.post(f"{LO}/factory/review", content='{"action":"adopt","values":{}}',
+                       headers={"Content-Type": "text/plain"}).status_code == 422
+    operation = client.get("/openapi.json").json()["paths"][f"{LO}/factory/review"]["post"]
+    assert operation["requestBody"]["content"]["application/json"]["schema"]["required"] == ["action", "values"]
 
 
 def _wait(client, started, timeout: float = 15.0) -> dict:

@@ -281,14 +281,14 @@ Config equivalents live under `[effort]` (`enabled`, `default`, `<role>`) and
 | `MAVERICK_TTS_OPENAI_MODEL` | `tts-1` | OpenAI text-to-speech model used by the voice tool. |
 | `MAVERICK_TTS_ELEVENLABS_MODEL` | `eleven_turbo_v2_5` | ElevenLabs text-to-speech model used by the voice tool. |
 | `MAVERICK_SEARCH_BACKEND` | auto (preference order) | Force a web-search backend: `tavily`, `brave`, `serpapi`, or `ddg`. |
-| `MAVERICK_FETCH_ALLOW_PRIVATE` | unset | `1` allows fetching URLs resolving to private/loopback/reserved IPs (SSRF escape hatch). |
+| `MAVERICK_FETCH_ALLOW_PRIVATE` | unset | `1` allows supported fetch tools to reach private/loopback/reserved IPs (SSRF escape hatch). Event pollers always require public addresses, including when this is enabled. |
 | `MAVERICK_PARTNER_ALLOW_TEST_ESTATE_LOOPBACK` | unset | Explicit operator opt-in for exact-IP loopback partner test-estate enrollment and probes; each API action also requires global-admin authority. |
 | `MAVERICK_FETCH_RESPECT_ROBOTS` | unset | `1` makes the fetch tool honor `robots.txt`. |
 | `MAVERICK_FETCH_NO_SCAN` | unset | `1` skips safety scanning of fetched remote content. |
 | `MAVERICK_NET_HOST_CONCURRENCY` | `4` | Max concurrent network requests per host. |
 | `MAVERICK_ATTACH_MAX_FILE_BYTES` | `104857600` (100 MiB) | Max size of a single attachment file. Also `[attachments] max_file_bytes` (Settings > All settings; read at startup, this variable wins). |
 | `MAVERICK_ATTACH_MAX_GOAL_BYTES` | `524288000` (500 MiB) | Max total attachment bytes per goal. Also `[attachments] max_goal_bytes` (Settings > All settings; read at startup, this variable wins). |
-| `MAVERICK_ALLOW_RAW_MEDIA_ARGS` | unset | `1` passes raw media tool args verbatim (skips sanitization). |
+| `MAVERICK_ALLOW_RAW_MEDIA_ARGS` | unset | Legacy helper override for extensions that use it. Built-in Pandoc, ImageMagick and FFmpeg always enforce their restricted option sets. |
 | `MAVERICK_ENABLE_CRED_TOOLS` | unset (off) | Enable credential-handling tools. |
 | `MAVERICK_USE_SKILLS` | config `[features] skills` | Override skill injection; `0` disables (e.g. for benchmark runs). |
 
@@ -311,6 +311,7 @@ Config equivalents live under `[effort]` (`enabled`, `default`, `<role>`) and
 | `MAVERICK_MCP_TASK_POLL_MS` | `1000` | `pollInterval` (ms) the server suggests to clients in task responses. Also `[mcp] task_poll_ms` (Settings > All settings; read at startup, this variable wins). |
 | `MAVERICK_PREFLIGHT` | `warn` | Request preflight mode: `warn` (log only), `strict` (hard-refuse), or `off`. |
 | `MAVERICK_AUDIT_SIGN` | config `[audit] sign` (off) | Sign audit-log rows. |
+| `MAVERICK_AUDIT_TRUSTED_PUBLIC_KEYS` | unset | Comma-separated hex Ed25519 public keys trusted for audit verification, supplied by an independently protected startup environment. The value is captured at startup. Pin retired external keys before rotation. Without an external signer, the list is exclusive and must include the active local public key. |
 | `MAVERICK_ANON` | config `[privacy] anonymous` (off) | Enable anonymous mode (scrubs home paths and identifying data). |
 | `MAVERICK_AI_DISCLOSURE` | config `[compliance] disclosure_text` | AI-disclosure text appended to outputs; empty string opts out. |
 | `MAVERICK_STRIPE_ENABLE_REFUNDS` | unset (off) | Required to allow the Stripe tool to issue real refunds. |
@@ -351,13 +352,17 @@ Config equivalents live under `[effort]` (`enabled`, `default`, `<role>`) and
 | Env var | Default | Description |
 | --- | --- | --- |
 | `MAVERICK_PLUGINS_ALLOW` | config `[plugins] enabled` | Comma-separated plugin allowlist; `*` enables all. |
-| `MAVERICK_PLUGINS_ENFORCE` | config `[plugins] enforce_permissions` (off) | Enforce plugin permission declarations. |
+| `MAVERICK_PLUGINS_ENFORCE` | config `[plugins] enforce_permissions` (off) | Reject plugins whose declared permissions are not granted. This checks declarations at load time; it does not sandbox plugin code or enforce its actual access. |
 
 ## Channels & integrations
 
 | Env var | Default | Description |
 | --- | --- | --- |
-| `MAVERICK_WEBHOOK_SECRET` | unset | HMAC secret for inbound webhooks. **Inbound receivers fail closed (401) without it** — set it before relying on inbound webhook channels (e.g. Twilio SMS / WhatsApp), or they will reject every request. |
+| `MAVERICK_WEBHOOK_SECRET` | unset | Outbound webhook signing secret; takes precedence over the legacy outbound configuration. Do not reuse it for inbound control or approval links. |
+| `MAVERICK_PUBLIC_POLICY_GLOBAL_RATE` | `20000` | Maximum public policy-link requests per process per minute, clamped to 1–100,000. Client limits also apply and trusted proxy configuration controls forwarded client addresses. |
+| `MAVERICK_INBOUND_WEBHOOK_SECRET` | unset | Dedicated HMAC secret for `/webhook/start` and `/webhook/run`. These control endpoints fail closed without it or if it duplicates another configured webhook credential. Configure callers with the new key when upgrading. |
+| `MAVERICK_LINEAR_WEBHOOK_SECRET`, `MAVERICK_JIRA_WEBHOOK_SECRET` | unset | Separate HMAC secrets for the Linear and Jira issue receivers. Each must differ from the control webhook, GitLab and approval-link secrets. Existing integrations must configure and update their provider's secret. |
+| `MAVERICK_FLOW_APPROVAL_SECRET` | unset | Dedicated signing secret for actionable flow approval links. It must differ from the control webhook and issue-tracker credentials. Existing links stop working when this key changes; mint new links after configuring it. |
 | `MAVERICK_WEBHOOK_WORKERS` | config `[webhooks] workers` (4) | Outbound webhook dispatch thread-pool size. |
 | `MAVERICK_WEBHOOK_MAX_INFLIGHT` | config `[webhooks] max_inflight` (16×workers) | Cap on queued+running dispatches; excess is dropped + logged (bounds memory under a burst against a slow receiver). |
 | `MAVERICK_GRPC_MAX_WORKERS` | config `[grpc] max_workers` (8) | gRPC goal-API server thread-pool size. |

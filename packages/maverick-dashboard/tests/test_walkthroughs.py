@@ -32,7 +32,7 @@ def client(world, monkeypatch):
     from maverick_dashboard import app as app_mod
     monkeypatch.setattr(app_mod, "_world", lambda: world)
     monkeypatch.setattr(api_mod, "_world", lambda: world)
-    return TestClient(app_mod.app, headers={"Origin": "http://testserver"})
+    return TestClient(app_mod.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def test_page_empty_state_is_honest(client, home):
@@ -101,7 +101,9 @@ def test_media_route_serves_and_guards(client, world, home):
 def test_walkthroughs_hide_cross_user_artifacts(client, world, home, monkeypatch):
     import maverick_dashboard.auth as auth
     from maverick.oidc import VerifiedPrincipal
+    from maverick_dashboard import rbac
 
+    rbac.set_role("user:bob", "operator")
     monkeypatch.setattr(auth, "oidc_enabled", lambda: True)
     monkeypatch.setattr(
         auth,
@@ -203,3 +205,39 @@ def test_export_reports_unencoded_honestly(client, world, monkeypatch):
     assert body["video"] is None
     assert body["ffmpeg_command"][0] == "ffmpeg"
     assert "Pillow" in body["detail"]
+
+
+def test_workspace_walkthroughs_do_not_cross_read_or_overwrite(
+    client, world, home, render_stub, monkeypatch
+):
+    gid = world.create_goal("same task id", "")
+    world.append_event(gid, "worker", "observation", "workspace A content")
+    monkeypatch.setenv("MAVERICK_TENANT", "workspace-a")
+    assert client.post(f"/api/v1/goals/{gid}/walkthrough").status_code == 201
+    a = home / "tenants" / "workspace-a" / "walkthroughs"
+    original = (a / f"goal-{gid}.vtt").read_text()
+    assert "workspace A content" in original
+    assert client.get(f"/walkthroughs/media/goal-{gid}.vtt").text == original
+
+    from maverick.world_model import WorldModel
+    from maverick_dashboard import api as api_mod
+    from maverick_dashboard import app as app_mod
+
+    other = WorldModel(home / "other-world.db")
+    monkeypatch.setattr(api_mod, "_world", lambda: other)
+    monkeypatch.setattr(app_mod, "_world", lambda: other)
+    assert other.create_goal("other workspace task", "") == gid
+    other.append_event(gid, "worker", "observation", "workspace B content")
+    monkeypatch.setenv("MAVERICK_TENANT", "workspace-b")
+    assert client.get(f"/walkthroughs/media/goal-{gid}.vtt").status_code == 404
+    assert client.get(f"/walkthroughs/media/goal-{gid}.mp4").status_code == 404
+    assert f"goal-{gid}.mp4" not in client.get("/walkthroughs").text
+    assert client.post(f"/api/v1/goals/{gid}/walkthrough").status_code == 201
+    b = home / "tenants" / "workspace-b" / "walkthroughs"
+    assert render_stub[-1]["out_path"] == b / f"goal-{gid}.mp4"
+    assert (a / f"goal-{gid}.vtt").read_text() == original
+    response = client.get(f"/walkthroughs/media/goal-{gid}.vtt")
+    assert response.status_code == 200
+    assert "workspace B content" in response.text
+    assert "workspace A content" not in response.text
+    other.close()

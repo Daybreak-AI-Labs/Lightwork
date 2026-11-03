@@ -10,6 +10,7 @@ from maverick.flow import action_recipe_transforms, store
 from maverick.flow.workflow_recipe_flow import HISTORY, SELECTION
 
 from test_support.action_episode_native import native as native
+from test_support.audit_child_process import audit_signing_target
 from test_support.workflow_memory_native import TOOL, child_resume, decide, redeliver
 from test_support.workflow_memory_native import memory_native as memory_native
 
@@ -76,7 +77,7 @@ def test_fresh_worker_reconstructs_accumulator_from_retained_native_receipts(mem
     run = decide(run.run_id)
     assert run.status == "paused_approval" and len(run.data[HISTORY]) == 1
     preserved = copy.deepcopy(run.data[HISTORY])
-    process = multiprocessing.get_context("spawn").Process(target=child_resume,
+    process = multiprocessing.get_context("spawn").Process(target=audit_signing_target(child_resume),
         args=(run.run_id, str(h.journal), str(h.schedule), str(world_model.DEFAULT_DB), copy.deepcopy(h.flags)))
     process.start()
     process.join(60)

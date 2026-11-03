@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 def _client():
     from maverick_dashboard.app import app
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def _prep(monkeypatch, tmp_path):
@@ -135,7 +135,7 @@ def test_chat_workflow_draft_tracks_live_feature_state(monkeypatch, tmp_path):
     disabled = client.post(
         "/api/v1/flows/draft",
         json={"description": "Prepare a customer welcome workflow"},
-        headers={"Origin": "http://testserver"},
+        headers={"Origin": "http://127.0.0.1"},
     )
     assert disabled.status_code == 403
     assert disabled.headers["x-lightwork-feature-off"] == "workflows"

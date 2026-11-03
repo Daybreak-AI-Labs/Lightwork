@@ -106,7 +106,10 @@ def _worker(sandbox, request, *, allow_local=False):
         job = DocumentJob.create(request)
         (stage / "engine.py").write_bytes(resources.files("maverick.sandbox").joinpath("document_engine.py").read_bytes())
         (stage / "request.json").write_text(json.dumps({**request, **job.manifest()}), encoding="utf-8")
-        yield stage, worker
+        from ..sandbox.workspace_guard import _document_stage_scope
+
+        with _document_stage_scope(stage):
+            yield stage, worker
 
 
 def _execute(stage, worker):
@@ -220,12 +223,11 @@ def ocr_pdf(data: bytes, pages: str, sandbox) -> str:
 
 def recalculate(path: Path, sandbox) -> str:
     from .office_package import WorkbookPackage
-    from .spreadsheet import _atomic_destination, _openpyxl
+    from .spreadsheet import _atomic_destination, _openpyxl, _xlsx_snapshot
 
     if not get_document_tools()["native_recalculation"]:
         raise RuntimeError("Native recalculation is disabled; enable documents.native_recalculation and configure the document engine image")
-    with path.open("rb") as stream:
-        original_bytes = stream.read(64 * 1024 * 1024 + 1)
+    original_bytes = _xlsx_snapshot(path)
     package = WorkbookPackage(original_bytes)
     package.check_recalculable()
     formulas = package.formulas()
@@ -242,7 +244,7 @@ def recalculate(path: Path, sandbox) -> str:
             workbook.close()
         _execute(stage, worker)
         count = package.import_caches(WorkbookPackage(_read(stage, "calculated.xlsx")))
-        if hashlib.sha256(path.read_bytes()).digest() != original:
+        if hashlib.sha256(_xlsx_snapshot(path)).digest() != original:
             raise RuntimeError("Workbook changed during recalculation; newer file retained")
         with _atomic_destination(path) as temporary:
             package.write(temporary)

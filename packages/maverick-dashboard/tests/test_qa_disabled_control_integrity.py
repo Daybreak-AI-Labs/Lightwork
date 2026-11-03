@@ -65,8 +65,8 @@ def _render(template_name: str, **context: Any) -> _ControlMarkup:
         return templates.TemplateResponse(request, template_name, context)
 
     response = TestClient(
-        app,
-        headers={"Origin": "http://testserver"},
+        app, base_url="http://127.0.0.1",
+        headers={"Origin": "http://127.0.0.1"},
     ).get("/")
     assert response.status_code == 200
     markup = _ControlMarkup()

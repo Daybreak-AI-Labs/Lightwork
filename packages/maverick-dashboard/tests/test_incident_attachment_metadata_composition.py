@@ -25,7 +25,7 @@ def _request(app: FastAPI, subject: str = "operator@example.test") -> Request:
             "path": "/",
             "headers": [],
             "query_string": b"",
-            "server": ("testserver", 80),
+            "server": ("127.0.0.1", 80),
             "client": ("testclient", 50000),
             "scheme": "http",
         }

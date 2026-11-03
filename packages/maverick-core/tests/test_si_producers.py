@@ -159,7 +159,8 @@ def test_propose_code_requires_human_even_when_valid(tmp_path, monkeypatch):
     common = dict(validate=lambda: (True, ""), eval_before=0.5, eval_after=0.9,
                   samples=10, rollback="commit-abc", capability_widens=False)
     assert not propose_code("rewrite", approved=False, controller=_ctrl(tmp_path), **common).ok
-    assert propose_code("rewrite", approved=True, controller=_ctrl(tmp_path), **common).ok
+    verdict = propose_code("rewrite", approved=True, controller=_ctrl(tmp_path), **common)
+    assert not verdict.ok and "signature" in verdict.blocking_reason.lower()
 
 
 # -- Phase 6: weights ------------------------------------------------------
@@ -168,7 +169,8 @@ def test_propose_weights_is_human_gated(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_SELF_IMPROVEMENT", "1")
     common = dict(eval_before=0.6, eval_after=0.75, samples=20, rollback="ckpt-1")
     assert not propose_weights("finetune", approved=False, controller=_ctrl(tmp_path), **common).ok
-    assert propose_weights("finetune", approved=True, controller=_ctrl(tmp_path), **common).ok
+    verdict = propose_weights("finetune", approved=True, controller=_ctrl(tmp_path), **common)
+    assert not verdict.ok and "signature" in verdict.blocking_reason.lower()
 
 
 def test_disabled_engine_blocks_all_producers(tmp_path, monkeypatch):

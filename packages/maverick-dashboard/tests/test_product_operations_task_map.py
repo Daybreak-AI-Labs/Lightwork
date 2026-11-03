@@ -25,7 +25,7 @@ def setup(tmp_path, monkeypatch):
         goal_id = world.create_goal("Reviewed task", owner="user:owner")
         request = Request({"type": "http", "method": "POST", "scheme": "http",
                            "path": "/api/v1/copilot/product-operations/execute",
-                           "headers": [(b"host", b"testserver"), (b"origin", b"http://testserver")]})
+                           "headers": [(b"host", b"127.0.0.1"), (b"origin", b"http://127.0.0.1")]})
         yield world, goal_id, request, {"kind": "goal", "id": goal_id}
 
 

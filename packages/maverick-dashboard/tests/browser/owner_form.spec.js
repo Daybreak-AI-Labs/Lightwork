@@ -42,6 +42,7 @@ test('fresh owner setup and login submit real browser origin without header inje
     expect((await context.cookies()).some(cookie=>cookie.name==='mvk_session')).toBe(true);
     await page.screenshot({path:info.outputPath('first-owner.png'),fullPage:true});
     await page.getByRole('link',{name:'Sign out',exact:true}).click();
+    await page.getByRole('button',{name:'Sign out',exact:true}).click();
     expect((await context.cookies()).some(cookie=>cookie.name==='mvk_session')).toBe(false);
     await page.goto(origin+'/goals');
     await expect(page).toHaveURL(/\/auth\/local-login/);

@@ -11,6 +11,7 @@ from dataclasses import FrozenInstanceError
 from types import SimpleNamespace
 
 import pytest
+import pytest as _workspace_guard_pytest
 from maverick.sandbox import build_sandbox, pool
 from maverick.sandbox.container_cleanup import ContainerCleanup
 from maverick.sandbox.docker import DockerBackend
@@ -349,3 +350,12 @@ def test_both_engine_image_id_forms_pin_the_image(monkeypatch, reported):
     monkeypatch.setattr(pool.subprocess, "run",
                         lambda *a, **k: SimpleNamespace(returncode=0, stdout=reported + "\n"))
     assert pool._image_digest("podman", "python:3.12") == reported
+
+
+# Container argv tests use a workspace separate from the operator's state.
+@_workspace_guard_pytest.fixture(autouse=True)
+def _separate_container_test_home(tmp_path, monkeypatch, _isolate_dynamic_maverick_home):
+    operator_home = tmp_path.parent / (tmp_path.name + "-operator")
+    monkeypatch.setenv("HOME", str(operator_home))
+    monkeypatch.setenv("USERPROFILE", str(operator_home))
+    monkeypatch.setenv("MAVERICK_HOME", str(operator_home / ".maverick"))

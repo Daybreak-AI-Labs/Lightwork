@@ -41,7 +41,7 @@ def client(tmp_path, monkeypatch):
     api._world_cache.clear()
     rbac.set_role("user:priya@corp.com", "operator", actor="user:setup")
     rbac.set_role("user:vic@corp.com", "viewer", actor="user:setup")
-    yield TestClient(app, headers={"Origin": "http://testserver"})
+    yield TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     config.reset_config_cache()
     audit_writer._default = None
     audit_writer._defaults.clear()

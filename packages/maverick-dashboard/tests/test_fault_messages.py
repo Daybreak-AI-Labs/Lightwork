@@ -22,7 +22,7 @@ def client(tmp_path, monkeypatch):
     (tmp_path / "config.toml").write_text("", encoding="utf-8")
     config.reset_config_cache()
     dash_app._world_cache.clear()
-    yield TestClient(dash_app.app, headers={"Origin": "http://testserver"})
+    yield TestClient(dash_app.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     config.reset_config_cache()
     dash_app._world_cache.clear()
 
@@ -111,7 +111,7 @@ def test_a_write_refused_by_a_read_only_database_answers_in_plain_words(client, 
     monkeypatch.setattr(WorldModel, "create_goal", refuse)
     from maverick_dashboard.app import app
 
-    client = TestClient(app, headers={"Origin": "http://testserver"}, raise_server_exceptions=False)
+    client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}, raise_server_exceptions=False)
     answer = client.post("/api/v1/goals", json={"title": "Pay the March invoices"})
     assert answer.status_code == 503, answer.text
     detail = answer.json()["detail"]

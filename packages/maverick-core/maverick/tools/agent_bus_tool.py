@@ -432,20 +432,28 @@ def delegate_to_agent(agent: Any) -> Tool:
         from ..bus_handoff import authority_for, send_handoff
 
         authority = authority_for(agent.ctx)
-        sender_cap = getattr(agent, "capability", None)
         if authority is None:
             return (
                 "ERROR: secure handoff authority is unavailable; delegation "
                 "was not sent"
             )
+        try:
+            sender_cap = agent._effective_capability("delegate_to_agent")
+        except Exception:
+            return "ERROR: sender capability is unavailable; delegation was not sent"
         if sender_cap is None:
             return (
                 "ERROR: no sender capability is available; delegation was not sent"
             )
-        # Attenuate this agent's own grant to the requested tools, re-bound to the
-        # recipient principal (mint requires grant.principal == recipient).
-        grant = sender_cap.attenuate(principal=to_id, allow=set(tools) or None)
         try:
+            if not sender_cap.permits("delegate_to_agent") or any(
+                not sender_cap.permits(tool) for tool in tools
+            ):
+                return "ERROR: requested delegation exceeds the sender's current capability"
+            # Include any verified handoff in the authority passed onward.
+            grant = sender_cap.attenuate(principal=to_id, allow=set(tools) or None)
+            if any(not grant.permits(tool) for tool in tools):
+                return "ERROR: requested delegation exceeds the sender's current capability"
             nonce = send_handoff(
                 authority, sender=agent.name, recipient=to_id, grant=grant,
                 task=task, required_tools=tuple(tools),

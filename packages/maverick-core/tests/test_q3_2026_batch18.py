@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import sqlite3
 from contextlib import nullcontext
+from types import SimpleNamespace
 
 import pytest
 from maverick.tools.sql_query import sql_query
@@ -32,16 +33,46 @@ def _mkdb(tmp_path):
     return db
 
 
+def test_sql_query_rejects_internal_data_inside_workspace(tmp_path, monkeypatch):
+    private = tmp_path / ".maverick"
+    private.mkdir()
+    db = _mkdb(private)
+    monkeypatch.setenv("MAVERICK_HOME", str(private))
+    out = sql_query(SimpleNamespace(workdir=tmp_path)).fn({
+        "database": str(db), "query": "SELECT name FROM users",
+    })
+    assert "internal data directory" in out
+
+
+def test_sql_query_requires_workspace(tmp_path):
+    db = _mkdb(tmp_path)
+    assert "sandbox workspace is required" in sql_query().fn({
+        "database": str(db), "query": "SELECT name FROM users",
+    })
+
+
+def test_sql_query_allows_the_default_workspace_under_state(tmp_path, monkeypatch):
+    state = tmp_path / "state"
+    workspace = state / "workspace"
+    workspace.mkdir(parents=True)
+    monkeypatch.setenv("MAVERICK_HOME", str(state))
+    db = _mkdb(workspace)
+    out = sql_query(SimpleNamespace(workdir=workspace)).fn({
+        "database": str(db), "query": "SELECT name FROM users",
+    })
+    assert "alice" in out
+
+
 def test_select_returns_rows(tmp_path):
     db = _mkdb(tmp_path)
-    out = sql_query().fn({"database": str(db), "query": "SELECT name FROM users ORDER BY id"})
+    out = sql_query(SimpleNamespace(workdir=tmp_path)).fn({"database": str(db), "query": "SELECT name FROM users ORDER BY id"})
     assert "alice" in out and "bob" in out and "carol" in out
     assert "(3 row(s))" in out
 
 
 def test_readonly_rejects_write_by_keyword(tmp_path):
     db = _mkdb(tmp_path)
-    out = sql_query().fn({"database": str(db), "query": "DELETE FROM users"})
+    out = sql_query(SimpleNamespace(workdir=tmp_path)).fn({"database": str(db), "query": "DELETE FROM users"})
     assert out.startswith("ERROR") and "read-only" in out.lower()
     # data untouched
     c = sqlite3.connect(db)
@@ -51,7 +82,7 @@ def test_readonly_rejects_write_by_keyword(tmp_path):
 
 def test_readonly_rejects_commented_write_by_keyword(tmp_path):
     db = _mkdb(tmp_path)
-    out = sql_query().fn({
+    out = sql_query(SimpleNamespace(workdir=tmp_path)).fn({
         "database": str(db),
         "query": "/* sneaky */ UPDATE users SET name='x'",
     })
@@ -65,7 +96,7 @@ def test_readonly_blocks_commented_attach_outside_workspace(tmp_path):
     db = _mkdb(tmp_path)
     outside = tmp_path.parent / "outside-attach.db"
     outside.unlink(missing_ok=True)
-    out = sql_query().fn({
+    out = sql_query(SimpleNamespace(workdir=tmp_path)).fn({
         "database": str(db),
         "query": f"/* sneaky */ ATTACH DATABASE '{outside}' AS escaped",
     })
@@ -77,7 +108,7 @@ def test_readonly_authorizer_blocks_commented_vacuum_into(tmp_path):
     db = _mkdb(tmp_path)
     outside = tmp_path.parent / "outside-vacuum.db"
     outside.unlink(missing_ok=True)
-    out = sql_query().fn({
+    out = sql_query(SimpleNamespace(workdir=tmp_path)).fn({
         "database": str(db),
         "query": f"/* sneaky */ VACUUM INTO '{outside}'",
     })
@@ -87,7 +118,7 @@ def test_readonly_authorizer_blocks_commented_vacuum_into(tmp_path):
 
 def test_write_allowed_when_read_only_false(tmp_path):
     db = _mkdb(tmp_path)
-    out = sql_query().fn({
+    out = sql_query(SimpleNamespace(workdir=tmp_path)).fn({
         "database": str(db),
         "query": "DELETE FROM users WHERE id = 1",
         "read_only": False,
@@ -109,7 +140,7 @@ def test_denied_write_leaves_rows_unchanged(tmp_path, monkeypatch):
     module = importlib.import_module("maverick.tools.sql_query")
     monkeypatch.setattr(module, "request_execution_consent", deny)
     db = _mkdb(tmp_path)
-    out = sql_query().fn({"database": str(db), "query": "DELETE FROM users",
+    out = sql_query(SimpleNamespace(workdir=tmp_path)).fn({"database": str(db), "query": "DELETE FROM users",
                           "read_only": False})
     assert "not approved" in out
     with sqlite3.connect(db) as connection:
@@ -121,7 +152,7 @@ def test_write_mode_authorizer_blocks_attach_outside_workspace(tmp_path):
     outside = tmp_path.parent / "outside-write-attach.db"
     outside.unlink(missing_ok=True)
 
-    out = sql_query().fn({
+    out = sql_query(SimpleNamespace(workdir=tmp_path)).fn({
         "database": str(db),
         "query": f"ATTACH DATABASE '{outside}' AS escaped",
         "read_only": False,
@@ -136,7 +167,7 @@ def test_write_mode_authorizer_blocks_vacuum_into_outside_workspace(tmp_path):
     outside = tmp_path.parent / "outside-write-vacuum.db"
     outside.unlink(missing_ok=True)
 
-    out = sql_query().fn({
+    out = sql_query(SimpleNamespace(workdir=tmp_path)).fn({
         "database": str(db),
         "query": f"VACUUM INTO '{outside}'",
         "read_only": False,
@@ -151,7 +182,7 @@ def test_write_with_returning_is_committed(tmp_path):
     # the row-formatting path -- it must still be committed, or sqlite rolls the
     # mutation back on connection close and the "success" is silently lost.
     db = _mkdb(tmp_path)
-    out = sql_query().fn({
+    out = sql_query(SimpleNamespace(workdir=tmp_path)).fn({
         "database": str(db),
         "query": "INSERT INTO users(id, name) VALUES(4, 'dave') RETURNING id",
         "read_only": False,
@@ -164,7 +195,7 @@ def test_write_with_returning_is_committed(tmp_path):
 
 def test_delete_with_returning_is_committed(tmp_path):
     db = _mkdb(tmp_path)
-    sql_query().fn({
+    sql_query(SimpleNamespace(workdir=tmp_path)).fn({
         "database": str(db),
         "query": "DELETE FROM users WHERE id = 1 RETURNING name",
         "read_only": False,
@@ -176,7 +207,7 @@ def test_delete_with_returning_is_committed(tmp_path):
 
 def test_params_binding(tmp_path):
     db = _mkdb(tmp_path)
-    out = sql_query().fn({
+    out = sql_query(SimpleNamespace(workdir=tmp_path)).fn({
         "database": str(db),
         "query": "SELECT name FROM users WHERE name = ?",
         "params": ["bob"],
@@ -186,18 +217,18 @@ def test_params_binding(tmp_path):
 
 def test_max_rows_truncation(tmp_path):
     db = _mkdb(tmp_path)
-    out = sql_query().fn({"database": str(db), "query": "SELECT * FROM users", "max_rows": 1})
+    out = sql_query(SimpleNamespace(workdir=tmp_path)).fn({"database": str(db), "query": "SELECT * FROM users", "max_rows": 1})
     assert "truncated at 1" in out
 
 
 def test_missing_database(tmp_path):
-    out = sql_query().fn({"database": str(tmp_path / "nope.db"), "query": "SELECT 1"})
+    out = sql_query(SimpleNamespace(workdir=tmp_path)).fn({"database": str(tmp_path / "nope.db"), "query": "SELECT 1"})
     assert "not found" in out.lower()
 
 
 def test_bad_sql_returns_error(tmp_path):
     db = _mkdb(tmp_path)
-    out = sql_query().fn({"database": str(db), "query": "SELECT * FROM does_not_exist"})
+    out = sql_query(SimpleNamespace(workdir=tmp_path)).fn({"database": str(db), "query": "SELECT * FROM does_not_exist"})
     assert out.startswith("ERROR")
 
 
@@ -209,7 +240,7 @@ def test_multi_statement_does_not_execute_injected_write(tmp_path):
     # future could run only the first statement). Asserting the data
     # invariant instead of a version-specific error message is what keeps
     # this test from breaking across the interpreter matrix.
-    sql_query().fn({
+    sql_query(SimpleNamespace(workdir=tmp_path)).fn({
         "database": str(db),
         "query": "SELECT 1; DROP TABLE users",
         "read_only": False,
@@ -220,9 +251,9 @@ def test_multi_statement_does_not_execute_injected_write(tmp_path):
     assert "users" in tables  # the injected DROP never executed
 
 
-def test_requires_database_and_query():
-    assert "database is required" in sql_query().fn({"query": "SELECT 1"}).lower()
-    assert "query is required" in sql_query().fn({"database": "x.db"}).lower()
+def test_requires_database_and_query(tmp_path):
+    assert "database is required" in sql_query(SimpleNamespace(workdir=tmp_path)).fn({"query": "SELECT 1"}).lower()
+    assert "query is required" in sql_query(SimpleNamespace(workdir=tmp_path)).fn({"database": "x.db"}).lower()
 
 
 def test_registered_by_default():

@@ -73,6 +73,48 @@ def test_real_child_roundtrip(monkeypatch):
     assert result == {"a": [1, 2]}
 
 
+@pytest.mark.skipif(pi.os.name != "posix", reason="evidence PDF limits require POSIX")
+def test_evidence_child_roundtrip_with_resource_limits(monkeypatch):
+    entry = pi.ParserEntry(name="evidence_pdf_text", module="json", func="loads",
+                           feeds="test", memory_safe=True)
+    monkeypatch.setitem(pi.PARSERS, "evidence_pdf_text", entry)
+    assert pi.parse_isolated("evidence_pdf_text", b'"bounded"') == "bounded"
+
+
+def test_evidence_child_refuses_unsupported_platform(monkeypatch):
+    monkeypatch.setattr(pi, "_POSIX_RESOURCE_LIMITS", False)
+    with pytest.raises(RuntimeError, match="requires POSIX"):
+        pi.parse_isolated("evidence_pdf_text", b"document")
+
+
+@pytest.mark.skipif(pi.os.name != "posix", reason="evidence PDF limits require POSIX")
+def test_evidence_output_is_file_bounded_and_stderr_discarded(monkeypatch):
+    seen = {}
+
+    def fake_run(args, **kwargs):
+        seen.update(kwargs)
+        assert "RLIMIT_FSIZE" in args[-1]
+        kwargs["stdout"].write(b'{"ok": true, "result": "ok"}')
+        return subprocess.CompletedProcess(args, 0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert pi.parse_isolated("evidence_pdf_text", b"document") == "ok"
+    assert seen["stderr"] == subprocess.DEVNULL
+    assert "capture_output" not in seen
+
+
+@pytest.mark.skipif(pi.os.name != "posix", reason="evidence PDF limits require POSIX")
+def test_evidence_worker_resource_limits_bound_regular_file(tmp_path):
+    output = tmp_path / "output"
+    with output.open("wb") as target:
+        subprocess.run(
+            [pi.sys.executable, "-I", "-c", pi._EVIDENCE_LIMITS +
+             "\nimport os\nos.write(1, b'x' * (17 * 1024 * 1024))\n"],
+            stdout=target, stderr=subprocess.DEVNULL, timeout=15,
+        )
+    assert 0 < output.stat().st_size <= pi._EVIDENCE_OUTPUT_LIMIT
+
+
 def test_child_parser_error_surfaces(monkeypatch):
     # json.dumps(bytes) raises inside the child -> ok:False -> RuntimeError
     entry = pi.ParserEntry(name="boom", module="json", func="dumps",

@@ -62,7 +62,7 @@ def test_the_approvals_page_speaks_the_chosen_language(monkeypatch, tmp_path):
     WorldModel(tmp_path / "world.db").create_approval("send_email", risk="medium", scope="Customers")
     from maverick_dashboard.app import app
 
-    page = TestClient(app, headers={"Origin": "http://testserver"}).get("/approvals", params={"lang": "fr"}).text
+    page = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}).get("/approvals", params={"lang": "fr"}).text
     assert "Approuver « Send email »" in page
     assert "Refuser « Send email »" in page
     assert "1 demande en attente" in page

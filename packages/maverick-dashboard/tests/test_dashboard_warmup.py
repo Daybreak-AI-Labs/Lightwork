@@ -175,7 +175,7 @@ def test_leaving_the_lifespan_stops_its_warm_up_thread(monkeypatch, tmp_path):
         return {t for t in threading.enumerate() if t.name == "lightwork-warm-hooks"}
 
     before = mine()
-    with TestClient(dashboard.app, headers={"Origin": "http://testserver"}):
+    with TestClient(dashboard.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}):
         started = mine() - before
     assert started, "startup runs the warm-up in the background"
     deadline = time.monotonic() + 120
@@ -317,7 +317,7 @@ def test_the_dashboard_serves_only_after_its_request_path_caches_are_warm(monkey
     monkeypatch.setattr("maverick.hooks.ensure_loaded", slow_hooks)
     monkeypatch.setattr(dashboard, "_warm_dashboard_caches", lambda stop=None: warmed.append(1) or {})
     try:
-        with TestClient(dashboard.app, headers={"Origin": "http://testserver"}):
+        with TestClient(dashboard.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}):
             assert warmed == [1], "the caches were warm before the first request"
     finally:
         release.set()
@@ -339,7 +339,7 @@ def test_overdue_automation_starts_after_the_warm_up(monkeypatch, tmp_path):
     monkeypatch.setattr(dashboard, "_warm_dashboard_caches", lambda stop=None: order.append("warm") or {})
     monkeypatch.setattr(automation_queue, "start", lambda: order.append("automation") or False)
     try:
-        with TestClient(dashboard.app, headers={"Origin": "http://testserver"}):
+        with TestClient(dashboard.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}):
             assert order == ["warm", "automation"]
     finally:
         dashboard._world_cache.clear()
@@ -360,7 +360,7 @@ def test_a_slow_warm_up_delays_serving_only_up_to_its_limit(monkeypatch, tmp_pat
     monkeypatch.setattr(dashboard, "_warm_dashboard_caches", lambda stop=None: release.wait(30) and {})
     try:
         started = time.monotonic()
-        with TestClient(dashboard.app, headers={"Origin": "http://testserver"}) as client:
+        with TestClient(dashboard.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"}) as client:
             assert time.monotonic() - started < 10, "startup waited past its limit (15 s by default)"
             assert client.get("/livez").status_code == 200
     finally:

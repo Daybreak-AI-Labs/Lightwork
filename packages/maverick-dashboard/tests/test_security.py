@@ -8,7 +8,7 @@ from maverick.oidc import OIDCError, VerifiedPrincipal
 
 def _client():
     from maverick_dashboard.app import app
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 # ---------- bearer auth: query-token branch deleted ----------
@@ -73,7 +73,7 @@ def test_is_same_origin_accepts_with_matching_origin(monkeypatch, tmp_path):
     resp = client.post(
         "/chat/send",
         data={"title": "x"},
-        headers={"Origin": "http://testserver"},
+        headers={"Origin": "http://127.0.0.1"},
         follow_redirects=False,
     )
     assert resp.status_code == 303
@@ -130,7 +130,7 @@ def test_api_v1_mutation_allows_matching_origin(monkeypatch, tmp_path):
     resp = client.post(
         "/api/v1/facts",
         json={"key": "city", "value": "Lisbon"},
-        headers={"Origin": "http://testserver"},
+        headers={"Origin": "http://127.0.0.1"},
     )
     assert resp.status_code == 204
 
@@ -232,7 +232,7 @@ def test_static_token_composes_with_ambient_identity(
         audience="lightwork",
         claims={"via": "invite" if identity_kind == "invite" else "session", "iat": 1},
     )
-    headers = {"Origin": "http://testserver"}
+    headers = {"Origin": "http://127.0.0.1"}
     if identity_kind == "oidc_session":
         monkeypatch.setattr(auth_mod, "oidc_enabled", lambda: True)
         monkeypatch.setattr(auth_mod, "_session_principal", lambda _request: principal)
@@ -416,7 +416,7 @@ def test_skill_install_blocked_by_default(monkeypatch, tmp_path):
     resp = client.post(
         "/api/v1/skills",
         json={"source": "gh:attacker/skill"},
-        headers={"Origin": "http://testserver"},
+        headers={"Origin": "http://127.0.0.1"},
     )
     assert resp.status_code == 403
     assert "MAVERICK_ALLOW_SKILL_INSTALL" in resp.json()["detail"]
@@ -430,7 +430,7 @@ def test_skill_install_enabled_by_env(monkeypatch, tmp_path):
     resp = client.post(
         "/api/v1/skills",
         json={"source": "gh:not/real/path/that/will/fail"},
-        headers={"Origin": "http://testserver"},
+        headers={"Origin": "http://127.0.0.1"},
     )
     # 400 = install_skill raised ValueError (bad URL); we're past the gate.
     assert resp.status_code in (400, 404, 500)

@@ -35,7 +35,7 @@ def client(monkeypatch, tmp_path):
     from maverick_dashboard import app as dash_app
 
     dash_app._world_cache.clear()
-    return TestClient(dash_app.app, headers={"Origin": "http://testserver"})
+    return TestClient(dash_app.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def _map_groups(monkeypatch, roles=None, suites=None):
@@ -47,7 +47,7 @@ def _map_groups(monkeypatch, roles=None, suites=None):
 
 def _scim(client, path, body):
     # The IdP is its own caller: no browser session, no selected workspace.
-    idp = TestClient(client.app, headers={"Origin": "http://testserver"})
+    idp = TestClient(client.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     response = idp.post(path, json=body, headers={"Authorization": f"Bearer {_TOKEN}"})
     assert response.status_code == 201, response.text
     return response.json()["id"]
@@ -92,7 +92,7 @@ def _link(response):
 
 
 def _stranger(client):
-    return TestClient(client.app, headers={"Origin": "http://testserver"})
+    return TestClient(client.app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
 
 
 def test_a_workspace_admin_cannot_invite_a_person_the_idp_made_a_global_admin(client, monkeypatch):
@@ -152,7 +152,7 @@ def test_a_person_known_to_the_idp_only_by_name_is_invited_as_usual(client, monk
     _map_groups(monkeypatch, roles={"Admins": "admin"})
     _workspace_admin(client)
     _push_group(client, "Admins", [_push_user(client, external_id="00u-opaque-okta-subject")])
-    assert auth.global_role_for_principal("user:" + CFO) == "operator"   # the default: nothing is conferred
+    assert auth.global_role_for_principal("user:" + CFO) is None
     assert invites.existing_local_account(CFO) is False
     assert _invite(client, CFO).status_code == 200
 
