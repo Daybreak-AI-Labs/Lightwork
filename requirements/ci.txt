@@ -71,7 +71,7 @@ markdown-it-py==4.2.0
 markupsafe==3.0.4
 mdurl==0.1.2
 msgpack==1.2.4
-multidict==6.9.1
+multidict==7.1.0
 mypy==1.18.2
 mypy-extensions==1.1.0
 nuitka==4.3.1
