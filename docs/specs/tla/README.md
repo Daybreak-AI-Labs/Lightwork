@@ -1,7 +1,8 @@
 # Formal verification of the sandbox interface (TLA+)
 
-`SandboxInterface.tla` models the sandbox chokepoint (CLAUDE.md rule 4 + the
-sandbox SDK v2 contract) as a state machine and TLC model-checks the
+`SandboxInterface.tla` models the sandbox chokepoint (kernel rule 4 in
+[`CONTRIBUTING.md`](../../../CONTRIBUTING.md#house-rules) and the sandbox SDK v2
+contract) as a state machine and TLC model-checks the
 properties the Python suite pins empirically — for **all** interleavings, not
 just the tested ones:
 
@@ -15,10 +16,9 @@ just the tested ones:
 
 Verified result (TLC 2.19, config `SandboxInterface.cfg`, 2 symmetric
 commands, MaxSteps=3): **982 states generated, 521 distinct, no errors.**
-Model-checking the liveness property surfaced a real modelling subtlety —
-without fairness on *dispatch*, a submitted command may stutter forever; the
-code's synchronous chokepoint provides that fairness, and the spec now states
-it explicitly.
+The liveness property needs fairness on *dispatch*: without it, a submitted
+command may stutter forever. The code's synchronous chokepoint provides that
+fairness, and the spec states it as an explicit assumption.
 
 ## Reproducing
 
@@ -29,7 +29,7 @@ cd docs/specs/tla
 java -cp /tmp/tla2tools.jar tlc2.TLC -deadlock SandboxInterface.tla
 ```
 
-Scope honesty: the model covers the dispatch/lifecycle/scrub/timeout
+Scope: the model covers the dispatch/lifecycle/scrub/timeout
 contract, not the container runtimes' internals (Docker/gVisor/Firecracker
 correctness is theirs). Extending the model (e.g. workdir-confinement paths)
 extends the table above.

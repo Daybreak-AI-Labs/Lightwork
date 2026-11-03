@@ -72,7 +72,7 @@ The CC series is mandatory for every SOC 2 report.
 | TSC | Lightwork control | Status | Evidence |
 | --- | --- | --- | --- |
 | CC5.1 Selects control activities | Tool ACLs + risk ceilings; capability grants | Implemented | `maverick/safety/tool_acl.py`; `maverick/capability.py` |
-| CC5.2 Technology general controls | Sandbox-mediated shell; capability chokepoint at the tool boundary | Implemented | `maverick/safety/`; sandbox `exec()` mediation (CLAUDE.md rule 4) |
+| CC5.2 Technology general controls | Sandbox-mediated shell; capability chokepoint at the tool boundary | Implemented | `maverick/safety/`; sandbox `exec()` mediation (kernel rule 4, `CONTRIBUTING.md`; enforced by the `shell=True` gate in `.github/workflows/ci.yml`) |
 | CC5.3 Deploys via policies & procedures | Config-driven policy (`~/.maverick/config.toml`); installer wizard | Partial | `maverick/config.py`; `apps/installer-cli/` |
 
 ### CC6 — Logical & Physical Access Controls
@@ -105,7 +105,7 @@ This is Lightwork's strongest area.
 
 | TSC | Lightwork control | Status | Evidence |
 | --- | --- | --- | --- |
-| CC8.1 Authorizes/designs/tests/approves changes | Eval-gated CI; PR review; semantic-PR-title + lint gates; test-driven verifier | Partial | `.github/workflows/` (ci, lint-pr-title); test matrix (CLAUDE.md) |
+| CC8.1 Authorizes/designs/tests/approves changes | Eval-gated CI; PR review; semantic-PR-title + lint gates; test-driven verifier | Partial | `.github/workflows/` (ci, lint-pr-title); test matrix (`.github/workflows/ci.yml`) |
 | CC8.1 Change-management *policy* (approvals, segregation of duties) | Documented change-control policy, reviewer requirements, prod-deploy approvals | Process-only | Not code — operator policy |
 
 ### CC9 — Risk Mitigation
