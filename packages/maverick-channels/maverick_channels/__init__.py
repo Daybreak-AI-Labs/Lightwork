@@ -15,13 +15,10 @@ per-sender allowlist, default-deny):
   - teams (Azure Bot Framework webhook; approvals as Adaptive Cards)
   - mattermost (bot account answering direct messages and @mentions)
   - imessage (macOS only)
-``cli`` is the interactive terminal channel (used directly, not hosted by
-``maverick serve``); ``glasses`` is fronted by the external webhook relay.
-Opt-in helpers layer on the base channels rather than being separate adapters:
-email_v2 (IMAP IDLE + threading), discord_stages (Stage voice), streaming_voice
-(barge-in), and rich_render (KaTeX/Mermaid — applied by ``server.add_channel``
-when ``[channels] rich_render`` is on). signal needs signal-cli on PATH; matrix
-needs matrix-nio.
+rich_render (KaTeX/Mermaid — applied by ``server.add_channel`` when
+``[channels] rich_render`` is on) is an opt-in helper layered on the base
+channels rather than a separate adapter. signal needs signal-cli on PATH;
+matrix needs matrix-nio.
 """
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _distribution_version

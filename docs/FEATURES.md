@@ -23,7 +23,7 @@ catalogue of built features and tools.
 | [Hosted control plane and multi-tenancy](#hosted-control-plane-and-multi-tenancy) | 11 |
 | [Evaluation and benchmarks](#evaluation-and-benchmarks) | prose |
 | [Observability and reliability](#observability-and-reliability) | prose |
-| [UX surfaces](#ux-surfaces) | 52 |
+| [UX surfaces](#ux-surfaces) | 50 |
 | [Packaged governance, evidence and external privacy control planes](#packaged-governance-evidence-and-external-privacy-control-planes) | 5 |
 | [Software development: the code vault](#software-development-the-code-vault) | 2 |
 | [Information-flow control](#information-flow-control) | 1 |
@@ -32,7 +32,7 @@ catalogue of built features and tools.
 | [Distribution and install](#distribution-and-install) | 19 |
 | [Customer workflow completion and readiness](#customer-workflow-completion-and-readiness) | 22 in 24 subsections |
 
-459 entries in 19 sections. This block is generated: `python scripts/features_toc.py --write` (the test suite fails when it is stale).
+457 entries in 19 sections. This block is generated: `python scripts/features_toc.py --write` (the test suite fails when it is stale).
 <!-- toc:end -->
 
 ## Agent kernel and orchestration
@@ -3093,30 +3093,15 @@ author allowlist, claim-first dedup that fails CLOSED because a polling
 adapter re-sees replies, two-step publish with 500-char chunking),
 **RCS** (`rcs.py`: Google RCS Business Messaging for approved RBM agents —
 Pub/Sub or direct envelopes, constant-time clientToken verify, MSISDN
-allowlist, service-account Bearer auth with cached refresh), and a
-**glasses/wearable** adapter
-(Even Realities G2 "bring your own agent" bridge: the ack-then-run pattern that
-answers quick utterances on the HUD within the device deadline and runs long
-tasks in the background, delivering the result to a secondary channel). Rich
+allowlist, service-account Bearer auth with cached refresh). Rich
 formatting + dedup + per-channel authz. **Reply threading** — inbound messages
 carry their platform `message_id` and adapters expose `send_threaded`
 (Slack `thread_ts` behind opt-in `[channels.slack] thread_replies`; Telegram
 `reply_to_message_id`; base falls back to a plain send) so long-running
-answers land under the message that asked. **Email v2** adds IMAP IDLE (push
-instead of poll) + conversation threading from Message-ID/In-Reply-To/References
-(`email_v2.py`). Inbound IMAP/SMTP channel work and IMAP-triggered workflows
+answers land under the message that asked. Inbound IMAP/SMTP channel work and IMAP-triggered workflows
 require a configured receiving-server identity, a matching From-aligned
 sender-authentication result, and an explicit permitted-sender list before an
 email can start work. The Channels and Automations pages provide those controls.
-**Discord Stages voice v2** (`discord_stages.py`): drive Lightwork from a
-Stage channel — per-speaker utterance assembly over an injected transcriber,
-the same `DISCORD_ALLOWED_USER_IDS` speaker allowlist as Discord text,
-optional wake-word gating, replies spoken when the bot holds a speaker slot
-and degraded to stage-chat text when it doesn't (or TTS fails), and stage
-etiquette built in: the bot only *requests* a speaker slot, never
-self-promotes (a human moderator approves). Every Discord interaction sits
-behind an injected seam so the session logic is fully offline-tested; the
-heavy voice binding (discord.py voice + PyNaCl) plugs into the same seam.
 **KaTeX/Mermaid rich render** (`rich_render.py`, opt-in
 `[channels] rich_render`): replies carrying display math or ```mermaid fences
 are rendered into a standalone HTML page (KaTeX/Mermaid in-page, escaped
@@ -4932,16 +4917,6 @@ tested without spawning py-spy.
 
 ## UX surfaces
 
-- **i18n community portal** (`maverick_dashboard/i18n_portal.py`): the
-  no-Python on-ramp for new dashboard-chrome languages — `scaffold(lang)`
-  emits a fill-in catalog (every key seeded with English), `validate_catalog`
-  lints a submission against the English reference (lang-code shape, missing/
-  unknown keys, blank values, unbalanced `{placeholder}` tokens — a precise
-  diff for a translation PR's CI), and `load_external_catalogs` /
-  `merged_messages` overlay validated `<lang>.json` files from `[i18n]
-  portal_dir` onto the built-ins so an operator drops in a community
-  translation and the dashboard speaks it with no rebuild (malformed catalogs
-  skipped, never blanking the UI).
 - **Computer-use calibration + vision clicking**
   (`computer_calibration.py`, `vision_click.py`):
   per-axis affine calibration fitted by least squares over clicked targets
@@ -5205,13 +5180,6 @@ tested without spawning py-spy.
   throughput (world), and tool-latency percentiles (`tool_latency`) — the
   ASCII renderer is the tested core, `rich` panels a thin lazy wrapper;
   honest empty-state lines when there's no data.
-- **Streaming voice channel v2** (`maverick_channels/streaming_voice.py`):
-  the protocol layer for streaming ASR + **barge-in** — partial/final
-  hypothesis events drive endpointing on an injected clock, and speech onset
-  while the bot is talking halts playback immediately (`stop_speaking()`),
-  preserving the interrupted reply as partially-delivered. Fully offline-
-  tested with scripted event sequences; the real streaming ASR + playback
-  engine plug into the seams.
 - **Image edit tool** (`tools/image_edit.py`): the edit verbs to pair with
   replicate's generation — hosted inpaint/variation/upscale over the same
   Replicate API surface. All settings > AI models > Images and the installer
@@ -5843,7 +5811,7 @@ read-only endpoint without repeating a start. See
 
 Signal/IRC readers run independently of serial durable agent work; see [Transport supervision](channel-transport-supervision.md).
 
-Voice and wearable callbacks preserve saved results with explicit uncertain delivery; see [Live interaction boundaries](channel-live-interfaces.md), including the CLI exception and blocked bootstrap authority restoration.
+Voice callbacks preserve saved results with explicit uncertain delivery; see [Live interaction boundaries](channel-live-interfaces.md), including blocked bootstrap authority restoration.
 
 The [persistence authority inventory](operations/persistence-authorities.md) maps local/shared store ownership, transaction and recovery contracts. The control-plane singleton restriction remains in force.
 

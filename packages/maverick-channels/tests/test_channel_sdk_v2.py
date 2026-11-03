@@ -80,12 +80,12 @@ def test_dispatch_text_returns_text_and_drops_attachments(caplog):
 def test_v2_handler_works_through_a_migrated_adapter():
     """The in-tree adapters route via dispatch_text, so a Reply-returning
     handler flows end-to-end without the adapter knowing about v2."""
-    from maverick_channels.cli import CLIChannel  # a thin real adapter
+    from maverick_channels.irc import IRCChannel  # a real in-tree adapter
 
     async def handler(msg):
         return Reply(text=f"echo:{msg.text}")
 
-    ch = CLIChannel.__new__(CLIChannel)
+    ch = IRCChannel.__new__(IRCChannel)
     Channel.__init__(ch, handler)
     out = asyncio.run(ch.dispatch_text(_msg()))
     assert out == "echo:hi"

@@ -144,7 +144,6 @@ explicit limits, retry behavior and unknown provider charges.
 | `MAVERICK_LICENSE_PRIVATE_KEY` | — (secret) | Publisher Ed25519 signing key hex used by `maverick license issue`/`set` to sign a deployment license. Resolved through the secret provider (env or a mounted vault/secret file); **never** read from `config.toml` and never printed. Mint one with `maverick license keygen`; publish the matching **public** key as the trust anchor (`[license] publisher_pubkeys` / `MAVERICK_LICENSE_PUBKEYS`). |
 | `MAVERICK_PUBLIC_URL` | config `[dashboard] public_url` / `[flows] public_url` | Externally-reachable dashboard base URL. `maverick tenant onboard` uses it to build the printed first-admin invite link (also used for flow-approval links). Unset → the command prints the relative `/auth/invite/<token>` path and tells you to prepend your host. |
 | `IRC_ALLOWED_ACCOUNTS` | — | Comma-separated allowlist of authenticated IRC account names that may drive the agent over the IRC channel. Requires an IRC server that provides the IRCv3 `account-tag` capability. |
-| `GLASSES_ALLOWED_USER_IDS` | — | Allowlist for the glasses/wearable channel. |
 | `IRC_SERVER` / `IRC_PASSWORD` | config `[channels.irc]` | IRC server host / password. |
 
 ### Platform billing (Stripe)

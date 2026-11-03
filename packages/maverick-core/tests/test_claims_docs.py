@@ -148,7 +148,7 @@ def test_features_catalogue_has_a_current_table_of_contents():
     text = _read("docs/FEATURES.md")
     assert toc.apply(text) == text, "run python scripts/features_toc.py --write"
     found = toc.sections(text)
-    assert len(found) >= 19 and sum(s.entries for s in found) >= 459
+    assert len(found) >= 19 and sum(s.entries for s in found) >= 457
     assert toc.entries_before_first_section(text) == 0
     for section in found:
         assert "&" not in section.title, section.title

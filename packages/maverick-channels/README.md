@@ -22,7 +22,7 @@ provider account, so send a test message from the Channels page after setup.
 | Discord | `discord` | `[discord]` | Gateway WebSocket bot |
 | Slack | `slack` | `[slack]` | Socket Mode; no public webhook needed |
 | Signal | `signal` | bundled; needs `signal-cli` on PATH | JSON-RPC daemon |
-| Email | `email` | bundled | IMAP poll + SMTP send (stdlib); `email_v2` adds IMAP IDLE and threading |
+| Email | `email` | bundled | IMAP poll + SMTP send (stdlib) |
 | Matrix | `matrix` | `[matrix]` | matrix-nio; federated, end-to-end encryptable |
 | Mattermost | `mattermost` | `[mattermost]` | Bot account answering direct messages and @mentions |
 | Microsoft Teams | `teams` | `[teams]` | Azure Bot Framework webhook; approvals as Adaptive Cards |
@@ -35,12 +35,10 @@ provider account, so send a test message from the Channels page after setup.
 | SMS | `sms` | `[sms]` | Twilio webhook; needs public HTTPS |
 | iMessage | `imessage` | bundled | macOS only; needs Full Disk Access |
 | IRC | `irc` | bundled | RFC 1459/2812 over asyncio |
-| Voice | `voice` | `[voice]` | Voice provider functions (HTTP results never prove spoken delivery); `streaming_voice` adds barge-in |
+| Voice | `voice` | `[voice]` | Voice provider functions (HTTP results never prove spoken delivery) |
 
-`cli` is the interactive terminal channel behind `maverick start`, not hosted
-by `maverick serve`; `glasses` is fronted by the external webhook relay.
-`discord_stages` and `rich_render` are opt-in helpers layered on the base
-adapters, not separate channels.
+`rich_render` is an opt-in helper layered on the base adapters, not a separate
+channel.
 
 Install one extra per channel, or everything at once:
 

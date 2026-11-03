@@ -4,8 +4,8 @@
 A thin, dependency-free edge service that accepts a simple inbound POST and
 forwards it as a properly HMAC-signed request to a Lightwork dashboard's
 ``/webhook/start``. This is the self-hostable counterpart to a hosted bridge
-(e.g. the glasses/wearable adapter): run it on your own box/VPS/edge instead of
-depending on someone's cloud function.
+(e.g. one in front of a wearable device): run it on your own box/VPS/edge
+instead of depending on someone's cloud function.
 
 It signs exactly the way ``maverick.webhooks`` verifies:
     material   = f"{timestamp}.".encode() + body

@@ -49,5 +49,5 @@ Adapter specifics are in [Gateway recovery](channel-gateway-recovery.md) for
 Slack, Telegram, Discord, Matrix and iMessage, and [Bounded social polling](channel-polling.md)
 for Mastodon, Bluesky and Threads.
 Signal and IRC use [owned transport supervision](channel-transport-supervision.md).
-Voice and wearable response semantics, the CLI scope exception and conservative
-bootstrap restore handling are described in [Live interaction boundaries](channel-live-interfaces.md).
+Voice response semantics and conservative bootstrap restore handling are
+described in [Live interaction boundaries](channel-live-interfaces.md).

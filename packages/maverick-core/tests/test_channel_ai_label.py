@@ -103,16 +103,14 @@ def test_unknown_dispatch_asks_for_reconciliation_without_repainting_goal(monkey
     assert "Check its status before trying again" in reply
 
 
-@pytest.mark.parametrize("channel", ["voice", "glasses", "discord-stage"])
-def test_a_spoken_answer_says_it_was_written_by_an_agent_without_reading_a_link(monkeypatch, tmp_path, channel):
+def test_a_spoken_answer_says_it_was_written_by_an_agent_without_reading_a_link(monkeypatch, tmp_path):
+    from maverick_dashboard import rbac
+
     monkeypatch.setenv("MAVERICK_PUBLIC_BASE_URL", "https://lightwork.example.test/")
     srv, world = _server(monkeypatch, tmp_path, ("done", "The report is ready."))
-    if channel == "voice":
-        from maverick_dashboard import rbac
-
-        rbac.set_role("user:voice:U1", "operator")
+    rbac.set_role("user:voice:U1", "operator")
     try:
-        reply = asyncio.run(srv._handle_message(ChannelMessage(channel, "U1", "U1", "Prepare a report")))
+        reply = asyncio.run(srv._handle_message(ChannelMessage("voice", "U1", "U1", "Prepare a report")))
     finally:
         world.close()
     assert reply == "The report is ready.\n\nWritten by an agent in Lightwork."

@@ -309,7 +309,7 @@ screened by the same shield/budget/sandbox machinery:
 - **Channels** — 18 wired adapters (`packages/maverick-channels/`):
   Telegram, Discord, Slack, Signal, Email, Matrix, Bluesky, Mastodon,
   Voice, WhatsApp (Twilio + Cloud API), SMS, iMessage, IRC, Threads, RCS,
-  and a glasses/wearable bridge. New ones subclass `Channel` in `base.py`;
+  Microsoft Teams and Mattermost. New ones subclass `Channel` in `base.py`;
   the steps are in [`CONTRIBUTING.md`](CONTRIBUTING.md).
 - **Connectors & primary-source grounding** — 2,877 write-capable enterprise
   REST/GraphQL connectors plus 37 read-only primary-source / public-data

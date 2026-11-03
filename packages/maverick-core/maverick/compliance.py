@@ -46,7 +46,7 @@ def ai_answer_label(goal_id: int, base_url: str = "") -> str:
 
 # Channels that speak the reply: a read-out link is noise, so the mark is one
 # plain sentence. Channels with a short message limit get a one-line mark.
-SPOKEN_CHANNELS = frozenset({"voice", "glasses", "discord-stage", "streaming_voice"})
+SPOKEN_CHANNELS = frozenset({"voice"})
 SHORT_CHANNELS = frozenset({"sms", "rcs", "bluesky", "mastodon", "threads", "irc"})
 
 

@@ -96,7 +96,7 @@ async def relay_endpoint(req: Request, authorization: str | None = Header(defaul
         raise HTTPException(status_code=401, detail="unauthorized relay request")
 
     body = await req.json()
-    resp = relay.handle(body["text"], context={"source": "glasses"}, auth_token=token)
+    resp = relay.handle(body["text"], context={"source": "wearable"}, auth_token=token)
     return {"reply": resp.immediate, "kind": resp.kind.value, "started": resp.started}
 ```
 
@@ -137,7 +137,7 @@ export default {
     }
 
     // Long: ack now, forward to /webhook/start, let the run deliver to Telegram.
-    const payload = JSON.stringify({ goal: text, deliver_to: "telegram", source: "glasses" });
+    const payload = JSON.stringify({ goal: text, deliver_to: "telegram", source: "wearable" });
     // Fire-and-forget so the ack returns inside the device budget.
     request.waitUntil?.(
       fetch(env.START_URL, {
