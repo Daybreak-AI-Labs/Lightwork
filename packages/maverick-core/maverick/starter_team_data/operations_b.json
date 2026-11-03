@@ -777,7 +777,7 @@
         "columns": [
           "id",
           "source",
-          "account_key",
+          "account_id",
           "contact_email",
           "currency",
           "gross_amount",
@@ -823,7 +823,7 @@
         "kind": "unique",
         "action": "Ask the data owner to reconcile all records sharing this key.",
         "fields": [
-          "account_key"
+          "account_id"
         ]
       },
       {
@@ -852,7 +852,7 @@
           {
             "id": "dq-1",
             "source": "sample://data-quality/dq-1",
-            "account_key": "ACCT-001",
+            "account_id": "ACCT-001",
             "contact_email": "sample1@example.invalid",
             "currency": "USD",
             "gross_amount": 100,
@@ -861,7 +861,7 @@
           {
             "id": "dq-2",
             "source": "sample://data-quality/dq-2",
-            "account_key": "ACCT-002",
+            "account_id": "ACCT-002",
             "contact_email": "sample2@example.invalid",
             "currency": "USD",
             "gross_amount": 200,
@@ -870,7 +870,7 @@
           {
             "id": "dq-3",
             "source": "sample://data-quality/dq-3",
-            "account_key": "ACCT-002",
+            "account_id": "ACCT-002",
             "contact_email": "",
             "currency": "USD",
             "gross_amount": 200,
@@ -879,7 +879,7 @@
           {
             "id": "dq-4",
             "source": "sample://data-quality/dq-4",
-            "account_key": "ACCT-004",
+            "account_id": "ACCT-004",
             "contact_email": "sample4@example.invalid",
             "currency": "USD",
             "gross_amount": 100,
