@@ -49,8 +49,8 @@ The server refuses the bundle request from clients that do not declare support
 for the policy protocol. Upgrade older companion builds; no retroactive promise
 is made about copies already retained by unqualified old builds. A disconnected
 device cannot learn a new server policy until it reconnects, so the last accepted
-expiry remains the offline bound. Native timing/storage qualification is still
-pending on native hosts; the local mocked regression suite has been run.
+expiry remains the offline bound. Native timing/storage qualification needs
+native hosts; the local mocked regression suite covers the logic.
 
 Updates are plain polling (5–15s per screen) — dependency-light and
 battery-predictable; no SSE/websocket client to maintain.
@@ -142,8 +142,8 @@ Offline task data is optional in Settings, is limited to 2 MB and 24 hours, and
 is removed on connection replacement or explicit disconnect. A phone's
 127.0.0.1 address refers to the phone itself: use the organization's reachable
 HTTPS dashboard address (including its configured proxy port), not the desktop's
-loopback address. Native streaming and accessibility qualification are still
-pending; this source scaffold is not a signed device release.
+loopback address. Native streaming and accessibility qualification need
+installed devices; this source is not a signed device release.
 
 Named connections can be added, switched and removed in Settings; their tokens
 remain in the same device secure store. Switching clears the previous offline

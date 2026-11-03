@@ -1,9 +1,8 @@
 # Installed-IDE connection qualification checklist
 
-These checks have not been executed yet. Build the plugin with `python build.py`
-(see [BUILDING.md](../BUILDING.md)), install the resulting ZIP in an IDE with
-PasswordSafe enabled, and run them before distribution. Use only a loopback
-fixture dashboard.
+Run these checks before distribution. Build the plugin with `python build.py`
+(see [BUILDING.md](../BUILDING.md)) and install the resulting ZIP in an IDE with
+PasswordSafe enabled. Use only a loopback fixture dashboard.
 
 1. Save a named HTTPS connection and protected token through Settings. Read it
    back through PasswordSafe without printing it. Reopen Settings, rotate it and

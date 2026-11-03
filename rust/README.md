@@ -14,14 +14,14 @@ mvk-scan-wasm/   wasm-bindgen  -> npm/edge package (TypeScript, Workers, Deno)
 
 The safety scanners run on **every** agent input and tool output and are pure
 CPU — exactly the kind of hot, GIL-bound work that belongs in native code. The
-pilot module is the unicode scanner (`maverick.safety.unicode_filter`); it's a
-faithful port, and Python keeps a **fallback shim** so a build *without* the
-native wheel is byte-identical to today. The native module is a drop-in
-accelerator, never a new hard dependency.
+unicode scanner (`maverick.safety.unicode_filter`) is a faithful port, and
+Python keeps a **fallback shim**, so a build *without* the native wheel behaves
+identically. The native module is a drop-in accelerator, never a new hard
+dependency.
 
 ## Measured speedup (native vs pure Python, same machine)
 
-The reason the carve is worth it — the unicode scanner alone:
+The unicode scanner alone:
 
 | call | input | speedup |
 |---|---|---|
@@ -36,7 +36,7 @@ worst case and Rust's short-circuit scan is ~50× faster. Even the smallest inpu
 For large normalization, secret/PII scan and image-hash inputs, the Python
 bindings copy the input to owned Rust data and release the GIL during the
 computation. Small calls and the short-circuit Unicode check retain it. The
-historical figures above measure single-call latency; they do not establish
+figures above measure single-call latency; they do not establish
 parallel throughput or an optimal detach threshold.
 
 ## Build
@@ -61,7 +61,7 @@ node --test test/parity.test.mjs                          # parity vs Python
 
 Core unit tests: `cd rust && cargo test -p mvk-scan`.
 
-## Modules carved so far
+## Modules
 
 | core module | role | Python hot path | engine |
 |---|---|---|---|
@@ -70,7 +70,7 @@ Core unit tests: `cd rust && cargo test -p mvk-scan`.
 | `pii` | edge/TS + parity | **pure `re`** (native ~break-even) | `fancy-regex` |
 | `phash` | accelerator | **wired in** (~28× on the file path) | pure int math |
 
-### `phash` — perceptual image hash (carve #3)
+### `phash` — perceptual image hash
 
 `maverick.perceptual_hash` runs on **every screenshot** in computer-use: an 8×8
 average-hash, pure integer arithmetic, with a per-pixel Python luma loop — the
@@ -78,7 +78,7 @@ same shape that made the unicode scanner a win. It's a faithful port (the
 `GRADIENT_HASH` reference value is asserted identically in Rust, Python, and
 `extensions/webgpu-vision/ahash.js`), with the Python kept as a fallback shim.
 
-The lesson here was about the **FFI boundary**, not the loop. Handing the native
+The speedup depends on the **FFI boundary**, not the loop. Handing the native
 side a list of `width*height` Python tuples made it only ~1.4× (marshalling
 dominated). The real hot path — `average_hash_file` — gets pixels from PIL, so
 `average_hash_from_rgb_bytes` takes the raw `Image.tobytes()` buffer instead: the
@@ -93,8 +93,9 @@ So the tuple API stays the cross-language reference, and the **bytes** API is th
 accelerator the file path uses. `test_native_phash_parity.py` keeps both
 byte-for-byte identical to pure Python.
 
-The secret/PII carve is **carve #2**, and it taught a real lesson: not every hot
-CPU module is a Rust win. Unlike the unicode scanner (a per-char *Python* loop),
+### `secret` and `pii` — detectors
+
+Not every hot CPU module is a Rust win. Unlike the unicode scanner (a per-char *Python* loop),
 the detectors already run on CPython's compiled `re`. Measured on the same
 machine, the native port — 21 separate `fancy-regex` passes — was **~3× slower
 for secrets** and roughly break-even for PII:
@@ -128,10 +129,3 @@ byte offsets, so redaction is byte-identical on non-ASCII text.
   Python too.
 
 All run off the same `mvk-scan` core, so they cannot diverge.
-
-## Carve order (next)
-
-Same pattern, profiler-gated: ~~secret/PII detectors~~ (done) -> world-model
-access -> blackboard/budget -> compaction/tokenization -> the native agent-host
-daemon (density / cold-start). The ~80-90% that stays Python+TS: tools, packs,
-skills, providers, dashboard, channels.

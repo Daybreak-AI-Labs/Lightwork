@@ -114,23 +114,18 @@ Bundle targets (`src-tauri/tauri.conf.json`):
 
 This dashboard shell is distinct from `apps/installer-desktop`: this app opens
 an already-installed Lightwork dashboard, while `installer-desktop` performs
-the source installation. It is not currently selected by
-`.github/workflows/desktop.yml` and is not attached to product releases, so
-treat it as an unshipped engineering prototype rather than a supported
-installer.
+the source installation. `.github/workflows/desktop.yml` runs its Rust unit
+tests, and `.github/workflows/windows-customer.yml` packages it for Windows
+through `apps/installer-msi/build-customer.ps1`.
 
-The current Tauri 2.12 dependency graph uses Wry's GTK3 backend on Linux. OSV
-Scanner 2.3.8 therefore reports two advisories in `Cargo.lock`: the
-medium-severity `glib` 0.18 soundness advisory (GHSA-wrw7-89jp-8q8g, also
-published as RUSTSEC-2024-0429) and the unmaintained build-time
-`proc-macro-error` (RUSTSEC-2024-0370), which the gtk/glib 0.18 macros pull
-in. `cargo update` cannot resolve them: Wry 0.57 pins webkit2gtk 2.0.2, which
-requires GTK/GLib 0.18, while the `glib` fix begins at 0.20. Both findings are
-Linux-only. `osv-scanner.toml` carries narrow exceptions for exactly these two
-that expire on 2027-01-31; keep Linux artifacts engineering-only and
-re-evaluate when webkit2gtk-rs and Wry move to gtk 0.19 / glib 0.20 or later.
+On Linux, Tauri 2.12 uses Wry's GTK3 backend. The registry releases of its
+GTK/GLib 0.18 crates carry the `glib` soundness advisory (GHSA-wrw7-89jp-8q8g,
+also published as RUSTSEC-2024-0429) and the unmaintained `proc-macro-error`
+(RUSTSEC-2024-0370). The build resolves reviewed local patches for both
+instead; see [`vendor/README.md`](../../vendor/README.md). `osv-scanner.toml`
+carries no advisory exceptions.
 
-Any locally produced bundles are **unsigned**, so SmartScreen (Windows) and
+Locally produced bundles are **unsigned**, so SmartScreen (Windows) and
 Gatekeeper (macOS) will warn until code-signing certificates exist.
 
 ## Protected maintenance and offline packages
@@ -159,4 +154,3 @@ external-resource blockers. Repair preserves current data; workspace recovery
 opens its explicit isolation confirmation and offers existing per-workspace export
 and restore drill controls. Save the metadata-only plan for the responsible
 administrators. Plan evidence never waives accounting or action-history checks.
-Native, installer and release qualification has not been run.

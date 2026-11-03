@@ -1,7 +1,7 @@
 # Reviewed dependency patches
 
 These source copies keep the desktop applications compatible with GTK3 while
-removing dependencies reported by the November 2026 audit. They are maintained
+fixing the advisories listed below. They are maintained
 here until compatible upstream releases make them unnecessary. They are not
 unmodified registry packages, and a clean registry scan alone does not assess
 these local sources.

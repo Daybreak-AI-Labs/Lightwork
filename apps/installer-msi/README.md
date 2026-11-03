@@ -3,8 +3,8 @@
 The separate [Windows desktop package candidate](CUSTOMER.md) combines the
 complete frozen runtime, desktop app, and offline WebView2 installer. Its build,
 maintenance, signing, and acceptance workflow does not use this engineering
-bootstrap. Release acceptance for that package remains pending; the distinction
-below continues to apply to `Package.wxs` and `build.ps1`.
+bootstrap. That package has its own release acceptance; the distinction below
+applies to `Package.wxs` and `build.ps1`.
 
 WiX Toolset v4 authoring for an **engineering-only** Windows bootstrap. It
 installs a `maverick.cmd` launcher on the per-user PATH plus one

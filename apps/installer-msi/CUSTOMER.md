@@ -7,15 +7,14 @@ Python, pip, Node, or source checkout is required on that computer.
 Provider accounts and network-dependent product features retain their normal
 requirements. The engineering `Package.wxs` bootstrap is separate.
 
-**Status: implemented candidate path, not yet an accepted release.**
-The Windows candidate workflow (`.github/workflows/windows-customer.yml`)
-exercises native installation, repair, synthetic upgrade/rollback and WebView
-journeys. Those runs use disposable signing identities and the same frozen
-runtime under different fixture versions. They do not qualify a recognized
-publisher, a clean end-user computer or a real release migration. No release
-has been published and no real release-pair acceptance run has been recorded.
-This workflow produces candidates; it does not publish an installer or
-activate an update channel.
+**Qualification boundary.** The Windows candidate workflow
+(`.github/workflows/windows-customer.yml`) exercises native installation,
+repair, synthetic upgrade/rollback and WebView journeys. Those runs use
+disposable signing identities and the same frozen runtime under different
+fixture versions. They do not qualify a recognized publisher, a clean end-user
+computer or a real release migration; a release also needs a release-pair
+acceptance run on real release builds. This workflow produces candidates; it
+does not publish an installer or activate an update channel.
 
 ## In-app maintenance
 
