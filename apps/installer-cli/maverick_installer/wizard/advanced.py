@@ -2073,7 +2073,7 @@ def _ask_dashboard_followups(advanced: dict[str, Any]) -> None:
     )
     # The sidebar ([dashboard] navigation) stays "classic" by default. "areas"
     # groups every page into nine job-named areas; run the tree test in
-    # docs/research/tree-test before switching it on for everyone.
+    # docs/tree-test before switching it on for everyone.
     # navigation_personal lets each person try it in Your preferences.
     advanced["dashboard_navigation"] = "areas" if _q_confirm(
         "Use the job-named sidebar (areas such as Work, Privacy and Settings) for everyone? "

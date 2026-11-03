@@ -7,7 +7,7 @@ both studies test exactly what the product would show:
 
     python -m maverick_dashboard.nav_tree --export classic
     python -m maverick_dashboard.nav_tree --export areas --format csv --role operator
-    python -m maverick_dashboard.nav_tree --export areas --answers docs/research/tree-test/tasks.csv
+    python -m maverick_dashboard.nav_tree --export areas --answers docs/tree-test/tasks.csv
 
 ``--role`` keeps only the pages that role sees out of the box (the floors and
 defaults, without this installation's Settings overrides); without it the
