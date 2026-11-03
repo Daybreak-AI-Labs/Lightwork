@@ -6,8 +6,8 @@ plus one sentinel row. The sentinel determines `has_more`; a result with more
 rows, omitted columns, truncated cells or omitted output rows has `complete=false`.
 Execution success and complete business evidence are separate fields.
 
-The default readable preview remains a string and now puts `result_metadata`
-before the row data. This keeps the completeness warning visible if an outer
+The default readable preview is a string that puts `result_metadata` before the
+row data. This keeps the completeness warning visible if an outer
 agent preview cap shortens the output. `response_format="json"` returns the
 same admitted data and metadata as a valid JSON object. The final renderer drops
 whole rows to keep the 50,000-character output bound; it never slices serialized
@@ -78,7 +78,7 @@ guarantees for every driver or arbitrary extension.
 ## Writes and reconciliation
 
 Current host grants, model-URL restrictions, confirmation rules, protected paths,
-read-only mode and SQLite authorizers remain in force. SQLite now explicitly
+read-only mode and SQLite authorizers remain in force. SQLite explicitly
 begins a transaction, covering DDL as well as DML. Nontransactional maintenance
 such as VACUUM, and manual transaction management statements, are not admitted
 inside that boundary; perform maintenance through a separately reviewed operator

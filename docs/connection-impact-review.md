@@ -41,8 +41,8 @@ identity, grant, and dependent-work evidence is disclosed instead of inferred.
 The OAuth qualification matrix labels every unobserved installed Windows/provider
 combination as unqualified and distinguishes synthetic, native and live evidence.
 
-Regression tests use no installed/native host, sandbox job or live provider.
+Installed and native hosts, sandbox jobs and live providers are not qualified.
 OAuth acceptance requires a signed build, a registered provider application and
-a test account. These UI and read-probe
-extensions use the existing Connections feature gate. Mutation/rebind operations
-are not currently offered through Copilot; use their governed in-product review.
+a test account. These UI and read-probe extensions use the Connections feature
+gate. Mutation and rebind operations are not offered through Copilot; use their
+governed in-product review.

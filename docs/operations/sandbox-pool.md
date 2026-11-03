@@ -3,8 +3,8 @@
 `[sandbox] cross_run_pool = true` remains off by default. The normal background
 runner creates and closes a fresh sandbox for each run; it does not park one at
 run end. Explicit embedders may call `park_at_run_end()` and let `build_sandbox()`
-consume the resulting policy entry. This API currently provides no demonstrated
-startup acceleration and is not recommended as a performance setting.
+consume the resulting policy entry. This API provides no demonstrated startup
+acceleration and is not recommended as a performance setting.
 
 ## Ownership and safety
 
@@ -40,8 +40,8 @@ construction can surface the current engine/configuration error.
 
 ## Compatibility
 
-The old explicit API returned the same mutable backend after changing its
-workspace. It now returns a distinct object. An embedder must stop using a handle
+The explicit API returns a distinct backend object rather than the same mutable
+backend with a changed workspace. An embedder must stop using a handle
 after `park_at_run_end(handle)` returns true. That retirement is intentional even
 when no later caller acquires the policy. Pooling does not replace `close()` for
 an ineligible backend; the caller still owns its cleanup.

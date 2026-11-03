@@ -47,13 +47,7 @@ checks still apply. An older binary must refuse a newer database as usual;
 rollback requires a reviewed pre-migration backup, not destructive SQL that
 silently discards task restrictions.
 
-## Local qualification
+## Limits
 
-Local regression checks cover actual cookie/tenant authority, exact REST/Drive
-credential selection, rotation, role revocation before coroutine creation,
-scheduled dispatch, atomic Chat/event admission, publication and native schedule
-creation, Copilot stale-review refusal, browser picker invalidation, encrypted
-draft recovery, and template handoff. Test providers and task runners are
-synthetic; no paid model or live provider was contacted. PostgreSQL migration
-structure is checked locally; a live PostgreSQL service and provider consent
-flows remain separate deployment qualification.
+A live PostgreSQL service, live providers and provider consent flows are not
+qualified.

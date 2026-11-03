@@ -1,7 +1,6 @@
 # Employee content and administrator authority
 
-This feature is covered by local regression tests; installed and distributed
-acceptance are not qualified.
+Installed and distributed deployments of this feature are not qualified.
 
 Named administrators do not inherit employee task content through the task
 authorization helper. Lists remain owner scoped. Existing task ownership is

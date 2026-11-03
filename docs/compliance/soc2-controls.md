@@ -7,7 +7,7 @@ machine-readable evidence collector in
 [`packages/maverick-core/maverick/soc2.py`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/packages/maverick-core/maverick/soc2.py)
 (`collect_soc2_evidence()`).
 
-> **Honesty note.** SOC 2 is an *organizational* attestation, not a code audit.
+> **Note.** SOC 2 is an *organizational* attestation, not a code audit.
 > Lightwork's engineering controls cover a large share of the **Security (Common
 > Criteria)** plus the **Confidentiality / Availability / Processing Integrity /
 > Privacy** categories — but a real SOC 2 Type II report also requires

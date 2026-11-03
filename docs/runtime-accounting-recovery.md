@@ -81,10 +81,9 @@ Legacy checkpoints with an acknowledged marker import that credit once.
 Historical unacknowledged legacy usage still requires operator reconciliation:
 no migration can infer a missing receipt. A hard process loss can also lose
 usage since the last persisted boundary; provider receipts remain necessary
-for reconciling unreturned or uncheckpointed usage. Process-exit, replay,
-concurrency, tenant, retention, and lifecycle tests cover the new settlement
-boundary; they do not establish live provider invoice accuracy or recovery of
-usage that was never recorded.
+for reconciling unreturned or uncheckpointed usage. The settlement boundary
+does not establish live provider invoice accuracy or recover usage that was
+never recorded.
 
 Resuming messages does not undo tools or establish whether a timed-out
 external mutation succeeded. The governed external-action operation and

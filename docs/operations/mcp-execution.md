@@ -1,6 +1,6 @@
 # MCP execution ownership and cancellation
 
-MCP task cancellation and request cancellation now reach an execution-specific
+MCP task cancellation and request cancellation reach an execution-specific
 cooperative stop handle. They do not arm the global HALT switch. The handle is
 bound through a ContextVar inside the worker, so agent turn/tool boundaries and
 the existing guarded async provider wait observe it. Async child tasks and
@@ -62,4 +62,4 @@ back by this API. Such a worker remains counted; its cancellation result reports
 unknown effects. Server shutdown rejects new admissions and drains cancelled
 queued work, but does not claim a hard process-exit deadline for uninterruptible
 code. Live upstream cancellation, customer providers and OS-level process-tree
-termination have not been qualified by the local transport tests.
+termination are not qualified.

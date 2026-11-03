@@ -26,4 +26,4 @@ The implementation uses the existing tenant-scoped governed-record backend, encr
 
 Per workspace: 100 planning members, 100 milestones, 50 linked task/review references per milestone, 100 context sources, 30 criteria and 20 labels. Ordinary change receipts are retained up to 2,000 operations, after which new changes close while existing grants can still be revoked. No receipt eviction permits replay. The selection controls explicitly show the latest 500 permitted project tasks. Namespace listings are bounded to 10,000 records and report overflow rather than silently returning a complete-looking result.
 
-Local tests cover real governed records, native HTTP, typed adapters, strict feature/installer controls, UI review separation, draft preservation, cancellation, receipt recovery and context changes. Postgres multi-process fault injection, full browser rendering, assistive-technology and cross-device visual checks remain integration qualification; no production, live provider or network-credential calls were made.
+Multi-process failure handling on PostgreSQL, full browser rendering, assistive technology and cross-device visual behavior are not qualified.

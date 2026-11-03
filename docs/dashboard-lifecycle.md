@@ -67,11 +67,7 @@ after six elapsed seconds even if fetch never settles. Retry and navigation
 cancel obsolete probes. An opaque no-CORS health response still admits usable
 onboarding when provider configuration makes healthz return 503.
 
-Local Python child-process tests verify pipe shutdown and final state writes;
-Node virtual-clock tests verify splash timing. Rust compilation and Clippy
-alone do not qualify an installed native build, frozen bootloader descendants,
-signed MSI update or real WebView behavior.
 Mandatory installation-recovery, enterprise, residency and authentication gates
-still refuse startup. Tests cover shared deadlines, signal order, cancellation,
-partial startup, admission races and retained workers locally. They do not
-constitute a Kubernetes rolling-restart or live-provider acceptance test.
+still refuse startup. An installed native build, frozen bootloader descendants,
+a signed MSI update, real WebView behavior, Kubernetes rolling restarts and
+live providers are not qualified.

@@ -34,7 +34,7 @@ tool call/result exchange crosses its boundary. They decline a middle digest
 when an exchange involving the preserved first message makes that unsafe. The
 ordinary structural pass still enforces its existing size ceiling. Streaming
 folds retain prefix fingerprints and cross-process sidecar locking; the final
-write now compares the original entry so an older completion cannot overwrite a
+write compares the original entry so an older completion cannot overwrite a
 concurrent fold or reset. A lost write race returns this caller's computed result
 without another model request; a later call can refold uncached source.
 

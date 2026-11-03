@@ -43,7 +43,6 @@ normalized document identity and exact reconstruction offsets. Full-document
 and per-chunk screening remain in force. Conflicting provenance cannot silently
 replace an existing normalized document record.
 
-Local regression fixtures use real DOCX, XLSX and PDF libraries and hand-labeled
-content, including Word tables, formulas and an image-only PDF page. They are
-parser/coverage checks; they do not qualify rendered layout, OCR transcription,
-arbitrary customer documents, or native Office compatibility.
+Extraction covers parsing and coverage reporting. It does not qualify rendered
+layout, OCR transcription, arbitrary customer documents, or native Office
+compatibility.

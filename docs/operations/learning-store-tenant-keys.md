@@ -1,10 +1,8 @@
 # PostgreSQL learning keys and migration 39
 
-The shared PostgreSQL learning store previously added `tenant_id` predicates
-while retaining globally unique primary keys. Two tenants could not store the
-same model, guidance-line or corpus key: the second write failed even though
-the tenants' rows were distinct. Migration 39 scopes uniqueness for all four
-`harness_*` learning tables.
+Migration 39 scopes key uniqueness to the tenant for all four `harness_*`
+learning tables in the shared PostgreSQL learning store, so two tenants can
+store the same model, guidance-line or corpus key without conflict.
 
 The migration preserves existing tables, rows, values, nullable tenant identity,
 and existing row-security policies. Named tenants have unique natural keys

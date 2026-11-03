@@ -1,6 +1,6 @@
 # Governed-record Postgres connections
 
-The Postgres governed-record backend now uses the same libpq connection policy
+The Postgres governed-record backend uses the same libpq connection policy
 as the world-model backend. The original DSN, including TLS verification,
 certificates, service settings and search path, is preserved. The application
 connect cap defaults to ten seconds **per host**; a shorter operator timeout is

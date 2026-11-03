@@ -18,4 +18,4 @@ Administrator limits default to 10,000 passages, 300 elapsed seconds and a $5 em
 
 The typed Copilot knowledge adapters use the same native review, operation receipt, authority, cancellation and recovery service. Registration is integrated with the shared product-operations registry.
 
-Validation includes deterministic computation, temporary SQLite, synthetic hosted HTTP responses, and real local native cost/organization/usage ledgers. Live providers, installed-model performance and distributed publication are not certified by those tests. Cost and recovery messages use the English fallback; no additional translation coverage is claimed.
+Live providers, installed-model performance and distributed publication are not qualified. Cost and recovery messages use the English fallback.

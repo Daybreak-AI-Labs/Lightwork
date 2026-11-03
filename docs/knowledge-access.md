@@ -133,7 +133,7 @@ SHA-256, decision, and current request revision must match before Lightwork
 finishes the durable transition.
 
 Deleting or excluding a raw record does not prove that its influence has been
-removed from learned weights. The UI and export preserve that limitation. Local
-tests validate the control logic; external store availability, installed-system
-behavior, customer acceptance, and model retirement or retraining remain
-qualification pending until verified in that environment.
+removed from learned weights. The UI and export preserve that limitation.
+External store availability, installed-system behavior, customer acceptance, and
+model retirement or retraining are not qualified; verify them in your
+environment.

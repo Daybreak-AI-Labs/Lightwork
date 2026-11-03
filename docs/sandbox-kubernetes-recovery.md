@@ -89,5 +89,4 @@ Use a dedicated namespace, least-privilege pod/exec permissions and an enforced
 deny-all NetworkPolicy when networking is disabled. The API checks cannot prove
 the CNI filters live traffic. Before customer use, qualify create/edit/rename/
 delete, command timeout, lost export connection and recovery on the actual
-cluster. Local tests exercise real filesystem reconciliation with a synthetic
-kubectl transport; they do not establish live cluster acceptance.
+cluster; behavior on a live cluster is not qualified.

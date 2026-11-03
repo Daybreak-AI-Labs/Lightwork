@@ -1,8 +1,7 @@
 # Runtime integrity and bounded work
 
-The behaviors below preserve the existing configuration and authority
-boundaries. Local synthetic tests exercise failure and concurrency mechanics;
-they do not establish acceptance against real providers or production workloads.
+The behaviors below keep the configured authority boundaries. They are not
+qualified against real providers or production workloads.
 
 ## Sandbox dispatch and cleanup
 

@@ -52,10 +52,6 @@ and cascading goal deletion. PostgreSQL applies exact tenant predicates and its
 RLS policy to receipts; preflight/backfill includes the new table. Existing
 attachment insertion also uses the serialized quota/dedup service.
 
-Regression coverage includes actual SQLite transactions across independent
-connections, HTTP chat/REST retries and draft recovery, bounded/interrupted
-uploads, partial publication, file changes, and missing companion disclosure.
-Native PostgreSQL tests use isolated databases, concurrent connections and a
-temporary NOSUPERUSER/NOBYPASSRLS role to verify receipt isolation. No live
-transcription/provider request, S3 transfer, or production deployment is implied
-by those local tests.
+Receipt isolation holds on PostgreSQL for a NOSUPERUSER/NOBYPASSRLS application
+role. Live transcription and provider requests, S3 transfers and production
+deployments are not qualified.

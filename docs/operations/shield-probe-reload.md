@@ -34,9 +34,8 @@ outside ±1,000,000, thresholds outside [0,1], excessive weights, or invalid
 n-gram parameters are rejected. There may be at most 65,536 weights/buckets and
 1–8 n-gram sizes, each 1–32. Loaded weights are immutable.
 
-Local tests cover replacement, missing-to-valid recovery, malformed reloads,
-concurrent readers, tenant isolation and the shipped fixed red-team corpus's
-monotonic score/flag floor across reloads. That corpus is a known regression
-corpus, not an independent held-out measurement of a newly trained classifier.
+Reloads keep the shipped red-team corpus's score and flag floor. That corpus is
+a known regression corpus, not an independent held-out measurement of a newly
+trained classifier.
 Operators still need their own held-out quality evaluation before deploying
 new weights; reloading does not authorize or perform model training.

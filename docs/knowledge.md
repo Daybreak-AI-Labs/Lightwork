@@ -63,7 +63,7 @@ receipts. A complete existing document with the same text and provenance can
 still satisfy an idempotent, read-only retry. No backend is silently substituted.
 Qdrant's newer conditional point writes do not by themselves supply this
 adapter's required multi-chunk document and collection-identity transaction;
-this release does not claim distributed publication qualification for Qdrant.
+distributed publication on Qdrant is not qualified.
 Chroma is a separate core recall adapter, not a `KnowledgeBase` storage backend.
 
 ## Embedders

@@ -40,8 +40,7 @@ Uncertain changes are checked before retrying; loading a failed read is safe to
 retry. An independent minimal failure page remains available if normal template
 rendering fails.
 
-Focused task-report builder and API checks pass locally. An installed-browser
-support journey remains unverified.
+The support journey in an installed browser is not qualified.
 
 Previews are encrypted, account/workspace-bound, valid for ten minutes, and
 bounded to sixteen retained copies per context. Downloads recheck current

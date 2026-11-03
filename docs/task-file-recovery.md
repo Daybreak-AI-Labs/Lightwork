@@ -12,4 +12,4 @@ The latest captured run holds at most 100 files, 8 MiB each and 32 MiB of origin
 
 This is file-content recovery, not a complete task rollback. Shell commands, permissions, remote sandboxes, remote workers, database changes, provider spending, tickets and other external mutations are outside its coverage. Restoring files neither removes task results nor invalidates or recreates financial receipts, approvals or provider actions. Local tasks serialize supported file writes and recovery admission; remote-worker deployments cannot use this local restore path.
 
-Synthetic tests exercise the actual orchestrator and file tool, Windows file reads/restoration, independent-process exclusion, same-thread async exclusion, changed-file rejection, interrupted recovery, exact retry, named-owner API checks and a real Chromium journey at 320 and 1280 pixels. These checks do not constitute customer or provider acceptance.
+Customer and provider acceptance are not qualified.

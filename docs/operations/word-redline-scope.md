@@ -1,12 +1,11 @@
 # Word redline scope and review outcomes
 
 The privacy paper-review writer applies complete paragraph replacements with
-real Word tracked insertions/deletions, author and date. It no longer expands
-a clause-sized anchor into a replacement of a larger paragraph. A proposal
-must include the entire existing paragraph and the entire intended replacement.
-The `ClauseEdit.scope` field defaults to `paragraph`; other scopes are visibly
-unsupported. This is the conservative scope/refusal step, not an intra-run
-editing implementation.
+real Word tracked insertions/deletions, author and date. It does not expand a
+clause-sized anchor into a replacement of a larger paragraph: a proposal must
+include the entire existing paragraph and the entire intended replacement. The
+`ClauseEdit.scope` field defaults to `paragraph`; other scopes are visibly
+unsupported, and edits within a single run of text are not supported.
 
 An exact normalized paragraph match must be unique. Repeated clauses require a
 `ParagraphLocation` with the SHA-256 of the original package and its zero-based
@@ -25,8 +24,6 @@ other package parts retain their original content. Rejected proposals stay in
 upload result surface the need for manual review. Duplicate proposed edits to
 one paragraph do not silently count as two applied changes.
 
-Local tests inspect active accepted text, ambiguity, source-version binding,
-untouched XML/package parts and numbering. These are structural tests, not
-native Word/LibreOffice rendering or accept/reject qualification. No reviewed
-document is automatically published or sent. Archive/decompression bounds and
-the existing operator review workflow remain in place.
+Native Word and LibreOffice rendering and their accept/reject behavior are not
+qualified. No reviewed document is automatically published or sent.
+Archive/decompression bounds and the operator review workflow still apply.

@@ -52,7 +52,5 @@ has already allocated its response before the adapter can inspect it, and its
 own implementation controls cancellation. Do not use that compatibility seam
 to claim bounded allocation or cancellation of arbitrary third-party code.
 
-Local tests exercise actual downstream sockets, a real loopback upstream,
-controlled partial failures, byte caps, backpressure, cancellation, shutdown
-and generated route/auth/header parity. They do not qualify live provider
-behavior, hostile operating-system resource exhaustion, or production load.
+Live provider behavior, hostile operating-system resource exhaustion and
+production load are not qualified.

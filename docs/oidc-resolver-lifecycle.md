@@ -29,6 +29,5 @@ and local/session authentication retain ordinary worker capacity. Network and
 DNS behavior remain subject to the HTTP client's timeout semantics; this is
 bounded admission, not cancellation of an operating-system thread.
 
-Local tests use generated RSA signatures and fake JWKS responses, plus a blocked
-verifier alongside the actual ASGI liveness route. No external identity provider
-or production key-rotation deployment is exercised by those tests.
+External identity providers and production key-rotation deployments are not
+qualified.

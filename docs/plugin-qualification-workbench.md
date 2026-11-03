@@ -44,7 +44,7 @@ The Plugins page supplies a sample shape for each real interface:
   once with a deadline. Connection-only servers have no inspectable version and
   cannot qualify until an exact local server entry is configured. Unsupported
   launch forms must be bundled for the image; no live endpoint is substituted.
-  The host now owns its child process tree, bounds RPC messages and process output,
+  The host owns its child process tree, bounds RPC messages and process output,
   polls cancellation/deadlines, and never repeats a Call after a transport failure.
   Typed unknown outcomes prevent outer tool retries, including read-looking names.
 

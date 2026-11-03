@@ -24,10 +24,8 @@ complete SQL digest for this retirement. An extra destructive statement, altered
 SQL or the same statements at another version still refuses. This does not
 relax the general additive-only or released-migration rules.
 
-Actual local SQLite and cached PostgreSQL 16 upgrades preserved authoritative
-message and conversation rows byte for byte, including legacy plain text and
-sealed Unicode. Native append, history, task search, tenant isolation and current
-reopens passed. A newer schema was refused. These checks establish the named
-local upgrade paths, not compatibility with custom SQL, mixed old binaries or
-every customer database. Removing derived objects does not itself shrink the
+The supported upgrade paths are SQLite and PostgreSQL 16. They preserve
+authoritative message and conversation rows byte for byte, including legacy
+plain text and sealed Unicode, and a newer schema is refused. Custom SQL, mixed
+old binaries and modified customer databases are not supported upgrade paths. Removing derived objects does not itself shrink the
 physical database file; no automatic vacuum is added.

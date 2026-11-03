@@ -10,9 +10,9 @@ The queue creates a successor and records the parent's `successor_id` and legacy
 schedule/occurrence pair. Retries use the stored link even when the successor has
 already run, been cancelled or been purged. Mutable handler checkpoints do not
 change the schedule template; `start_goal` checkpoints are not copied to future goals.
-Cron and timezone calculations retain the existing next-future-occurrence behavior.
+Cron and timezone calculations use next-future-occurrence behavior.
 
-`JobQueue.set_payload` now requires `expected_attempts`. It returns `False` unless
+`JobQueue.set_payload` requires `expected_attempts`. It returns `False` unless
 that attempt still owns a running row. Handlers must stop when it returns `False`;
 they must not continue business execution after losing their checkpoint lease.
 The built-in worker does this. Rearm raises `LeaseLost` for a stale attempt. This
@@ -60,9 +60,8 @@ never reruns the historical business action. **History → Download audit histor
 exports definition decisions and retained occurrence states. Ordinary queue
 retention still bounds occurrence history; definition versions remain durable.
 
-The direct UI and API use the existing queue reconciliation transaction. Copilot
-operation routing for schedule management is not yet connected and must not claim
-that it performed these changes.
+The direct UI and API use the queue reconciliation transaction. Copilot does not
+manage schedules and must not claim that it performed these changes.
 
 ## Explicit local operator reconciliation
 

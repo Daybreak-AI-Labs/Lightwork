@@ -52,13 +52,11 @@ unknown states are distinct. If lookup fails, keep the item unresolved, check
 source access and retry; a manual advanced source-position review remains
 available. Normal work still requires the separate final recovery decision.
 
-The existing workspace-recovery setting, global administrator permission,
-current recovery context, configured channel enablement and exact account
-binding govern lookup. No new provider credentials or broader source access are
-introduced. Installed-source qualification remains separate from mocked local
-tests.
-Native file and archive tests, API admission tests and synthetic browser checks
-are separate from authenticated installed-application acceptance.
+The workspace-recovery setting, global administrator permission, current
+recovery context, configured channel enablement and exact account binding govern
+lookup. Lookup uses no additional provider credentials or broader source access.
+Lookup against installed sources and the authenticated installed application
+are not qualified.
 
 ## Implementation and qualification
 

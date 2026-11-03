@@ -43,7 +43,7 @@ and restoring or resolving a record never authorizes replay of its old work.
 Polling records require a current source watermark to avoid consuming old
 messages as new after restore.
 
-Validation is local. Actual local filesystem/SQLite and least-privilege PostgreSQL authorities are exercised with synthetic provider/agent transports. Successful SDK import and local adapter tests do not qualify live provider delivery.
+Live provider delivery is not qualified; the local filesystem, SQLite and least-privilege PostgreSQL authorities are the supported stores.
 
 Adapter specifics are in [Gateway recovery](channel-gateway-recovery.md) for
 Slack, Telegram, Discord, Matrix and iMessage, and [Bounded social polling](channel-polling.md)
