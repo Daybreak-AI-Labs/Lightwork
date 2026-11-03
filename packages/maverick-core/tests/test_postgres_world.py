@@ -2265,6 +2265,7 @@ def test_named_tenant_cannot_mutate_legacy_or_link_foreign_rows(world, monkeypat
         with world._tx() as cur:
             cur.execute("DELETE FROM turns WHERE conversation_id=%s", (conversation,))
             cur.execute("DELETE FROM conversations WHERE id=%s", (conversation,))
+            cur.execute("DELETE FROM artifacts WHERE goal_id IN (%s,%s)", (legacy, own))
             cur.execute("DELETE FROM goals WHERE id IN (%s,%s)", (legacy, own))
             cur.execute("DELETE FROM projects WHERE id IN (%s,%s)", (legacy_project, own_project))
 
