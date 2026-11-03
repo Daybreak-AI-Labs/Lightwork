@@ -495,14 +495,6 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "max_citations_per_answer",
         "min_confidence_bps",
     },
-    "ai_cloud_agent_governance": {
-        "enable",
-        "enabled_providers",
-        "databricks_framework_enable",
-        "max_records_per_sync",
-        "max_events_per_batch",
-        "retention_seconds",
-    },
     "ai_identity_governance_connectors": {
         "enable",
         "entra",
@@ -728,11 +720,6 @@ _INTEGER_KEYS: dict[str, set[str]] = {
         "max_citations_per_answer",
         "min_confidence_bps",
     },
-    "ai_cloud_agent_governance": {
-        "max_records_per_sync",
-        "max_events_per_batch",
-        "retention_seconds",
-    },
     "administration_document_access": {
         "default_ttl_seconds",
         "max_ttl_seconds",
@@ -806,7 +793,6 @@ _BOOL_KEYS: dict[str, set[str]] = {
     },
     "automation_import": {"enable", "create_schedules"},
     "ai_vendor_risk": {"portal_enable"},
-    "ai_cloud_agent_governance": {"databricks_framework_enable"},
     "assessment_evidence_autopopulation": {"apply_enabled"},
     "governance_agents": {"context_projection_enable"},
     "models": {"cascade"},
@@ -1757,9 +1743,6 @@ _NESTED_INTEGER_BOUNDS: dict[tuple[tuple[str, ...], str], tuple[int, int]] = {
         1,
         10_000,
     ),
-    (("ai_cloud_agent_governance",), "max_records_per_sync"): (1, 1_000_000),
-    (("ai_cloud_agent_governance",), "max_events_per_batch"): (1, 100_000),
-    (("ai_cloud_agent_governance",), "retention_seconds"): (3_600, 315_360_000),
     (("ai_governance_loop",), "poll_seconds"): (5, 3_600),
     (("ai_governance_loop",), "batch_size"): (1, 500),
     (("ai_governance_loop",), "lease_seconds"): (30, 3_600),
@@ -3418,36 +3401,6 @@ def _lint_custody_and_cloud(cfg: dict) -> list[Finding]:
                 "assessment evidence proposals require ai_evidence_analysis.enable = true",
             )
         )
-    if _table_enabled(cfg, ("ai_cloud_agent_governance",)):
-        required_cloud_authorities = (
-            ("ai_inventory",),
-            ("ai_policy_management",),
-            ("ai_runtime_guardrails",),
-        )
-        missing = [
-            ".".join(path) for path in required_cloud_authorities if not _table_enabled(cfg, path)
-        ]
-        if missing:
-            findings.append(
-                _nested_error(
-                    "ai_cloud_agent_governance",
-                    "enable",
-                    "cloud-agent governance requires enabled authority: " + ", ".join(missing),
-                )
-            )
-        cloud_table = _at_path(cfg, ("ai_cloud_agent_governance",))
-        if (
-            isinstance(cloud_table, dict)
-            and cloud_table.get("databricks_framework_enable") is True
-            and not _table_enabled(cfg, ("policy_packs",))
-        ):
-            findings.append(
-                _nested_error(
-                    "ai_cloud_agent_governance",
-                    "databricks_framework_enable",
-                    "Databricks framework activation requires policy_packs.enable = true",
-                )
-            )
     return findings
 
 
@@ -4356,11 +4309,6 @@ def _lint_governance_capabilities(cfg: dict) -> list[Finding]:
             ("ai_evidence_analysis",),
             "enabled_media_types",
             {"pdf", "jpeg", "png", "xls", "xlsx", "text"},
-        ),
-        (
-            ("ai_cloud_agent_governance",),
-            "enabled_providers",
-            {"aws_bedrock", "azure_ai_foundry", "google_vertex_ai"},
         ),
     )
     for path, key, allowed in closed_capability_lists:

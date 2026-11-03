@@ -24,7 +24,7 @@ catalogue of built features and tools.
 | [Evaluation and benchmarks](#evaluation-and-benchmarks) | prose |
 | [Observability and reliability](#observability-and-reliability) | prose |
 | [UX surfaces](#ux-surfaces) | 50 |
-| [Packaged governance, evidence and external privacy control planes](#packaged-governance-evidence-and-external-privacy-control-planes) | 5 |
+| [Packaged governance, evidence and external privacy control planes](#packaged-governance-evidence-and-external-privacy-control-planes) | 4 |
 | [Software development: the code vault](#software-development-the-code-vault) | 2 |
 | [Information-flow control](#information-flow-control) | 1 |
 | [Adaptive immunity](#adaptive-immunity) | 5 |
@@ -32,7 +32,7 @@ catalogue of built features and tools.
 | [Distribution and install](#distribution-and-install) | 19 |
 | [Customer workflow completion and readiness](#customer-workflow-completion-and-readiness) | 22 in 24 subsections |
 
-456 entries in 19 sections. This block is generated: `python scripts/features_toc.py --write` (the test suite fails when it is stale).
+455 entries in 19 sections. This block is generated: `python scripts/features_toc.py --write` (the test suite fails when it is stale).
 <!-- toc:end -->
 
 ## Agent kernel and orchestration
@@ -5384,23 +5384,6 @@ tested without spawning py-spy.
   stored status (for example `review_approved`). Do not treat a pre-upgrade
   approved record as released; run a new analysis for each one that still needs
   review.
-- **Cloud-agent governance research preview (not available in the shipped dashboard)**
-  (`ai_cloud_agent_governance.py`, informational dashboard page
-  `/assurance/cloud-agents`) — experimental
-  provider contracts normalize AWS Bedrock, Azure AI Foundry and Google Vertex
-  inventories into opaque tenant/scope references with revision manifests,
-  observability records, policy evaluations, enforcement intents, signed
-  adapter receipts and later inventory reconciliation. Azure has an exact
-  hosted-agent disable mapping; unresolved/unsafe Bedrock operations and
-  generic Vertex mutations fail closed. The Databricks path supports immutable
-  content-free control mappings, independent review, evidence links,
-  attestation and activation. Canonical state is still process-local in the
-  shipped composition; credentials, production transports, broad provider
-  writes, licensed framework prose, certification and live acceptance are not
-  included. The production runtime intentionally refuses enabled operation
-  until durable canonical state and provider composition ship. Settings and the
-  installer therefore do not offer an enable control. The API remains
-  fail-closed and injectable for controlled development tests.
 - **Assessment-question comments** (`assessment.py`, assessment-session API) —
   create audited, bounded comments only for section/question pairs pinned to
   the saved questionnaire and retrieve deterministic bounded pages ordered by

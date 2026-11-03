@@ -131,8 +131,6 @@ def test_pick_security_suite_safe_defaults(monkeypatch):
         "ai_dynamic_risk": False,
         "ai_policy_management": False,
         "ai_runtime_guardrails": False,
-        "ai_cloud_agent_governance": False,
-        "databricks_ai_security_framework": False,
         "ai_governance_loop": False,
         "ai_explainability": False,
         "ai_conformity_workflow": False,
@@ -306,8 +304,6 @@ def test_pick_security_suite_response_is_separate_opt_in(monkeypatch):
     assert picked["ai_dynamic_risk"] is True
     assert picked["ai_policy_management"] is True
     assert picked["ai_runtime_guardrails"] is True
-    assert picked["ai_cloud_agent_governance"] is False
-    assert picked["databricks_ai_security_framework"] is False
     assert picked["ai_governance_loop"] is True
     assert picked["ai_explainability"] is True
     assert picked["ai_conformity_workflow"] is True

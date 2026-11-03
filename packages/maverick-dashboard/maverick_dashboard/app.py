@@ -1857,9 +1857,6 @@ app.add_middleware(RequestSizeLimitMiddleware)
 from .agent_control_plane_page import (  # noqa: E402
     create_agent_control_plane_page_router,
 )
-from .ai_cloud_agent_governance_workbench import (  # noqa: E402
-    create_ai_cloud_agent_governance_workbench_router,
-)
 from .ai_entity_tasks_page import create_ai_entity_tasks_page_router  # noqa: E402
 from .ai_evidence_analysis_page import (  # noqa: E402
     create_ai_evidence_analysis_page_router,
@@ -1916,7 +1913,6 @@ from .trust_receipts_page import (  # noqa: E402
     create_trust_receipts_page_router,
 )
 
-app.include_router(create_ai_cloud_agent_governance_workbench_router(templates))
 app.include_router(create_tenant_select_page_router(templates))
 app.include_router(create_ai_evidence_analysis_page_router(templates))
 app.include_router(create_assessment_evidence_autopopulation_page_router(templates))
@@ -14320,7 +14316,6 @@ async def shell_copilot_js() -> FileResponse:
 @app.get("/static/lightwork-privacy-discovery-data-use.js")
 @app.get("/static/lightwork-runtime-enforcement.js")
 @app.get("/static/lightwork-draft-recovery.css")
-@app.get("/static/lightwork-ai-cloud-agent-governance.js")
 @app.get("/static/lightwork-governance-agents.js")
 @app.get("/static/lightwork-knowledge-library.js")
 @app.get("/static/lightwork-tabs.js")

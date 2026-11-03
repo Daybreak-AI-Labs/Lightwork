@@ -181,7 +181,6 @@ ROWS = [
     ("AI evidence analysis", "Analyse des preuves par IA", "KI-Nachweisanalyse", "AIによる証拠分析", "AI证据分析"),
     ("Suggested assessment answers", "Réponses d’évaluation suggérées", "Vorgeschlagene Bewertungsantworten", "評価の回答候補", "建议的评估答案"),
     ("AI system tasks", "Tâches des systèmes d’IA", "Aufgaben für KI-Systeme", "AIシステムのタスク", "AI系统任务"),
-    ("Cloud AI agents", "Agents d’IA dans le cloud", "KI-Agenten in der Cloud", "クラウドのAIエージェント", "云端AI智能体"),
     ("California DROP requests", "Demandes DROP de Californie", "Kalifornische DROP-Anfragen", "カリフォルニア州のDROPリクエスト", "加州DROP请求"),
     ("Security & GRC", "Sécurité et GRC", "Sicherheit und GRC", "セキュリティとGRC", "安全与GRC"),
     ("AI vendor onboarding", "Intégration des fournisseurs IA", "Aufnahme von KI-Anbietern", "AIベンダーの導入", "AI供应商接入"),

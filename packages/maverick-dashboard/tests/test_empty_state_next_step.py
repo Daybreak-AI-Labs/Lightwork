@@ -41,7 +41,6 @@ VALUES = {
     ("usability_survey.html", "None yet"): "median-time cell of a first-session row",
     ("users.html", "No description yet."): "role description field",
     ("lightwork-agent-control-plane.js", "No agents or people yet"): "select placeholder",
-    ("lightwork-ai-cloud-agent-governance.js", "No policies are available from your policy service yet"): "select placeholder",
     ("lightwork-ai-entity-tasks.js", "No AI systems in inventory yet"): "select placeholder",
     ("lightwork-compliance-scope-actions.js", "None yet"): "task plan cell",
     ("lightwork-feature-actions.js", "None yet"): "departments summary field",

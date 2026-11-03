@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
-from maverick_dashboard import settings_all_page as settings_page
 from maverick_dashboard import settings_catalog as catalog
 from maverick_dashboard import settings_catalog_governance as governance
 from maverick_dashboard.app import app
@@ -23,9 +22,7 @@ client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http:/
 API = "/api/v1/settings/catalog"
 ROWS = tuple(governance.entries(catalog.S, catalog.C, catalog.Column))
 IDS = {row.id for row in ROWS}
-# Cloud agent oversight is still in development: its rows are listed but refused.
-UNAVAILABLE = tuple(row for row in ROWS if row.section in settings_page._UNAVAILABLE_SETTING_SECTIONS)
-SAVEABLE = tuple(row for row in ROWS if row not in UNAVAILABLE)
+SAVEABLE = ROWS
 SAVEABLE_IDS = {row.id for row in SAVEABLE}
 WEAKENING = tuple(row for row in SAVEABLE if row.warning)
 _ENV_TO_CLEAR = (
@@ -215,8 +212,6 @@ _TOGETHER = {
 def test_every_row_saves_reads_back_and_resets(audit_rows):
     from maverick import config
 
-    # The Databricks check needs cloud oversight, a row of another group.
-    _base('[ai_cloud_agent_governance]\nenable = true\nenabled_providers = ["aws_bedrock"]\n')
     changes = [{"id": row.id, "value": _TOGETHER_SAMPLES.get(row.id, _sample(row))}
                for row in SAVEABLE]
     r = _save(changes, confirm=True)
@@ -256,13 +251,6 @@ def test_every_row_saves_reads_back_and_resets(audit_rows):
 def test_invalid_values_are_refused(setting):
     r = _save([{"id": setting.id, "value": _invalid(setting)}], confirm=True)
     assert r.status_code == 400, (setting.id, r.text)
-    assert not catalog.lookup(_loaded(), setting.path)[0]
-
-
-@pytest.mark.parametrize("setting", UNAVAILABLE, ids=lambda s: s.id)
-def test_rows_still_in_development_are_refused(setting):
-    r = _save([{"id": setting.id, "value": _sample(setting)}], confirm=True)
-    assert r.status_code == 409 and "still in development" in r.json()["detail"], setting.id
     assert not catalog.lookup(_loaded(), setting.path)[0]
 
 

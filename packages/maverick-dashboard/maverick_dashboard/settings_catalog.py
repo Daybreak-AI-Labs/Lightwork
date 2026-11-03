@@ -1100,14 +1100,6 @@ SETTINGS: tuple[Setting, ...] = (
     S("shoring", "enable", "Book of work and service levels",
       "Show the book of work, measured service levels and the exception desk.",
       "toggle", "Integrations", True, "maverick.shoring"),
-    S("ai_cloud_agent_governance", "enable", "Oversee cloud AI agents",
-      "Keep an inventory of the AI agents your cloud accounts run and govern them. Choose at least one cloud below.",
-      "toggle", "Integrations", False, "maverick.ai_cloud_agent_governance"),
-    S("ai_cloud_agent_governance", "enabled_providers", "Clouds to oversee",
-      "The cloud services whose AI agents are brought under oversight.",
-      "multiselect", "Integrations", [], "maverick.ai_cloud_agent_governance",
-      choices=(("aws_bedrock", "Amazon Bedrock"), ("azure_ai_foundry", "Microsoft Azure AI Foundry"),
-               ("google_vertex_ai", "Google Vertex AI"))),
 
     # ------------------------------------------------------------- Performance
     S("query_limits", "timeout_seconds", "Time limit for data look-ups",
@@ -2507,10 +2499,8 @@ BY_ID: dict[str, Setting] = {s.id: s for s in SETTINGS}
 CATALOG_TOP_SECTIONS: tuple[str, ...] = tuple(sorted({s.top for s in SETTINGS}))
 
 # Settings that must agree with another setting before the kernel accepts
-# them: enabling cloud-agent oversight without choosing a cloud makes the
-# module's configuration invalid, so the pair is validated together.
+# them, so the pair is validated together.
 _REQUIRES_NONEMPTY: dict[str, str | tuple[str, ...]] = {
-    "ai_cloud_agent_governance.enable": "ai_cloud_agent_governance.enabled_providers",
     # Strict residency refuses to start without a declared region.
     "residency.strict": "residency.region",
     # The gateway and the tool gateway refuse to start without somewhere to

@@ -137,7 +137,6 @@ KNOWN_SECTIONS = frozenset({
     "ai_media_provenance",
     "governance_agents",
     "ai_evidence_analysis",
-    "ai_cloud_agent_governance",
     "ai_identity_governance_connectors",
     "ai_entity_tasks",
     "assessment_evidence_autopopulation",

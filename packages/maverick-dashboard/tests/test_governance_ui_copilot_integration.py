@@ -31,7 +31,6 @@ GOVERNANCE_PAGES = {
         "/static/lightwork-assessment-evidence-autopopulation.js",
     },
     "/administration/document-vault": {"/static/lightwork-governed-document-vault.js"},
-    "/assurance/cloud-agents": set(),
     "/privacy/drop": {"/static/lightwork-privacy-drop-management.js"},
     "/privacy/data-discovery": {
         "/static/lightwork-privacy-data-discovery.css",
@@ -193,7 +192,6 @@ def test_all_copilot_contexts_have_registered_pages_and_new_role_nav_links(
         "/ai-evidence-analysis": "view",
         "/assess/evidence-autopopulation": "view",
         "/administration/document-vault": "view",
-        "/assurance/cloud-agents": "operate",
         "/privacy/drop": "view",
         "/privacy/data-discovery": "view",
         "/governance/inventory": "view",

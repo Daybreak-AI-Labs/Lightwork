@@ -121,7 +121,7 @@ def _row_ids(html: str) -> list[str]:
 
 
 def _available_settings(catalog):
-    return [s for s in catalog.SETTINGS if s.section != "ai_cloud_agent_governance"]
+    return list(catalog.SETTINGS)
 
 
 def test_first_load_is_the_list_of_groups_without_their_settings():
@@ -378,9 +378,6 @@ def test_invalid_values_are_refused_with_a_plain_message(audit_rows):
     assert r.status_code == 400
     assert r.json()["message"].startswith("Actions per task:")
     assert _save([{"id": "no.such_setting", "value": 1}]).status_code == 400
-    r = _save([{"id": "ai_cloud_agent_governance.enable", "value": True}])
-    assert r.status_code == 409 and "cannot be turned on" in r.json()["message"]
-    assert "ai_cloud_agent_governance" not in _loaded()
     assert audit_rows == []
 
 

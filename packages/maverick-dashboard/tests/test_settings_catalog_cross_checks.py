@@ -66,8 +66,6 @@ def _accepted(module, values: dict) -> None:
     ({"ai_cost_roi.collector_lookback_days": 120,
       "ai_cost_roi.collector_limits.max_period_days": 93},
      "can't be more than longest period one collection covers"),
-    ({"ai_cloud_agent_governance.databricks_framework_enable": True},
-     "turn on “.*” first"),
 ])
 def test_governance_combinations_the_kernel_rejects_are_refused(values, words):
     _refused(governance, values, words)
@@ -82,8 +80,6 @@ def test_governance_combinations_the_kernel_rejects_are_refused(values, words):
     {f"{_ENTRA}.retry_base_seconds": 60, f"{_ENTRA}.retry_max_seconds": 60},
     {"ai_cost_roi.collector_lookback_days": 93,
      "ai_cost_roi.collector_limits.max_period_days": 93},
-    {"ai_cloud_agent_governance.enable": True,
-     "ai_cloud_agent_governance.databricks_framework_enable": True},
 ])
 def test_governance_combinations_the_kernel_accepts_pass(values):
     _accepted(governance, values)

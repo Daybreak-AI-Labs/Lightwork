@@ -14665,9 +14665,6 @@ async def marketplace_connectors_api(request: Request, q: str = "") -> dict:
 from .administration_document_access_api import (  # noqa: E402
     router as administration_document_access_router,
 )
-from .ai_cloud_agent_governance_api import (  # noqa: E402
-    router as ai_cloud_agent_governance_router,
-)
 from .ai_entity_tasks_api import router as ai_entity_tasks_router  # noqa: E402
 from .ai_evidence_analysis_api import router as ai_evidence_analysis_router  # noqa: E402
 from .ai_evidence_analysis_authority_api import (  # noqa: E402
@@ -14782,7 +14779,6 @@ from .intent_value_api import router as intent_value_router  # noqa: E402
 router.include_router(intent_value_router)
 router.include_router(flow_recipe_lineage_router)
 router.include_router(flow_operator_review_router)
-router.include_router(ai_cloud_agent_governance_router)
 router.include_router(ai_evidence_analysis_router)
 router.include_router(ai_evidence_analysis_authority_router)
 from .people_picker_api import router as people_picker_router  # noqa: E402

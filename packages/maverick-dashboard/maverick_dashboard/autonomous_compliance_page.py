@@ -25,7 +25,6 @@ MODULE_SUMMARIES: dict[str, str] = {
     "/governance-agents": "Ready-made agents that keep your AI inventory and reviews up to date.",
     "/ai-entity-tasks": "Review and fix-up tasks for each AI system you use.",
     "/ai-evidence-analysis": "Read uploaded documents and pull out evidence about your AI systems.",
-    "/assurance/cloud-agents": "Keep track of AI agents running in your cloud accounts.",
     "/privacy": "Assessments, vendors, data requests, breaches and consent in one place.",
     "/privacy/rights-orchestration": "Handle requests from people to see, correct or delete their data.",
     "/privacy/data-discovery": "Scan your storage to find where personal data lives.",

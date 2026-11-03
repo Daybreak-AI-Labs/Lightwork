@@ -911,25 +911,6 @@ def _governance_modules(S) -> tuple:
           "maverick_dashboard.customer_sandbox_composition", minimum=1, maximum=2147483647,
           integer=True, unit="", **sandbox),
 
-        S("ai_cloud_agent_governance", "databricks_framework_enable",
-          "Check cloud agents against the Databricks AI security framework",
-          "Also map overseen cloud AI agents to the Databricks AI Security Framework. Needs "
-          "cloud AI agent oversight on.", "toggle", "Integrations", False,
-          "maverick.ai_cloud_agent_governance"),
-        S("ai_cloud_agent_governance", "max_records_per_sync", "Cloud agents read per refresh",
-          "The most AI agents read from one cloud in one refresh.", "number", "Integrations",
-          10000, "maverick.ai_cloud_agent_governance", minimum=1, maximum=1000000,
-          integer=True, unit="agents"),
-        S("ai_cloud_agent_governance", "max_events_per_batch", "Cloud agent events handled at a time",
-          "The most agent events handled in one batch.", "number", "Integrations", 5000,
-          "maverick.ai_cloud_agent_governance", minimum=1, maximum=100000, integer=True,
-          unit="events"),
-        S("ai_cloud_agent_governance", "retention_seconds", "Keep cloud agent records for",
-          "How long records about cloud AI agents are kept.", "number", "Integrations",
-          31536000, "maverick.ai_cloud_agent_governance", minimum=1, maximum=3650,
-          integer=True, scale=86400, unit="days", weaker="lower",
-          warning="Records about cloud AI agents will be deleted sooner."),
-
         S("assessments", "sources", "Where assessments look for documents",
           "The connected document sources assessments search, in this order. Only sources "
           "with sign-in details are used.", "multiselect", "Memory & learning",
@@ -991,10 +972,6 @@ def cross_checks(effective: dict, by_id: dict, error: type) -> None:
                    f"{outcome}_max_seconds")
     _check_ordered(effective, by_id, error, "ai_cost_roi.collector_lookback_days",
                    "ai_cost_roi.collector_limits.max_period_days")
-    oversight, databricks = ("ai_cloud_agent_governance.enable",
-                             "ai_cloud_agent_governance.databricks_framework_enable")
-    if effective.get(databricks) is True and effective.get(oversight) is not True:
-        raise error(f"{by_id[databricks].label}: turn on “{by_id[oversight].label}” first.")
 
 
 def _check_file_readers(effective, by_id, error) -> None:

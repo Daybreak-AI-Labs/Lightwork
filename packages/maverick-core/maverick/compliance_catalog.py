@@ -107,8 +107,6 @@ _SUITES: tuple[Suite, ...] = (
             Module("AI Entity Tasks", "/ai-entity-tasks", STATUS_SHIPPED),
             # TRC-24 Partial: parser sandbox unproven on the shipped host.
             Module("AI Evidence Analysis", "/ai-evidence-analysis", STATUS_PREVIEW),
-            # AG-25 / AG-26 Partial: no provider tenant has accepted effects.
-            Module("Cloud Agent Governance", "/assurance/cloud-agents", STATUS_PREVIEW),
         ),
     ),
     Suite(

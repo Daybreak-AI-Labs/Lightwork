@@ -154,12 +154,8 @@ def test_weakening_directions():
 
 def test_cross_checks_refuse_configurations_the_kernel_rejects():
     with pytest.raises(catalog.SettingError):
-        catalog.cross_checks({"ai_cloud_agent_governance.enable": True,
-                              "ai_cloud_agent_governance.enabled_providers": []})
-    catalog.cross_checks({"ai_cloud_agent_governance.enable": True,
-                          "ai_cloud_agent_governance.enabled_providers": ["aws_bedrock"]})
-    with pytest.raises(catalog.SettingError):
         catalog.cross_checks({"residency.strict": True, "residency.region": ""})
+    catalog.cross_checks({"residency.strict": True, "residency.region": "eu"})
 
 
 def test_admin_policy_defaults_match_the_kernel():

@@ -687,26 +687,6 @@ _CONTEXTS = tuple(
             ),
         ),
         _registered(
-            path="/assurance/cloud-agents",
-            summary=(
-                "Cloud agent oversight is a research preview and is not available "
-                "in this installation."
-            ),
-            capabilities=(
-                "Explain the current availability of cloud agent oversight.",
-            ),
-            boundaries=(
-                "This installation cannot list agents in cloud accounts or send changes to them.",
-                "Changing workspaces or settings cannot make this preview available.",
-            ),
-            next_steps=(
-                "If something else isn't working, open Help and use Prepare support report.",
-            ),
-            suggested_questions=(
-                "Can I oversee cloud agents in this installation?",
-            ),
-        ),
-        _registered(
             path="/ai-evidence-analysis",
             summary=(
                 "Extract bounded technical facts from an attested artifact and route the "
@@ -2208,7 +2188,6 @@ _PANEL_TIPS = {
     "/users/departures": "Deactivating local access does not end access granted by outside services.",
     "/companion/admin": "You need workspace administrator access and current employee membership to change companion policy.",
     "/companion": "A workspace administrator must enroll you before you can use a companion.",
-    "/assurance/cloud-agents": "This installation cannot list or change agents in cloud accounts.",
     "/ai-evidence-analysis": "Results help review evidence. They do not certify compliance or provide legal advice.",
     "/assess/evidence-autopopulation": "A proposed answer does not change an assessment or its score until applied.",
     "/administration/document-vault": "Local encrypted storage does not confirm that outside backup or recovery has been tested.",

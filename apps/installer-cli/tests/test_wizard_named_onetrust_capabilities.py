@@ -38,8 +38,6 @@ def test_named_capability_prompts_enable_safe_dependencies(monkeypatch) -> None:
     assert picked["ai_evidence_analysis"] is True
     assert picked["assessment_evidence_autopopulation"] is True
     assert picked["assessment_evidence_apply"] is True
-    assert picked["ai_cloud_agent_governance"] is False
-    assert picked["databricks_ai_security_framework"] is False
     assert picked["evidence_gateway"] is True
     assert picked["ai_inventory"] is True
     assert picked["ai_policy_management"] is False
@@ -92,18 +90,6 @@ def test_named_capability_prompts_enable_safe_dependencies(monkeypatch) -> None:
         "max_pdf_bytes": 524_288,
         "retention_seconds": 31_536_000,
         "download_token_seconds": 300,
-    }
-    assert rendered["ai_cloud_agent_governance"] == {
-        "enable": False,
-        "enabled_providers": [
-            "aws_bedrock",
-            "azure_ai_foundry",
-            "google_vertex_ai",
-        ],
-        "databricks_framework_enable": False,
-        "max_records_per_sync": 10_000,
-        "max_events_per_batch": 5_000,
-        "retention_seconds": 31_536_000,
     }
     assert rendered["ai_inventory"]["connectors"] == [
         "bedrock",
@@ -201,8 +187,7 @@ def test_direct_writer_keeps_named_capabilities_default_off() -> None:
     assert rendered["ai_evidence_analysis"]["enable"] is False
     assert rendered["assessment_evidence_autopopulation"]["enable"] is False
     assert rendered["assessment_evidence_autopopulation"]["apply_enabled"] is False
-    assert rendered["ai_cloud_agent_governance"]["enable"] is False
-    assert rendered["ai_cloud_agent_governance"]["databricks_framework_enable"] is False
+    assert "ai_cloud_agent_governance" not in rendered
     assert rendered["administration_document_access"]["enable"] is False
     assert rendered["incident_attachment_metadata"]["enable"] is False
     assert lint_config(rendered) == []
@@ -221,8 +206,6 @@ def test_direct_writer_derives_fail_closed_dependencies() -> None:
                     "ai_evidence_analysis": True,
                     "assessment_evidence_autopopulation": True,
                     "assessment_evidence_apply": True,
-                    "ai_cloud_agent_governance": True,
-                    "databricks_ai_security_framework": True,
                 }
             )
         )
@@ -232,7 +215,4 @@ def test_direct_writer_derives_fail_closed_dependencies() -> None:
     assert rendered["assessment_evidence_autopopulation"]["apply_enabled"] is True
     assert rendered["ai_entity_tasks"]["enable"] is True
     assert rendered["ai_inventory"]["enable"] is True
-    assert rendered["ai_policy_management"]["enable"] is True
-    assert rendered["ai_runtime_guardrails"]["enable"] is True
-    assert rendered["policy_packs"]["enable"] is True
     assert lint_config(rendered) == []

@@ -808,17 +808,6 @@ PAGES: tuple[dict, ...] = (
         "in_nav": True,
     },
     {
-        "path": "/assurance/cloud-agents",
-        "label": "Cloud AI agents",
-        "aliases": "Cloud Agent Governance",
-        "group": "AI oversight",
-        "icon": "shield",
-        "floor": "operate",
-        "default": "operate",
-        "in_nav": True,
-        "ready": False,  # Shipped runtime has no durable governance authority.
-    },
-    {
         "path": "/privacy/drop",
         "label": "California DROP requests",
         "group": "Privacy",
@@ -1565,7 +1554,6 @@ PAGE_AREAS: dict[str, tuple[str, str]] = {
     "/ai-evidence-analysis": ("Risk & compliance", "Assessments"),
     "/assess/evidence-autopopulation": ("Risk & compliance", "Assessments"),
     "/ai-entity-tasks": ("Risk & compliance", "AI risk"),
-    "/assurance/cloud-agents": ("Rules & safety", "Outside agents"),
     "/privacy/drop": ("Privacy", "Requests"),
     "/security": ("Risk & compliance", "Security"),
     "/third-party/vendor-onboarding": ("Risk & compliance", "Vendors"),

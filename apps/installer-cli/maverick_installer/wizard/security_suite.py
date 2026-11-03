@@ -547,22 +547,6 @@ def pick_security_suite() -> dict[str, Any]:
         "runtime receipts? Raw runtime content is never persisted by this plane.",
         default=False,
     )
-    # The canonical cloud-agent authority is not durable in the shipped
-    # runtime. A wizard toggle would write an enabled config that cannot run.
-    ai_cloud_agent_governance = False
-    databricks_ai_security_framework = False
-    if ai_cloud_agent_governance:
-        ai_inventory = True
-        ai_policy_management = True
-        ai_runtime_guardrails = True
-        databricks_ai_security_framework = _q_confirm(
-            "Enable the content-free, versioned Databricks AI Security Framework "
-            "mapping pack? It requires human activation and does not include "
-            "licensed framework prose or certification.",
-            default=False,
-        )
-        if databricks_ai_security_framework:
-            policy_packs = True
     ai_governance_loop = (
         ai_inventory
         and ai_dynamic_risk
@@ -999,8 +983,6 @@ def pick_security_suite() -> dict[str, Any]:
         "ai_dynamic_risk": ai_dynamic_risk,
         "ai_policy_management": ai_policy_management,
         "ai_runtime_guardrails": ai_runtime_guardrails,
-        "ai_cloud_agent_governance": ai_cloud_agent_governance,
-        "databricks_ai_security_framework": databricks_ai_security_framework,
         "ai_governance_loop": ai_governance_loop,
         "ai_explainability": ai_explainability,
         "ai_conformity_workflow": ai_conformity_workflow,
@@ -1094,15 +1076,6 @@ def _cfg_security_suite(
     assessment_evidence_apply_enabled = bool(
         assessment_evidence_enabled and security_suite.get("assessment_evidence_apply", False)
     )
-    cloud_agent_governance_enabled = bool(security_suite.get("ai_cloud_agent_governance", False))
-    databricks_framework_enabled = bool(
-        cloud_agent_governance_enabled
-        and security_suite.get("databricks_ai_security_framework", False)
-    )
-    if cloud_agent_governance_enabled:
-        inventory_connectors = list(
-            dict.fromkeys([*inventory_connectors, "bedrock", "azure_ai_foundry", "vertex_ai"])
-        )
     rendered_inventory_connectors = ", ".join(_toml_str(value) for value in inventory_connectors)
     vendor_portal_enabled = bool(
         security_suite.get("ai_vendor_risk", False)
@@ -1186,7 +1159,7 @@ def _cfg_security_suite(
         "",
         "[ai_inventory]",
         "enable = "
-        f"{'true' if security_suite.get('ai_inventory', False) or ai_entity_tasks_enabled or cloud_agent_governance_enabled else 'false'}",
+        f"{'true' if security_suite.get('ai_inventory', False) or ai_entity_tasks_enabled else 'false'}",
         f"connectors = [{rendered_inventory_connectors}]",
         "page_cap = 100",
         "record_cap = 5000",
@@ -1210,7 +1183,7 @@ def _cfg_security_suite(
         "",
         "[policy_packs]",
         "enable = "
-        f"{'true' if security_suite.get('policy_packs', False) or databricks_framework_enabled else 'false'}",
+        f"{'true' if security_suite.get('policy_packs', False) else 'false'}",
         "",
         "[governance_agents]",
         f"enable = {'true' if governance_agents_enabled else 'false'}",
@@ -1368,19 +1341,11 @@ def _cfg_security_suite(
         "",
         "[ai_policy_management]",
         "enable = "
-        f"{'true' if security_suite.get('ai_policy_management', False) or cloud_agent_governance_enabled else 'false'}",
+        f"{'true' if security_suite.get('ai_policy_management', False) else 'false'}",
         "",
         "[ai_runtime_guardrails]",
         "enable = "
-        f"{'true' if security_suite.get('ai_runtime_guardrails', False) or cloud_agent_governance_enabled else 'false'}",
-        "",
-        "[ai_cloud_agent_governance]",
-        f"enable = {'true' if cloud_agent_governance_enabled else 'false'}",
-        'enabled_providers = ["aws_bedrock", "azure_ai_foundry", "google_vertex_ai"]',
-        f"databricks_framework_enable = {'true' if databricks_framework_enabled else 'false'}",
-        "max_records_per_sync = 10000",
-        "max_events_per_batch = 5000",
-        "retention_seconds = 31536000",
+        f"{'true' if security_suite.get('ai_runtime_guardrails', False) else 'false'}",
         "",
         "[ai_governance_loop]",
         f"enable = {'true' if security_suite.get('ai_governance_loop', False) else 'false'}",

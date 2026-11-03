@@ -52,7 +52,6 @@ CANONICAL_CONTEXTS = {
     "/users/departures": "Employee departures",
     "/companion/admin": "Employee companions",
     "/companion": "My companion",
-    "/assurance/cloud-agents": "Cloud AI agents",
     "/ai-evidence-analysis": "AI evidence analysis",
     "/assess/evidence-autopopulation": "Suggested assessment answers",
     "/administration/document-vault": "Document vault",

@@ -55,18 +55,6 @@ def _valid_config() -> dict:
             "max_citations_per_answer": 32,
             "min_confidence_bps": 7_000,
         },
-        "ai_cloud_agent_governance": {
-            "enable": True,
-            "enabled_providers": [
-                "aws_bedrock",
-                "azure_ai_foundry",
-                "google_vertex_ai",
-            ],
-            "databricks_framework_enable": True,
-            "max_records_per_sync": 10_000,
-            "max_events_per_batch": 5_000,
-            "retention_seconds": 31_536_000,
-        },
         "third_party_management": {
             "enable": True,
             "intelligence": {"enable": True},
@@ -100,30 +88,20 @@ def test_named_capability_allowlists_reject_unknown_duplicate_and_empty_values()
     config = _valid_config()
     config["governance_agents"]["enabled_agents"] = ["breach_response", "unknown"]
     config["ai_evidence_analysis"]["enabled_media_types"] = []
-    config["ai_cloud_agent_governance"]["enabled_providers"] = [
-        "aws_bedrock",
-        "aws_bedrock",
-    ]
 
     messages = _messages(config)
     assert any("enabled_agents allowlist" in message for message in messages)
     assert any("enabled_media_types allowlist" in message for message in messages)
-    assert any("enabled_providers allowlist" in message for message in messages)
 
 
 def test_named_capabilities_require_their_existing_authorities() -> None:
     config = _valid_config()
     del config["evidence_gateway"]
     del config["ai_inventory"]
-    del config["ai_policy_management"]
-    del config["ai_runtime_guardrails"]
-    del config["policy_packs"]
 
     messages = _messages(config)
     assert any("packaged governance agents require" in message for message in messages)
     assert any("AI evidence analysis requires" in message for message in messages)
-    assert any("cloud-agent governance requires" in message for message in messages)
-    assert any("Databricks framework activation requires" in message for message in messages)
 
 
 def test_named_capability_limits_reject_bool_fractional_and_out_of_range_values() -> None:
@@ -133,7 +111,6 @@ def test_named_capability_limits_reject_bool_fractional_and_out_of_range_values(
     config["ai_evidence_analysis"]["max_artifacts_per_case"] = 2.5
     config["ai_evidence_analysis"]["max_authority_records"] = 3
     config["assessment_evidence_autopopulation"]["min_confidence_bps"] = 10_001
-    config["ai_cloud_agent_governance"]["max_events_per_batch"] = 100_001
     config["third_party_management"]["contracts"]["max_records"] = 0
     config["third_party_management"]["executive_reports"]["max_pdf_bytes"] = 1_024
 
@@ -143,7 +120,6 @@ def test_named_capability_limits_reject_bool_fractional_and_out_of_range_values(
     assert any("max_artifacts_per_case must be an integer" in message for message in messages)
     assert any("max_authority_records must be an integer between" in message for message in messages)
     assert any("min_confidence_bps must be an integer between" in message for message in messages)
-    assert any("max_events_per_batch must be an integer" in message for message in messages)
     assert any("max_records must be an integer between" in message for message in messages)
     assert any("max_pdf_bytes must be an integer between" in message for message in messages)
 
@@ -155,7 +131,6 @@ def test_named_capability_boolean_gates_are_strict() -> None:
     config["ai_entity_tasks"]["enable"] = "yes"
     config["ai_evidence_analysis"]["enable"] = 1
     config["assessment_evidence_autopopulation"]["apply_enabled"] = "yes"
-    config["ai_cloud_agent_governance"]["databricks_framework_enable"] = "yes"
     config["third_party_management"]["contracts"]["enable"] = "yes"
     config["third_party_management"]["executive_reports"]["enable"] = "yes"
 
@@ -171,10 +146,6 @@ def test_named_capability_boolean_gates_are_strict() -> None:
     )
     assert any(
         "assessment_evidence_autopopulation.apply_enabled must be true or false" in message
-        for message in messages
-    )
-    assert any(
-        "ai_cloud_agent_governance.databricks_framework_enable must be true or false" in message
         for message in messages
     )
     assert any(
