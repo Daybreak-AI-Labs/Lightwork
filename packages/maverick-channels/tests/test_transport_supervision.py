@@ -693,7 +693,17 @@ def test_a_conversation_blocked_behind_a_briefly_unreadable_receipt_continues(mo
     # X's send is refused, so the person's next message Y waits behind X. X
     # then cannot be read three times in a row: it no longer holds Y, and it
     # is sent once it opens again.
-    monkeypatch.setattr(transport_worker, "RETRY_DELAY", 0.05)
+    # The worker's clock is the test's, and X's failed reads start only once
+    # Y waits behind X. On the real clock the worker rescans every retry
+    # period and Y's admission runs in a thread: a runner that stalled it for
+    # three periods used up X's failed reads before Y was saved, and one that
+    # resumed the test a period late let X's retry come due first. Either way
+    # the worker rightly resent X before Y.
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(transport_worker, "RETRY_DELAY", 0.05)  # real seconds between idle scans
+    now = [0.0]
+    monkeypatch.setattr(transport_worker, "time", SimpleNamespace(monotonic=lambda: now[0]))
     state = {"x": None, "fail_left": 0}
     journal = _unreadable_journal(0, lambda record_id: False)
     readable_get = journal.get
@@ -723,10 +733,11 @@ def test_a_conversation_blocked_behind_a_briefly_unreadable_receipt_continues(mo
                                                 message_id="x"), external_id="x")
         state["x"] = x["id"]
         await until(lambda: bool(worker._blocked_conversations))
-        await asyncio.sleep(0.01)
-        state["fail_left"] = 3
-        await worker.submit(IncomingMessage(user_id="p", sender_id="p", text="Y", channel=Adapter.name,
-                                            message_id="y"), external_id="y")
+        y = await worker.submit(IncomingMessage(user_id="p", sender_id="p", text="Y", channel=Adapter.name,
+                                                message_id="y"), external_id="y")
+        await until(lambda: y["id"] in worker._retry_after)  # Y waits for X's retry
+        state["fail_left"] = 3  # before the clock moves, so no scan finds X due and readable
+        now[0] += transport_worker.RETRY_DELAY  # X's retry comes due, and Y's with it
         await until(lambda: "Y" in sends and sends.count("X") == 2)
         await worker.close()
         # Only X could not be read, so Y's reply went first: a receipt that
