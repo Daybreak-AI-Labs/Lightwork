@@ -40,7 +40,9 @@ MAX_INPUT_BYTES = 64 * 1024 * 1024   # refuse absurd inputs before any parse
 DEFAULT_TIMEOUT = 60.0
 _EVIDENCE_OUTPUT_LIMIT = 16 * 1024 * 1024
 _POSIX_RESOURCE_LIMITS = os.name == "posix"
-_RESOURCE_LIMITED_PARSERS = {"evidence_pdf_text", "spreadsheet_read", "spreadsheet_info"}
+_RESOURCE_LIMITED_PARSERS = {
+    "evidence_pdf_text", "spreadsheet_read", "spreadsheet_info", "spreadsheet_set_cell",
+}
 
 # Applied inside the child, before loading data or importing the parser. A
 # preexec_fn in the multi-threaded parent can deadlock after fork.
@@ -90,6 +92,10 @@ PARSERS: dict[str, ParserEntry] = {
     "spreadsheet_info": ParserEntry(
         name="spreadsheet_info", module="maverick.tools.spreadsheet",
         func="_isolated_xlsx_info", feeds="workspace XLSX inspection", memory_safe=False,
+    ),
+    "spreadsheet_set_cell": ParserEntry(
+        name="spreadsheet_set_cell", module="maverick.tools.spreadsheet",
+        func="_isolated_xlsx_set_cell", feeds="workspace XLSX edits", memory_safe=False,
     ),
     "image_meta": ParserEntry(
         name="image_meta",

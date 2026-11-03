@@ -156,6 +156,30 @@ def test_xlsx_reads_fail_closed_when_isolated_worker_fails(tmp_path, monkeypatch
         assert "worker unavailable" in ss._run({"op": op, "path": str(path)})
 
 
+def test_xlsx_edit_worker_failure_preserves_original(tmp_path, monkeypatch):
+    from maverick import parser_isolation
+    path = tmp_path / "book.xlsx"
+    original = b"existing workbook"
+    path.write_bytes(original)
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("worker unavailable")
+
+    monkeypatch.setattr(parser_isolation, "parse_isolated", fail)
+    result = ss._run({"op": "set_cell", "path": str(path), "cell": "A1", "value": 3})
+    assert "worker unavailable" in result
+    assert path.read_bytes() == original
+
+
+def test_macro_cell_edit_does_not_create_non_macro_workbook(tmp_path, monkeypatch):
+    from maverick import config
+    monkeypatch.setattr(config, "get_document_tools", lambda: {"macro_cell_edits": True})
+    path = tmp_path / "missing.xlsm"
+    result = ss._run({"op": "set_cell", "path": str(path), "cell": "A1", "value": 3})
+    assert "must already exist" in result
+    assert not path.exists()
+
+
 def test_xlsx_rejects_compressed_expansion_before_parser(tmp_path):
     import zipfile
 

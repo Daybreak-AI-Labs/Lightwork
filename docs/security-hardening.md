@@ -1323,12 +1323,14 @@ isolate filesystem or network access, contain subprocess descendants, or
 coordinate limits across workers. Deployments accepting untrusted PDFs still
 need operating-system process and network isolation around the service.
 
-Spreadsheet XLSX `read` and `info` operations also run archive validation and
-workbook parsing in a resource-limited child, with a 30-second timeout and two
-concurrent parser slots per service process. They fail closed where the POSIX
-resource controls are unavailable. XLSX cell edits and recalculation have
-separate parsing paths and do not yet share this isolation; the same filesystem,
-network, descendant and cross-worker limits above apply.
+Spreadsheet XLSX `read`, `info`, and edits to existing workbooks run archive
+validation and workbook parsing in a resource-limited child, with a 30-second
+timeout and two concurrent parser slots per service process. Edited workbooks
+are limited to 11 MiB and are published atomically only after the worker
+succeeds. These operations fail closed where the POSIX resource controls are
+unavailable. Recalculation has a separate parsing path and does not yet share
+this isolation; the same filesystem, network, descendant and cross-worker
+limits above apply.
 
 The interactive browser connects through the same DNS-pinning proxy used by the
 consent scanner. It refuses private addresses and permits outbound TCP only on

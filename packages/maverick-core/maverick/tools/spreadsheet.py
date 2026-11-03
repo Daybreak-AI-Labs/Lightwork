@@ -342,6 +342,33 @@ def _isolated_xlsx_info(content: bytes) -> str:
         wb.close()
 
 
+def _isolated_xlsx_set_cell(
+    content: bytes, *, cell: str, value: Any, sheet: str | None, macro: bool,
+) -> str:
+    import base64
+    _validate_xlsx(content)
+    output = io.BytesIO()
+    if macro:
+        from .office_package import WorkbookPackage
+        package = WorkbookPackage(content)
+        package.set_cell(cell, _neutralize_formula(value), sheet)
+        package.write(output)
+    else:
+        wb = _openpyxl().load_workbook(io.BytesIO(content), keep_links=False)
+        try:
+            ws = wb[sheet] if sheet and sheet in wb.sheetnames else (
+                wb.create_sheet(sheet) if sheet else wb.active
+            )
+            ws[cell] = _neutralize_formula(value)
+            wb.save(output)
+        finally:
+            wb.close()
+    result = output.getvalue()
+    if len(result) > 11 * 1024 * 1024:
+        raise ValueError("Edited workbook exceeds the 11 MiB worker output limit")
+    return base64.b64encode(result).decode("ascii")
+
+
 def _xlsx_isolated(path: Path, name: str, **kwargs) -> str:
     from ..parser_isolation import parse_isolated
     if not _XLSX_PARSER_SLOTS.acquire(timeout=0.25):
@@ -419,13 +446,20 @@ def _set_cell_operation(path, args, sheet):
         return "ERROR: set_cell requires cell (e.g. 'B2')"
     from ..file_lock import cross_process_lock
     with cross_process_lock(path, strict=True):
-        if path.suffix.lower() == ".xlsm":
-            from .office_package import WorkbookPackage
-            package = WorkbookPackage(_xlsx_snapshot(path))
-            package.set_cell(cell, _neutralize_formula(args.get("value")), sheet)
+        if path.exists():
+            import base64
+            encoded = _xlsx_isolated(
+                path, "spreadsheet_set_cell", cell=cell, value=args.get("value"),
+                sheet=sheet, macro=path.suffix.lower() == ".xlsm",
+            )
+            workbook_bytes = base64.b64decode(encoded, validate=True)
+            if len(workbook_bytes) > 11 * 1024 * 1024:
+                raise ValueError("Edited workbook exceeds the 11 MiB worker output limit")
             with _atomic_destination(path) as temporary:
-                package.write(temporary)
+                temporary.write_bytes(workbook_bytes)
         else:
+            if path.suffix.lower() == ".xlsm":
+                raise ValueError("Macro workbook must already exist for a cell edit")
             _xlsx_set_cell(path, cell, args.get("value"), sheet)
     return f"set {cell} in {path}"
 
