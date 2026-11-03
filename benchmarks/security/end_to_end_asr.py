@@ -4,8 +4,8 @@
 each labelled attack through the ACTUAL Shield chokepoint the agent invokes for
 that attack class -- `scan_input` (direct prompt injection), `scan_tool_call`
 (the agent tricked into a destructive tool call), or `scan_output` (exfil /
-indirect injection that arrives as content) -- and reports the metric the
-RUNBOOK asks for: attack-success-rate reduction.
+indirect injection that arrives as content) -- and reports attack-success-rate
+reduction.
 
   ASR_off = 1.0   (no shield: every attack reaches the agent / executes)
   ASR_on  = fraction of attacks the shield lets THROUGH at their chokepoint

@@ -16,11 +16,10 @@ regresses, ``main()`` exits 1 and the CI job goes red. Self-runnable::
 
     python benchmarks/eval_governance.py
 
-It is the falsifiable, CI-runnable half of ``benchmarks/benchmark-plan.md``:
-the unsafe-action prevention and evidence-integrity wiring, exercised against
+It exercises the unsafe-action prevention and evidence-integrity wiring against
 real machinery. This five-case smoke does not quantify the broader deterministic
 task-completion / false-positive frontier; ``eval_governance_frontier.py`` does.
-A true end-to-end completion claim still needs the plan's paid live-model arm.
+Neither suite measures end-to-end natural-language task completion.
 Every smoke scenario also asserts the *legitimate* path passes
 (``utility_ok``), so the gate can't be satisfied by a control that simply
 blocks everything.

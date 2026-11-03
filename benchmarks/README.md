@@ -61,27 +61,16 @@ All three are designed to **fail** for single-shot prompting (too
 broad, too many steps) and **succeed** for a recursive swarm with
 verify + skill distill enabled.
 
-## Does the learning actually help?
+## Does recall pick the right memory?
 
 Unlike a stateless assistant, Lightwork *retains and recalls* what it learns.
-These benchmarks make that claim falsifiable:
-
-| Benchmark | Question | Cost |
-|---|---|---|
-| `recall_precision.py` | Does relevance-gating cut injected noise without losing the right skill? | **free** (deterministic, lexical path) |
-| `moat_rigorous.py` | Holding the task fixed, is a *warm* agent (relevant prior in store) never worse — and ideally cheaper — than a *cold* one? | ~$0.5–0.7/run × 3 runs/observation |
-| `moat.py` | Original cold-vs-warm A/B (kept for history; superseded by `moat_rigorous.py`'s same-target protocol) | as above |
-
-`recall_precision.py` runs in CI (no key): it shows the relevance gate drops
-the lexical false-positive rate from **88% → 12%** with Recall@1 held at 100%
-— precision is what matters, because injecting weakly-relevant memory *regresses*
-the agent (hard negatives flip answers; large/noisy memory degrades).
-
-`moat_rigorous.py` is the paid, end-to-end test. Its primary result is
-whether *warm is never worse than cold* (the property the gate provides),
-reported as a not-worse rate + a **median** (outlier-robust) cost delta,
-with success parity. Pure aggregation is unit-tested offline
-(`test_moat_rigorous.py`); results land in `MOAT_RIGOROUS_RESULTS.md`.
+`recall_precision.py` makes the recall side of that claim falsifiable: does
+relevance-gating cut injected noise without losing the right skill? It is
+deterministic (lexical path), needs no key and runs in CI. It shows the
+relevance gate drops the lexical false-positive rate from **88% → 12%** with
+Recall@1 held at 100%. Precision is what matters, because injecting
+weakly-relevant memory *regresses* the agent (hard negatives flip answers;
+large or noisy memory degrades).
 
 ## Does the governance contain unsafe autonomy? (the control plane)
 
@@ -100,9 +89,7 @@ is allowed to *do*. `eval_governance.py` makes that falsifiable -- and, like
 
 It reports a **prevention rate** (unsafe vectors contained) *and* a **utility
 rate** (legitimate paths preserved), so it can't be gamed by a control that
-blocks everything. This is the CI-runnable half of
-[`benchmark-plan.md`](benchmark-plan.md); the
-broader governed-vs-baseline frontier is implemented by
+blocks everything. The broader governed-vs-baseline frontier is implemented by
 `eval_governance_frontier.py`. Run the fast wiring smoke standalone:
 `python benchmarks/eval_governance.py`.
 
@@ -140,8 +127,8 @@ python -m pytest -q benchmarks/test_eval_governance_frontier.py \
 ```
 
 No model, provider key, or network is used. “Task completion” here means the
-benign scripted terminal action remained admissible; natural-language agent
-completion still belongs in a later paid live-model arm. Likewise, “prevented”
+benign scripted terminal action remained admissible; the suite does not measure
+natural-language agent completion. Likewise, “prevented”
 means the called control returned a denial before the harness marked its
 simulated terminal effect admitted; the suite executes no live payment,
 deletion, or external side effect. The tracked run uses an ephemeral co-located
@@ -224,32 +211,8 @@ numbers sit side by side.
 ## Out of scope
 
 - Raw LLM accuracy (MMLU etc.) -- that measures the model, not the agent
-  system. SWE-bench runs drive the full agent; the operator runbooks are
-  [`RUNBOOK_SWE_BENCH_VERIFIED.md`](RUNBOOK_SWE_BENCH_VERIFIED.md) and
-  [`RUNBOOK_SWE_BENCH_PRO.md`](RUNBOOK_SWE_BENCH_PRO.md). No SWE-bench result
-  is published in this directory.
+  system. No SWE-bench result is published in this directory.
 - Raw red-team / prompt-injection content scanning -- that is Agent Shield's
-  territory and has its own suite
-  ([`security/RUNBOOK_SECURITY.md`](security/RUNBOOK_SECURITY.md)). The
-  *action-governance* layer -- block/gate/record unsafe actions -- **is**
+  territory and has its own suite ([`security/README.md`](security/README.md)).
+  The *action-governance* layer -- block/gate/record unsafe actions -- **is**
   measured; see "Does the governance contain unsafe autonomy?" above.
-
-Distillation quality (whether auto-generated SKILL.md files actually help
-future runs) **is** measured — see "Does the learning actually help?"
-above (`recall_precision.py` + `moat_rigorous.py`).
-
-# Hidden-test execution boundary
-
-Agent-driven governed SWE-bench and DGM solver runs refuse instances containing
-a hidden `test_patch`. The former opaque-mode filters do not isolate the agent
-from grader material, host tools, or checkout history. Restoring these runs
-requires a separately confined solver and trusted grader, including a review of
-the feedback and network channels. Oracle grading remains available for trusted
-pipeline validation; it does not measure hidden-test secrecy. DGM solver
-payloads also omit the canonical `gold_patch` and `test_patch` fields. Custom
-instance fields must not contain secrets: they are passed to the solver.
-Existing benchmark results and checkpoints made with solver-visible hidden tests
-should not be treated as evidence of hidden-test performance.
-The standalone `swe_bench.py` runner also refuses manifests with a `test_patch`,
-but it cannot identify grader material already present in a checkout, history,
-or other host-accessible files. Do not use it to protect hidden tests.

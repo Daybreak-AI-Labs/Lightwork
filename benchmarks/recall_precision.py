@@ -1,10 +1,10 @@
 """Recall-precision benchmark: does relevance-gating cut injected noise?
 
-The warm-vs-cold memory A/B was mixed because recalled-but-irrelevant memory was
-injected into warm runs (precision >> recall for agent memory: hard negatives
-flip answers -- GSM-DC/GSM-IC; large/noisy memory degrades -- LifelongAgentBench
-2505.11942; the inverted-U of long-context RAG -- 2410.05983). This measures the
-fix: on a held-out query set the store never saw, what fraction of UNRELATED
+Recalled-but-irrelevant memory hurts an agent more than a missed recall does
+(precision >> recall for agent memory: hard negatives flip answers --
+GSM-DC/GSM-IC; large/noisy memory degrades -- LifelongAgentBench 2505.11942; the
+inverted-U of long-context RAG -- 2410.05983). This measures the relevance gate:
+on a held-out query set the store never saw, what fraction of UNRELATED
 queries still surface a (wrong) skill (false-positive rate), and do the right
 skills still surface (Recall@1 / MRR), for the lexical recall ungated vs gated.
 

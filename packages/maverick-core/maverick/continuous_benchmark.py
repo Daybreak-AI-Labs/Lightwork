@@ -1,6 +1,6 @@
 """Continuous benchmarking: record benchmark scores over time, flag regressions.
 
-The benchmark *harnesses* (swe_bench, eval_gaia, eval_tau2, terminal_bench) score
+The benchmark *harnesses* (eval_gaia, eval_tau2, eval_terminal_bench) score
 a single run; this is the durable layer on top — append each run's score to a
 per-benchmark history (keyed by name + commit) and detect when a new score
 regresses materially below the recent baseline. Pure, dependency-free, JSON-backed

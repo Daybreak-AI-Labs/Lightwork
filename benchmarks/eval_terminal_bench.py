@@ -13,13 +13,11 @@ deterministic stub (no LLM / network / container): a solver receives a task + th
 domain's shell tools (name -> callable) and drives them to satisfy the request,
 mutating the virtual FS. The verifier then checks the FS + the command log.
 
-The real-environment seam is the solver: a production run injects a solver that
-executes commands in a container (via ``maverick.sandbox`` / ``swe_bench.py``'s
-backend) and reflects the resulting filesystem back into ``TerminalEnv`` for
-verification. That container wiring + a Lightwork-driving solver (+ user
-simulator) is the documented follow-up; the env + verifier + task format are the
-harness, and they are Docker-free by construction so CI can exercise both grading
-legs without a daemon.
+The real-environment seam is the solver: ``terminal_solver.py`` drives a live
+LLM over these virtual-FS tools, and ``container_terminal_solver.py`` runs tasks
+that need real command execution in an isolated Docker container. The env +
+verifier + task format are the harness, and they are Docker-free by construction
+so CI can exercise both grading legs without a daemon.
 """
 from __future__ import annotations
 

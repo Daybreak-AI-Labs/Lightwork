@@ -4447,7 +4447,6 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   `stub` (deterministic; proofs/tests) and `dpo-lora` (delegates to
   `training/rlaif.py`, `[training]` extra). OFF by default AND inert until
   `base_model` is set (never hard-coded; wizard suggests an Apache-2.0 base).
-  Proof: `python proof/adapter_rung_proof.py` — 6 guarantees.
 - **Governed specialist-model improvement** (`training/environments.py`,
   `training/specialist_models.py`, `training/qualification.py`,
   `training/receipts.py`, `[model_improvement]`) — locked deterministic PIA,
@@ -4919,7 +4918,7 @@ deadline enforcement, secondary-channel delivery) as a framework-agnostic,
 fully-injected core that runs as a Worker or a local service.
 
 `benchmarks/`: GAIA, τ²-bench-style stateful harness, terminal-bench-style
-harness, SWE-bench harness, warm-vs-cold memory suite, and an **adversarial-cost suite**
+harness, recall-precision memory suite, and an **adversarial-cost suite**
 (`eval_adversarial_cost.py`): scripted money-wasting scenarios — tool loops,
 token bombs, runaway iterations — each asserted CLAMPED by the cache /
 output-cap / Budget ceilings; `main()` exits 1 on any unclamped scenario. All

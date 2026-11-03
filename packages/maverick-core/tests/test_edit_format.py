@@ -273,6 +273,40 @@ class TestApplyBlocks:
         # File must be restored to original.
         assert (repo / "seed.py").read_text() == original
 
+    def test_atomic_rollback_restores_every_file(self, tmp_path):
+        """One failing block in a multi-file edit leaves no file half-edited."""
+        from maverick.edit_format import apply_blocks, parse_blocks
+        repo = _make_git_repo(tmp_path)
+        (repo / "src").mkdir()
+        (repo / "src" / "a.py").write_text("a = 1\n")
+        (repo / "src" / "b.py").write_text("b = 2\n")
+        text = (
+            "src/a.py\n<<<<<<< SEARCH\na = 1\n=======\na = 11\n>>>>>>> REPLACE\n"
+            "src/b.py\n<<<<<<< SEARCH\nbogus = 9\n=======\nb = 22\n>>>>>>> REPLACE\n"
+        )
+        summary = apply_blocks(parse_blocks(text), repo, atomic=True)
+        assert not summary.ok
+        assert (repo / "src" / "a.py").read_text() == "a = 1\n"
+        assert (repo / "src" / "b.py").read_text() == "b = 2\n"
+
+    def test_crlf_blocks_apply_to_lf_file(self, tmp_path):
+        """Model output with CRLF line endings applies cleanly to an LF file."""
+        from maverick.edit_format import apply_blocks, parse_blocks
+        repo = _make_git_repo(tmp_path)
+        text = (
+            "seed.py\r\n"
+            "<<<<<<< SEARCH\r\n"
+            "def add(a, b):\r\n"
+            "    return a + b\r\n"
+            "=======\r\n"
+            "def add(a, b):\r\n"
+            "    return a + b + 1\r\n"
+            ">>>>>>> REPLACE\r\n"
+        )
+        summary = apply_blocks(parse_blocks(text), repo)
+        assert summary.ok, summary.summary_text()
+        assert (repo / "seed.py").read_text() == "def add(a, b):\n    return a + b + 1\n"
+
     def test_path_traversal_blocked(self, tmp_path):
         from maverick.edit_format import SearchReplaceBlock, apply_blocks
         repo = _make_git_repo(tmp_path)
@@ -352,6 +386,18 @@ class TestApplyBlocks:
         assert "new_module.py" in diff
         assert "+def added():" in diff
         assert "sk-secret" not in diff
+
+    def test_render_diff_combines_tracked_edits_and_new_files(self, tmp_path):
+        """A tracked edit and a new file named in `paths` share one patch."""
+        from maverick.edit_format import render_diff
+        repo = _make_git_repo(tmp_path)
+        (repo / "seed.py").write_text("def add(a, b):\n    return a - b\n")
+        (repo / "newmod.py").write_text("y = 99\n")
+        diff = render_diff(repo, paths=["seed.py", "newmod.py"])
+        assert "diff --git a/seed.py b/seed.py" in diff
+        assert "diff --git a/newmod.py b/newmod.py" in diff
+        assert "+y = 99" in diff
+        assert "/dev/null" in diff or "new file" in diff
 
 
     @pytest.mark.skipif(

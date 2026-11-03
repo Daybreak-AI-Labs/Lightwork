@@ -1,9 +1,8 @@
 """In-process live solver: run an eval task as a real Lightwork goal.
 
 The eval framework (``evals.py``) injects a ``Solver = Callable[[EvalTask], str]``.
-``run_eval.py`` shipped only a brittle one that shells out to ``maverick start``
-and returns raw stdout. This is the real seam: it runs each task through the
-SAME ``run_goal`` path a user hits, in-process, so it (a) reads the agent's
+This solver runs each task through the SAME ``run_goal`` path a user hits,
+in-process, so it (a) reads the agent's
 final answer directly (``run_goal_sync -> str``, with the world-model goal
 result as a fallback), (b) bounds cost per task with a fresh ``Budget``, and
 (c) isolates each task in its own throwaway world DB.

@@ -110,8 +110,7 @@ carries no encoded blobs — obfuscated variants are built at runtime.
 
 ## What a published recall number needs
 
-The credible public recall figure comes from scale and end-to-end measurement,
-documented in `benchmarks/security/RUNBOOK_SECURITY.md`:
+The credible public recall figure comes from scale and end-to-end measurement:
 external held-out sets (AgentDojo, JailbreakBench) run through the leakage
 guard, and an end-to-end AgentDojo run measuring attack-success-rate reduction
 with the shield **on vs. off** (the number that actually matters: not "did we

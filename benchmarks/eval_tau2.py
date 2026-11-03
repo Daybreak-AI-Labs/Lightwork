@@ -1,8 +1,7 @@
 """tau2-style harness: stateful tool-agent evaluation with outcome+action checks.
 
 GAIA (``eval_gaia.py``) scores a single string answer. tau2-bench is a different
-shape -- the roadmap calls for a *verification environment*, not a string
-adapter: the agent acts on a stateful tool domain (a DB the tools mutate), and a
+shape -- it needs a *verification environment*, not a string adapter: the agent acts on a stateful tool domain (a DB the tools mutate), and a
 task is graded on BOTH the final state (the outcome) AND whether the required
 tool actions were taken (the process). This module is that harness, with a small
 self-contained "retail" domain so it runs end-to-end in CI; real tau2-bench task
@@ -11,9 +10,9 @@ files (same row shape) plug in via ``--dataset``.
 Like ``evals.py``, the **solver is injected** so the whole thing runs with a
 deterministic stub (no LLM / network): a solver receives a task + the domain's
 tools (name -> callable) and drives them to satisfy the request, mutating the
-env. The verifier then checks the env. A real run wires a solver that registers
-these tools into a Lightwork agent + a user simulator -- that integration is the
-documented follow-up; the env + verifier + task format are the harness.
+env. The verifier then checks the env. A live run uses ``tau2_solver.py``, which
+registers these tools into a Lightwork agent talking to a user simulator; the
+env + verifier + task format are the harness.
 """
 from __future__ import annotations
 

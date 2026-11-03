@@ -156,26 +156,3 @@ class TestLowCacheWarning:
         cache_warnings = [r for r in caplog.records if "prompt cache" in r.message]
         assert len(cache_warnings) == 1
         ap._LOW_CACHE_WARNING_EMITTED.clear()
-
-
-class TestHarnessSetsGoldPatch:
-    """Complete the env plumbing the agent side already
-    expects. Without this, defensive_validate's cheating detector never
-    has a gold to compare against and silently never fires."""
-
-    def test_run_maverick_sets_gold_patch_env(self, monkeypatch, tmp_path):
-        """We can't run a real instance here without an API key, but we
-        can inspect the env-set behaviour by reading the harness source."""
-        monkeypatch.delenv("MAVERICK_GOLD_PATCH", raising=False)
-        # Verify the harness module sets the env var when given a
-        # `gold_patch` kwarg. We do this by reading the source.
-        from pathlib import Path
-        src = (Path(__file__).resolve().parents[3] / "benchmarks" / "swe_bench.py").read_text(
-            encoding="utf-8",
-        )
-        assert 'os.environ["MAVERICK_GOLD_PATCH"] = gold_patch' in src, (
-            "harness must set MAVERICK_GOLD_PATCH from manifest gold_patch"
-        )
-        assert "reset_gold_patch_cache" in src, (
-            "harness must reset coding_mode's gold-patch cache per instance"
-        )

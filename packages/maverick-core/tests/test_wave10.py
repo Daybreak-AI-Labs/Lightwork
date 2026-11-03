@@ -379,36 +379,34 @@ class TestShellOpaqueGuard:
         out = tool.fn({"cmd": "git log -p"})
         assert "ran:" in out
 
+    def test_github_downloads_blocked(self, tmp_path, monkeypatch):
+        """Fetching an upstream fix from GitHub is refused in opaque mode."""
+        from maverick.tools.shell import shell
+        monkeypatch.setenv("MAVERICK_BENCHMARK_OPAQUE", "1")
+        monkeypatch.setenv("MAVERICK_CODING_MODE", "1")
+        tool = shell(self._make_sandbox(tmp_path))
+        for cmd in (
+            "curl -sL https://raw.githubusercontent.com/foo/bar/abc.patch",
+            "wget https://github.com/foo/bar/pull/123.diff",
+        ):
+            out = tool.fn({"cmd": cmd})
+            assert "blocked" in out.lower(), f"expected {cmd!r} to be blocked"
+            assert "ran:" not in out
+
+    def test_package_installs_blocked(self, tmp_path, monkeypatch):
+        """Opaque mode refuses every package install, editable or not."""
+        from maverick.tools.shell import shell
+        monkeypatch.setenv("MAVERICK_BENCHMARK_OPAQUE", "1")
+        monkeypatch.setenv("MAVERICK_CODING_MODE", "1")
+        tool = shell(self._make_sandbox(tmp_path))
+        for cmd in ("pip install -e .", "pip install requests", "npm install"):
+            out = tool.fn({"cmd": cmd})
+            assert "blocked" in out.lower(), f"expected {cmd!r} to be blocked; got {out[:200]}"
+        monkeypatch.setenv("MAVERICK_BENCHMARK_OPAQUE", "0")
+        assert "ran:" in tool.fn({"cmd": "pip install ."})
+
 
 # ---- D7: load_instances tolerates malformed JSON lines ----
-
-class TestLoadInstancesTolerant:
-    def test_malformed_json_line_is_skipped_not_raises(self, tmp_path, capsys):
-        import importlib.util
-        import sys
-        from pathlib import Path
-        # Resolve relative to this test file so the path is correct in any
-        # checkout location (local dev, CI runner, etc.).
-        # tests/test_wave10.py → packages/maverick-core/tests → repo root → benchmarks/swe_bench.py
-        repo_root = Path(__file__).resolve().parents[3]
-        p = repo_root / "benchmarks" / "swe_bench.py"
-        assert p.exists(), f"benchmarks/swe_bench.py not found at {p}"
-        spec = importlib.util.spec_from_file_location("benchmarks_swe_bench", p)
-        mod = importlib.util.module_from_spec(spec)
-        sys.modules["benchmarks_swe_bench"] = mod
-        spec.loader.exec_module(mod)
-
-        manifest = tmp_path / "m.jsonl"
-        manifest.write_text(
-            '{"instance_id": "good", "brief": "fix"}\n'
-            '{this is broken\n'  # malformed
-            '{"instance_id": "good2", "brief": "fix2"}\n'
-        )
-        out = mod.load_instances(manifest)
-        assert [d["instance_id"] for d in out] == ["good", "good2"]
-        err = capsys.readouterr().err
-        assert "malformed JSON" in err or "JSONDecodeError" in err or "warning:" in err
-
 
 # ---- C1: predicted_patch in CSV uses extracted diff, not prose ----
 

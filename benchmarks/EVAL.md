@@ -44,11 +44,11 @@ run_benchmark(bench, solver, dataset=..., limit=...) -> {pass_at_1, mean_score, 
 
 ## Benchmarks
 
-| slice | benchmark | status | scorer |
-|---|---|---|---|
-| general assistant | **GAIA** (`eval_gaia.py`) | ✅ shipped | official normalized exact-match (number / string / list) |
-| tool-agent policy | **τ²-bench** (`eval_tau2.py`) | ✅ shipped | stateful tool domain + DB; graded on final state **and** required actions. The **live solver** (`tau2_solver.py`) runs an agent↔user-simulator conversation over the domain tools. Run: `python benchmarks/eval_tau2.py --limit N --max-dollars 2`; CI/stub: `MAVERICK_EVAL_DRY_RUN=1 …`. |
-| CLI ops | **terminal-bench** (`eval_terminal_bench.py`) | ✅ shipped | Docker-free virtual-FS: graded on final files **and** required commands. The **live solver** (`terminal_solver.py`) drives a real LLM in a tool-calling loop over the env's shell tools. Run: `python benchmarks/eval_terminal_bench.py --limit N --max-dollars 2`; CI/stub: `MAVERICK_EVAL_DRY_RUN=1 …`. |
+| slice | benchmark | scorer |
+|---|---|---|
+| general assistant | **GAIA** (`eval_gaia.py`) | official normalized exact-match (number / string / list) |
+| tool-agent policy | **τ²-bench** (`eval_tau2.py`) | stateful tool domain + DB; graded on final state **and** required actions. The **live solver** (`tau2_solver.py`) runs an agent↔user-simulator conversation over the domain tools. Run: `python benchmarks/eval_tau2.py --limit N --max-dollars 2`; CI/stub: `MAVERICK_EVAL_DRY_RUN=1 …`. |
+| CLI ops | **terminal-bench** (`eval_terminal_bench.py`) | Docker-free virtual-FS: graded on final files **and** required commands. The **live solver** (`terminal_solver.py`) drives a real LLM in a tool-calling loop over the env's shell tools. Run: `python benchmarks/eval_terminal_bench.py --limit N --max-dollars 2`; CI/stub: `MAVERICK_EVAL_DRY_RUN=1 …`. |
 
 ### Adding the next slice
 
@@ -63,12 +63,11 @@ a task gives starting files + a request, the **live solver** (`terminal_solver.p
 drives a real LLM in a tool-calling loop over the virtual-FS shell tools, and
 `verify` grades the final filesystem (`expected_files` / `absent_files`) **and**
 the command log (`required_commands`). Validated for free with a scripted
-FakeLLM (`test_terminal_solver.py`); a live smoke on the bundled tasks passes
-**3/3**. For tasks that need **real command execution** (run code, run a test
+FakeLLM (`test_terminal_solver.py`). For tasks that need **real command execution** (run code, run a test
 suite, chmod+exec) the virtual FS can't do, `container_terminal_solver.py` runs
 the agent against a throwaway **isolated Docker container** (`--network none`,
 memory/pid-capped) and grades by running the verify command *inside* it
-(exit 0) — live-proven **4/4** on `eval_fixtures/container_terminal_hard.jsonl`.
+(exit 0); `eval_fixtures/container_terminal_hard.jsonl` holds such tasks.
 Its loop + grading are unit-tested free (in-memory fake container); a live run
 needs a Docker daemon.
 
@@ -77,8 +76,3 @@ runs a Lightwork agent in a tool-loop talking to a **user-simulator** LLM that
 holds the scenario, until the customer's goal is resolved; `verify` grades the
 final DB state **and** the required tool actions. Validated for free with
 scripted FakeLLMs for *both* sides (`test_tau2_solver.py`).
-
-**τ²-bench** needs a live **user-simulator** LLM (it's a dual-control
-agent↔user setting), which is a separate piece; the *offline* scorer
-(comparing the recorded action trace / DB state to the expected one) fits
-the contract today.

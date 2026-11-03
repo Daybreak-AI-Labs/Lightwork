@@ -84,26 +84,6 @@ _RETRY_OWNERSHIP = {
         "_validate_openai_compat_key",
         "OpenAI",
     ): _INTENTIONAL_ONE_SHOT,
-    (
-        "benchmarks/preflight.py",
-        "check_api_key",
-        "Anthropic",
-    ): _INTENTIONAL_ONE_SHOT,
-    (
-        "benchmarks/swe_bench.py",
-        "run_sonnet_single",
-        "Anthropic",
-    ): _INTENTIONAL_ONE_SHOT,
-    (
-        "benchmarks/swe_bench.py",
-        "run_sonnet_tools",
-        "Anthropic",
-    ): _INTENTIONAL_ONE_SHOT,
-    (
-        "benchmarks/swe_bench.py",
-        "run_sonnet_self_consistency_n8",
-        "Anthropic",
-    ): _INTENTIONAL_ONE_SHOT,
     # codec_probe.anthropic_counter now counts through the LLM's configured
     # dispatch client (417d9da9) instead of constructing its own Anthropic().
     (

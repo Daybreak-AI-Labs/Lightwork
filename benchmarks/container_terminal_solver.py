@@ -1,9 +1,8 @@
 """Containerized terminal solver: a Lightwork LLM driving a REAL isolated shell.
 
 The virtual-FS ``eval_terminal_bench.py`` can only manipulate file *contents* --
-``run_command`` just logs. The documented gap is tasks that need **real command
-execution** (run code, run a test suite, chmod+exec). This closes it: each task
-gets a throwaway Docker container (``--network none``, memory/pid-capped), the
+``run_command`` just logs. This solver handles tasks that need **real command
+execution** (run code, run a test suite, chmod+exec): each task gets a throwaway Docker container (``--network none``, memory/pid-capped), the
 agent drives real ``run_command``/``write_file``/``read_file`` tools that exec
 inside it, and grading runs the task's ``verify_command`` IN the container
 (exit 0 = pass) and/or checks ``expected_files``.

@@ -22,8 +22,7 @@ from pathlib import Path
 
 
 def _load_framework():
-    """Load ``evals.py`` by path -- benchmarks/ is a flat dir, not a package
-    (mirrors swe_bench.py's path-based ``_common`` loader)."""
+    """Load ``evals.py`` by path -- benchmarks/ is a flat dir, not a package."""
     name = "benchmarks_evals"
     if name in sys.modules:
         return sys.modules[name]
