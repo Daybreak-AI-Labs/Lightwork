@@ -20,7 +20,9 @@
   if (stage && stage.getContext) (function () {
     var ctx = stage.getContext("2d"), W, H, dpr = Math.min(window.devicePixelRatio || 1, 1.5), traces = [], parts = [], t0 = performance.now();
     var sun = { x: 0, y: 0 }, signed = 0, denied = 0, visible = true, raf = 0, lastT = 0;
-    var GX = [0.42, 0.50, 0.58, 0.66, 0.74], GATES = ["CAPABILITY", "POLICY", "SHIELD", "BUDGET", "AUDIT"];
+    var GX = [0.42, 0.50, 0.58, 0.66, 0.74], GATES = (stage.getAttribute("data-gates") || "CAPABILITY,POLICY,SHIELD,BUDGET,AUDIT").split(",");
+    // data-stop-label / data-stop-rgb let a page say what a stopped action means (default: denied, red).
+    var STOP_LABEL = stage.getAttribute("data-stop-label") || "denied at the gate", STOP_RGB = stage.getAttribute("data-stop-rgb") || "255,92,92";
     var elSigned = document.getElementById("hud-signed"), elDenied = document.getElementById("hud-denied");
     function build() {
       W = stage.clientWidth; H = stage.clientHeight; stage.width = W * dpr; stage.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -62,10 +64,10 @@
       if (!reduce && prog >= 1) {
         if (Math.random() < .11) { var t = traces[Math.random() * traces.length | 0]; parts.push({ tr: t, d: 0, v: 260 + Math.random() * 220, fate: Math.random() < .16 ? "deny" : "ok", gate: 1 + (Math.random() * 3 | 0), dead: 0 }); }
         for (var p = parts.length - 1; p >= 0; p--) { var a2 = parts[p]; if (a2.dead) { a2.dead += dt; if (a2.dead > .7) parts.splice(p, 1); continue; } a2.d += a2.v * dt; var pos = at(a2.tr, a2.d);
-          if (a2.fate === "deny" && pos[0] >= W * GX[a2.gate]) { a2.dead = .01; a2.pos = pos; denied++; if (elDenied) elDenied.textContent = denied + " denied at the gate"; continue; }
+          if (a2.fate === "deny" && pos[0] >= W * GX[a2.gate]) { a2.dead = .01; a2.pos = pos; denied++; if (elDenied) elDenied.textContent = denied + " " + STOP_LABEL; continue; }
           if (a2.d >= a2.tr.total) { parts.splice(p, 1); signed++; if (elSigned) elSigned.textContent = signed.toLocaleString(); continue; } a2.pos = pos; }
       }
-      for (p = 0; p < parts.length; p++) { var q = parts[p], pos2 = q.pos; if (!pos2) continue; var col = q.dead ? "255,92,92" : "255,255,255";
+      for (p = 0; p < parts.length; p++) { var q = parts[p], pos2 = q.pos; if (!pos2) continue; var col = q.dead ? STOP_RGB : "255,255,255";
         var gg = ctx.createRadialGradient(pos2[0], pos2[1], 0, pos2[0], pos2[1], 9); gg.addColorStop(0, "rgba(" + col + ",.65)"); gg.addColorStop(1, "rgba(" + col + ",0)"); ctx.fillStyle = gg; ctx.beginPath(); ctx.arc(pos2[0], pos2[1], 9, 0, 6.283); ctx.fill();
         ctx.fillStyle = "rgba(" + col + ",1)"; ctx.beginPath(); ctx.arc(pos2[0], pos2[1], 2.2, 0, 6.283); ctx.fill();
         if (q.dead) { ctx.fillStyle = "#FF5C5C"; ctx.font = MONO; ctx.textAlign = "center"; ctx.fillText("DENY", pos2[0], pos2[1] - 14); } }

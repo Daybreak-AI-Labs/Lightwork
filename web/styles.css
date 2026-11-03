@@ -320,15 +320,58 @@ html.modal-open{overflow:hidden}
   .hud b{font-size:34px}
 }
 
-/* Product screenshots and journey (capabilities-first revision) */
+/* Product screenshots, journey and instruments (capabilities-first revision) */
 .shot-wrap{margin:56px 0 0}
 .shot{border:1px solid var(--line-2);border-radius:16px;overflow:hidden;background:var(--panel);box-shadow:0 40px 120px -60px rgba(139,92,246,.55)}
 .shot .bar{display:flex;align-items:center;gap:7px;padding:11px 14px;border-bottom:1px solid var(--line);background:var(--bg-2)}
 .shot .bar i{width:10px;height:10px;border-radius:50%;background:var(--line-2);display:block}
 .shot .bar span{margin-left:10px;font-family:var(--mono);font-size:12px;color:var(--muted)}
 .shot img{display:block;width:100%;height:auto}
+.shots-2{display:grid;grid-template-columns:1.25fr 1fr;gap:18px;margin-top:52px;align-items:start}
 .gate.four{grid-template-columns:repeat(4,1fr)}
 .chips{display:flex;flex-wrap:wrap;gap:10px;margin-top:28px}
 .chips span{font-family:var(--mono);font-size:12.5px;letter-spacing:.04em;color:var(--text-2);border:1px solid var(--line-2);border-radius:999px;padding:7px 13px;background:var(--panel)}
-@media (max-width:1000px){.gate.four{grid-template-columns:repeat(2,1fr)}}
-@media (max-width:600px){.gate.four{grid-template-columns:1fr}}
+.glow{box-shadow:0 40px 120px -60px rgba(139,92,246,.6)}
+/* status badges and service-level chips, shared by the instruments */
+.badge{display:inline-block;font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;border-radius:999px;padding:3px 9px;border:1px solid var(--line-2);color:var(--muted);white-space:nowrap}
+.badge.ok{color:var(--ok);border-color:rgba(61,220,151,.35);background:rgba(61,220,151,.07)}
+.badge.warn{color:var(--warn);border-color:rgba(255,181,71,.35);background:rgba(255,181,71,.07)}
+.badge.info{color:var(--blue-2);border-color:rgba(47,124,255,.35);background:rgba(47,124,255,.08)}
+.badge.hi{color:var(--deny);border-color:rgba(255,92,92,.35);background:rgba(255,92,92,.07)}
+.sla{display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11.5px;color:var(--text-2);border:1px solid var(--line);border-radius:8px;padding:6px 10px;background:var(--bg-2)}
+.sla::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--ok);flex:none}
+.sla.warn::before{background:var(--warn)}
+.sla i{font-style:normal;color:var(--muted)}
+/* the book of work instrument */
+.save{display:grid;grid-template-columns:repeat(3,1fr);border-bottom:1px solid var(--line)}
+.save > div{padding:20px 22px;border-right:1px solid var(--line);min-width:0}
+.save > div:last-child{border-right:0}
+.save .v{font-size:30px;font-weight:300;letter-spacing:-.03em;color:var(--text);line-height:1;font-variant-numeric:tabular-nums;white-space:nowrap}
+.save .v.ok{color:var(--ok)}
+.save .k{font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-top:10px}
+.area{padding:18px 22px;border-bottom:1px solid var(--line)}
+.area:last-child{border-bottom:0}
+.area .ah{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.area .ah b{color:var(--text);font-weight:600;font-size:16px;margin-right:4px}
+.area .am{font-size:13.5px;color:var(--muted);margin-top:6px}
+.area .slas{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+/* the exception desk instrument */
+.desk .item{display:grid;grid-template-columns:1fr auto auto;gap:14px;align-items:center;padding:15px 22px;border-bottom:1px solid var(--line);font-size:14.5px;color:var(--text-2)}
+.desk .item:last-child{border-bottom:0}
+.desk .where{display:block;font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
+.decide{font-family:var(--mono);font-size:12px;color:var(--text);border:1px solid var(--line-2);border-radius:7px;padding:6px 12px;background:var(--panel-2);white-space:nowrap}
+/* capability list */
+.caps{display:grid;grid-template-columns:repeat(2,1fr);column-gap:56px;margin-top:52px;border-top:1px solid var(--line-2)}
+.cap-i{display:grid;grid-template-columns:132px 1fr;gap:20px;padding:24px 0;border-bottom:1px solid var(--line)}
+.cap-i .k{font-family:var(--mono);font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--blue-2);padding-top:4px}
+.cap-i h3{font-size:19px;font-weight:600;color:var(--text);margin:0}
+.cap-i p{color:var(--muted);font-size:15.5px;line-height:1.6;margin-top:6px}
+.cap-i .opt{font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);margin-left:8px;vertical-align:2px}
+/* grouped chip rows */
+.rows{margin-top:48px;border-top:1px solid var(--line-2)}
+.rows .r{display:grid;grid-template-columns:170px 1fr;gap:24px;padding:22px 0;border-bottom:1px solid var(--line);align-items:start}
+.rows .r .k{font-family:var(--mono);font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--blue-2);padding-top:8px}
+.rows .r .chips{margin-top:0}
+@media (max-width:1000px){.gate.four{grid-template-columns:repeat(2,1fr)}.caps,.shots-2{grid-template-columns:1fr}.rows .r{grid-template-columns:1fr;gap:12px}}
+@media (max-width:600px){.gate.four{grid-template-columns:1fr}.save{grid-template-columns:1fr}.save > div{border-right:0;border-bottom:1px solid var(--line)}.desk .item{grid-template-columns:1fr auto}.desk .item .badge{display:none}.cap-i{grid-template-columns:1fr;gap:8px}}
+.hud .human{color:var(--warn)}
