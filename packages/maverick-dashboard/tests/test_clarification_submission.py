@@ -81,3 +81,18 @@ def test_workspace_change_refuses_before_admission(environment):
     response = send(environment, expected_context="earlier-workspace")
     assert response.status_code == 409 and response.json()["detail"]["code"] == "context_changed"
     assert world.open_questions(goal_id=goal) and not runs
+
+
+def test_clarification_prepares_document_without_mirroring_before_admission(tmp_path, monkeypatch):
+    import hashlib
+
+    data = b"{\\rtf1 example evidence}"
+    staged = tmp_path / "staged-upload"
+    staged.write_bytes(data)
+    record = attachments.Stored("evidence.rtf", "application/rtf", len(data), hashlib.sha256(data).hexdigest(), staged)
+    monkeypatch.setattr(attachments, "s3_mirror_enabled", lambda: True)
+    monkeypatch.setattr(attachments, "_s3_mirror", lambda *args: pytest.fail("staging must not mirror files"))
+    monkeypatch.setattr(attachments, "_extract_document", lambda path: "example evidence")
+    result = submissions._prepare([record], 7, tmp_path / "prepared")
+    assert [item.filename for item in result] == ["evidence.rtf", "evidence.rtf.extracted.txt"]
+    assert submissions._read_staged(result[1]) == b"example evidence"

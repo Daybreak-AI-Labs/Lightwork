@@ -64,6 +64,9 @@ test('fresh owner can browse every sidebar destination and sign out at phone wid
     expect(await page.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth+1)).toBe(true);
     await info.attach('fresh-owner-phone',{body:await page.screenshot({fullPage:true}),contentType:'image/png'});
     await page.getByRole('link',{name:'Sign out',exact:true}).click();
+    // Sign-out is a POST behind a confirmation page so a cross-site GET cannot
+    // end an existing session. Exercise the complete customer journey.
+    await page.getByRole('button',{name:'Sign out',exact:true}).click();
     expect((await context.cookies()).some(cookie=>cookie.name==='mvk_session')).toBe(false);
     await page.goto(origin+'/goals');await expect(page).toHaveURL(/\/auth\/local-login/);
     expect(errors).toEqual([]);expect(failures).toEqual([]);

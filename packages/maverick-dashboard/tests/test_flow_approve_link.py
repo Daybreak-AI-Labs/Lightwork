@@ -184,6 +184,8 @@ def test_forwarded_link_is_refused_for_the_wrong_assignee(monkeypatch, tmp_path)
     _isolate(monkeypatch, tmp_path)
     from maverick_dashboard import automation_queue as aq
     monkeypatch.setattr(aq, "_queue", None)
+    from maverick_dashboard import rbac
+    rbac.set_role("user:bob", "operator")
     _as_actor(monkeypatch, "user:bob")
     rid, _ = _paused_run()
 

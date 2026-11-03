@@ -480,3 +480,16 @@ def test_warm_up_never_raises(monkeypatch, tmp_path):
     monkeypatch.setattr("maverick.voice_models.locate_model", _explode)
     assert voice_mod.warm_up_local_stt() is False
     assert voice_mod.stt_warming() is False
+
+
+def test_voice_cli_transcribes_operator_selected_file(monkeypatch, tmp_path):
+    from click.testing import CliRunner
+    from maverick.cli import main
+
+    _isolate(monkeypatch, tmp_path)
+    audio = tmp_path / "clip.wav"
+    audio.write_bytes(b"RIFFfake")
+    monkeypatch.setattr(voice_mod, "_whisper_local", lambda path, _lang: path.read_bytes().decode())
+    result = CliRunner().invoke(main, ["voice", "transcribe", str(audio), "--backend", "local"])
+    assert result.exit_code == 0, result.output
+    assert "RIFFfake" in result.output

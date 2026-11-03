@@ -1494,11 +1494,9 @@ def _park_approval(
     approval_card: Mapping[str, object] | None,
 ) -> tuple[int, Mapping[str, object]]:
     """Queue the exact request on the Approvals page; raise when it can't be."""
-    # Approval-delegation routing (opt-in via [governance.delegation] rules):
-    # a risk/tool rule can route this approval to a specific delegate. No-op
-    # (route returns None) when no rules are configured, so the default queue
-    # behaviour is unchanged. The delegate is recorded in detail for the
-    # operator console.
+    # Optional [approval] delegation rules suggest a reviewer for this risk
+    # and tool. The suggestion may appear in detail; it does not constrain
+    # decision authority and a prebuilt card may omit it altogether.
     try:
         from ..approval_delegation import route as _delegate_route
         delegate = _delegate_route({"risk": risk, "tool": action})

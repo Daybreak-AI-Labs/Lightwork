@@ -204,3 +204,16 @@ def test_view_video_passes_sandbox_to_run_cmd(monkeypatch, tmp_path):
 
     out = view_video(_SB()).fn({"source": "v.mp4", "num_frames": 2})
     assert out == "a cat plays the piano, then jumps down"
+
+
+def test_video_audio_uses_its_private_generated_file(monkeypatch, tmp_path):
+    from maverick.tools import voice
+
+    def extract(_sandbox, cmd, *, timeout=600.0):
+        Path(cmd[-1]).write_bytes(b"ID3audio")
+        return 0, "", ""
+
+    monkeypatch.setattr(vv, "_run_cmd", extract)
+    monkeypatch.setattr(voice, "_default_stt_backend", lambda: "local")
+    monkeypatch.setattr(voice, "_whisper_local", lambda path, _lang: path.read_bytes().decode())
+    assert vv._transcribe_track("source.mp4", str(tmp_path), object()) == "ID3audio"

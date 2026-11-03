@@ -223,6 +223,9 @@ def test_sealed_attachments_bind_goal_name_and_tenant(monkeypatch, tmp_path):
         with att.plaintext_path(st.path) as plain:
             assert plain.read_bytes() == secret and plain != st.path
         assert not plain.exists()  # temporary plaintext removed
+        with att._verified_companion_path(5, st, tmp_path) as snapshot:
+            assert snapshot.read_bytes() == secret
+        assert not snapshot.exists()
         moved = tmp_path / "6" / st.path.name
         moved.parent.mkdir()
         moved.write_bytes(raw)

@@ -73,9 +73,12 @@ def _invite_to_workspace():
 
 
 def _join(browser):
-    joined = browser.post(_invite_to_workspace(), data={"password": PASSPHRASE, "password2": PASSPHRASE})
+    invite = _invite_to_workspace()
+    joined = browser.post(invite, data={"password": PASSPHRASE, "password2": PASSPHRASE})
     assert joined.status_code == 303, joined.text
     assert "mvk_session" in browser.cookies
+    opened = browser.post(invite + "/workspace")
+    assert opened.status_code == 303, opened.text
 
 
 def _people(owner):

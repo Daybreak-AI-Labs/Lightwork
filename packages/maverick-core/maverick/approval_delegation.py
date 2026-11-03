@@ -1,12 +1,10 @@
-"""Approval delegation rules: auto-route a pending approval to a delegate.
+"""Select suggested reviewers for matching approval requests.
 
-The approval queue (``consent`` / dashboard) gates risky actions on a human OK.
-This adds a thin, pure policy layer on top: operator-defined rules say "an
-approval at risk ≥ X (optionally for tools matching a glob) is routed to
-``delegate_to``" — so high-risk items reach a senior approver and routine ones a
-team inbox, instead of everything landing in one queue. ``route`` is a pure
-function (unit-tested); ``load_rules`` reads ``[approval] delegation`` from config.
-Default: no rules → ``route`` returns ``None`` (no delegation; unchanged behavior).
+Rules name a suggested reviewer based on risk and optional tool glob. The
+suggestion may be included in approval detail; it does not restrict who can decide,
+route notifications, or satisfy a separation-of-duties requirement. Other
+authorized reviewers retain their existing authority. ``load_rules`` reads
+``[approval] delegation``; with no rules, ``route`` returns ``None``.
 """
 from __future__ import annotations
 
@@ -71,10 +69,10 @@ def load_rules() -> list[DelegationRule]:
 
 
 def route(approval: dict, rules: list[DelegationRule] | None = None) -> str | None:
-    """Return the delegate for ``approval`` (first matching rule), or ``None``.
+    """Return the suggested reviewer (first matching rule), or ``None``.
 
     ``approval`` is a dict with ``risk`` (low/medium/high/critical) and ``tool``.
-    With no rules, returns ``None`` — the approval stays in the default queue.
+    The returned value is advisory and never changes decision authority.
     """
     rules = rules if rules is not None else load_rules()
     risk = str(approval.get("risk") or "low").strip().lower()

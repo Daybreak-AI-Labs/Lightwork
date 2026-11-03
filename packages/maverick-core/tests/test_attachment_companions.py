@@ -229,3 +229,70 @@ class TestServerInboundAttachments:
         names = [a.filename for a in wm.list_attachments(gid)]
         assert names == ["report.txt"]
 
+
+
+def test_companion_source_binds_registered_goal_and_digest(tmp_path):
+    from dataclasses import replace
+
+    root = tmp_path / "attachments"
+    record = store(7, "memo.mp3", "audio/mpeg", b"ID3verified", root=root)
+    with att._verified_companion_path(7, record, root) as snapshot:
+        assert snapshot != record.path
+        assert snapshot.read_bytes() == b"ID3verified"
+    assert not snapshot.exists()
+
+    outside = tmp_path / "outside.mp3"
+    outside.write_bytes(b"ID3verified")
+    with pytest.raises(AttachmentRejected):
+        with att._verified_companion_path(7, replace(record, path=outside), root):
+            pytest.fail("must reject paths outside the registered goal")
+    with pytest.raises(AttachmentRejected):
+        with att._verified_companion_path(8, record, root):
+            pytest.fail("must reject an attachment from another goal")
+    record.path.write_bytes(b"ID3tampered")
+    with pytest.raises(AttachmentRejected):
+        with att._verified_companion_path(7, record, root):
+            pytest.fail("must reject content that no longer matches its digest")
+
+
+def test_companion_source_refuses_symlinked_file(tmp_path):
+    root = tmp_path / "attachments"
+    record = store(7, "memo.mp3", "audio/mpeg", b"ID3verified", root=root)
+    outside = tmp_path / "outside.mp3"
+    outside.write_bytes(b"ID3verified")
+    record.path.unlink()
+    try:
+        record.path.symlink_to(outside)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks unavailable")
+    with pytest.raises(AttachmentRejected):
+        with att._verified_companion_path(7, record, root):
+            pytest.fail("must reject symlinked attachment files")
+
+
+def test_companion_accepts_verified_clarification_attachment(tmp_path):
+    from dataclasses import replace
+
+    root = tmp_path / "attachments"
+    record = store(7, "memo.mp3", "audio/mpeg", b"ID3verified", root=root)
+    exclusive = record.path.parent / f"{record.sha256[:16]}-c{'a' * 16}-{record.filename}"
+    assert att._publish_attachment(exclusive, att._encode_for_disk(b"ID3verified", exclusive), record.sha256)
+    with att._verified_companion_path(7, replace(record, path=exclusive), root) as snapshot:
+        assert snapshot.read_bytes() == b"ID3verified"
+
+
+def test_companion_source_refuses_symlinked_goal_directory(tmp_path):
+    from dataclasses import replace
+
+    root = tmp_path / "attachments"
+    record = store(7, "memo.mp3", "audio/mpeg", b"ID3verified", root=root)
+    original_dir = record.path.parent
+    moved = tmp_path / "moved-goal"
+    original_dir.rename(moved)
+    try:
+        original_dir.symlink_to(moved, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("directory symlinks unavailable")
+    with pytest.raises(AttachmentRejected):
+        with att._verified_companion_path(7, replace(record, path=original_dir / record.path.name), root):
+            pytest.fail("must reject symlinked goal directories")

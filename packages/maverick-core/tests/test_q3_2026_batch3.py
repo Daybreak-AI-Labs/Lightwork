@@ -93,6 +93,8 @@ def test_devcontainer_rejects_run_args(tmp_path, monkeypatch):
     raise AssertionError("expected RuntimeError")
 
 def test_devcontainer_exec_builds_docker_run(tmp_path, monkeypatch):
+    monkeypatch.delenv("MAVERICK_SANDBOX_ALLOW_ROOT", raising=False)
+    monkeypatch.setattr("maverick.sandbox.devcontainer.container_user_args", lambda _allow_root: ["--user", "1000:1000"])
     (tmp_path / ".devcontainer").mkdir()
     (tmp_path / ".devcontainer" / "devcontainer.json").write_text(
         json.dumps({
@@ -115,7 +117,8 @@ def test_devcontainer_exec_builds_docker_run(tmp_path, monkeypatch):
     result = backend.exec("echo hi")
     assert result.ok
     args = captured["args"]
-    assert "--user" in args and "node" in args
+    assert args[args.index("--user"):args.index("--user") + 2] == ["--user", "1000:1000"]
+    assert "node" not in args
     assert "-e" in args and any("NODE_ENV=test" in s for s in args)
     assert "alpine" in args
     # DoS parity with DockerBackend: RAM is capped and swap pinned to it so the

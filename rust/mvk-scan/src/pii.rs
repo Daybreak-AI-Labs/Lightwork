@@ -269,8 +269,14 @@ mod tests {
 
     #[test]
     fn phone_boundary_uses_unicode_decimal_digits() {
-        assert!(!kinds("١(555) 123-4567").contains(&"phone_us".to_string()));
-        assert!(kinds("²(555) 123-4567").contains(&"phone_us".to_string()));
+        assert!(!kinds("١5551234567").contains(&"phone_us".to_string()));
+        assert!(kinds("²5551234567").contains(&"phone_us".to_string()));
+        // Python retries inside the parentheses after rejecting the first
+        // candidate; the first 5 is preceded by '(', not a digit.
+        assert_eq!(
+            scan_spans("١(555) 123-4567").unwrap(),
+            vec![("phone_us".to_string(), 2, 15)]
+        );
     }
 
     #[test]
