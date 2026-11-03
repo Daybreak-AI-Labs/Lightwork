@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import shutil
 import subprocess
 from collections.abc import Iterator
@@ -254,7 +255,7 @@ def test_desktop_installer_checks_the_python_floor_after_installing(tmp_path, re
         "echo RETURNED\n"
     )
     result = subprocess.run(
-        ["bash", "-c", harness],
+        [shutil.which("bash"), "-c", harness],
         env={"PATH": f"{bin_dir}{os.pathsep}/usr/bin{os.pathsep}/bin", "HOME": str(tmp_path)},
         capture_output=True, text=True, timeout=30, check=False,
     )
@@ -277,7 +278,7 @@ def test_vps_installer_checks_the_python_floor_after_installing(tmp_path, report
     script = _read("deploy/vps/install.sh")
     start = script.index("install_system_deps() {")
     function = script[start:script.index("\n}\n", start) + 3]
-    function = function.replace("/usr/bin/python3", str(tmp_path / "bin" / "python3"))
+    function = function.replace("/usr/bin/python3", shlex.quote((tmp_path / "bin" / "python3").as_posix()))
     major, minor = reported.split(".")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -291,7 +292,7 @@ def test_vps_installer_checks_the_python_floor_after_installing(tmp_path, report
         (bin_dir / name).chmod(0o755)
     harness = f"set -euo pipefail\nlog() {{ :; }}\n{function}install_system_deps\necho RETURNED\n"
     result = subprocess.run(
-        ["bash", "-c", harness],
+        [shutil.which("bash"), "-c", harness],
         env={"PATH": f"{bin_dir}{os.pathsep}/usr/bin{os.pathsep}/bin", "HOME": str(tmp_path)},
         capture_output=True, text=True, timeout=30, check=False,
     )
