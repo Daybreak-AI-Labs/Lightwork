@@ -11,11 +11,12 @@ from __future__ import annotations
 
 import os
 import time
+from io import StringIO
 
 import pytest
 from maverick.sandbox.local import LocalBackend
 
-pytestmark = pytest.mark.skipif(
+_POSIX_ONLY = pytest.mark.skipif(
     not hasattr(os, "killpg"), reason="POSIX process groups required",
 )
 
@@ -32,10 +33,69 @@ def _gone(pid: int) -> bool:
     try:
         with open(f"/proc/{pid}/stat") as f:
             return f.read().rsplit(")", 1)[1].split()[0] == "Z"
-    except OSError:  # non-Linux POSIX: no /proc -- rely on ProcessLookupError
+    except OSError:
+        # init can reap a zombie after kill(pid, 0) but before the stat read.
+        # Recheck existence instead of reporting that vanished PID as alive.
+        # Missing/unreadable procfs alone still cannot prove termination.
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        except PermissionError:
+            return False
         return False
 
 
+@pytest.mark.parametrize("state, expected", [("R", False), ("S", False), ("D", False), ("Z", True)])
+def test_gone_distinguishes_live_processes_from_zombies(monkeypatch, state, expected):
+    monkeypatch.setattr(os, "kill", lambda pid, signal: None)
+    monkeypatch.setitem(globals(), "open", lambda path: StringIO(f"123 (child process) {state} 1"))
+
+    assert _gone(123) is expected
+
+
+@pytest.mark.parametrize("error, expected", [(ProcessLookupError, True), (PermissionError, False)])
+def test_gone_checks_process_existence_without_requiring_procfs(monkeypatch, error, expected):
+    def probe(pid, signal):
+        raise error
+
+    monkeypatch.setattr(os, "kill", probe)
+
+    assert _gone(123) is expected
+
+
+@pytest.mark.parametrize("after_read, expected", [(ProcessLookupError, True), (None, False), (PermissionError, False)])
+@pytest.mark.parametrize("stat_error", [FileNotFoundError, ProcessLookupError])
+def test_gone_handles_process_reaping_between_probe_and_stat(monkeypatch, after_read, expected, stat_error):
+    probes = iter([None, after_read])
+
+    def probe(pid, signal):
+        error = next(probes)
+        if error is not None:
+            raise error
+
+    def missing_stat(path):
+        raise stat_error(path)
+
+    monkeypatch.setattr(os, "kill", probe)
+    monkeypatch.setitem(globals(), "open", missing_stat)
+
+    # A missing stat file proves nothing by itself: procfs may be unavailable,
+    # or access may have changed. Only a vanished PID establishes termination.
+    assert _gone(123) is expected
+
+
+def test_gone_does_not_accept_an_unreadable_process_stat(monkeypatch):
+    def unreadable_stat(path):
+        raise PermissionError(path)
+
+    monkeypatch.setattr(os, "kill", lambda pid, signal: None)
+    monkeypatch.setitem(globals(), "open", unreadable_stat)
+
+    assert not _gone(123)
+
+
+@_POSIX_ONLY
 def test_timeout_kills_grandchildren_and_keeps_partial_output(tmp_path):
     b = LocalBackend(workdir=tmp_path)
     pidfile = tmp_path / "grandchild.pid"
@@ -57,6 +117,7 @@ def test_timeout_kills_grandchildren_and_keeps_partial_output(tmp_path):
     assert _gone(pid), "backgrounded grandchild survived the timeout"
 
 
+@_POSIX_ONLY
 def test_exec_success_and_failure_paths_unchanged(tmp_path):
     b = LocalBackend(workdir=tmp_path)
     ok = b.exec("echo hi")

@@ -41,6 +41,18 @@ def test_disabled_by_default_no_caching(monkeypatch, tmp_path):
     assert calls["n"] == 2  # no memoization when off
 
 
+def test_noncacheable_tool_never_reads_cache_enablement(monkeypatch):
+    tool, _ = _counting_tool(parallel_safe=False)
+
+    def unexpected_config_read():
+        raise AssertionError("a write cannot be cached under any configuration")
+
+    monkeypatch.setattr(tool_cache, "enabled", unexpected_config_read)
+    assert tool_cache.get_cached(tool, {}) == (False, None)
+    tool_cache.store_cached(tool, {}, "a write result")
+    assert tool_cache.stats() == {"hits": 0, "misses": 0, "size": 0}
+
+
 def test_hit_serves_cache_without_reinvoking(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_TOOL_CACHE", "1")

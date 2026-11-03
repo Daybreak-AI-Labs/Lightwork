@@ -104,7 +104,8 @@ def main():
                     audit.audit_event("goal_end", goal_id=gid, agent="orchestrator", status="succeeded")
 
         import uvicorn
-        uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="critical")
+        uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="critical",
+                    timeout_keep_alive=server.KEEP_ALIVE_SECONDS)
 
 
 if __name__ == "__main__":
