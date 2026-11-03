@@ -30,11 +30,10 @@ extends this to refuse shared-token-only peers. Node names used as signing
 origins must be valid lowercase origins (``federation_envelope`` charset), which
 the registry ids already are.
 
-Both halves of every delegation are recorded with the reciprocity convention
-``maverick.audit.federation`` verifies — the caller logs ``{peer_node,
-correlation_id, direction: "sent"}``, the receiver ``{..., direction:
-"received"}`` (kind :data:`EventKind.FEDERATION_DELEGATE`) — so a node that
-drops its half of a cross-swarm event is detectable by ``cross_verify``.
+Both halves of every delegation are recorded with matching fields — the
+caller logs ``{peer_node, correlation_id, direction: "sent"}``, the receiver
+``{..., direction: "received"}`` (kind :data:`EventKind.FEDERATION_DELEGATE`)
+— so comparing the two nodes' signed audit logs shows a dropped half.
 
 Transport seam: anything with ``call(method, payload_dict) -> payload_dict``.
 ``FederationService.call`` itself satisfies it, so tests (or an in-process

@@ -1,9 +1,8 @@
-"""Invariance, reliability/bonds/truth market, epistemic hygiene, policy
-discovery, learning envelopes and pricing parallelism."""
+"""Invariance checks and policy discovery."""
 from __future__ import annotations
 
 import pytest
-from maverick.immune import envelope, epistemic, invariance, market, policy, reliability
+from maverick.immune import invariance, policy
 
 
 def test_awareness_gap_separates_signal_from_noise():
@@ -21,40 +20,6 @@ def test_drift_detects_a_silent_model_swap():
     assert same == {"agreement": 1.0, "changed": [], "drifted": False}
     swapped = invariance.drift(before, {**before, "p1": "Sure, here it is", "p7": "ok"})
     assert swapped["changed"] == ["p1", "p7"] and swapped["drifted"]
-
-
-def test_bond_shrinks_only_with_real_track_record():
-    assert reliability.bond(1000, []) == 1000
-    few = reliability.bond(1000, [True] * 3)
-    many = reliability.bond(1000, [True] * 300)
-    assert many < few < 1000 and many > 0
-    with pytest.raises(ValueError):
-        reliability.bond(-1, [True])
-
-
-def test_truth_market_verifies_contested_claims_first_and_settles():
-    m = {"agreed": [("a", True, 5.0), ("b", True, 5.0)],
-         "split": [("a", True, 5.0), ("b", False, 4.0)],
-         "lopsided": [("a", True, 9.0), ("b", False, 1.0)]}
-    assert reliability.allocate(m, 2) == ["split", "lopsided"]
-    assert reliability.settle(m["split"], truth=False) == {"a": -5.0, "b": 5.0}
-    assert reliability.settle(m["agreed"], truth=False) == {"a": 0.0, "b": 0.0}
-
-
-def test_quarantine_and_unverified_basis():
-    facts = {
-        "f1": {"source": "agent", "verified": False},
-        "f2": {"source": "human", "verified": False, "derived_from": ["f1"]},
-        "f3": {"source": "agent", "verified": True, "derived_from": ["f1"]},
-        "f4": {"source": "human", "verified": False, "derived_from": ["f3"]},
-        "f5": {"source": "external", "verified": False, "derived_from": ["ghost"]},
-        "c1": {"source": "human", "verified": False, "derived_from": ["c2"]},
-        "c2": {"source": "human", "verified": False, "derived_from": ["c1"]},
-    }
-    assert epistemic.quarantine(facts, "f1") == ["f2", "f3", "f4"]
-    # f3 was verified by a human: a firebreak for f4. Unknown parents and
-    # unfounded cycles are untrusted.
-    assert epistemic.unverified_basis(facts) == ["c1", "c2", "f1", "f2", "f5"]
 
 
 def test_policy_replay_promotes_only_real_improvements():
@@ -79,28 +44,6 @@ def test_contradictions_need_compatible_conditions():
     both = rules + [{"id": "hold2", "action": "delete_record", "modality": "forbid", "when": {}}]
     assert [pair[0] for pair in policy.contradictions(both)] == ["hold", "hold2"]
     assert [pair[0] for pair in policy.contradictions(both, limit=1)] == ["hold"]
-
-
-def test_learning_envelope_marks_substantial_modifications():
-    env = {"temperature": {"min": 0.0, "max": 0.7}, "retriever": {"in": ["bm25", "dense"]}}
-    assert not envelope.substantial(env, {"temperature": 0.5, "retriever": "dense"})
-    assert envelope.violations(env, {"temperature": 0.9, "retriever": "web", "tools": ["shell"]}) == [
-        "retriever: 'web' not among ['bm25', 'dense']",
-        "temperature: 0.9 outside [0.0, 0.7]",
-        "tools: not in the declared envelope"]
-
-
-def test_parallelism_flags_a_lagged_follower_only():
-    import random
-    rng = random.Random(7)
-    leader = [100.0]
-    for _ in range(40):
-        leader.append(leader[-1] + rng.choice([-1, 1]))
-    follower = [leader[0]] + leader[:-1]          # copies the leader one period later
-    independent = [100.0 + rng.choice([-1, 0, 1]) for _ in leader]
-    hit = market.parallelism(leader, follower)
-    assert (hit["lag"], hit["co_moves"], hit["flag"]) == (1, 1.0, True)
-    assert not market.parallelism(leader, independent)["flag"]
 
 
 def test_composition_cache_is_per_tenant(monkeypatch):

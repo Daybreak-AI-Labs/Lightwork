@@ -87,29 +87,3 @@ def test_frozen_verifier_does_not_retire_insights(tmp_path):
     # Unfrozen baseline: the identical inputs DO retire it.
     assert run(False) >= 1
     assert dreaming.load_insights(ipath) == []
-
-
-def test_rollout_aborts_when_snapshot_raises(monkeypatch):
-    # A pre-promotion snapshot failure must ABORT (no reliable rollback), not
-    # proceed into a promotion that can't be cleanly undone.
-    from maverick import learning_rollout as lr
-
-    def boom(*a, **k):
-        raise OSError("disk full")
-
-    monkeypatch.setattr("maverick.dreaming.snapshot_learning_state", boom)
-    constraint_calls = []
-
-    def _constraint(cand, fraction):
-        constraint_calls.append(fraction)
-        return True, "ok"
-
-    res = lr.promote_skill_live(
-        "skill-x", [_constraint],
-        deploy_backend=lambda c, f: lr.DeploymentReceipt(c, f, "rev-1"),
-        rollback_backend=lambda _c: True,
-    )
-    assert res.completed is False
-    assert "aborted" in res.reason
-    assert res.stages == []          # never reached the staged rollout
-    assert constraint_calls == []    # and never deployed/checked

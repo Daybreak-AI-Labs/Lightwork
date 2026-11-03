@@ -2406,7 +2406,7 @@ def _remove_post_snapshot_stores(
     restore loop never touches a store created mid-cycle (e.g. the first-ever
     ``insights.ndjson`` / ``learned-skills/`` on a fresh tenant). Without this a
     newly-created store SURVIVES the rollback -- a partial revert that defeats
-    the "fully restored or unchanged" guarantee ``learning_rollout`` relies on
+    the "fully restored or unchanged" guarantee rollback callers rely on
     (a failed promotion would leave a just-distilled poisoned skill on disk).
     Each is removed via rename-aside so a failure can't half-delete a dir store.
     """

@@ -25,8 +25,7 @@ safety model: an addendum is a file entry, removing it is the rollback handle.
 The LLM proposer is an injected seam (:data:`ProposeFn`); a deterministic
 fallback composes a guidance line from the signature so the loop runs and is
 unit-testable without a provider. Validation likewise takes injected scorers --
-a live A/B needs a real model, exactly as ``learning_rollout`` takes injected
-constraints. A clean deployment enables the conservative ``risk_limited``
+a live A/B needs a real model. A clean deployment enables the conservative ``risk_limited``
 profile; ``MAVERICK_SELF_HARNESS=0`` or config can opt out.
 """
 from __future__ import annotations
@@ -1638,7 +1637,7 @@ class ValidationResult:
 # ``{"success": rate, "cost"?: float, "latency"?: float, "tool_calls"?: float}``
 # so validation can also gate on OPERATIONAL regressions (a line can raise the
 # pass rate while making the model slower / pricier / chattier). Injected: a
-# live A/B needs a real model, exactly like learning_rollout's constraints.
+# live A/B needs a real model.
 ScoreFn = Callable[[str, list[str]], object]
 HoldoutAuthorize = Callable[[str, str, list[str]], float]
 

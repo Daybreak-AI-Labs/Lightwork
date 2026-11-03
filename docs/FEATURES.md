@@ -18,7 +18,7 @@ catalogue of built features and tools.
 | [Sandboxes](#sandboxes) | prose |
 | [LLM providers and routing](#llm-providers-and-routing) | prose |
 | [MCP and agent interop](#mcp-and-agent-interop) | 20 |
-| [Safety and security](#safety-and-security) | 53 |
+| [Safety and security](#safety-and-security) | 52 |
 | [Governed agent runtime and onboarding](#governed-agent-runtime-and-onboarding) | 37 |
 | [Hosted control plane and multi-tenancy](#hosted-control-plane-and-multi-tenancy) | 11 |
 | [Evaluation and benchmarks](#evaluation-and-benchmarks) | prose |
@@ -32,7 +32,7 @@ catalogue of built features and tools.
 | [Distribution and install](#distribution-and-install) | 19 |
 | [Customer workflow completion and readiness](#customer-workflow-completion-and-readiness) | 22 in 24 subsections |
 
-457 entries in 19 sections. This block is generated: `python scripts/features_toc.py --write` (the test suite fails when it is stale).
+456 entries in 19 sections. This block is generated: `python scripts/features_toc.py --write` (the test suite fails when it is stale).
 <!-- toc:end -->
 
 ## Agent kernel and orchestration
@@ -637,14 +637,12 @@ Settings and the installation wizard.
   a confirm-gated tool call. Opt-in via `[governed_connectors] enable` +
   `connectors` (`MAVERICK_GOVERNED_CONNECTORS`; wizard step). Traceable
   action governance for self-improving agents.
-- **Governed learning at scale** (`access_policy.py`, `learning_rollout.py`;
-  opt-in, additive) — **PBAC**: a skill declares `purposes:` and
+- **Governed learning at scale** (`access_policy.py`; opt-in, additive) —
+  **PBAC**: a skill declares `purposes:` and
   `relevant_skills` recalls it only under a matching run purpose
   (`purpose_scope` / `MAVERICK_PURPOSE`; default-open). On the run path, per-goal
   action **lineage** is recorded when `[actions] enable` is set (tenant-scoped),
-  and `impact_of` answers "revoke X → what did it touch?". Apollo-style
-  `run_rollout` promotes a learned skill across the fleet only behind eval/health
-  constraints, staged with auto-rollback. Inspect with
+  and `impact_of` answers "revoke X → what did it touch?". Inspect with
   `maverick governance lineage|impact`.
 - **Specialist operating discipline** (`domain_discipline.py`, on by
   default; `[domains] discipline = false` opts out) — every domain pack's
@@ -3351,9 +3349,9 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   id + required tools resolved **narrow-only** via capability boot negotiation
   (an ungrantable requirement refuses the delegation), auth is a constant-time
   shared token that *identifies* the caller from local config (wire names
-  never trusted; fail-closed), and **both halves record reciprocal audit rows**
-  in exactly the convention `audit/federation.py` cross-verifies — a dropped
-  half is detectable. The protocol layer runs over any `call(method, payload)`
+  never trusted; fail-closed), and **both halves record matching audit rows**
+  with the shared correlation id, so comparing the two nodes' signed logs shows
+  a dropped half. The protocol layer runs over any `call(method, payload)`
   transport; the gRPC binding is a thin `[grpc]` adapter (live-smoked).
   New inbound requests atomically reserve one held goal and a sealed, pinned
   execution contract in the existing SQLite/PostgreSQL world admission ledger.
@@ -4141,18 +4139,8 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   forwards only to its single configured upstream host plus model-inference
   routes by default (override with `[model_proxy] allowed_routes` or
   `MAVERICK_PROXY_ALLOWED_ROUTES`).
-- **Audit & compliance** — signed append-only audit log (`maverick audit verify`), **federated
-  audit-log verification** (`audit/federation.py`) — over a set of nodes/tenants
-  whose signed logs reference each other (delegation, A2A handoff), checks
-  reciprocal references extracted from the same per-segment snapshots whose
-  signatures were verified. Supplied decoded rows must match those snapshots;
-  missing counterparts, conflicting acceptance/goal identities, and unresolved
-  or malformed delegation outcomes prevent a consistent report. Generic
-  references establish reciprocity only; acceptance does not prove completed
-  work. Anchors are checked separately against current files; this is not an
-  atomic multi-day snapshot or independent checkpoint proof. Missing evidence
-  cannot establish the actions that were never recorded. Includes
-  date-windowed **SIEM export**, **WORM export** (`audit/worm.py`, `maverick audit
+- **Audit & compliance** — signed append-only audit log (`maverick audit verify`).
+  Includes date-windowed **SIEM export**, **WORM export** (`audit/worm.py`, `maverick audit
   worm push`) — ships closed day-files to S3 Object-Lock (COMPLIANCE/GOVERNANCE)
   or a local read-only mirror with a retention lock, so the historical trail is
   *immutable*, not just tamper-evident; `maverick audit worm verify` proves every
@@ -4213,9 +4201,6 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   `[safety] shield_rate_limit = "100/60"` sliding-window token bucket per goal;
   throttling SKIPS the scan fail-open (the shield never blocks the agent by
   being busy), with once-per-window suppressed-call alerts.
-- **Model cards per LLM** (`model_cards.py`) — aggregate the deployment's own
-  usage ledger into per-model cards (roles, calls, tokens, dollars) rendered
-  as markdown with a no-vendor-claims disclaimer; duck-typed world adapter.
 - **Goal risk-tier auto-classifier** (`safety/goal_risk.py`) — deterministic
   low/medium/high scoring of a goal's wording before it runs (money/infra/
   credential/bulk-comms/PII/irreversibility signals, read-only de-escalators,
@@ -5492,11 +5477,8 @@ tested without spawning py-spy.
   `maverick immune awareness --goals` replays recorded goals with and without
   an evaluation cue and tests the behaviour gap. `canary-auto` models canaries
   on real approvals with one planted flaw.
-- **Analyses** (`immune/policy.py`, `invariance.py`, `reliability.py`,
-  `epistemic.py`, `envelope.py`, `market.py`): rule replay and contradiction
-  discovery, evaluation-awareness gap and model-swap drift, conservative bonds
-  and a verification-allocating truth market, fact contamination tracing,
-  Art. 43(4) learning envelopes, and pricing-parallelism signals.
+- **Analyses** (`immune/policy.py`, `invariance.py`): rule replay and
+  contradiction discovery, evaluation-awareness gap and model-swap drift.
 
 ## Unified cross-suite audit projection
 

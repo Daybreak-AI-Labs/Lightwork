@@ -200,7 +200,7 @@ point.
 
 | Threat | Mitigation |
 |--------|------------|
-| A node drops its half of a cross-swarm delegation | Both halves are audit-logged with a shared `correlation_id`; `audit.federation` reciprocity (`cross_verify`) detects a missing half. |
+| A node drops its half of a cross-swarm delegation | Both halves are audit-logged as `federation_delegate` rows with a shared `correlation_id` (direction `sent` / `received`), so comparing the two nodes' signed logs shows a missing half. There is no automated cross-node reciprocity check. |
 | A trust-plane denial isn't recorded | Every inbound/outbound denial lands in the audit chain (`agent_trust.record_denied`). |
 
 ### Information disclosure

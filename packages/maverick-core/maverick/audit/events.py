@@ -35,8 +35,8 @@ Payload shapes (kind -> required fields, all events also carry
   federation_delegate: peer_node:str (absent when the caller was unauthenticated),
                      correlation_id:str, direction:str (sent|received),
                      accepted:bool, reason:str ("" when accepted) — one half of a
-                     cross-swarm delegation; reciprocity of the two halves is
-                     verified by ``audit/federation.cross_verify``
+                     cross-swarm delegation; the two halves share the
+                     correlation_id
   agent_trust_denied: peer:str, direction:str (inbound|outbound), rule:str,
                      reason:str, correlation_id:str — an external agent was
                      refused by the Agent Trust Plane.
@@ -420,14 +420,6 @@ class EventKind:
     # auto:bool, exposure:float|None; on execution also card:str|None and
     # committed:bool.
     SHADOW_EXECUTION = "shadow_execution"
-    # AI system lifecycle: an AI system/component was retired (decommissioned).
-    # Closes the ISO/IEC 42001 A.6.2 lifecycle at the far end — the signed chain
-    # records the deliberate end-of-life the same way it records learning
-    # promotions, so a system that stops appearing is provably retired, not
-    # silently dropped. payload: system_id:str, reason:str, decided_by:str,
-    # data_disposition:str (retain|archive|erase), archived:bool, erased:bool,
-    # disposal_detail:dict (counts of erased world facts / audit events).
-    AI_SYSTEM_RETIRED = "ai_system_retired"
     # Continuous group-fairness monitoring (ISO/IEC 42001 A.6.2.6): the rolling
     # window breached the four-fifths rule or drifted below its baseline, so a
     # fairness regression is anchored in the signed chain instead of passing

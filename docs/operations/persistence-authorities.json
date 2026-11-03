@@ -190,7 +190,7 @@
     "sqlite_domain": 81,
     "configuration": 72,
     "read_projection": 24,
-    "audit": 25,
+    "audit": 24,
     "transient": 25,
     "business_records": 21,
     "execution": 46,
@@ -23486,25 +23486,6 @@
           "function": "_journal_records",
           "kind": "data_dir",
           "expression": "data_dir()"
-        }
-      ]
-    },
-    {
-      "path": "packages/maverick-core/maverick/audit/federation.py",
-      "contract": "audit",
-      "owner": "packages/maverick-core/maverick/audit/federation.py",
-      "purpose": "Federated audit-log verification: checks each node's signed chain from locked segment snapshots and cross-node references.",
-      "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
-      "governed_namespaces": [],
-      "literal_path_hints": [],
-      "observed_mechanism_markers": {},
-      "source_sites": [
-        {
-          "line": 177,
-          "function": "collect_node",
-          "kind": "cross_process_lock",
-          "expression": "cross_process_lock(f, strict=True)"
         }
       ]
     },

@@ -29,11 +29,10 @@
 // transport metadata, so the contract survives non-gRPC bindings.
 //
 // Audit reciprocity — both halves of a delegation land in the audit logs with
-// the convention maverick.audit.federation verifies: the caller records
-// {peer_node, correlation_id, direction: "sent"} and the receiver records
-// {peer_node, correlation_id, direction: "received"} (kind
-// "federation_delegate"), so a node that drops its half of a cross-swarm
-// event is detectable by cross_verify().
+// matching fields: the caller records {peer_node, correlation_id, direction:
+// "sent"} and the receiver records {peer_node, correlation_id, direction:
+// "received"} (kind "federation_delegate"), so comparing the two nodes' logs
+// shows a node that dropped its half of a cross-swarm event.
 //
 // Generate Python stubs with:
 //   python -m grpc_tools.protoc -I<dir containing maverick/> \
@@ -75,7 +74,7 @@ message DelegateRequest {
   string goal_description = 2;
   string correlation_id = 3;        // required, caller-generated, unique per
                                     // delegation — the shared id that links the
-                                    // two audit halves for reciprocity checks
+                                    // two audit halves
   repeated string requested_tools = 4;  // REQUIRED capabilities; the receiver
                                         // refuses unless its local grant can
                                         // supply every one (narrow-only)

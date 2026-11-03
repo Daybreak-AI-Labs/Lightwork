@@ -13,10 +13,6 @@ witness that establishes it, never a model's opinion.
 | Can a machine-assisted discovery be owned? | `immune.title` | `maverick immune title check / seal / verify` |
 | Do two rules contradict? Is a candidate rule better? | `immune.policy` | `maverick immune rules` |
 | Does a model act differently when watched? | `immune.invariance` | library |
-| What should an agent's output be bonded for? | `immune.reliability` | library |
-| Which facts rest on an unverified agent claim? | `immune.epistemic` | library |
-| Is a learning change inside its declared envelope? | `immune.envelope` | library |
-| Are two pricing agents moving in lock-step? | `immune.market` | library |
 
 ## Composition risk
 

@@ -283,7 +283,6 @@ tamper-evident.
   | `consent_result` | Human approval, denial or timeout on a gated action. |
   | `governance_denied` | A governance or policy guardrail blocked an action. |
   | `fairness_alert` | A fairness or bias threshold was breached. |
-  | `ai_system_retired` | An AI system or agent was retired. |
   | `halt` | The killswitch fired (source, reason). |
 
 - **Preserve, don't alter.** Copy the relevant day-files to evidence storage and
@@ -300,11 +299,11 @@ The general pattern is **halt → snapshot → roll back → review → re-enabl
 | --- | --- |
 | **Agent behaving unsafely, out of scope, or taking an unsafe autonomous action** | 1. Halt (§5.1): the halt file first for speed; the dashboard emergency stop for a shared, multi-host deployment. 2. Pull `governance_denied`, `capability_denied`, `consent_result` and `halt` events (§6) to reconstruct what it attempted. 3. If one principal is responsible, revoke it (§5.2) and keep the rest running; otherwise stay halted. 4. Establish whether any action taken is reversible, and work with the owners of the affected systems to undo real-world effects. 5. Remove the root cause; re-enable only with the incident commander's approval. |
 | **Prompt-injection compromise** | 1. Halt if a high-privilege tool was reached; otherwise revoke the affected principal. 2. Pull `shield_block` events (stage = input, tool or output) to see what the shield caught and what it missed. 3. Keep the malicious input as evidence and add a shield or guardrail rule for the pattern. 4. Check that no learned state was poisoned (next row). 5. Re-enable once the new rule is shown to work. |
-| **Runaway or poisoned learning** | 1. Halt learning-driven agents. 2. Snapshot the current learned state for evidence: `from maverick import dreaming; dreaming.snapshot_learning_state()`. 3. Roll back to the last known-good snapshot: `maverick dream --list-snapshots`, then `maverick dream --rollback <snapshot>` (or `latest`). 4. Live promotions go through the staged rollout in `maverick/learning_rollout.py`, whose `promote_skill_live` snapshots first and rolls back on a failed constraint; confirm the failed rollout rolled back, then re-run with tighter constraints. 5. Verify the audit log (§6) before re-enabling learning. |
+| **Runaway or poisoned learning** | 1. Halt learning-driven agents. 2. Snapshot the current learned state for evidence: `from maverick import dreaming; dreaming.snapshot_learning_state()`. 3. Roll back to the last known-good snapshot: `maverick dream --list-snapshots`, then `maverick dream --rollback <snapshot>` (or `latest`). 4. Verify the audit log (§6) before re-enabling learning. |
 | **Fairness alert** | 1. Set severity (usually SEV3 unless people are affected at scale). 2. Pull `fairness_alert` events for the metric, threshold and affected group. 3. If biased outputs are being produced at scale, halt or revoke; otherwise pause the affected workflow. 4. Find the root cause (data, prompt or learned drift), fix it and document it. 5. Assess under your own policy whether any disclosure is required. |
 
-If an agent or model is permanently decommissioned as the resolution, record an
-`ai_system_retired` event (`maverick/retirement.py`).
+If an agent or model is permanently decommissioned as the resolution, record
+the decision, its owner and the data disposition in your incident record.
 
 ---
 

@@ -7,7 +7,6 @@ import pytest
 from maverick import dreaming, factory_learning, killswitch, self_harness
 from maverick import self_improvement as si
 from maverick.learning_guard import check_learning_halt
-from maverick.learning_rollout import Stage, run_rollout
 
 
 @pytest.fixture(autouse=True)
@@ -388,35 +387,3 @@ def test_self_improvement_returns_killswitch_gate_before_evaluation(
     assert verdict.gates[0].gate == "killswitch"
     assert "source=file" in verdict.blocking_reason
     assert controller.ledger.all() == []
-
-
-def test_rollout_halt_after_deploy_rolls_back_before_constraints(
-    _clean_killswitch,
-):
-    deployed: list[float] = []
-    rolled_back: list[str] = []
-    evaluated = 0
-
-    def deploy(candidate: str, fraction: float) -> None:
-        assert candidate == "skill-v2"
-        deployed.append(fraction)
-        _clean_killswitch.write_text("stop canary", encoding="utf-8")
-
-    def constraint(_candidate: str, _fraction: float):
-        nonlocal evaluated
-        evaluated += 1
-        return True, "healthy"
-
-    def rollback(candidate: str) -> bool:
-        rolled_back.append(candidate)
-        return True
-
-    result = run_rollout(
-        "skill-v2", [Stage("canary", 0.1), Stage("full", 1.0)], [constraint],
-        deploy=deploy, rollback=rollback)
-
-    assert deployed == [0.1]
-    assert evaluated == 0
-    assert rolled_back == ["skill-v2"]
-    assert result.rolled_back is True and result.completed is False
-    assert "source=file" in result.reason
