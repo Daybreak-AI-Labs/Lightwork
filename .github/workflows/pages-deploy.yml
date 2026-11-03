@@ -42,8 +42,8 @@ jobs:
           node-version: "22"
       - name: Stage the site
         run: |
-          mkdir _site
-          rsync -a --exclude 'widget/' --exclude 'README.md' web/ _site/
+          cp -R web _site
+          rm -rf _site/widget _site/README.md
       - name: Publish to Cloudflare Pages
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
