@@ -20,12 +20,15 @@ import os
 import stat
 import struct
 import tempfile
+import threading
 import zipfile
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Any
 
 from . import Tool
+
+_XLSX_PARSER_SLOTS = threading.BoundedSemaphore(2)
 
 _SPREADSHEET_SCHEMA = {
     "type": "object",
@@ -233,6 +236,13 @@ def _validate_merged_cells(data: bytes, count: int = 0, area: int = 0) -> tuple[
 
 def _xlsx_snapshot(path: Path) -> bytes:
     """Snapshot and bound an XLSX archive before handing it to openpyxl."""
+    content = _xlsx_bytes(path)
+    _validate_xlsx(content)
+    return content
+
+
+def _xlsx_bytes(path: Path) -> bytes:
+    """Read bounded regular-file bytes without parsing the archive in the host."""
     input_limit = 64 * 1024 * 1024
     fd = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0))
     with os.fdopen(fd, "rb") as stream:
@@ -242,7 +252,6 @@ def _xlsx_snapshot(path: Path) -> bytes:
         content = stream.read(input_limit + 1)
     if len(content) > input_limit:
         raise ValueError("Workbook exceeds the 64 MiB input limit")
-    _validate_xlsx(content)
     return content
 
 def _xlsx_read_bounds(worksheet, limit: int) -> tuple[int, int]:
@@ -288,6 +297,10 @@ def _xlsx_read_bounds(worksheet, limit: int) -> tuple[int, int]:
 
 def _xlsx_read(path: Path, sheet: str | None, limit: int) -> list[list]:
     content = _xlsx_snapshot(path)
+    return _xlsx_read_content(content, sheet, limit)
+
+
+def _xlsx_read_content(content: bytes, sheet: str | None, limit: int) -> list[list]:
     with ExitStack() as cleanup:
         wb = _openpyxl().load_workbook(io.BytesIO(content), read_only=True, data_only=False, keep_links=False)
         cleanup.callback(wb.close)
@@ -311,6 +324,35 @@ def _xlsx_read(path: Path, sheet: str | None, limit: int) -> list[list]:
                     output.append(cell.value)
             rows.append(output)
         return rows
+
+
+def _isolated_xlsx_read(content: bytes, *, sheet: str | None, limit: int) -> str:
+    import json
+    _validate_xlsx(content)
+    return json.dumps(_xlsx_read_content(content, sheet, limit), default=str)
+
+
+def _isolated_xlsx_info(content: bytes) -> str:
+    _validate_xlsx(content)
+    wb = _openpyxl().load_workbook(io.BytesIO(content), read_only=True, keep_links=False)
+    try:
+        dims = {s: (wb[s].max_row, wb[s].max_column) for s in wb.sheetnames}
+        return f"xlsx sheets {dims}"
+    finally:
+        wb.close()
+
+
+def _xlsx_isolated(path: Path, name: str, **kwargs) -> str:
+    from ..parser_isolation import parse_isolated
+    if not _XLSX_PARSER_SLOTS.acquire(timeout=0.25):
+        raise RuntimeError("spreadsheet parsing is busy; retry later")
+    try:
+        result = parse_isolated(name, _xlsx_bytes(path), timeout=30.0, **kwargs)
+    finally:
+        _XLSX_PARSER_SLOTS.release()
+    if not isinstance(result, str):
+        raise RuntimeError("spreadsheet parser returned an invalid result")
+    return result
 
 
 def _xlsx_write(path: Path, rows: list[list], sheet: str | None) -> None:
@@ -411,12 +453,7 @@ def _run(args: dict[str, Any], sandbox=None) -> str:
             if not path.exists():
                 return f"ERROR: no such file {path}"
             if _is_xlsx(path):
-                wb = _openpyxl().load_workbook(io.BytesIO(_xlsx_snapshot(path)), read_only=True, keep_links=False)
-                try:
-                    dims = {s: (wb[s].max_row, wb[s].max_column) for s in wb.sheetnames}
-                    return f"xlsx sheets {dims}"
-                finally:
-                    wb.close()
+                return _xlsx_isolated(path, "spreadsheet_info")
             rows = _csv_read(path, 10_001)
             if len(rows) > 10_000:
                 return f"csv rows=10001+ cols={len(rows[0])} (at least 10001 rows; count limited)"
@@ -424,7 +461,9 @@ def _run(args: dict[str, Any], sandbox=None) -> str:
         if op == "read":
             if not path.exists():
                 return f"ERROR: no such file {path}"
-            rows = _xlsx_read(path, sheet, limit) if _is_xlsx(path) else _csv_read(path, limit)
+            if _is_xlsx(path):
+                return _xlsx_isolated(path, "spreadsheet_read", sheet=sheet, limit=limit)
+            rows = _csv_read(path, limit)
             import json
             return json.dumps(rows, default=str)
         if op == "write":

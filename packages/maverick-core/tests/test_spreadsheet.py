@@ -142,6 +142,20 @@ def test_factory_shape():
     assert t.name == "spreadsheet" and callable(t.fn)
 
 
+def test_xlsx_reads_fail_closed_when_isolated_worker_fails(tmp_path, monkeypatch):
+    from maverick import parser_isolation
+    path = tmp_path / "book.xlsx"
+    path.write_bytes(b"untrusted")
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("worker unavailable")
+
+    monkeypatch.setattr(parser_isolation, "parse_isolated", fail)
+    monkeypatch.setattr(ss, "_validate_xlsx", lambda *_: pytest.fail("parsed in parent"))
+    for op in ("read", "info"):
+        assert "worker unavailable" in ss._run({"op": op, "path": str(path)})
+
+
 def test_xlsx_rejects_compressed_expansion_before_parser(tmp_path):
     import zipfile
 

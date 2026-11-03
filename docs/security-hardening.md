@@ -1323,6 +1323,13 @@ isolate filesystem or network access, contain subprocess descendants, or
 coordinate limits across workers. Deployments accepting untrusted PDFs still
 need operating-system process and network isolation around the service.
 
+Spreadsheet XLSX `read` and `info` operations also run archive validation and
+workbook parsing in a resource-limited child, with a 30-second timeout and two
+concurrent parser slots per service process. They fail closed where the POSIX
+resource controls are unavailable. XLSX cell edits and recalculation have
+separate parsing paths and do not yet share this isolation; the same filesystem,
+network, descendant and cross-worker limits above apply.
+
 The interactive browser connects through the same DNS-pinning proxy used by the
 consent scanner. It refuses private addresses and permits outbound TCP only on
 ports 80 and 443, even when `MAVERICK_FETCH_ALLOW_PRIVATE` is enabled. The proxy
