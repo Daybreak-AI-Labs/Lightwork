@@ -52,10 +52,11 @@ def test_ecs_task_definition_parses_and_matches_contract():
 
 
 def test_fly_toml_parses_and_matches_contract():
-    data = tomllib.loads((_RA / "fly" / "fly.toml").read_text(encoding="utf-8"))
+    data = tomllib.loads((_RA / "flyio" / "fly.toml").read_text(encoding="utf-8"))
     assert data["http_service"]["internal_port"] == int(_PORT)
-    assert data["mounts"]["destination"] == _STATE
-    assert "dashboard" in data["processes"]["app"]
+    # The volume holds all runtime state: MAVERICK_HOME points at its mount.
+    assert data["mounts"][0]["destination"] == data["env"]["MAVERICK_HOME"]
+    assert data["experimental"]["cmd"][0] == "dashboard" and _PORT in data["experimental"]["cmd"]
     assert data["http_service"]["force_https"] is True
 
 

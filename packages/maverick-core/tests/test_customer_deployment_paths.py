@@ -293,7 +293,7 @@ bash "$1"
 
 def test_reference_recipes_provision_the_dashboard_credentials_they_require():
     recipes = ROOT / "deploy/reference-architectures"
-    for document in [recipes / "fly/fly.toml", recipes / "railway/README.md"]:
+    for document in [recipes / "flyio/fly.toml", recipes / "railway/README.md"]:
         text = document.read_text(encoding="utf-8")
         assert "ANTHROPIC_API_KEY" in text and "MAVERICK_DASHBOARD_TOKEN" in text
     task = json.loads((recipes / "ecs/task-definition.json").read_text(encoding="utf-8"))
