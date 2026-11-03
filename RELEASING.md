@@ -8,6 +8,24 @@ This is the maintainer procedure for publishing a release. It describes what
 No release is currently published, and PyPI publishing is switched off (see
 [PyPI publishing](#pypi-publishing)).
 
+Before enabling public releases, a repository administrator must configure and
+verify the repository's GitHub protections. Require an independent approving
+review on `main`, dismiss stale approvals, require approval of the latest push
+and resolution of review conversations, and require code-owner review for
+release and workflow changes. The current owner list needs enough eligible
+reviewers for maintainers to review one another's changes.
+
+Restrict creation of `v*`, `native-v*`, and `desktop-v*` tags to designated
+release maintainers and prevent routine tag updates or deletion. Protect the
+release and publishing environments with independent reviewers and appropriate
+branch/tag restrictions, then attach every publication and signing job to the
+correct protected environment. The `workflow_run` publisher uses the default
+branch ref, while tag-triggered jobs use tag refs; configure and verify both
+cases before release. Environment names in workflow files do not themselves
+create approval rules. Check inherited organization rules and classic branch
+protection as well as repository rulesets, and test the complete release path
+before relying on these controls.
+
 ## Versions and tags
 
 The eight Python distributions are released together, at one version, as a
