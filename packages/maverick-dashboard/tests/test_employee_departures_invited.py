@@ -33,8 +33,7 @@ def install(monkeypatch, tmp_path):
         if name.startswith(("MAVERICK_", "LIGHTWORK_")):
             monkeypatch.delenv(name, raising=False)
     config_path = tmp_path / "config.toml"
-    config_path.write_text('[client]\nid="departures-invited"\n[features]\nemployee_departures = true\n',
-                           encoding="utf-8")
+    config_path.write_text('[features]\nemployee_departures = true\n', encoding="utf-8")
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_CONFIG", str(config_path))
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
