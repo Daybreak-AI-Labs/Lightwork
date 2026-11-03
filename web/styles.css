@@ -425,3 +425,59 @@ html.modal-open{overflow:hidden}
 @media (prefers-reduced-motion:no-preference){canvas.lattice{cursor:crosshair}}
 @media (max-width:900px){.hero.inner canvas.neon{opacity:.4;-webkit-mask-image:linear-gradient(180deg,#000 0%,rgba(0,0,0,.45) 60%);mask-image:linear-gradient(180deg,#000 0%,rgba(0,0,0,.45) 60%)}}
 @media (prefers-reduced-motion:reduce){.gate .stage:hover{transform:none}.cap-i::after,.rows .r::after{transition:none}}
+
+/* ---- the page as one space (lab.js 5-13): living sky, seamless bands, the route, staged arrivals ---- */
+canvas.sky{position:fixed;inset:0;width:100vw;height:100vh;z-index:-1;pointer-events:none;display:block}
+section.panel{background:linear-gradient(180deg,rgba(7,9,15,0) 0%,rgba(7,9,15,.62) 18%,rgba(7,9,15,.62) 82%,rgba(7,9,15,0) 100%);border-top:0;border-bottom:0}
+.nav::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:1px;background:var(--grad-line);transform:scaleX(var(--progress,0));transform-origin:left;opacity:.85;pointer-events:none}
+/* the route */
+.spine{position:absolute;z-index:3;width:1px;pointer-events:none;background:linear-gradient(180deg,rgba(121,172,255,.14),rgba(139,92,246,.14),rgba(255,138,43,.14))}
+.spine b{position:absolute;left:0;top:0;width:1px;height:0;background:linear-gradient(180deg,#2F7CFF,#8B5CF6 55%,#FF8A2B);background-size:1px var(--len,100%)}
+.spine b::after{content:"";position:absolute;bottom:-3px;left:-3px;width:7px;height:7px;border-radius:50%;background:#fff;box-shadow:0 0 14px 4px rgba(167,139,250,.75)}
+.spine i{position:absolute;left:-4px;width:9px;height:9px;margin-top:-4.5px;border-radius:50%;border:1px solid var(--line-2);background:var(--bg);transition:background .4s ease,border-color .4s ease,box-shadow .4s ease}
+.spine i::after{content:"";position:absolute;left:9px;top:3px;width:21px;height:1px;background:linear-gradient(90deg,#A78BFA,rgba(167,139,250,0));transform:scaleX(0);transform-origin:left;transition:transform .5s ease .1s}
+.spine i.on{background:#A78BFA;border-color:#A78BFA;box-shadow:0 0 12px rgba(167,139,250,.85)}
+.spine i.on::after{transform:scaleX(1)}
+.eyebrow .n{transition:color .4s ease,text-shadow .4s ease}
+.eyebrow.lit .n{color:#fff;text-shadow:0 0 14px rgba(167,139,250,.7)}
+/* staged arrivals */
+.term .body,.fl{--from:translateX(-10px)}
+.kid{opacity:0;transform:var(--from,translateY(16px))}
+.go > .kid{opacity:1;transform:none;transition:opacity .65s cubic-bezier(.2,.7,.2,1) var(--d,0ms),transform .65s cubic-bezier(.2,.7,.2,1) var(--d,0ms)}
+.rv .dline{transform:scaleX(0);transform-origin:left;transition:transform 1.1s cubic-bezier(.2,.7,.2,1) .35s}
+.rv.in .dline{transform:none}
+.cta-final .rv .dline{transform-origin:center}
+/* things that keep working */
+.desk .item{transition:opacity .45s ease}
+.desk .item .decide{transition:background .3s ease,color .3s ease,border-color .3s ease}
+.desk .item.deciding .decide{background:var(--text);color:var(--bg);border-color:var(--text)}
+.desk .item.decided{opacity:.35}
+.desk .item.decided .decide{background:rgba(61,220,151,.14);color:var(--ok);border-color:rgba(61,220,151,.45)}
+.node,.edge{transition:border-color .3s ease,box-shadow .3s ease,background .3s ease}
+.node.hot{border-color:#A78BFA;box-shadow:0 0 0 1px rgba(139,92,246,.35),0 0 30px -6px rgba(139,92,246,.85);background:#131a2c}
+.node.ok.hot{border-color:var(--ok);box-shadow:0 0 0 1px rgba(61,220,151,.3),0 0 30px -6px rgba(61,220,151,.7)}
+.node.human.hot{border-color:var(--warn);box-shadow:0 0 0 1px rgba(255,181,71,.3),0 0 30px -6px rgba(255,181,71,.7)}
+.edge.hot{background:linear-gradient(180deg,#A78BFA,#fff)}
+.chips span{transition:border-color .5s ease,color .5s ease,box-shadow .5s ease,background .5s ease}
+.chips span.ping{border-color:rgba(167,139,250,.85);color:#fff;background:rgba(139,92,246,.14);box-shadow:0 0 20px -4px rgba(139,92,246,.75)}
+.chatbox .typing::after{content:"...";display:inline-block;overflow:hidden;vertical-align:bottom;width:0;animation:typing 1.3s steps(4) infinite}
+@keyframes typing{to{width:1.3em}}
+/* the home ticker */
+.marks.tick .wrap{display:block;overflow:hidden;padding-left:0;padding-right:0;-webkit-mask-image:linear-gradient(90deg,transparent,#000 7%,#000 93%,transparent);mask-image:linear-gradient(90deg,transparent,#000 7%,#000 93%,transparent)}
+.marks .track{display:flex;width:max-content;animation:tick 46s linear infinite}
+.marks.tick:hover .track{animation-play-state:paused}
+.marks .set{display:flex}
+.marks .set > span{position:relative;white-space:nowrap;padding-right:64px}
+.marks .set > span::after{content:"";position:absolute;right:29px;top:50%;width:5px;height:5px;margin-top:-2.5px;border-radius:50%;background:linear-gradient(135deg,#5EA0FF,#FFB070);box-shadow:0 0 8px rgba(167,139,250,.6)}
+@keyframes tick{to{transform:translateX(-50%)}}
+/* motion that runs on its own: the hero gradient word, the stage bars, the closing sunrise */
+@media (prefers-reduced-motion:no-preference){
+  .hero .grad,.hero .grad b{background-image:linear-gradient(90deg,#5EA0FF,#A78BFA 25%,#FFB070 50%,#A78BFA 75%,#5EA0FF);background-size:200% 100%;animation:sheen 9s linear infinite}
+  .gate .stage::before{animation:charge 5.6s ease-in-out infinite}
+  .gate .stage:nth-child(2)::before{animation-delay:.45s}.gate .stage:nth-child(3)::before{animation-delay:.9s}.gate .stage:nth-child(4)::before{animation-delay:1.35s}.gate .stage:nth-child(5)::before{animation-delay:1.8s}
+  .cta-final::before{animation:dawn 9s ease-in-out infinite alternate}
+}
+@keyframes sheen{to{background-position:-200% 0}}
+@keyframes charge{0%,40%,100%{box-shadow:none;filter:none}10%{box-shadow:0 0 18px 2px rgba(167,139,250,.6);filter:brightness(1.8)}}
+@keyframes dawn{from{opacity:.7;transform:translateY(30px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.rv .dline{transform:none;transition:none}}

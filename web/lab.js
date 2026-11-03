@@ -10,6 +10,10 @@
       tilts it and lights the nodes it passes; a click lights a cluster.
    3. Panel spotlight: a soft light follows the pointer across panels.
    4. Scroll reveals for .rv elements.
+   5-13. The page itself: a living sky behind everything, a route down the
+      gutter that connects the sections, staged arrivals, figures that
+      count up, an exception desk and a workflow that keep moving, chips
+      that light up, the home ticker, figure depth and reading progress.
    Pure canvas, no dependencies. Honors prefers-reduced-motion (one static
    frame, no pointer effects, no reveal animation) and pauses when scrolled
    out of view. */
@@ -183,4 +187,143 @@
   var rv = document.querySelectorAll(".rv");
   if (rv.length) { if (reduce || !("IntersectionObserver" in window)) { for (var i = 0; i < rv.length; i++) rv[i].classList.add("in"); }
     else { var io = new IntersectionObserver(function (es) { es.forEach(function (e) { if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); } }); }, { threshold: .12, rootMargin: "0px 0px -8% 0px" }); for (i = 0; i < rv.length; i++) io.observe(rv[i]); } }
+
+  /* ---- 5. the sky: one living background behind the whole page. The light
+     moves from night blue to sunrise as you scroll down; faint motes drift
+     with depth, and pulses run short circuit paths across it. ---- */
+  var sky = (function () {
+    var cv = document.createElement("canvas"); cv.className = "sky"; cv.setAttribute("aria-hidden", "true");
+    document.body.insertBefore(cv, document.body.firstChild);
+    var ctx = cv.getContext && cv.getContext("2d"); if (!ctx) return null;
+    var W = 0, H = 0, motes = [], sigs = [], last = 0, t = 0, ptr = { x: 0, y: 0, a: 0, on: false }, raf = 0;
+    function size() { W = window.innerWidth; H = window.innerHeight; cv.width = W; cv.height = H; motes = [];
+      for (var i = 0, n = W < 700 ? 36 : 70; i < n; i++) motes.push({ x: Math.random() * W, y: Math.random() * H, z: .25 + Math.random() * .75, tw: Math.random() * 6.283 }); }
+    function signal() { var y = H * (.08 + Math.random() * .84), x = -20 + Math.random() * W * .45, pts = [[x, y]];
+      for (var k = 0; k < 3; k++) { x += 110 + Math.random() * 300; pts.push([x, y]); y += (Math.random() < .5 ? -1 : 1) * (36 + Math.random() * 110); pts.push([x, y]); }
+      var L = [0]; for (k = 1; k < pts.length; k++) L.push(L[k - 1] + Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]));
+      sigs.push({ pts: pts, L: L, d: 0, v: 150 + Math.random() * 150, sy: window.scrollY }); }
+    function along(g, d) { var p = g.pts, L = g.L; d = Math.max(0, Math.min(L[L.length - 1], d)); for (var k = 1; k < L.length; k++) if (d <= L[k]) { var f = (d - L[k - 1]) / (L[k] - L[k - 1] || 1); return [p[k - 1][0] + (p[k][0] - p[k - 1][0]) * f, p[k - 1][1] + (p[k][1] - p[k - 1][1]) * f]; } return p[p.length - 1]; }
+    function draw(now) {
+      raf = 0; var dt = Math.min(.05, (now - last) / 1000 || 0); last = now; t += dt;
+      var sy = window.scrollY, max = document.documentElement.scrollHeight - H, p = max > 0 ? Math.max(0, Math.min(1, sy / max)) : 0, c = mix(p).join(",");
+      ctx.clearRect(0, 0, W, H);
+      var g = ctx.createRadialGradient(W * .08, -H * .15, 0, W * .08, -H * .15, W * .6); g.addColorStop(0, "rgba(47,124,255," + (.08 * (1 - p)) + ")"); g.addColorStop(1, "rgba(47,124,255,0)"); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+      g = ctx.createRadialGradient(W * .7, H * 1.1, 0, W * .7, H * 1.1, Math.max(W, H) * .85); g.addColorStop(0, "rgba(" + c + "," + (.10 + .16 * p) + ")"); g.addColorStop(.45, "rgba(" + c + "," + (.035 + .05 * p) + ")"); g.addColorStop(1, "rgba(" + c + ",0)"); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+      if (ptr.a > .01) { g = ctx.createRadialGradient(ptr.x, ptr.y, 0, ptr.x, ptr.y, 280); g.addColorStop(0, "rgba(139,92,246," + (.07 * ptr.a) + ")"); g.addColorStop(1, "rgba(139,92,246,0)"); ctx.fillStyle = g; ctx.fillRect(ptr.x - 280, ptr.y - 280, 560, 560); }
+      ptr.a += ((ptr.on ? 1 : 0) - ptr.a) * Math.min(1, dt * 4);
+      for (var i = 0; i < motes.length; i++) { var m = motes[i], y = ((m.y - sy * m.z * .25 - t * 10 * m.z) % (H + 40) + H + 40) % (H + 40) - 20, cc = mix(m.x / W * .6 + p * .4);
+        ctx.fillStyle = "rgba(" + cc[0] + "," + cc[1] + "," + cc[2] + "," + ((.12 + .4 * m.z) * (.6 + .4 * Math.sin(m.tw + t * 1.3))) + ")"; ctx.beginPath(); ctx.arc(m.x, y, .5 + m.z * 1.3, 0, 6.283); ctx.fill(); }
+      if (!reduce) {
+        if (sigs.length < (W < 700 ? 2 : 4) && Math.random() < dt * 1.1) signal();
+        ctx.lineCap = "round";
+        for (i = sigs.length - 1; i >= 0; i--) { var s = sigs[i], total = s.L[s.L.length - 1]; s.d += s.v * dt; if (s.d > total + 140) { sigs.splice(i, 1); continue; }
+          var oy = (s.sy - sy) * .3, fade = Math.min(1, (total + 140 - s.d) / 140);
+          ctx.strokeStyle = "rgba(124,155,255," + (.035 * fade) + ")"; ctx.lineWidth = 1; ctx.beginPath(); var a0 = s.pts[0]; ctx.moveTo(a0[0], a0[1] + oy);
+          for (var k = 1; k < s.pts.length && s.L[k - 1] < s.d; k++) { var q = s.L[k] <= s.d ? s.pts[k] : along(s, s.d); ctx.lineTo(q[0], q[1] + oy); } ctx.stroke();
+          for (k = 0; k < 10; k++) { var u = along(s, s.d - 120 + k * 12), v2 = along(s, s.d - 120 + (k + 1) * 12), cs = mix(u[0] / W).join(",");
+            ctx.strokeStyle = "rgba(" + cs + "," + (k / 10 * .4 * fade) + ")"; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.moveTo(u[0], u[1] + oy); ctx.lineTo(v2[0], v2[1] + oy); ctx.stroke(); }
+          var h = along(s, s.d); if (s.d <= total) { var hg = ctx.createRadialGradient(h[0], h[1] + oy, 0, h[0], h[1] + oy, 7); hg.addColorStop(0, "rgba(255,255,255," + (.5 * fade) + ")"); hg.addColorStop(1, "rgba(255,255,255,0)"); ctx.fillStyle = hg; ctx.beginPath(); ctx.arc(h[0], h[1] + oy, 7, 0, 6.283); ctx.fill(); } }
+        raf = requestAnimationFrame(draw);
+      }
+    }
+    // a phone's address bar showing or hiding only changes the height: keep the motes where they are
+    size(); window.addEventListener("resize", function () { if (window.innerWidth === W) { H = window.innerHeight; cv.height = H; } else size(); if (!raf) raf = requestAnimationFrame(draw); });
+    if (!reduce) { window.addEventListener("pointermove", function (e) { ptr.x = e.clientX; ptr.y = e.clientY; ptr.on = e.pointerType !== "touch"; }, { passive: true });
+      document.documentElement.addEventListener("pointerleave", function () { ptr.on = false; }); }
+    raf = requestAnimationFrame(draw);
+    return { redraw: function () { if (!raf) raf = requestAnimationFrame(draw); } };
+  })();
+
+  /* ---- 6. the route: a circuit trace down the left gutter connects every
+     section heading and lights up as you scroll past it ---- */
+  var route = (function () {
+    var heads = Array.prototype.filter.call(document.querySelectorAll("section .eyebrow"), function (e) { return !e.closest(".hero"); });
+    if (heads.length < 3) return null;
+    var sp = document.createElement("div"); sp.className = "spine"; sp.setAttribute("aria-hidden", "true"); sp.appendChild(document.createElement("b")); document.body.appendChild(sp);
+    var fill = sp.firstChild, nodes = heads.map(function () { var n = document.createElement("i"); sp.appendChild(n); return n; }), top = 0, len = 0, ys = [];
+    function update() { if (!len) return; var f = Math.max(0, Math.min(len, window.scrollY + window.innerHeight * .62 - top)); fill.style.height = f + "px";
+      for (var k = 0; k < nodes.length; k++) { var on = ys[k] - top <= f + 1; nodes[k].classList.toggle("on", on); heads[k].classList.toggle("lit", on); } }
+    function layout() { var w = heads[0].closest(".wrap"), r = (w || heads[0]).getBoundingClientRect(), pad = w ? parseFloat(getComputedStyle(w).paddingLeft) || 0 : 0, x = r.left + pad - 36 + window.scrollX;
+      // offsetTop ignores transforms, so a heading still sliding in (.rv) is measured where it will settle
+      ys = heads.map(function (h) { var y = h.offsetHeight / 2, e = h; while (e) { y += e.offsetTop; e = e.offsetParent; } return y; }); top = ys[0]; len = ys[ys.length - 1] - top;
+      sp.style.cssText = "left:" + x + "px;top:" + top + "px;height:" + len + "px;display:" + (x < 20 ? "none" : "block") + ";--len:" + len + "px";
+      for (var k = 0; k < nodes.length; k++) nodes[k].style.top = (ys[k] - top) + "px"; update(); }
+    layout(); window.addEventListener("resize", layout); window.addEventListener("load", layout);
+    if ("ResizeObserver" in window) new ResizeObserver(function () { layout(); }).observe(document.body);
+    return { update: update };
+  })();
+
+  /* ---- 7. staged arrivals: cards, rows, chips, terminal lines and workflow
+     steps come in one after another instead of all at once ---- */
+  if (!reduce && "IntersectionObserver" in window) {
+    var STAGED = [[".cols,.caps,.gate,.inds,.rows,.instrument", 90], [".chips", 30], [".term .body,.fl", 105], [".msgs", 700]];
+    var sio = new IntersectionObserver(function (es) { es.forEach(function (e) { if (!e.isIntersecting) return; var c = e.target, n = c.children.length; sio.unobserve(c); c.classList.add("go");
+      setTimeout(function () { for (var k = 0; k < c.children.length; k++) c.children[k].classList.remove("kid"); }, 800 + Math.min(n, 15) * (+c.getAttribute("data-step") || 90)); }); }, { threshold: .12, rootMargin: "0px 0px -6% 0px" });
+    STAGED.forEach(function (st) { Array.prototype.forEach.call(document.querySelectorAll(st[0]), function (c) {
+      if (c.hasAttribute("data-step") || c.closest(".hero.stage")) return; c.setAttribute("data-step", st[1]);
+      for (var k = 0, i = 0; k < c.children.length; k++) { var kid = c.children[k]; if (kid.classList.contains("rv")) continue; kid.classList.add("kid"); kid.style.setProperty("--d", (Math.min(i++, 15) * st[1]) + "ms"); }
+      sio.observe(c); }); });
+  }
+
+  /* ---- 8. figures count up to their value when they come into view ---- */
+  if (!reduce && "IntersectionObserver" in window) {
+    var nio = new IntersectionObserver(function (es) { es.forEach(function (e) { if (!e.isIntersecting) return; nio.unobserve(e.target); var el = e.target, m = /^(\D*)([\d,]+(?:\.\d+)?)(.*)$/.exec(el.textContent.trim()); if (!m) return;
+      var dec = (m[2].split(".")[1] || "").length, to = parseFloat(m[2].replace(/,/g, "")), t0 = performance.now();
+      (function step(now) { var k = Math.min(1, (now - t0) / 1600), v = to * (1 - Math.pow(1 - k, 3)); el.textContent = m[1] + v.toLocaleString("en-US", { minimumFractionDigits: dec, maximumFractionDigits: dec }) + m[3]; if (k < 1) requestAnimationFrame(step); })(t0); }); }, { threshold: .5 });
+    Array.prototype.forEach.call(document.querySelectorAll(".save .v, [data-count]"), function (el) { nio.observe(el); });
+  }
+
+  /* ---- 9. the exception desk keeps moving: the top item is decided and goes
+     to the back of the queue (illustrative, like the figure it animates) ---- */
+  if (!reduce && "IntersectionObserver" in window) Array.prototype.forEach.call(document.querySelectorAll(".desk"), function (desk) {
+    var vis = false, hover = false, busy = false;
+    new IntersectionObserver(function (es) { vis = es[0].isIntersecting; }, { threshold: .35 }).observe(desk);
+    desk.addEventListener("pointerenter", function () { hover = true; }); desk.addEventListener("pointerleave", function () { hover = false; });
+    setInterval(function () {
+      var items = desk.querySelectorAll(".item"); if (!vis || hover || busy || document.hidden || items.length < 2) return; busy = true;
+      var it = items[0], dec = it.querySelector(".decide"), label = dec ? dec.textContent : ""; it.classList.add("deciding");
+      setTimeout(function () { if (dec) dec.textContent = "Decided"; it.classList.add("decided"); }, 650);
+      setTimeout(function () {
+        var all = Array.prototype.slice.call(desk.querySelectorAll(".item")), before = all.map(function (e) { return e.getBoundingClientRect().top; });
+        desk.appendChild(it); it.classList.remove("deciding", "decided"); if (dec) dec.textContent = label;
+        all.forEach(function (e, k) { var d = before[k] - e.getBoundingClientRect().top; e.style.transition = "none"; e.style.transform = d ? "translateY(" + d + "px)" : ""; });
+        it.style.opacity = "0";
+        requestAnimationFrame(function () { requestAnimationFrame(function () { all.forEach(function (e) { e.style.transition = "transform .6s cubic-bezier(.2,.7,.2,1),opacity .6s ease"; e.style.transform = ""; }); it.style.opacity = ""; }); });
+        setTimeout(function () { all.forEach(function (e) { e.style.transition = ""; }); busy = false; }, 750);
+      }, 1500);
+    }, 3800);
+  });
+
+  /* ---- 10. workflows run: a pulse walks the steps, taking each branch in turn ---- */
+  if (!reduce && "IntersectionObserver" in window) Array.prototype.forEach.call(document.querySelectorAll(".flow .fl"), function (fl) {
+    var seq = [], vis = false, i = 0, alt = 0;
+    Array.prototype.forEach.call(fl.children, function (c) { seq.push(c.classList.contains("branch") ? Array.prototype.slice.call(c.querySelectorAll(".node")) : c); });
+    new IntersectionObserver(function (es) { vis = es[0].isIntersecting; }, { threshold: .3 }).observe(fl);
+    setInterval(function () { if (!vis || document.hidden) return; Array.prototype.forEach.call(fl.querySelectorAll(".hot"), function (h) { h.classList.remove("hot"); });
+      var s = seq[i]; if (s) { if (Array.isArray(s)) s = s[alt++ % s.length]; s.classList.add("hot"); } i = (i + 1) % (seq.length + 3); }, 480);
+  });
+
+  /* ---- 11. chips light up now and then, as if in use ---- */
+  var chipSets = Array.prototype.slice.call(document.querySelectorAll(".chips"));
+  if (!reduce && chipSets.length) setInterval(function () { if (document.hidden) return; var vh = window.innerHeight;
+    chipSets.forEach(function (c) { var r = c.getBoundingClientRect(); if (r.bottom < 0 || r.top > vh || !c.children.length || Math.random() < .35) return;
+      var el = c.children[Math.random() * c.children.length | 0]; el.classList.add("ping"); setTimeout(function () { el.classList.remove("ping"); }, 1500); }); }, 1000);
+
+  /* ---- 12. the strip under the home hero runs as a slow ticker ---- */
+  var mk = document.querySelector(".marks .wrap");
+  if (mk && !reduce) { var setA = document.createElement("div"), setB; setA.className = "set"; while (mk.firstChild) setA.appendChild(mk.firstChild);
+    setB = setA.cloneNode(true); setB.setAttribute("aria-hidden", "true"); var track = document.createElement("div"); track.className = "track"; track.appendChild(setA); track.appendChild(setB); mk.appendChild(track); mk.parentNode.classList.add("tick"); }
+
+  /* ---- 13. depth and progress: figures drift slightly against the scroll,
+     the nav carries a reading-progress line, and the route follows ---- */
+  var drift = [];
+  if (!reduce && window.matchMedia && window.matchMedia("(min-width: 900px)").matches) Array.prototype.forEach.call(document.querySelectorAll(".instrument,.term,.shot"), function (el) {
+    if (el.closest(".hero")) return; var t = el.closest("figure") || el; if (drift.indexOf(t) < 0) drift.push(t); });
+  var ticking = false;
+  function onScroll() { if (ticking) return; ticking = true; requestAnimationFrame(function () { ticking = false; var vh = window.innerHeight, max = document.documentElement.scrollHeight - vh;
+    document.documentElement.style.setProperty("--progress", max > 0 ? (window.scrollY / max).toFixed(4) : "0");
+    for (var i = 0; i < drift.length; i++) { var r = drift[i].getBoundingClientRect(); if (r.bottom < -240 || r.top > vh + 240) continue;
+      drift[i].style.translate = "0 " + Math.max(-26, Math.min(26, ((r.top + r.height / 2) - vh / 2) * -.045)).toFixed(1) + "px"; }
+    if (route) route.update(); if (reduce && sky) sky.redraw(); }); }
+  window.addEventListener("scroll", onScroll, { passive: true }); onScroll();
 })();
