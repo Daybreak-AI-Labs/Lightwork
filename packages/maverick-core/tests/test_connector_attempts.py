@@ -193,6 +193,13 @@ def test_retry_revalidates_original_request_and_authority(connector, monkeypatch
 
     monkeypatch.setattr(tool_reliability.asyncio, "sleep", sleep)
     result = asyncio.run(registry.run(connector.name, args))
+    if change == "args":
+        # The registry snapshots top-level arguments, so the retry uses the
+        # original path even if the caller mutates its own dictionary.
+        assert result == '{"ok": true}'
+        assert len(requests) == 2
+        assert all(request.url.path == "/items" for request in requests)
+        return
     assert result.startswith("ERROR:")
     assert len(requests) == 1
 

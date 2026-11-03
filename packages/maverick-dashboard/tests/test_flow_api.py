@@ -431,6 +431,9 @@ def test_unpublish_refuses_paused_live_resume(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     from maverick.flow import store
     from maverick_dashboard import automation_queue as aq
+    from maverick_dashboard import rbac
+
+    rbac.set_role("operator", "operator")
 
     _reset_aq(monkeypatch, aq)
     client = _client()

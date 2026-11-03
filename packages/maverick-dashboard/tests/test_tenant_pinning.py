@@ -145,7 +145,7 @@ def test_websocket_uses_principal_tenant_with_colliding_same_owner_goal(
     resets = _record_tenant_resets(monkeypatch)
 
     with client.websocket_connect(
-        f"/ws/v1/runs/{alice_goal}/events",
+        "ws://127.0.0.1" + f"/ws/v1/runs/{alice_goal}/events",
         headers={
             "Origin": "http://127.0.0.1",
             "X-Forwarded-User": "alice",
@@ -175,7 +175,7 @@ def test_websocket_wrong_tenant_same_owner_is_non_disclosing_and_resets(
     resets = _record_tenant_resets(monkeypatch)
 
     with client.websocket_connect(
-        f"/ws/v1/runs/{wrong_tenant_goal}/events",
+        "ws://127.0.0.1" + f"/ws/v1/runs/{wrong_tenant_goal}/events",
         headers={
             "Origin": "http://127.0.0.1",
             "X-Forwarded-User": "alice",
@@ -198,7 +198,7 @@ def test_websocket_wrong_owner_in_correct_tenant_is_non_disclosing(monkeypatch):
     )
 
     with client.websocket_connect(
-        f"/ws/v1/runs/{wrong_owner_goal}/events",
+        "ws://127.0.0.1" + f"/ws/v1/runs/{wrong_owner_goal}/events",
         headers={
             "Origin": "http://127.0.0.1",
             "X-Forwarded-User": "alice",

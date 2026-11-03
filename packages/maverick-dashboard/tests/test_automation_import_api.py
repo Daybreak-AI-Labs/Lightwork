@@ -58,6 +58,9 @@ def _isolate(monkeypatch, tmp_path):
     monkeypatch.setattr(auth, "proxy_trusts", lambda _host: True)
     monkeypatch.setattr(auth, "proxy_header_name", lambda: "X-Forwarded-User")
     monkeypatch.setattr(auth, "oidc_enabled", lambda: False)
+    from maverick_dashboard import rbac
+
+    rbac.set_role("user:alice", "operator")
 
 
 N8N_WF = {

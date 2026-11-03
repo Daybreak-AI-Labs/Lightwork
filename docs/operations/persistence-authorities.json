@@ -192,13 +192,13 @@
     "read_projection": 24,
     "coordinator": 1,
     "audit": 26,
-    "transient": 25,
+    "transient": 26,
     "business_records": 22,
     "execution": 47,
     "recovery": 12,
     "derived": 19,
     "composition": 62,
-    "external": 18,
+    "external": 19,
     "key_custody": 4,
     "storage_primitive": 12,
     "world": 5,
@@ -30498,6 +30498,44 @@
         {
           "line": 45,
           "function": "_template_bytecode_cache",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/sandbox/workspace_guard.py",
+      "contract": "transient",
+      "owner": "packages/maverick-core/maverick/sandbox/workspace_guard.py",
+      "purpose": "Resolve private state paths to refuse unsafe container workspace mounts.",
+      "referenced_store_owners": [],
+      "review": "Reads the state root solely for path confinement; it does not persist or grant authority.",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 10,
+          "function": "validate_container_workspace",
+          "kind": "maverick_home",
+          "expression": "maverick_home()"
+        }
+      ]
+    },
+    {
+      "path": "packages/maverick-core/maverick/tools/pandas_query.py",
+      "contract": "external",
+      "owner": "packages/maverick-core/maverick/tools/pandas_query.py",
+      "purpose": "Confine dataframe reads to workspace paths outside private Lightwork state.",
+      "referenced_store_owners": [],
+      "review": "Reads the state root solely for path confinement; it does not persist or grant authority.",
+      "governed_namespaces": [],
+      "literal_path_hints": [],
+      "observed_mechanism_markers": {},
+      "source_sites": [
+        {
+          "line": 63,
+          "function": "_safe_path",
           "kind": "maverick_home",
           "expression": "maverick_home()"
         }

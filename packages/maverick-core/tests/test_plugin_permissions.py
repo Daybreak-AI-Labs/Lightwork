@@ -207,7 +207,7 @@ def test_advisory_warning_when_granted_but_isolation_none(monkeypatch, caplog):
         out = plugins.discover_tools()
     assert [n for n, _ in out] == ["wp"]          # loaded (granted)
     assert "ADVISORY" in caplog.text              # ...but flagged as advisory
-    assert "isolation" in caplog.text
+    assert "isolation" in caplog.text.lower()
 
 
 def test_advisory_warns_even_when_enforce_disabled(monkeypatch, caplog):

@@ -33,6 +33,7 @@ from test_support.action_choice_native import (
 from test_support.action_choice_native import choice_native as choice_native
 from test_support.action_choice_teaching_native import child_resume, permit, resume
 from test_support.action_choice_teaching_native import teaching_native as teaching_native
+from test_support.audit_child_process import audit_signing_target
 
 
 def test_real_human_teaching_capture_signs_distinct_family_and_refines_only_actual_actions(teaching_native, record_property):
@@ -58,7 +59,7 @@ def test_real_human_teaching_capture_signs_distinct_family_and_refines_only_actu
         option = next(option for option in question["options"] if option["tool"] == wanted)
         assert option["arguments"] == {"case_id": case_id}
         if index == 0:
-            process = multiprocessing.get_context("spawn").Process(target=child_resume,
+            process = multiprocessing.get_context("spawn").Process(target=audit_signing_target(child_resume),
                 args=(run.run_id, str(backend.path), str(harness.native.world_path), "route:" + option["route"]))
             process.start()
             process.join(45)

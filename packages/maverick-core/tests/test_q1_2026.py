@@ -330,9 +330,14 @@ def test_view_image_rejects_empty_source():
     assert "source is required" in view_image().fn({"source": ""}).lower()
 
 
-def test_view_image_missing_file():
+def test_view_image_missing_file(tmp_path):
+    from types import SimpleNamespace
+
+    from maverick.budget import Budget
     from maverick.tools.view_image import view_image
-    out = view_image().fn({"source": "/no/such/image.png"})
+    out = view_image(sandbox=SimpleNamespace(workdir=tmp_path), budget=Budget(max_dollars=1)).fn(
+        {"source": str(tmp_path / "missing.png")}
+    )
     assert "could not load" in out.lower()
 
 

@@ -6,6 +6,7 @@ import io
 import json
 import sys
 import wave
+from types import SimpleNamespace
 
 from maverick.tools.audio_understanding import (
     audio_understanding,
@@ -37,7 +38,7 @@ def _fake_text_embed(labels):
 
 def _tool(tmp_path, audio_vec=(0.9, 0.1, 0.0)):
     return audio_understanding(
-        sandbox=None,
+        sandbox=SimpleNamespace(workdir=tmp_path),
         audio_embed=lambda b: list(audio_vec),
         text_embed=_fake_text_embed,
     )
@@ -197,7 +198,7 @@ def test_default_embedder_reports_actionable_install_hint(tmp_path, monkeypatch)
     monkeypatch.setattr(au, "_clap", None)
     audio = tmp_path / "clip.wav"
     audio.write_bytes(_wav_bytes())
-    out = audio_understanding().fn({"audio_path": str(audio), "labels": ["siren"]})
+    out = audio_understanding(sandbox=SimpleNamespace(workdir=tmp_path)).fn({"audio_path": str(audio), "labels": ["siren"]})
     assert out.startswith("ERROR") and "packages/maverick-core[clap]" in out
 
 

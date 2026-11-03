@@ -312,7 +312,7 @@ def test_healthz_minimal_payload_when_token_set(monkeypatch, tmp_path):
     assert "checks" not in body
 
 
-def test_healthz_full_payload_without_token(monkeypatch, tmp_path):
+def test_healthz_redacts_payload_without_token(monkeypatch, tmp_path):
     from maverick import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
@@ -321,8 +321,7 @@ def test_healthz_full_payload_without_token(monkeypatch, tmp_path):
     r = _client().get("/healthz")
     assert r.status_code == 200
     body = r.json()
-    assert "checks" in body
-    assert "llm_key" in body["checks"]
+    assert body == {"status": "ok"}
 
 
 # ---------- finding #8: redaction gates on ANY auth mechanism, not just token -

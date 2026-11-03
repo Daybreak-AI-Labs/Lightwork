@@ -335,11 +335,15 @@ def test_ensure_started_registers_route_guard_on_the_context(monkeypatch):
             return _FakeContext()
 
     class _FakeChromium:
-        def launch(self, headless):
+        def launch(self, **kwargs):
+            captured["launch"] = kwargs
             return _FakeBrowser()
 
     class _FakePlaywrightHandle:
         chromium = _FakeChromium()
+
+        def stop(self):
+            pass
 
     class _FakeSyncPlaywright:
         def start(self):
@@ -357,3 +361,5 @@ def test_ensure_started_registers_route_guard_on_the_context(monkeypatch):
     sess._ensure_started()
 
     assert captured["route"] == ("**/*", browser_mod._route_guard)
+    assert captured["launch"]["proxy"]["server"].startswith("socks5://127.0.0.1:")
+    sess.close()

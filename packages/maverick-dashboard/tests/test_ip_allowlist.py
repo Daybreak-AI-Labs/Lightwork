@@ -130,10 +130,10 @@ def test_installation_list_also_gates_the_websocket(monkeypatch):
     client = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})
     assert client.get("/api/v1/sessions").status_code == 403
     with pytest.raises(WebSocketDisconnect):
-        with client.websocket_connect(f"/ws/v1/runs/{gid}/events") as ws:
+        with client.websocket_connect("ws://127.0.0.1" + f"/ws/v1/runs/{gid}/events") as ws:
             ws.receive_json()
     monkeypatch.setenv("MAVERICK_IP_ALLOWLIST", "127.0.0.0/8")
-    with client.websocket_connect(f"/ws/v1/runs/{gid}/events") as ws:
+    with client.websocket_connect("ws://127.0.0.1" + f"/ws/v1/runs/{gid}/events") as ws:
         assert ws.receive_json()["kind"] == "status"
 
 

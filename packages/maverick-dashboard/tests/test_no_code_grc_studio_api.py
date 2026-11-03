@@ -62,6 +62,9 @@ def blueprint() -> dict[str, object]:
 
 @pytest.fixture()
 def environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from maverick_dashboard import rbac
+
+    rbac.set_role("user:operator", "operator")
     actor = {"value": "author"}
     store = studio.GRCStudioStore(
         tmp_path / "grc.sqlite3",

@@ -26,7 +26,8 @@ def env(tmp_path, monkeypatch):
     config.reset_config_cache()
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     world = WorldModel(tmp_path / "world.db")
-    from maverick_dashboard import api, auth
+    from maverick_dashboard import api, auth, rbac
+    rbac.set_role(ANA, "operator")
     api._world_cache.clear()
     monkeypatch.setattr(auth, "caller_principal", lambda request: ANA)
     from maverick_dashboard import app as app_module

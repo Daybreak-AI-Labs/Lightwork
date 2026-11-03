@@ -221,7 +221,7 @@ def test_viewer_report_reads_plainly_and_flags_an_unknown_person(client):
     text = visible_text(page)
     assert "hasn't signed in or been invited yet" in text
     assert "Sign-in is off." in text
-    assert "Operator" in text  # the first-login default role
+    assert "Viewer" in text  # the first-login default role
     assert "Configured first-login default" in text
 
 

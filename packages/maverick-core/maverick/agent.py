@@ -3034,10 +3034,9 @@ class Agent:
     def _capability_host_denial(self, name: str, args: dict, cap) -> str | None:
         # P0 capability layer (host resource-scopes): for a known network tool,
         # the grant's allow_hosts globs also gate the host its URL reaches.
-        # No-op unless a host-restricted grant is active (empty == all). Fail-
-        # soft: if the URL arg is missing/unparseable (no host) we skip the
-        # check rather than error -- we never deny something we can't
-        # confidently locate the host for.
+        # No-op unless a host-restricted grant is active (empty == all).
+        # Unclassified network authority fails closed. Known tools must also
+        # enforce their own destination checks when a URL is absent or invalid.
         if cap is not None and cap.allow_hosts and name in _UNSCOPED_NETWORK_TOOLS:
             from .audit import EventKind
             self._audit_tool_event(EventKind.CAPABILITY_DENIED, tool=name,

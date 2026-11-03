@@ -244,12 +244,11 @@ def test_caller_can_force_signature_when_manual_tofu_is_enabled(tmp_path, monkey
 
 
 def test_catalog_no_trust_signed_self_asserted_is_not_verified(tmp_path, monkeypatch):
-    # A self-signed skill with no configured trust anchor is integrity, not
-    # authenticity: install succeeds but verified stays False.
+    # A self-signed skill without a trust anchor is not authenticated.
     priv, pub_hex = _keypair()
     _write_config(tmp_path, monkeypatch, "")
-    s = _install_content(monkeypatch, tmp_path, _signed_body(priv, pub_hex))
-    assert s.verified is False
+    with pytest.raises(ValueError, match="trust anchor"):
+        _install_content(monkeypatch, tmp_path, _signed_body(priv, pub_hex))
 
 
 def test_catalog_require_signed_catalog_forces_signing_with_empty_trust(tmp_path, monkeypatch):

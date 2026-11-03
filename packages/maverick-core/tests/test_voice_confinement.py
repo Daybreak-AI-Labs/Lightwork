@@ -31,12 +31,10 @@ def test_transcribe_in_workspace_path_passes_confinement(tmp_path):
     assert "escapes" not in out
 
 
-def test_transcribe_sandbox_none_passes_absolute_through(tmp_path):
-    # The internal view_video caller passes a trusted temp path with no sandbox.
+def test_transcribe_without_sandbox_rejects_absolute_path(tmp_path):
     missing = tmp_path / "audio.wav"
     out = _run_transcribe({"source": str(missing)})  # sandbox defaults to None
-    assert out.startswith("ERROR") and "not found" in out
-    assert "escapes" not in out
+    assert out.startswith("ERROR") and "requires a workspace" in out
 
 
 def test_speak_rejects_traversal_output(tmp_path):

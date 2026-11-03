@@ -643,7 +643,7 @@ def _workspace_member_only(owner):
     registry.create_tenant("acme")
     rbac.set_tenant_role("acme", principal, "viewer")
     rbac.remove_user(principal)
-    assert auth.global_role_for_principal(principal) == "operator"   # the default: nothing is conferred
+    assert auth.global_role_for_principal(principal) is None
     return principal
 
 

@@ -24,7 +24,8 @@ def _iso(monkeypatch, tmp_path):
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     config.reset_config_cache()
     from maverick_dashboard import app as dash_app
-    from maverick_dashboard import integration_readiness
+    from maverick_dashboard import integration_readiness, rbac
+    rbac.set_role("user:alice", "operator")
     integration_readiness._clear_for_testing()
     dash_app._world_cache.clear()
     yield

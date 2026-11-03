@@ -38,6 +38,8 @@ def _agent(tmp_path):
 def _gov(monkeypatch, policy: dict):
     monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {"governance": policy})
     monkeypatch.setattr("maverick.config.config_source_errors", lambda *a, **k: {})
+    # No reviewer answers in these tests; do not wait for the dashboard timeout.
+    monkeypatch.setattr("maverick.safety.consent._decide_via_dashboard", lambda *a, **k: None)
 
 
 @pytest.mark.asyncio

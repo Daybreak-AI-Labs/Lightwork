@@ -243,12 +243,12 @@ from .auth import (
     caller_principal,
     caller_suites,
     can_access_goal,
-    durable_automation_owner,
     execution_user_id_from_request,
     goal_owner_filter,
     has_global_permission,
     has_permission,
     is_dashboard_admin,
+    require_durable_automation_creator,
     require_global_permission,
     require_page_permission,
     require_permission,
@@ -9200,6 +9200,7 @@ def create_trigger(request: Request, payload: TriggerIn) -> TriggerOut:
     existing = triggers_store.get_trigger(triggers_store.slugify(default_name))
     if existing is not None and existing.get("owner", "") not in _event_trigger_allowed_owners(request):
         raise HTTPException(status_code=409, detail="a trigger with that name already exists")
+    durable_owner = require_durable_automation_creator(request)
     try:
         from maverick.paths import current_tenant_id
 
@@ -9207,7 +9208,7 @@ def create_trigger(request: Request, payload: TriggerIn) -> TriggerOut:
             default_name,
             payload.template,
             payload.params or {},
-            owner=durable_automation_owner(request),
+            owner=durable_owner,
             flow=payload.flow,
             tenant=current_tenant_id() or "",
             flow_owner=(target_flow.owner if target_flow is not None else ""),
@@ -9470,7 +9471,7 @@ def create_event_trigger(request: Request, payload: EventTriggerIn) -> EventTrig
         raise HTTPException(
             status_code=409, detail="an event trigger with that name already exists"
         )
-    durable_owner = durable_automation_owner(request)
+    durable_owner = require_durable_automation_creator(request)
     from maverick.automation_connected_events import SOURCES as connected_sources
 
     try:

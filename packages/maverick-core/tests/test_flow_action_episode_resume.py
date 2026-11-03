@@ -23,6 +23,7 @@ from test_support.action_episode_native import (
 from test_support.action_episode_native import (
     native as native,
 )
+from test_support.audit_child_process import audit_signing_target
 
 
 def test_durable_native_capture_survives_two_fresh_process_approval_resumes(native, tmp_path):
@@ -33,7 +34,7 @@ def test_durable_native_capture_survives_two_fresh_process_approval_resumes(nati
     # encrypted persisted evidence. No in-memory collector is handed across.
     for expected_status, count in (("paused_approval", 1), ("completed", 2)):
         process = multiprocessing.get_context("spawn").Process(
-            target=_child_resume, args=(run.run_id, str(native), str(tmp_path / "native-resume.db")),
+            target=audit_signing_target(_child_resume), args=(run.run_id, str(native), str(tmp_path / "native-resume.db")),
         )
         process.start()
         process.join(45)

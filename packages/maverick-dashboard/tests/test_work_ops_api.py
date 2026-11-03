@@ -508,7 +508,8 @@ def test_ekko_recording_runs_the_daemon_over_the_uploaded_file(env, monkeypatch)
             ran["observer"] = observer
             self.accepted_events, self.blocked_events = 0, 0
 
-        def run(self, *, stop_when):
+        def run(self, *, stop_when, max_idle_sleep):
+            assert max_idle_sleep == 1.0
             while ran["observer"].observe() is not None:
                 self.accepted_events += 1
             assert stop_when()

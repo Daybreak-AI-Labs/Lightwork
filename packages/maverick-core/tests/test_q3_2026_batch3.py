@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock
 
+import pytest as _workspace_guard_pytest
+
 # ---------- devcontainer sandbox ----------
 
 def _stub_subprocess_ok(monkeypatch):
@@ -362,3 +364,12 @@ def test_notify_and_diagnose_register(tmp_path):
     names = {t.name for t in reg.all()}
     assert "notify" in names
     assert "diagnose" in names
+
+
+# Container argv tests use a workspace separate from the operator's state.
+@_workspace_guard_pytest.fixture(autouse=True)
+def _separate_container_test_home(tmp_path, monkeypatch, _isolate_dynamic_maverick_home):
+    operator_home = tmp_path.parent / (tmp_path.name + "-operator")
+    monkeypatch.setenv("HOME", str(operator_home))
+    monkeypatch.setenv("USERPROFILE", str(operator_home))
+    monkeypatch.setenv("MAVERICK_HOME", str(operator_home / ".maverick"))

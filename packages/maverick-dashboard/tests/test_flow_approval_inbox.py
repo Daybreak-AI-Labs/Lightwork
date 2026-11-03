@@ -237,7 +237,9 @@ def test_named_assignee_gets_existing_personal_decision_alert(setup, monkeypatch
     from maverick import budget_guidance
     from maverick.personal_notifications import PersonalInbox
     from maverick_dashboard import personal_notifications_api as notifications
+    from maverick_dashboard import rbac
 
+    rbac.set_role("user:reviewer", "operator")
     actor["principal"] = "user:reviewer"
     monkeypatch.setattr(budget_guidance, "warning_sources", lambda _actor: [])
     world = SimpleNamespace(

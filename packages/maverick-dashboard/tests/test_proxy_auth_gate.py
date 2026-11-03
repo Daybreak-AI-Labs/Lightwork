@@ -550,3 +550,19 @@ def test_testserver_is_not_trusted_as_a_loopback_host(monkeypatch):
         response = client.get("/api/v1/goals", headers={"Origin": "http://testserver"})
         assert response.status_code == 401
         assert response.json()["detail"].startswith("Remote access to this dashboard")
+
+
+def test_automation_creation_needs_a_durable_owner_when_auth_is_enabled(monkeypatch):
+    request = _req()
+    monkeypatch.setattr(auth, "caller_principal", lambda _request: None)
+    monkeypatch.setattr(auth, "anonymous_local_access_allowed", lambda: False)
+    with pytest.raises(auth.HTTPException) as refused:
+        auth.require_durable_automation_creator(request)
+    assert refused.value.status_code == 409
+    assert "named account" in refused.value.detail
+
+    monkeypatch.setattr(auth, "anonymous_local_access_allowed", lambda: True)
+    assert auth.require_durable_automation_creator(request) == ""
+    monkeypatch.setattr(auth, "anonymous_local_access_allowed", lambda: False)
+    monkeypatch.setattr(auth, "caller_principal", lambda _request: "user:alice")
+    assert auth.require_durable_automation_creator(request) == "user:alice"

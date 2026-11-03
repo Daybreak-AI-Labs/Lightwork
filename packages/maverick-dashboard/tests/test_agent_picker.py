@@ -134,7 +134,7 @@ def test_endpoint_is_scoped_to_the_callers_departments(client, monkeypatch):
     from maverick_dashboard import suite_grants
 
     suite_grants.set_suites("user:fin", ["finance"])
-    _as(monkeypatch, "user:fin")
+    _as(monkeypatch, "user:fin", role="operator")
     items = client.get("/agents/picker", params={"setup": "1", "limit": 50, "q": "finance_ap"}).json()["items"]
     assert "finance_ap" in [item["name"] for item in items]
     legal = client.get("/agents/picker", params={"setup": "1", "limit": 50, "q": "legal_contracts"}).json()

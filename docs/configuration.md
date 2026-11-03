@@ -846,13 +846,17 @@ inbound webhook routes (`/webhook/start`, `/webhook/run`, issue webhooks)
 and the `/share/`, `/scim/`, `/saml/` prefixes authenticate by their own
 mechanism (HMAC signature / share token / SSO) rather than the bearer.
 
-Two ways to authenticate:
-
-- **Header**: `Authorization: Bearer <token>` — for API clients.
-- **Query string**: `?token=<token>` — so phone browsers can bookmark a
-  page once and not retype the token.
+API clients authenticate with `Authorization: Bearer <token>`. Dashboard
+tokens in URL query strings are not accepted. Use a named browser session for
+interactive access.
 
 Token comparison is constant-time (`hmac.compare_digest`).
+
+A shared dashboard token has no named owner whose access can be rechecked
+later. Creating or changing a webhook or event trigger, or creating an executive
+report schedule, therefore requires a named account or genuine local auth-off mode.
+Existing triggers can still be inspected or removed; older token-owned records
+may need to be recreated under a named account before they can run.
 
 Authenticated accounts without an explicit role or verified group mapping
 default to `viewer`. Assign `operator` or `admin` deliberately before granting

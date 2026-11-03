@@ -30,6 +30,7 @@ from maverick_dashboard.route_identity import iter_compatible_route_contexts
 report_path = Path(sys.argv[1])
 client = TestClient(
     dashboard_app.app,
+    base_url="http://127.0.0.1",
     headers={"Origin": "http://127.0.0.1"},
     raise_server_exceptions=False,
 )

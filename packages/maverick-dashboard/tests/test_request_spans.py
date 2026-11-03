@@ -223,7 +223,7 @@ def test_an_invented_method_is_bounded_to_other(tracer):
 
 
 def test_websockets_pass_through_without_a_span(tracer):
-    with _client().websocket_connect("/ws") as websocket:
+    with _client().websocket_connect("ws://127.0.0.1" + "/ws") as websocket:
         websocket.send_text("ping")
         assert websocket.receive_text() == "ping"
     assert tracer.spans == []

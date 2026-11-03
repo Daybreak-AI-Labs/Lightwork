@@ -41,6 +41,10 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     app_mod._world_cache.clear()
     config.reset_config_cache()
+    from maverick_dashboard import rbac
+
+    for principal in ("alice", "bob", "attacker", "victim"):
+        rbac.set_role(f"user:{principal}", "operator")
     result = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"},
                         follow_redirects=False)
     yield result

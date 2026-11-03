@@ -485,13 +485,27 @@ def durable_automation_owner(request: Request) -> str:
 
     Principal-bearing auth uses that exact principal. Auth-off preserves the
     historical ownerless local mode. A configured static dashboard token has
-    no user subject, so bind it to the explicit local execution identity rather
-    than persisting an ownerless row that would later bypass revocation checks.
+    no user subject, so the legacy owner remains available for managing
+    existing records.
     """
     principal = caller_principal(request)
     if principal:
         return principal
     return "" if anonymous_local_access_allowed() else "user:local"
+
+
+def require_durable_automation_creator(request: Request) -> str:
+    """Resolve the admissible owner once, refusing unidentified automation."""
+    principal = caller_principal(request)
+    if principal:
+        return principal
+    if anonymous_local_access_allowed():
+        return ""
+    raise HTTPException(
+        status_code=409,
+        detail=("Sign in with a named account to create an automation. "
+                "A shared access token cannot provide an owner for future runs."),
+    )
 
 
 def _pin_tenant_from_principal(request: Request, principal: VerifiedPrincipal) -> None:

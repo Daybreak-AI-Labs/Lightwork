@@ -69,6 +69,8 @@ def test_android_tap_builds_input(monkeypatch):
 
 
 def test_android_screenshot_writes_bytes(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
     monkeypatch.setattr("shutil.which", lambda b: "/usr/bin/adb")
     fake_png = b"\x89PNG\r\n\x1a\n" + b"x" * 200
 
@@ -78,7 +80,7 @@ def test_android_screenshot_writes_bytes(monkeypatch, tmp_path):
     monkeypatch.setattr("subprocess.run", _run)
     out_file = tmp_path / "shot.png"
     from maverick.tools.android import android
-    out = android().fn({"op": "screenshot", "out_path": str(out_file)})
+    out = android(sandbox=SimpleNamespace(workdir=tmp_path)).fn({"op": "screenshot", "out_path": str(out_file)})
     assert "saved" in out
     assert out_file.read_bytes() == fake_png
 

@@ -16,9 +16,10 @@ def _client():
 
 def _owner_client(monkeypatch):
     from maverick.oidc import VerifiedPrincipal
-    from maverick_dashboard import auth
+    from maverick_dashboard import auth, rbac
     from maverick_dashboard.app import app
 
+    rbac.set_role("user:dana", "operator")
     monkeypatch.setattr(auth, "oidc_enabled", lambda: True)
     monkeypatch.setattr(auth, "verify_oidc_token", lambda token, **kwargs: VerifiedPrincipal(
         sub=token, issuer="https://issuer.example", audience="maverick", claims={"sub": token}))

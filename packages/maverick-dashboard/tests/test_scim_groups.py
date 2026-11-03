@@ -406,7 +406,7 @@ def test_config_source_error_and_malformed_mapping_deny(monkeypatch):
         "config_source_errors",
         lambda: {"config.toml": "simulated parse error"},
     )
-    assert scim_groups.role_for_principal("user:any") == "viewer"
+    assert scim_groups.role_for_principal("user:any") is None
     assert scim_groups.suites_for_principal("user:any") == frozenset()
 
     def invalid_table(key):

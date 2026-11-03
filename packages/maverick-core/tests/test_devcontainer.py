@@ -12,6 +12,7 @@ import json
 import os
 
 import pytest
+import pytest as _workspace_guard_pytest
 from maverick.sandbox.devcontainer import (
     DevcontainerBackend,
     DevcontainerSpec,
@@ -179,3 +180,12 @@ def test_build_sandbox_devcontainer_defaults_isolated(tmp_path, monkeypatch):
     be = sandbox.build_sandbox()
     assert be.allow_network is False
     assert be.allow_root is False
+
+
+# Container argv tests use a workspace separate from the operator's state.
+@_workspace_guard_pytest.fixture(autouse=True)
+def _separate_container_test_home(tmp_path, monkeypatch, _isolate_dynamic_maverick_home):
+    operator_home = tmp_path.parent / (tmp_path.name + "-operator")
+    monkeypatch.setenv("HOME", str(operator_home))
+    monkeypatch.setenv("USERPROFILE", str(operator_home))
+    monkeypatch.setenv("MAVERICK_HOME", str(operator_home / ".maverick"))

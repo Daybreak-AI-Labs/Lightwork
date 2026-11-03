@@ -278,8 +278,10 @@ def test_slack_interactions_refuse_unconfigured_unsigned_and_replayed(tmp_path, 
 def test_slack_button_press_over_http_decides_and_updates_the_card(tmp_path, monkeypatch):
     from maverick import channel_identities, slack_interactive
     from maverick.slack_interactive import ACTION_APPROVE, encode_button_value
+    from maverick_dashboard import rbac
 
     ids = _seed(tmp_path)
+    rbac.set_role("user:alice", "operator")
     _configure_secret(tmp_path)
     channel_identities.link("slack", "U1", "user:alice", actor="admin")
     updates = []
@@ -297,8 +299,10 @@ def test_slack_button_press_over_http_decides_and_updates_the_card(tmp_path, mon
 
 def test_slack_slash_command_over_http(tmp_path):
     from maverick import channel_identities
+    from maverick_dashboard import rbac
 
     ids = _seed(tmp_path)
+    rbac.set_role("user:alice", "operator")
     _configure_secret(tmp_path)
     client = _client()
     body = urlencode({"command": "/lightwork", "text": "status", "user_id": "U1"}).encode()

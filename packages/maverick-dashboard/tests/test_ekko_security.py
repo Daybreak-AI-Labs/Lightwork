@@ -203,6 +203,10 @@ def test_authenticated_sessions_are_owner_scoped_and_cross_owner_is_404(
     _enable_oidc(monkeypatch)
     from maverick.config import get_ekko_policy
     from maverick.work_discovery_store import WorkDiscoveryStore
+    from maverick_dashboard import rbac
+
+    rbac.set_role("user:alice", "operator")
+    rbac.set_role("user:bob", "operator")
 
     WorkDiscoveryStore("user:alice", "desk").enroll(get_ekko_policy())
     alice_headers = {"Authorization": "Bearer alice"}

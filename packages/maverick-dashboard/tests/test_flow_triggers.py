@@ -253,6 +253,9 @@ def test_event_flow_queue_restores_trigger_tenant(monkeypatch, tmp_path):
     # THAT tenant when the worker drains it later -- not whatever tenant the
     # worker thread happens to be scoped to (or the shared/no-tenant namespace).
     _isolate(monkeypatch, tmp_path)
+    from maverick_dashboard import rbac
+
+    rbac.set_role("alice", "operator")
     from maverick.flow import execution, store
     from maverick.flow.ir import Flow, FlowNode
     from maverick.paths import reset_tenant, set_tenant

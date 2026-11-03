@@ -17,7 +17,9 @@ def _isolate(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_FLOW_APPROVAL_SECRET", "link-secret")  # pragma: allowlist secret
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     from maverick import world_model
+    from maverick_dashboard import rbac
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    rbac.set_role("user:alice", "operator")
 
 
 def _as_actor(monkeypatch, principal="user:alice"):

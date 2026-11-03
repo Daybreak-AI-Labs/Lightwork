@@ -57,7 +57,8 @@ Each rule is backed by a CI gate or a failure seen in practice.
 10. Relative imports inside packages, absolute imports in tests; renames must
     update `docs/FEATURES.md` too.
 11. Dashboard tests need `TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"})`
-    and the tmp-path world-DB fixture.
+    and the tmp-path world-DB fixture. Use an absolute `ws://127.0.0.1/...`
+    URL for WebSocket tests: Starlette otherwise defaults those to `testserver`.
 12. pytest aborts everything on one collection error; a pyo3 `PanicException`
     usually hides a missing import on the stderr line above it.
 13. User-facing features need an in-product journey after installation, plain

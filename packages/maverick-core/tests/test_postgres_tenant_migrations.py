@@ -666,7 +666,10 @@ def test_create_goal_persists_owner_with_tenant(monkeypatch):
         owner="user:alice",
         execution_principal="agent:worker",
     ) == 99
-    sql, params = cursor.calls[0]
+    parent_sql, parent_params = cursor.calls[0]
+    assert "tenant_id = %s FOR SHARE" in parent_sql
+    assert parent_params == (4, "tenant-a")
+    sql, params = cursor.calls[-1]
     # domain/project_id joined the
     # column list (signature parity with the SQLite backend), between
     # execution_principal and tenant_id.

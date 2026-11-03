@@ -6,7 +6,7 @@ import time
 from types import SimpleNamespace
 
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 from maverick_dashboard import automation_queue
 from maverick_dashboard import executive_report_schedules as schedules
 
@@ -16,10 +16,27 @@ REVIEWED = {"context": "ctx", "owner": "user:alice", "tenant": "acme", "role": "
             "mfa": True, "address": "203.0.113.5"}
 
 
+def test_static_token_cannot_review_or_enable_new_report_schedules(monkeypatch):
+    monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "schedule-test-shared-token")  # pragma: allowlist secret
+    monkeypatch.setattr(schedules, "authority", lambda *args, **kwargs: dict(REVIEWED))
+    request = Request({"type": "http", "method": "GET", "path": "/", "headers": [
+        (b"authorization", b"Bearer schedule-test-shared-token"),  # pragma: allowlist secret
+    ]})
+    with schedules.auth.fresh_configuration():
+        options = schedules.options(request)
+        assert options["enabled"] is False
+        assert "named account" in options["message"]
+        with pytest.raises(HTTPException) as error:
+            schedules.review(request, {"context": "ctx"})
+    assert error.value.status_code == 409
+    assert "named account" in error.value.detail
+
+
 @pytest.fixture
 def created(monkeypatch, tmp_path):
     """``create`` against a fake queue; ``now`` is what authority() reports on this request."""
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setattr(schedules.auth, "require_durable_automation_creator", lambda _request: REVIEWED["owner"])
     recipe = {"layout": "layout-1", "layout_revision": "rev", "reviewed_sources": []}
     value = {"purpose": schedules.PURPOSE, "operation": "op-1", "authority": copy.deepcopy(REVIEWED),
              "expires": time.time() + 600, "body": {"report": "layout-1"}, "runs": [time.time() + 300],
@@ -47,6 +64,25 @@ def created(monkeypatch, tmp_path):
         return schedules.create(SimpleNamespace(app=None), "review-token", {"report": "layout-1"})
 
     return SimpleNamespace(now=now, reviewed=value["authority"], create=create, enqueued=enqueued)
+
+
+def test_unidentified_automation_creator_cannot_enqueue(created, monkeypatch):
+    def refuse(_request):
+        raise HTTPException(409, "A named account is required")
+
+    monkeypatch.setattr(schedules.auth, "require_durable_automation_creator", refuse)
+    with pytest.raises(HTTPException) as error:
+        created.create()
+    assert error.value.status_code == 409
+    assert created.enqueued == []
+
+
+def test_changed_automation_owner_cannot_enqueue(created, monkeypatch):
+    monkeypatch.setattr(schedules.auth, "require_durable_automation_creator", lambda _request: "user:other")
+    with pytest.raises(HTTPException) as error:
+        created.create()
+    assert error.value.status_code == 409
+    assert created.enqueued == []
 
 
 def test_a_changed_source_address_does_not_void_the_review(created):

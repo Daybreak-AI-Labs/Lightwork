@@ -37,8 +37,9 @@ def env(monkeypatch, tmp_path):
 
 
 def _as(monkeypatch, principal):
-    from maverick_dashboard import api, auth, content_access
+    from maverick_dashboard import api, auth, content_access, rbac
 
+    rbac.set_role(principal, "operator")
     monkeypatch.setattr(api, "_supervisor", lambda request: principal)
     monkeypatch.setattr(auth, "caller_principal", lambda request: principal)
     # The requester owns the request's content, so they may read the card.

@@ -56,6 +56,10 @@ def _save_fleet(owner=""):
 
 def _enable_oidc_principal_map(monkeypatch):
     import maverick_dashboard.auth as auth
+    from maverick_dashboard import rbac
+
+    rbac.set_role("user:dana", "operator")
+    rbac.set_role("user:eve", "operator")
 
     monkeypatch.setattr(auth, "oidc_enabled", lambda: True)
     monkeypatch.setattr(

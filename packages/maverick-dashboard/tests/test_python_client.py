@@ -147,7 +147,7 @@ def test_health_returns_the_degraded_answer_instead_of_raising(dashboard, monkey
     assert isinstance(health, Health)
     assert health.ok is False and health.http_status == 503
     assert health.body["status"] == "degraded"
-    assert "llm_key" in health.body["checks"]
+    assert "checks" not in health.body
 
 
 def test_submit_goal_then_read_status_result_and_receipt(dashboard):

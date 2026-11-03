@@ -15,6 +15,7 @@ from maverick_dashboard.approval_authority import issue_flow_decision_attestatio
 
 from test_support.action_episode_native import _no_agent
 from test_support.action_episode_native import native as native
+from test_support.audit_child_process import audit_signing_target
 from test_support.workflow_runtime_native import child_resume
 from test_support.workflow_transducer_native import workflow_native as workflow_native
 
@@ -206,7 +207,7 @@ def test_fresh_worker_continues_variable_path_without_prefix_replay(workflow_nat
     run = env.start(env.draft("fresh-worker-workflow"), {**INPUTS, "repeat": True})
     run = decide(run.run_id)
     assert run.status == "paused_approval" and env.counts() == before + 1
-    process = multiprocessing.get_context("spawn").Process(target=child_resume,
+    process = multiprocessing.get_context("spawn").Process(target=audit_signing_target(child_resume),
         args=(run.run_id, str(env.journal), str(world_model.DEFAULT_DB), copy.deepcopy(env.flags)))
     process.start()
     process.join(45)

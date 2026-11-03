@@ -101,7 +101,9 @@ def test_media_route_serves_and_guards(client, world, home):
 def test_walkthroughs_hide_cross_user_artifacts(client, world, home, monkeypatch):
     import maverick_dashboard.auth as auth
     from maverick.oidc import VerifiedPrincipal
+    from maverick_dashboard import rbac
 
+    rbac.set_role("user:bob", "operator")
     monkeypatch.setattr(auth, "oidc_enabled", lambda: True)
     monkeypatch.setattr(
         auth,

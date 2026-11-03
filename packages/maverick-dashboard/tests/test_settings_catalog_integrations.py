@@ -255,7 +255,6 @@ LOOSENING: dict[str, tuple[object, object]] = {
     "email.imap_host": (None, "imap.other.example"),
     "calendar.url": (None, "https://caldav.other.example"),
     "erp.base_url": (None, "https://erp.other.example"),
-    "github.trigger_labels": (None, ["urgent"]),
     "webhooks.linear_bot_id": (None, "someone@example.com"),
     "webhooks.jira_bot_id": (None, "someone@example.com"),
     "webhooks.gitlab_bot_username": (None, "someone"),

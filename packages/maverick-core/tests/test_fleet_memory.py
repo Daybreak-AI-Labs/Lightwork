@@ -224,16 +224,20 @@ def test_unbound_caller_is_local_trust():
     assert (ok, reason) == (True, "ok")
 
 
-def test_per_caller_caller_may_act_only_as_itself():
+def test_per_caller_caller_may_act_only_as_itself(monkeypatch):
     """A per-caller-authenticated agent acts AS itself, never AS another
     rostered agent -- the fleet-impersonation fix."""
     _register()  # order-bot / agentforce
     assert fleet_memory.register_agent("helper", "copilot")
+    from maverick import agent_trust
+
+    trusted = agent_trust.TrustedAgent(id="order-bot", data_scopes=frozenset({"sales"}))
+    monkeypatch.setattr(agent_trust, "load_trust_state", lambda: (False, {"order-bot": trusted}))
     # Acting as itself: allowed.
     with fleet_memory.bind_caller("order-bot"):
         ok, reason = fleet_memory.ingest({
             "agent_id": "order-bot", "vendor": "agentforce",
-            "kind": "lesson", "goal_text": "reconcile"})
+            "kind": "lesson", "goal_text": "reconcile", "domain": "sales"})
     assert (ok, reason) == (True, "ok")
     # Claiming a DIFFERENT rostered agent: refused (no impersonation, no
     # inheriting the other agent's trust scope), on both write and read.

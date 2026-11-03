@@ -134,7 +134,7 @@ def test_sessions_use_the_existing_rate_limit(tmp_path):
     _start(env)
     refused = env.client.post(SESSIONS, headers=browser_headers())
     assert refused.status_code == 429 and refused.headers["retry-after"] == "60"
-    assert {action for _sha, action in calls} == {SESSIONS}
+    assert {action for _sha, action in calls} == {"request"}
     assert len({sha for sha, _action in calls}) == 1
 
 

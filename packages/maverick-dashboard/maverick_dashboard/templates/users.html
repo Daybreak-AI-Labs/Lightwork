@@ -277,7 +277,7 @@
     <p class="muted">No one matches this filter. <a href="/users#people">Clear the filter</a> to see everyone.</p>
     {% endif %}
     {% else %}
-    <p class="muted">No one has a specific installation role yet.
+    <p class="muted">No one has a specific installation role yet. <a href="/settings/all">Review sign-in settings</a>.
       {% if workspace_roles_initialized %}People need an installation role or workspace membership to access work.
       {% else %}People who sign in start as <strong>{{ default_role | role_label }}</strong>.{% endif %}
       {% if invites_on %}<a class="btn" href="#invite-email">Invite someone</a>{% endif %}</p>

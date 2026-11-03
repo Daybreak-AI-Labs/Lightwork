@@ -416,23 +416,6 @@ def _adopting(S) -> tuple:
           subgroup=_ADOPT, minimum=0.1, maximum=50, unit="percent", scale=0.01,
           weaker="higher",
           warning="A new answer checker could replace the current one on weaker evidence."),
-        S("self_improvement", "require_signed_approval", "Require signed approval of big changes",
-          "Human-gated changes require a person's cryptographic signature. Configure trusted "
-          "startup keys before promotion; this cannot be switched off here.", "toggle", group, True,
-          "maverick.approval_signing", subgroup=_ADOPT,
-          env=("MAVERICK_REQUIRE_SIGNED_APPROVAL",), weaker=False,
-          warning="Human-gated changes always require a valid signature."),
-        S("self_improvement", "approver_keys", "People who may sign big changes",
-          "Legacy stored keys no longer grant approval authority. Set MAVERICK_APPROVER_KEYS "
-          "in the trusted server environment to configure approver public keys.", "keys", group, [],
-          "maverick.approval_signing", subgroup=_ADOPT, weaker="grow",
-          warning="Keys saved here do not grant approval authority."),
-        S("self_improvement", "approver_keys_dir", "Folder of approver key files",
-          "Legacy key folders no longer establish approval trust. Configure MAVERICK_APPROVER_KEYS in the server environment.",
-          "text", group, "", "maverick.approval_signing", subgroup=_ADOPT,
-          env=("MAVERICK_APPROVER_KEYS_DIR",), max_length=400, pattern=_PATH,
-          weaker="change",
-          warning="Files in this folder do not grant approval authority."),
     )
 
 

@@ -337,8 +337,12 @@ async def test_model_host_scope_cannot_expand_a_real_grant(tmp_path):
     agent.tools.register(Tool(name="database", description="spy database",
                               fn=lambda args: captured.append(args) or "ran",
                               input_schema={"type": "object"}))
-    assert "ran" in await agent._run_tool("database", {"sql": "SELECT 1", "_capability_allow_hosts": ["*"]})
-    assert captured[0]["_capability_allow_hosts"] == ("*.example.com",)
+    args = {"sql": "SELECT 1", "_capability_allow_hosts": ["*"]}
+    scoped = agent._with_capability_host_scope("database", args, agent.capability)
+    assert scoped["_capability_allow_hosts"] == ("*.example.com",)
+    result = await agent._run_tool("database", args)
+    assert "no verified host scope" in result
+    assert captured == []
 
 
 @pytest.mark.asyncio

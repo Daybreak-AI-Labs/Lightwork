@@ -91,7 +91,7 @@ def test_auto_threshold_runs_only_under_a_threshold_with_an_amount(tmp_path):
     assert _decision("approve_expense", amount=5000.0).decision is Decision.REQUIRE_HUMAN
     missing = _decision("approve_expense")
     assert missing.decision is Decision.REQUIRE_HUMAN
-    assert missing.rule == "finance_automation:auto_threshold"
+    assert missing.rule == "require_human_above"
 
 
 def test_hard_floors_hold_whatever_the_default(tmp_path):
@@ -276,18 +276,20 @@ async def test_enforce_blocks_the_action_at_run_time(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_warn_records_a_finding_and_needs_a_person(tmp_path, monkeypatch):
+    from contextlib import nullcontext
+
     import maverick.safety.consent as consent
-    from maverick.safety.consent import ConsentDecision
 
     _config(tmp_path, _ON + '[finance.sod]\nmode = "warn"\n')
     rows = _audit(monkeypatch)
     asked: list = []
-    monkeypatch.setattr(consent, "require_consent", lambda *a, **k: asked.append(k)
-                        or ConsentDecision(True, "test", "high", 0.0))
+    monkeypatch.setattr(consent, "require_operation_consent", lambda *a, **k: asked.append(k) or object())
+    monkeypatch.setattr(consent, "consume_operation_consent", lambda permit: nullcontext())
     ran: list = []
     out = await _agent(tmp_path, "approve_expense", ran)._run_tool("approve_expense", {})
     assert ran == ["approve_expense"], out
     assert asked and "separation-of-duties conflict" in asked[0]["detail"]
+    assert asked[0]["require_fresh_person"] is True
     finding = next(kw for kind, kw in rows if kind == "finance_sod_finding")
     assert finding["outcome"] == "human_review" and finding["conflicts"]
 
@@ -295,6 +297,7 @@ async def test_warn_records_a_finding_and_needs_a_person(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_warn_without_a_person_does_not_run(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-approve")
+    monkeypatch.setattr("maverick.safety.consent._decide_via_dashboard", lambda *a, **k: None)
     _config(tmp_path, _ON + '[finance.sod]\nmode = "warn"\n')
     _audit(monkeypatch)
     ran: list = []
@@ -335,15 +338,17 @@ async def test_unanswered_finance_approval_is_refused_and_withdrawn(tmp_path, mo
 
 
 @pytest.mark.asyncio
-async def test_without_the_timeout_key_the_standing_grant_still_applies(tmp_path, monkeypatch):
+async def test_standing_grant_does_not_replace_human_approval(tmp_path, monkeypatch):
     import maverick.safety.consent as consent
 
     _config(tmp_path, _ON + '[finance.automation]\ndefault = "approve"\n')
     _audit(monkeypatch)
     monkeypatch.setattr(consent, "_check_ledger", lambda *a, **k: True)
+    monkeypatch.setattr(consent, "_decide_via_dashboard", lambda *a, **k: None)
     ran: list = []
-    await _agent(tmp_path, "approve_expense", ran)._run_tool("approve_expense", {})
-    assert ran == ["approve_expense"]  # today's behaviour, unchanged
+    result = await _agent(tmp_path, "approve_expense", ran)._run_tool("approve_expense", {})
+    assert ran == []
+    assert "requires human approval" in result
 
 
 def test_fail_closed_applies_only_to_finance_actions(tmp_path):

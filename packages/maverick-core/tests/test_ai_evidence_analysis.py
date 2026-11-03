@@ -930,11 +930,21 @@ def test_optional_local_parser_dependencies_fail_closed(
     content: bytes,
     package: str,
 ) -> None:
-    _blocked_import(monkeypatch, package)
+    if media_type == evidence.MEDIA_PDF:
+        # PDF decoding runs in another interpreter, so model a missing child
+        # dependency at the process boundary rather than patching this process.
+        def unavailable(*args, **kwargs):
+            raise RuntimeError("pypdf is required")
+
+        monkeypatch.setattr("maverick.parser_isolation.parse_isolated", unavailable)
+    else:
+        _blocked_import(monkeypatch, package)
     environment = _environment(tmp_path)
     artifact = _artifact("artifact-optional", media_type=media_type, content=content)
     _register(environment, artifact)
-    with pytest.raises(evidence.EvidenceAnalysisConfigError, match="required"):
+    expected = (evidence.EvidenceAnalysisValidationError if media_type == evidence.MEDIA_PDF
+                else evidence.EvidenceAnalysisConfigError)
+    with pytest.raises(expected, match="PDF extraction failed closed|required"):
         _analyze(environment, artifact)
 
 

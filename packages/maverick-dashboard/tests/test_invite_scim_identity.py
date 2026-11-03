@@ -152,7 +152,7 @@ def test_a_person_known_to_the_idp_only_by_name_is_invited_as_usual(client, monk
     _map_groups(monkeypatch, roles={"Admins": "admin"})
     _workspace_admin(client)
     _push_group(client, "Admins", [_push_user(client, external_id="00u-opaque-okta-subject")])
-    assert auth.global_role_for_principal("user:" + CFO) == "operator"   # the default: nothing is conferred
+    assert auth.global_role_for_principal("user:" + CFO) is None
     assert invites.existing_local_account(CFO) is False
     assert _invite(client, CFO).status_code == 200
 

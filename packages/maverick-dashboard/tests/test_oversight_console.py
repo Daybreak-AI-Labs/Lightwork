@@ -262,6 +262,9 @@ def test_oversight_audit_events_are_owner_scoped(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     _enable_oidc_principal_map(monkeypatch)
     monkeypatch.delenv("MAVERICK_DASHBOARD_ADMINS", raising=False)
+    from maverick_dashboard import rbac
+
+    rbac.set_role("user:alice", "operator")
 
     from maverick.audit import record
     from maverick.world_model import WorldModel
