@@ -196,6 +196,7 @@ class _BrowserSession:
         # context may have been reset and must not turn persistence back on.
         self._allow_persist = _persist_enabled()
         self._playwright = None
+        self._egress_proxy = None
         self._browser = None
         self._context = None
         self._page = None
@@ -282,31 +283,39 @@ class _BrowserSession:
                 "playwright not installed. Run: python -m pip install -e './packages/maverick-core[browser]' "
                 "&& playwright install chromium"
             ) from e
-        self._playwright = sync_playwright().start()
-        from ..env_setting import env_or_config
+        from ..consent_scanner import PlaywrightPageCollector, _PinnedSocksProxy
 
-        headless = env_or_config("MAVERICK_BROWSER_HEADED", "tools", "browser_headed", "0") != "1"
-        self._browser = self._playwright.chromium.launch(headless=headless)
-        self._context = self._browser.new_context(
-            user_agent=(
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/126.0.0.0 Safari/537.36"
-            ),
-            viewport={"width": 1280, "height": 800},
-            storage_state=_restore_state_arg() if self._allow_persist else None,
-        )
-        # Network-level backstop: every OTHER guard in this module only
-        # re-checks page.url after an action completes, so a page's own
-        # background requests (fetch/XHR, images, iframes, a popup this
-        # context spawns) to a blocked/enterprise-denied host were never
-        # checked at all -- readable/exfiltratable without ever showing up
-        # as page.url. Registered on the CONTEXT, not
-        # just the one page this tool tracks, so it also covers any popup a
-        # page opens (this tool doesn't interact with popups, but Playwright
-        # still lets a page's script open and use one).
-        self._context.route("**/*", _route_guard)
-        self._page = self._context.new_page()
+        # Keep the validated DNS answer tied to the actual socket connection,
+        # including background and WebSocket traffic outside route callbacks.
+        # A proxy failure must never fall back to an unguarded browser.
+        try:
+            self._egress_proxy = _PinnedSocksProxy()
+            self._egress_proxy.__enter__()
+            self._playwright = sync_playwright().start()
+            from ..env_setting import env_or_config
+
+            headless = env_or_config("MAVERICK_BROWSER_HEADED", "tools", "browser_headed", "0") != "1"
+            launch = PlaywrightPageCollector._browser_launch_options(self._egress_proxy.server_url)
+            launch["headless"] = headless
+            self._browser = self._playwright.chromium.launch(**launch)
+            self._context = self._browser.new_context(
+                user_agent=(
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/126.0.0.0 Safari/537.36"
+                ),
+                viewport={"width": 1280, "height": 800},
+                storage_state=_restore_state_arg() if self._allow_persist else None,
+            )
+            # Apply destination policy to routed HTTP requests across pages and
+            # popups. Chromium does not route every service-worker or WebSocket
+            # request here; the pinned proxy is the IP-level network backstop.
+            self._context.route("**/*", _route_guard)
+            self._page = self._context.new_page()
+
+        except BaseException:
+            self.close()
+            raise
 
     @property
     def page(self):
@@ -614,7 +623,7 @@ class _BrowserSession:
 
     def close(self):
         with self._lock:
-            for closer in (self._context, self._browser, self._playwright):
+            for closer in (self._context, self._browser, self._playwright, self._egress_proxy):
                 if closer is None:
                     continue
                 try:
@@ -629,6 +638,7 @@ class _BrowserSession:
                         _redact_browser_text(e),
                     )
             self._page = self._context = self._browser = self._playwright = None
+            self._egress_proxy = None
 
 
 _BrowserScope = tuple[str | None, str | None, int | None]
@@ -826,12 +836,10 @@ def _is_safe_browser_url(url: str) -> bool:
 
 def _route_guard(route: Any, request: Any) -> None:
     """Playwright request interceptor: abort any http(s) request -- main
-    frame OR subresource (image, script, XHR/fetch, iframe, popup) -- whose
-    host fails the same SSRF/enterprise/tenant checks every other guard in
-    this module applies only to page.url. This is the actual network
-    chokepoint, so unlike a post-navigation page.url re-check it also
-    catches a page's own background requests, which never show up as
-    page.url at all.
+    frame OR routed subresource (image, script, XHR/fetch, iframe, popup) --
+    whose host fails the SSRF/enterprise/tenant checks. Service workers and
+    WebSockets may bypass this callback; the connection proxy independently
+    enforces public IP addresses for their TCP traffic.
 
     Non-http(s) schemes (data:, blob:, about:, chrome-error:, ...) are not
     egress and are waved through -- these are same-document resource loads

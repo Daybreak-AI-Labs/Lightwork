@@ -1318,3 +1318,10 @@ per-process concurrency limit. This bounds worker occupancy; it does not impose
 OS memory or CPU limits, isolate filesystem or network access, or coordinate
 limits across workers. Deployments that accept untrusted PDFs still need
 OS-enforced resource limits and process isolation around the service.
+
+The interactive browser connects through the same DNS-pinning proxy used by the
+consent scanner. It refuses private addresses and permits outbound TCP only on
+ports 80 and 443, even when `MAVERICK_FETCH_ALLOW_PRIVATE` is enabled. The proxy
+is not an operating-system sandbox; deployments handling untrusted pages should
+also restrict the browser process's network access at the operating-system or
+container boundary. Long-idle browser connections may be closed by the proxy.
