@@ -181,7 +181,7 @@
     "preferences": 7,
     "learning": 60,
     "sqlite_domain": 81,
-    "configuration": 70,
+    "configuration": 69,
     "read_projection": 24,
     "audit": 24,
     "transient": 25,
@@ -16396,27 +16396,6 @@
           "function": "_write_text",
           "kind": "write_text",
           "expression": "target.write_text(text, encoding='utf-8')"
-        }
-      ]
-    },
-    {
-      "path": "packages/maverick-core/maverick/tools/oauth_helper.py",
-      "contract": "configuration",
-      "owner": "packages/maverick-core/maverick/tools/oauth_helper.py",
-      "purpose": "Generic OAuth helper.",
-      "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
-      "governed_namespaces": [],
-      "literal_path_hints": [],
-      "observed_mechanism_markers": {
-        "atomic_replace": 2
-      },
-      "source_sites": [
-        {
-          "line": 107,
-          "function": "_persist_tokens",
-          "kind": "atomic_write_text",
-          "expression": "atomic_write_text(p, json.dumps(payload, indent=2), encoding='utf-8')"
         }
       ]
     },

@@ -18,8 +18,9 @@ permission gate but is not offered in the sidebar, the page finder or the
 Settings visibility matrix. People reach it from links on other pages: the
 release-decision links in Workflow pilots, the release-review links in flow
 comparisons and flow requalification, the Research lab step of the
-installation setup guide, and the product-operations Copilot actions that open
-it. On the page, researchers can:
+installation setup guide, the workflow-release links on the request-program
+and teach-a-flow pages, the dataset-version link on knowledge sources, and the
+product-operations Copilot actions that open it. On the page, researchers can:
 
 - select up to 64 UTF-8 source files totaling at most 256 KiB;
 - choose a supplied Python entrypoint and an installation-owned evaluator;
