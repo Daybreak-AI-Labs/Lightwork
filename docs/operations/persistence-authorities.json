@@ -188,7 +188,7 @@
     "preferences": 7,
     "learning": 60,
     "sqlite_domain": 81,
-    "configuration": 72,
+    "configuration": 71,
     "read_projection": 24,
     "audit": 24,
     "transient": 25,
@@ -7114,31 +7114,6 @@
           "function": "_store_path",
           "kind": "data_dir",
           "expression": "data_dir('registers')"
-        }
-      ]
-    },
-    {
-      "path": "packages/maverick-core/maverick/licensing.py",
-      "contract": "configuration",
-      "owner": "packages/maverick-core/maverick/licensing.py",
-      "purpose": "Signed license keys for the standalone agent builds.",
-      "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
-      "governed_namespaces": [],
-      "literal_path_hints": [],
-      "observed_mechanism_markers": {},
-      "source_sites": [
-        {
-          "line": 137,
-          "function": "_cli",
-          "kind": "write_text",
-          "expression": "(out / 'license_signing.pem').write_text(private_pem)"
-        },
-        {
-          "line": 138,
-          "function": "_cli",
-          "kind": "write_text",
-          "expression": "(out / 'license_pubkey.pem').write_text(public_pem)"
         }
       ]
     },

@@ -48,12 +48,11 @@ it, follow the
 instead.
 
 Standalone demos carry local copies of their shared support code so each Docker
-build context or release archive remains independent. This includes the PIA
-and DSAR mail and license helpers, and the request boundary and store lock used
-by the GRC, platform threat, environment threat, and model risk demos. Edit the
-canonical files in `demo/shared/`, then run
-`python scripts/sync_standalone_support.py`. Include any new support files in
-the applicable Dockerfiles or release manifests. CI checks that the copies match.
+build context remains independent. This includes the DSAR mail helper, and the
+request boundary and store lock used by the GRC, platform threat, environment
+threat, and model risk demos. Edit the canonical files in `demo/shared/`, then
+run `python scripts/sync_standalone_support.py`. Include any new support files
+in the applicable Dockerfiles. CI checks that the copies match.
 
 You need git, bash and Python 3.11 or 3.12 (the versions CI tests).
 Docker or Podman is optional; the container sandbox backends use it. Node.js

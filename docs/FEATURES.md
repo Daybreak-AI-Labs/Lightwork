@@ -12,7 +12,7 @@ catalogue of built features and tools.
 
 | Section | Entries |
 | --- | ---: |
-| [Agent kernel and orchestration](#agent-kernel-and-orchestration) | 216 |
+| [Agent kernel and orchestration](#agent-kernel-and-orchestration) | 215 |
 | [Tools](#tools) | 10 |
 | [Channels](#channels) | prose |
 | [Sandboxes](#sandboxes) | prose |
@@ -32,7 +32,7 @@ catalogue of built features and tools.
 | [Distribution and install](#distribution-and-install) | 19 |
 | [Customer workflow completion and readiness](#customer-workflow-completion-and-readiness) | 22 in 24 subsections |
 
-455 entries in 19 sections. This block is generated: `python scripts/features_toc.py --write` (the test suite fails when it is stale).
+454 entries in 19 sections. This block is generated: `python scripts/features_toc.py --write` (the test suite fails when it is stale).
 <!-- toc:end -->
 
 ## Agent kernel and orchestration
@@ -874,19 +874,12 @@ Settings and the installation wizard.
   assessment: fire rate, rating impact (re-rolled on the scorer's own
   rollup), and a verdict (load-bearing / informative / inert / unproven).
   The evidence-based questionnaire prune list.
-- **Signed license keys** (`maverick.licensing` + `license_kit.py` in the
-  DSAR Concierge and PIA Concierge demos) — Ed25519 tokens
-  (`LW1.payload.sig`) minted with `python -m maverick.licensing make`,
-  verified agent-side from `LIGHTWORK_LICENSE` + `LIGHTWORK_LICENSE_PUBKEY`.
-  Without a token, those two demos run in evaluation mode (fully functional,
-  open-case cap, visible banner); changing capabilities or renewing is a key
-  swap, not a reinstall.
 - **DSAR Concierge** (`demo/dsar-concierge/`) — a
   standalone agent on the capability seam: subject-facing intake + a
   deterministic message detector, the emailed identity-verification loop,
   the statutory clock with SLA aging, access/portability packages built
   ONLY from operator-provided extracts, the deliberately non-destructive
-  erasure handoff, `/value.json` for the fleet console, licensing, and a
+  erasure handoff, `/value.json` for the fleet console, and a
   full deployment kit (Dockerfile, launcher, env reference). With
   Lightwork the same agent mirrors into the privacy workspace registers
   and the signed audit chain.

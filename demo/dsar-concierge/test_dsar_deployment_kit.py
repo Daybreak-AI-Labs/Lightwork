@@ -10,7 +10,7 @@ HERE = Path(__file__).resolve().parent
 
 _STANDALONE_MODULES = ("app.py", "backend.py", "capabilities.py",
                        "dsar_engine.py", "mailsink.py", "mailsink_transport.py", "value_ledger.py",
-                       "license_kit.py", "serve_standalone.py")
+                       "serve_standalone.py")
 
 
 def test_requirements_cover_every_third_party_import():

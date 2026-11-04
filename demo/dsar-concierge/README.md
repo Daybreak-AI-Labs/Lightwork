@@ -18,13 +18,6 @@ see `/about` in the running app):
   parks the request awaiting confirmation.
 * **Counted value** — `/value.json` sums per-request value (env-overridable
   baselines) for a fleet console to roll up.
-* **License key (optional)** — `LIGHTWORK_LICENSE` (+ `LIGHTWORK_LICENSE_PUBKEY`)
-  verified via Ed25519. Without a key the app runs in evaluation mode: fully
-  functional, with a cap of 5 open requests. The deployment owner selects the
-  trusted public key; this is not a vendor-enforced restriction on a
-  self-hosted open-source deployment.
-  See the [self-managed demo license guide](../../docs/self-managed-demo-licenses.md)
-  to generate and use your own keys.
 
 **With Lightwork** the same agent additionally mirrors every request into
 the governed privacy workspace registers, lands every step on the signed
@@ -37,7 +30,7 @@ DSAR_OPERATOR_TOKEN=$(openssl rand -hex 24) bash run_standalone.sh
                                 # http://127.0.0.1:8891  (operator queue;
                                 # sign in as operator with DSAR_OPERATOR_TOKEN)
                                 # /request  (subject-facing form)
-                                # /about    (capability + license matrix)
+                                # /about    (capability matrix)
 ```
 
 Container installs: `Dockerfile.standalone` here; its header shows the build
@@ -60,7 +53,6 @@ address; API clients performing changes must send the same trusted origin.
 | `DSAR_EMAIL_ALLOWED_DOMAINS` | unset | Required in platform mode: comma-separated exact recipient domains permitted for public intake and verification email. Configure shared rate limiting at the reverse proxy and mail service; the in-process peer, recipient, and global limits are per worker and reset on restart. External ASGI servers must disable proxy-header rewriting so callers cannot spoof the peer. |
 | `DSAR_SLA_DAYS` | `30` | the statutory clock |
 | `EMAIL_USER` / `EMAIL_SMTP_PORT` | — | outbound mail identity (standalone captures locally) |
-| `LIGHTWORK_LICENSE` / `LIGHTWORK_LICENSE_PUBKEY` | unset | signed license token + issuer public key |
 | `VALUE_HOURLY_RATE`, `VALUE_DSAR_*_HOURS` | `$60`, 2.5/2.5/3.0h | the operator's own value inputs |
 
 Public intake limits are best-effort abuse reduction. Recipient aliases can map

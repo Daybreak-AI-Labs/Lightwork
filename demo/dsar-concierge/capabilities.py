@@ -53,16 +53,6 @@ _LABELS = {
     "platform_exports": "Real subject-data exports (platform machinery)",
 }
 
-import license_kit  # noqa: E402
-
-if STANDALONE:
-    LICENSE = license_kit.load_license()
-else:
-    LICENSE = {"mode": "platform", "customer": "", "sku": "platform",
-               "expires_at": None, "capabilities": [], "reason": "",
-               "open_case_cap": None}
-
-
 def caps_summary() -> dict:
     active = [_LABELS[k] for k, on in CAPS.items() if on]
     gated = [_LABELS[k] for k, on in CAPS.items() if not on]
@@ -71,5 +61,4 @@ def caps_summary() -> dict:
         "mode": "Standalone agent" if STANDALONE else "Lightwork platform",
         "active": active,
         "gated": gated,
-        "license": LICENSE,
     }

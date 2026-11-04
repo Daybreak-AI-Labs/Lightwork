@@ -20,7 +20,7 @@ RUN pip install --no-cache-dir -r requirements-standalone.txt
 
 # The standalone agent: app + vendored engine + templates. No maverick.
 COPY app.py backend.py capabilities.py dsar_engine.py mailsink.py mailsink_transport.py \
-     value_ledger.py license_kit.py serve_standalone.py ./
+     value_ledger.py serve_standalone.py ./
 COPY templates/ templates/
 
 ENV DSAR_STANDALONE=1 \

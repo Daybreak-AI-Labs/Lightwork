@@ -57,12 +57,6 @@
   <header>
     <b>DSAR Concierge</b>
     <span style="opacity:0.75;">{{ caps_summary.mode }}</span>
-    {% set lic = caps_summary.license %}
-    {% if lic.mode == 'licensed' %}
-      <span class="chip ok">licensed · {{ lic.customer }}</span>
-    {% elif lic.mode == 'evaluation' %}
-      <span class="chip warn">evaluation · cap {{ lic.open_case_cap }}</span>
-    {% endif %}
     <nav>
       <a href="/">Queue</a>
       <a href="/request">New request</a>

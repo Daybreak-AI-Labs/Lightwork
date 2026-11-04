@@ -25,7 +25,7 @@ from pathlib import Path
 import backend
 import dsar_engine as engine
 import value_ledger
-from capabilities import CAPS, LICENSE, STANDALONE, caps_summary
+from capabilities import CAPS, STANDALONE, caps_summary
 from fastapi import Depends, FastAPI, Form, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -121,21 +121,6 @@ def require_operator(request: Request, authorization: str = Header("")) -> None:
         if (not expected or _origin(origin, origin_header=origin_header is not None) != expected
                 or request.headers.get("sec-fetch-site", "").lower() == "cross-site"):
             raise HTTPException(status_code=403, detail="Same-origin operator request required.")
-
-
-def _license_gate() -> str | None:
-    """Evaluation-mode cap (standalone only) on OPEN requests."""
-    if not STANDALONE or LICENSE.get("mode") == "licensed":
-        return None
-    cap = LICENSE.get("open_case_cap") or 0
-    open_now = sum(1 for r in engine.list_requests()
-                   if r["status"] in engine.OPEN_STATUSES)
-    if cap and open_now >= cap:
-        return (f"Evaluation mode ({LICENSE.get('reason', 'no license')}): "
-                f"{open_now} requests are open and the evaluation cap is "
-                f"{cap}. Close a request or set LIGHTWORK_LICENSE to lift "
-                f"the cap.")
-    return None
 
 
 # Public intake can cause platform email. Fail closed until the operator sets
@@ -237,9 +222,6 @@ async def request_submit(request: Request,
                          kind: str = Form("access"),
                          note: str = Form("")) -> HTMLResponse:
     _intake_rate_limit(request)
-    gate = _license_gate()
-    if gate:
-        return _page(request, "request.html", submitted=None, error=gate)
     try:
         rec = _open_request(subject_id, kind, channel="web", note=note)
     except ValueError as exc:
@@ -254,9 +236,6 @@ async def webhook_message(request: Request) -> JSONResponse:
     message that does not read as a subject request — or names no subject —
     is a 422, never a silently-opened case."""
     _intake_rate_limit(request)
-    gate = _license_gate()
-    if gate:
-        return JSONResponse({"ok": False, "error": gate}, status_code=403)
     body = await request.json()
     text = str(body.get("text", ""))
     sender = str(body.get("sender", ""))
@@ -312,7 +291,7 @@ async def queue(request: Request) -> HTMLResponse:
     return _page(request, "queue.html", rows=rows, aging=engine.aging(),
                  value={"handled": len(done), "hours": round(hours, 1),
                         "dollars": round(dollars, 2)},
-                 license=LICENSE, mail=INBOX[:8])
+                 mail=INBOX[:8])
 
 
 @app.get("/case/{rid}", response_class=HTMLResponse,

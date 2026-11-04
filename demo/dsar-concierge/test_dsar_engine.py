@@ -15,7 +15,7 @@ HERE = Path(__file__).resolve().parent
 # design -- each directory is a self-contained deployable. In one pytest
 # process that collides in sys.modules, so every loader purges the shared
 # names before executing its app.
-_SHARED_MODULES = ("backend", "capabilities", "license_kit", "mailsink",
+_SHARED_MODULES = ("backend", "capabilities", "mailsink",
                    "value_ledger", "dsar_engine", "serve_standalone")
 
 

@@ -1,5 +1,5 @@
 """The standalone DSAR Concierge end to end over HTTP: intake → verify →
-fulfill/handoff → close, the license evaluation cap, and the ops surface
+fulfill/handoff → close, and the ops surface
 (/health, /value.json) the partner fleet console polls."""
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ HERE = Path(__file__).resolve().parent
 # design -- each directory is a self-contained deployable. In one pytest
 # process that collides in sys.modules, so every loader purges the shared
 # names before executing its app.
-_SHARED_MODULES = ("backend", "capabilities", "license_kit", "mailsink",
+_SHARED_MODULES = ("backend", "capabilities", "mailsink",
                    "value_ledger", "dsar_engine", "serve_standalone")
 
 
@@ -30,7 +30,6 @@ def _purge_shared_modules():
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("DSAR_STANDALONE", "1")
     monkeypatch.setenv("DSAR_DATA_DIR", str(tmp_path / "store"))
-    monkeypatch.delenv("LIGHTWORK_LICENSE", raising=False)
     monkeypatch.setenv("DSAR_OPERATOR_TOKEN", "test-operator-token")
     sys.path.insert(0, str(HERE))
     _purge_shared_modules()
@@ -154,53 +153,6 @@ def test_operator_console_rejects_non_ascii_credentials(client, auth):
     assert response.status_code == 401
     assert response.headers["www-authenticate"].startswith("Basic")
     assert tc.get("/", **operator).status_code == 200
-
-
-def test_evaluation_mode_caps_open_requests(client):
-    tc, module, _operator = client
-    assert module.LICENSE["mode"] == "evaluation"
-    cap = module.LICENSE["open_case_cap"]
-    for i in range(cap):
-        assert tc.post("/request", data={
-            "subject_id": f"s{i}@example.test", "kind": "access"
-        }).status_code == 200
-    over = tc.post("/request", data={"subject_id": "x@example.test",
-                                     "kind": "access"})
-    assert "Evaluation mode" in over.text
-    assert len(module.engine.list_requests()) == cap
-    # The webhook refuses with the same message, as a 403.
-    r = tc.post("/webhook/message", json={
-        "text": "access request please — a@b.test", "sender": "a@b.test"})
-    assert r.status_code == 403
-
-
-def test_license_key_lifts_the_cap(tmp_path, monkeypatch):
-    from maverick.licensing import generate_keypair, make_license
-    private_pem, public_pem = generate_keypair()
-    token = make_license(customer="Acme", sku="dsar_standalone",
-                         private_pem=private_pem, days=30)
-    monkeypatch.setenv("LIGHTWORK_LICENSE", token)
-    monkeypatch.setenv("LIGHTWORK_LICENSE_PUBKEY", public_pem)
-    monkeypatch.setenv("DSAR_STANDALONE", "1")
-    monkeypatch.setenv("DSAR_DATA_DIR", str(tmp_path / "store"))
-    sys.path.insert(0, str(HERE))
-    _purge_shared_modules()
-    try:
-        spec = importlib.util.spec_from_file_location(
-            "dsar_concierge_licensed", HERE / "app.py")
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        assert module.LICENSE["mode"] == "licensed"
-        assert module.LICENSE["customer"] == "Acme"
-        tc = TestClient(module.app)
-        for i in range(7):   # comfortably past the evaluation cap
-            assert tc.post("/request", data={
-                "subject_id": f"s{i}@example.test", "kind": "access"
-            }).status_code == 200
-        assert len(module.engine.list_requests()) == 7
-        assert "licensed to <b>Acme</b>" in tc.get("/about").text
-    finally:
-        sys.path.remove(str(HERE))
 
 
 def test_platform_intake_requires_an_allowed_email_domain(client, monkeypatch):

@@ -1,7 +1,6 @@
 """Standalone products must carry the same reviewed support implementation."""
 from __future__ import annotations
 
-import json
 import shutil
 import subprocess
 import sys
@@ -20,9 +19,9 @@ def test_standalone_context_contains_shared_support_and_captures_mail(demo, tmp_
     context.mkdir()
     tls_dir = tmp_path / "tls"
     tls_dir.mkdir()
-    for name in ("mailsink.py", "mailsink_transport.py", "license_kit.py"):
+    for name in ("mailsink.py", "mailsink_transport.py"):
         shutil.copyfile(source / name, context / name)
-    for name in ("mailsink_transport.py", "license_kit.py"):
+    for name in ("mailsink_transport.py",):
         assert (source / name).read_bytes() == (ROOT / "demo" / "shared" / name).read_bytes()
         assert name in (source / "Dockerfile.standalone").read_text()
     script = '''
@@ -67,14 +66,13 @@ assert writer.tls_context is mailsink._TLS_CTX
 
 @pytest.mark.parametrize("demo", ["grc-concierge", "platform-threat-hunter",
                                   "environment-threat-hunter", "model-risk-ai-assurance-officer"])
-def test_standalone_archive_contains_shared_request_and_lock_support(demo, tmp_path):
-    """Each release remains self-contained and retains bounded request behavior."""
+def test_standalone_demo_carries_shared_request_and_lock_support(demo, tmp_path):
+    """Each demo's copied support files run outside the repository and keep
+    bounded request behavior."""
     source = ROOT / "demo" / demo
     context = tmp_path / demo
     context.mkdir()
-    manifest = json.loads((source / "release-manifest.json").read_text())
     for name in ("request_limits.py", "request_boundary.py", "local_store_lock.py"):
-        assert name in manifest["files"]
         shutil.copyfile(source / name, context / name)
     for name in ("request_boundary.py", "local_store_lock.py"):
         assert (source / name).read_bytes() == (ROOT / "demo" / "shared" / name).read_bytes()

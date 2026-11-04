@@ -15,7 +15,6 @@ CONCIERGES = ("dsar-concierge",)
 STANDALONE_STORES = ("grc-concierge", "platform-threat-hunter",
                      "environment-threat-hunter", "model-risk-ai-assurance-officer")
 FILES = {
-    "license_kit.py": CONCIERGES,
     "mailsink_transport.py": CONCIERGES,
     "local_store_lock.py": STANDALONE_STORES,
     "request_boundary.py": STANDALONE_STORES,
