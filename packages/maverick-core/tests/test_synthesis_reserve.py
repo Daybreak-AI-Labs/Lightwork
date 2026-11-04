@@ -1,9 +1,10 @@
-"""Recursive fan-out budget exhaustion (#611): keep budget for synthesis so a
-deep task delivers an artifact instead of paying in full for nothing.
+"""Recursive fan-out keeps budget for synthesis, so a deep task delivers an
+artifact instead of paying in full for nothing.
 
-Three levers, all unit-tested here (a real-deep-task confirmation still needs a
-live-API run): depth-decaying fan-out cap, a synthesis-reserve spawn gate, a
-per-worker soft-stop that yields the reserve, and a leaf-by-default worker prompt.
+The levers, all unit-tested here (a deep-task confirmation needs a live-API
+run): a depth-decaying fan-out cap, a synthesis-reserve spawn gate, a
+per-worker soft-stop that yields the reserve, and a leaf-by-default worker
+prompt.
 """
 from __future__ import annotations
 

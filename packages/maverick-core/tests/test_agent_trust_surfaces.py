@@ -1,7 +1,8 @@
-"""Phase 3 — gate the remaining external surfaces and add per-caller A2A
-identity. Covers A2A per-caller bearer -> agent identity + admission + ceiling,
-and governance gating on federation delegation (DENY + fail-closed
-REQUIRE_HUMAN)."""
+"""Agent identity and trust gating on the external surfaces.
+
+Covers A2A per-caller bearer -> agent identity + admission + ceiling, the
+gRPC, MCP and marketplace surfaces, and governance gating on federation
+delegation (DENY + fail-closed REQUIRE_HUMAN)."""
 from __future__ import annotations
 
 import asyncio

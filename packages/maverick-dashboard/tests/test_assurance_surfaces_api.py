@@ -1,9 +1,9 @@
-"""HTTP acceptance for the newest assurance surfaces.
+"""HTTP acceptance for the assurance surfaces.
 
-Covers the routes the gap-buildout handoff flagged as not acceptance-proven:
-the G3 portfolio trend/drill-through, the G5 AI vendor-risk lifecycle, the G6
-drift-monitoring lifecycle, and the G9 agent/MCP topology wiring — including
-permission boundaries, tenant boundaries, and safe-projection checks.
+Covers the portfolio trend/drill-through, the AI vendor-risk lifecycle, the
+drift-monitoring lifecycle, the agent/MCP topology wiring and incident clocks,
+including permission boundaries, tenant boundaries, and safe-projection
+checks.
 """
 from __future__ import annotations
 
@@ -129,7 +129,7 @@ def _governed_asset():
     return observation
 
 
-# G3 — portfolio trend and contributor drill-through --------------------------
+# Portfolio trend and contributor drill-through -------------------------------
 
 
 def test_portfolio_trend_routes_gate_wire_and_bound(monkeypatch):
@@ -173,7 +173,7 @@ def test_portfolio_trend_routes_gate_wire_and_bound(monkeypatch):
     assert client.get(f"{base}/trend").status_code == 403
 
 
-# G5 — AI vendor risk ---------------------------------------------------------
+# AI vendor risk --------------------------------------------------------------
 
 
 def test_tenant_scoped_routes_refuse_without_an_active_tenant():
@@ -248,7 +248,7 @@ def test_ai_vendor_lifecycle_over_http_is_safe_and_reviewable(monkeypatch):
     ).status_code == 403
 
 
-# G6 — drift monitoring -------------------------------------------------------
+# Drift monitoring ------------------------------------------------------------
 
 
 def test_drift_lifecycle_over_http_stays_aggregate_only(monkeypatch):
@@ -323,7 +323,7 @@ def test_drift_routes_refuse_when_disabled(monkeypatch):
     ).status_code == 200
 
 
-# G9 — agent and MCP topology -------------------------------------------------
+# Agent and MCP topology ------------------------------------------------------
 
 
 def test_agent_topology_routes_wire_permissions_and_error_mapping(monkeypatch):
@@ -395,7 +395,7 @@ def test_assurance_page_renders_new_panels_and_gates_admin_actions(monkeypatch):
 def test_red_team_schedule_dispatch_materializes_a_real_campaign(
     tmp_path, monkeypatch,
 ):
-    """G8 acceptance: schedule -> run-due -> live campaign, then cancel."""
+    """Red-team schedule -> run-due -> live campaign, then cancel."""
     from maverick import agent_trust
     from maverick import model_risk_assurance as mra
 
@@ -489,7 +489,7 @@ def test_red_team_schedule_dispatch_materializes_a_real_campaign(
 
 
 def test_ai_incident_clocks_surface_on_api_and_page():
-    """G13 acceptance: declared Art. 73 clocks are visible, drafts gated."""
+    """Declared Art. 73 incident clocks are visible, drafts gated."""
     import time as _time
 
     from maverick import ai_incident_reporting as air

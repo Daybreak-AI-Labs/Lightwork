@@ -1,4 +1,4 @@
-"""User-reported UI fixes: the pop-out→approval bridge, the audit quick
+"""Dashboard page wiring: the pop-out→approval bridge, the audit quick
 filter, capability/feature descriptions, and the departments dialog."""
 from __future__ import annotations
 

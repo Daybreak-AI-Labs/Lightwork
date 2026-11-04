@@ -1,4 +1,4 @@
-"""Tests for the trace_compare tool (2027-H1 UX comparative replay).
+"""Tests for the trace_compare tool (comparative trajectory replay).
 latency_heatmap + tool_call_inspector have their own suites. Deterministic."""
 from __future__ import annotations
 

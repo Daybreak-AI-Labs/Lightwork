@@ -1,17 +1,16 @@
-"""Issue #473 task 4: STOP signals must propagate, not be swallowed.
+"""STOP signals must propagate, not be swallowed.
 
 `BudgetExceeded` (budget cap) and `killswitch.Halted` (the killswitch) are
-control-flow signals, not normal failures. Two fan-out sites used to fold them
-into ordinary outcomes:
+control-flow signals, not normal failures. Two fan-out sites must not fold
+them into ordinary outcomes:
 
   - `spawn_swarm` gathers children with `return_exceptions=True` and folds each
-    result into a tool-result string -> a budget/halt became "ERROR: tool
-    raised ...", letting the parent keep spending.
-  - best-of-N (`run_goal_best_of_n`) caught every attempt exception, scored the
-    candidate zero, and continued to the next attempt -> a cap hit during
-    attempt 0 still spawned attempts 1..N.
+    result into a tool-result string; a budget/halt must not become "ERROR:
+    tool raised ...", which would let the parent keep spending.
+  - best-of-N (`run_goal_best_of_n`) must not score a halted attempt zero and
+    continue: a cap hit during attempt 0 must not spawn attempts 1..N.
 
-Both must re-raise these signals (matching agent.py's gather handler).
+Both re-raise these signals (matching agent.py's gather handler).
 """
 from __future__ import annotations
 

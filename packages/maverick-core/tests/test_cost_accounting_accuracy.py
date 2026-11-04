@@ -1,6 +1,6 @@
-"""Issue #465 — cost/billing accuracy.
+"""Cost and billing accuracy.
 
-Pins four fixes:
+Pins four properties:
   1. Provider-aware cache-read multiplier: Anthropic 0.1x (default) vs
      OpenAI/o-series/gpt-5 auto-cache ~0.5x, while record_tokens stays
      backward-compatible (no new required args).

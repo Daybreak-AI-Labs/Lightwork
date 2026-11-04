@@ -1,11 +1,10 @@
-"""Audit round 11: _response_call_cost overpriced OpenAI-family cache hits.
+"""_response_call_cost prices OpenAI-family cache hits at the cached rate.
 
-OpenAI-compatible usage folds cached-prompt tokens INTO ``prompt_tokens`` and the
-provider doesn't surface them on the LLMResponse, so _response_call_cost (which
-feeds provider-health routing + the budget_dollars metric) priced the full,
-cache-inclusive prompt at the full input rate -- no discount. The real billing
-path (Budget.record_tokens) already splits billable_in = prompt - cached and
-prices the cached part at 0.5x; this brings the metrics path in line.
+OpenAI-compatible usage folds cached-prompt tokens INTO ``prompt_tokens``, so
+_response_call_cost (which feeds provider-health routing + the budget_dollars
+metric) must not price the full, cache-inclusive prompt at the full input
+rate. The billing path (Budget.record_tokens) splits billable_in = prompt -
+cached and prices the cached part at 0.5x; the metrics path matches it.
 
 (Anthropic's input_tokens already excludes cache reads, which ride on the
 response as cache_read_tokens, so that path is unaffected.)
@@ -150,9 +149,9 @@ def test_anthropic_cache_write_priced_at_configured_ttl(monkeypatch):
     # Audit (llm unit): cache_creation_tokens are surfaced only by the Anthropic
     # provider, which writes breakpoints at the configured TTL. The interactive
     # default is "1h" (2.0x write surcharge) -- the authoritative
-    # Budget.record_tokens bills it at 2.0x. _response_call_cost previously
-    # hardcoded the 5m 1.25x rate, under-counting 1h cache-write spend by ~37.5%
-    # in the cross-run provider-cap ledger. Force the interactive default TTL.
+    # Budget.record_tokens bills it at 2.0x. _response_call_cost must not use
+    # the 5m 1.25x rate, which under-counts 1h cache-write spend by ~37.5% in
+    # the cross-run provider-cap ledger. Force the interactive default TTL.
     monkeypatch.delenv("MAVERICK_ANTHROPIC_CACHE_TTL", raising=False)
     monkeypatch.delenv("MAVERICK_CODING_MODE", raising=False)  # -> "1h"
     resp = _Resp(_UsageAnthropic(inp=1_000, out=100), cache_creation=2_000_000)

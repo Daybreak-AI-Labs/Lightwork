@@ -1,4 +1,4 @@
-"""Provider request-shaping fixes (#466).
+"""Provider request shaping.
 
 - Anthropic: the messages cache breakpoint must strip cache_control carried in
   from prior turns, so system + tools + messages never exceeds Anthropic's hard

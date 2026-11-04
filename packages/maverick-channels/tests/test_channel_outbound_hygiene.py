@@ -1,14 +1,14 @@
-"""Audit round 10: channel robustness + outbound info-hygiene.
+"""Channel robustness and outbound reply hygiene.
 
-1. Signal: the outbound reply send sat OUTSIDE the receive loop's try/except, so
-   a send failure (signal-cli's stdin breaks when the daemon dies/restarts --
-   exactly when sends fail) propagated out of start() and killed the whole
-   channel. Now guarded, like email/sms/whatsapp.
+1. Signal: the outbound reply send runs inside the receive loop's try/except,
+   so a send failure (signal-cli's stdin breaks when the daemon dies or
+   restarts, which is exactly when sends fail) does not propagate out of
+   start() and kill the whole channel, as with email/sms/whatsapp.
 
-2. Error-text leakage: several channels reflected the raw exception text back to
-   the remote user (``f"⚠ error: {e}"``), which can carry a credential or
-   internal path. The detail is already logged; the user now gets a generic
-   message (matching slack/signal). Voice is the representative case here.
+2. Error-text leakage: a channel never reflects the raw exception text back
+   to the remote user (``f"⚠ error: {e}"``), which can carry a credential or
+   internal path. The detail is logged; the user gets a generic message
+   (matching slack/signal). Voice is the representative case here.
 """
 from __future__ import annotations
 

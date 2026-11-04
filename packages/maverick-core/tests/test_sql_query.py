@@ -1,8 +1,8 @@
-"""Q3 2026 batch 18.
+"""sql_query tool: read-only-by-default SQLite querying.
 
-  - sql_query tool: read-only-by-default SQLite querying, write rejection
-    (keyword guard + engine mode=ro + authorizer), opt-in writes, params, row caps.
-    Tested against a real stdlib sqlite3 db (no mocks).
+Covers write rejection (keyword guard + engine mode=ro + authorizer), opt-in
+writes, params and row caps, tested against a real stdlib sqlite3 db (no
+mocks).
 """
 from __future__ import annotations
 

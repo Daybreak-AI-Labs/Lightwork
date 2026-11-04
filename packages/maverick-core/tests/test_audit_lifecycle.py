@@ -1,6 +1,6 @@
-"""Audit-log lifecycle hardening (#462).
+"""Audit-log erase and append lifecycle.
 
-Covers four fixes to the audit erase/write path:
+Covers four properties of the audit erase/write path:
 
   1. GDPR erase matches on STRUCTURED channel+user_id fields only -- it must
      match ``slack``+``42`` but never over-match ``slack:4200`` via a substring

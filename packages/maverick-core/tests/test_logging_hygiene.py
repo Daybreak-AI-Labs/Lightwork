@@ -1,4 +1,4 @@
-"""Issue #467: observability/logging hygiene.
+"""Observability and logging hygiene.
 
   - JSON formatter must not ship caller-attached `extra=` secrets verbatim:
     redact secret-named keys, scrub inline secrets in string values.
@@ -60,8 +60,8 @@ def test_benign_values_untouched():
 
 
 def test_nested_secret_in_extra_value_is_scrubbed():
-    # A secret buried in a dict/list extra (not a top-level string) used to slip
-    # past: the value isn't a string, so scrub passed it through verbatim.
+    # A secret buried in a dict/list extra (not a top-level string) must not
+    # slip past just because the value isn't a string.
     out = _fmt(meta={"inner": {"note": "key sk-ant-abcdefghij1234567890XYZ x"}},
                items=["clean", "tok sk-ant-abcdefghij1234567890XYZ"])
     body = json.dumps(out)

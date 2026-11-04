@@ -1,8 +1,8 @@
 """Tail-cap defaults: the constants that bound worst-case token injection.
 
-These pins are deliberate: each default was audited (July 2026 token-
-efficiency pass) and lowered from a value that let a single tool result,
-page fetch, or retry storm dominate the context window or output bill.
+These pins are deliberate: each default is set low enough that a single
+tool result, page fetch, or retry storm cannot dominate the context window or
+output bill.
 Raising one back is a cost decision — do it via the env knob, not here.
 """
 from __future__ import annotations

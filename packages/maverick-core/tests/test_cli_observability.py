@@ -1,11 +1,11 @@
-"""Issue #614: consumer-facing CLI UX / observability.
+"""Consumer-facing CLI UX and observability.
 
   1. Live spend is visible mid-run: a still-open episode whose running totals
      were mirrored (before end_episode) shows non-zero spend via `runs` /
      `budget` / the read path.
-  3. The model-404 hint points at `maverick config` (where [models] live),
+  2. The model-404 hint points at `maverick config` (where [models] live),
      not `maverick doctor` (which only validates the API key).
-  4. Library log lines don't bleed onto the terminal by default; they surface
+  3. Library log lines don't bleed onto the terminal by default; they surface
      when MAVERICK_DEBUG is set.
 """
 from __future__ import annotations

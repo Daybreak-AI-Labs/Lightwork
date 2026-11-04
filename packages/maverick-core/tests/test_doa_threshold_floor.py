@@ -1,11 +1,10 @@
-"""Audit round 15: a "*" DoA dollar threshold is a FLOOR (strictest-wins).
+"""A "*" DoA dollar threshold is a FLOOR (strictest-wins).
 
-_threshold_for returned the exact per-action entry whenever present, never
-comparing it against a stricter "*" catch-all. So an org-wide
-``require_human_above = {"*": 5000}`` (or a ``deny_above`` ceiling) was silently
-defeated for any action carrying its own higher threshold -- a money-movement
-action could slip its human-approval / deny tier. The catch-all is now a floor:
-a per-action key can only tighten it. This holds for a single policy AND for a
+_threshold_for compares an exact per-action entry against a stricter "*"
+catch-all, so an org-wide ``require_human_above = {"*": 5000}`` (or a
+``deny_above`` ceiling) is not defeated for an action carrying its own higher
+threshold, and a money-movement action cannot slip its human-approval / deny
+tier. The catch-all is a floor: a per-action key can only tighten it. This holds for a single policy AND for a
 composed (union) policy, matching the documented "lowest threshold wins" rule.
 """
 from __future__ import annotations

@@ -3,7 +3,7 @@
 `Budget.check()` only raises once `dollars` ALREADY exceeds `max_dollars`. With a
 wide parallel fan-out, N sub-agent calls sharing one budget each pass an
 individual check while `dollars` is still low, then collectively overshoot --
-a real $2.50-cap run reached $6+ with parallel Opus/Sonnet researchers on
+a $2.50-cap run can reach $6+ with parallel Opus/Sonnet researchers on
 200k-token contexts. `Budget.reserve()/release()` hold each call's projected
 cost so concurrent callers see the accumulated holds; the LLM layer reserves
 before dispatch and releases once the spend lands.

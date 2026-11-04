@@ -1,18 +1,17 @@
-"""Prompt-cache efficiency fixes: block-based secondary breakpoint, message-tier
+"""Prompt-cache efficiency: block-based secondary breakpoint, message-tier
 TTL, prewarm minimum gate, and tool-cache side-effect invalidation.
 
-Regression targets:
-- The secondary message breakpoint triggered on >=24 MESSAGES, but Anthropic's
-  cache lookback walks 20 CONTENT BLOCKS — a few agentic turns with many
-  parallel tool_results exceed the window long before 24 messages, so the
-  chain went cold and each turn re-wrote the full prefix.
+- The secondary message breakpoint counts CONTENT BLOCKS, not messages:
+  Anthropic's cache lookback walks 20 content blocks, and a few agentic turns
+  with many parallel tool_results exceed that window long before 24 messages,
+  leaving the chain cold so each turn re-writes the full prefix.
 - The message-tier breakpoint re-anchors every turn (its write is paid per
-  turn) but used the 1h TTL (2x write surcharge) when 5m (1.25x) covers the
-  seconds-later re-read.
-- prewarm() billed ~1.8k input tokens even when system+tools sit under the
-  model's 4096-token cache minimum, warming nothing.
-- The tool-output cache had purge() but nothing invalidated on writes: a
-  cached read_file could survive an apply_patch to the same file.
+  turn), so it uses the 5m TTL (1.25x), which covers the seconds-later
+  re-read, not the 1h TTL (2x write surcharge).
+- prewarm() does not bill ~1.8k input tokens when system+tools sit under the
+  model's 4096-token cache minimum, where it would warm nothing.
+- The tool-output cache invalidates on writes: a cached read_file does not
+  survive an apply_patch to the same file.
 """
 from __future__ import annotations
 

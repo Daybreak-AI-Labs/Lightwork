@@ -1,4 +1,5 @@
-"""Audit identity regressions. Authored for later execution; no provider calls."""
+"""Workspace identity boundaries: the workspace-admin roster, the OIDC login
+restart and the fixed-workspace refusal. No provider calls."""
 from __future__ import annotations
 
 import pytest
