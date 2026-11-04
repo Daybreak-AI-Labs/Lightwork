@@ -1,6 +1,6 @@
 """``maverick immune`` -- discover, prove and remember what policies miss.
 
-Split out of cli/__init__.py and registered on package import. The kernel
+Registered on package import. The kernel
 surface is :mod:`maverick.immune`; this module only renders it.
 """
 from __future__ import annotations

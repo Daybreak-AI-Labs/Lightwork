@@ -213,7 +213,7 @@ class Calculation:
             raise ValueError("The complete independent observation check disagreed; no plan was accepted.")
         return chosen, {"checked": True, "same_selection_and_every_cell": True,
             "candidate_batches": len(candidates), "method": "Independent complete situation/action enumeration with the same information, permissions, costs and allowance.",
-            "claim": "Agreement establishes this bounded calculation, not novelty, superiority or business truth. The earlier P14 comparison remains rejected."}
+            "claim": "Agreement establishes this bounded calculation, not novelty, superiority or business truth."}
 
     def _selection(self, order, cells):
         cost, questions, effort, facts = order

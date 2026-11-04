@@ -133,9 +133,9 @@ def audit_roster(domains: dict[str, DomainProfile] | None = None, *,
                  runtime: bool = True) -> list[PackAudit]:
     """Audit every discoverable pack (built-in + operator overrides).
 
-    The whole roster is audited against one read of the configuration: each
-    pack's workforce settings used to read it again (about 6,400 reads, most
-    of the time of the workforce pages).
+    The whole roster is audited against one read of the configuration, so the
+    workforce pages do not re-read it for each pack's workforce settings
+    (about 6,400 reads).
     """
     from .agent_autonomy import levels_enabled
     from .config import single_read

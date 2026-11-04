@@ -1,6 +1,6 @@
 """Voice CLI group: set up and check the built-in local speech-to-text.
 
-Split out of cli/__init__.py. Registered by importing this module at the end
+Registered by importing this module at the end
 of the package __init__ so the @main.group decorators fire on package import.
 """
 from __future__ import annotations

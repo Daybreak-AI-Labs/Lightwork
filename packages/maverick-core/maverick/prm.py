@@ -21,8 +21,8 @@ Three reference implementations ship:
   * RemotePRM         — POSTs to a user-deployed AgentPRM endpoint
                         (interface ready, no inference in-process).
 
-Scaffold. Real RL pipeline + Klear-AgentForge / OpenResearcher
-trajectory ingestion is queued for v0.3.
+This module is the interface and its reference scorers only; it does not
+train a model or ingest trajectories.
 """
 from __future__ import annotations
 
@@ -151,7 +151,7 @@ class HeuristicPRM:
 class RemotePRM:
     """POST to a user-deployed AgentPRM service.
 
-    Endpoint contract (May 2026 reference impl):
+    Endpoint contract:
       POST /score
       body:  {"goal_id":..., "step":..., "role":..., "tool":..., ...}
       reply: {"promise": ..., "progress": ..., "confidence": ...}

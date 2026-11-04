@@ -5,10 +5,9 @@ to answer a simple question on demand: *which technical controls are actually
 ON in this deployment right now, and is the tamper-evident audit log intact?*
 This module answers it.
 
-:func:`collect_soc2_evidence` returns a structured dict an auditor or a
-``maverick soc2`` CLI command (a deliberate follow-on — see
-``docs/compliance/soc2-controls.md``) can serialize to JSON and attach to an
-evidence request. It probes the live configuration:
+:func:`collect_soc2_evidence` returns a structured dict that an auditor or the
+``maverick soc2`` CLI command (see ``docs/compliance/soc2-controls.md``) can
+serialize to JSON and attach to an evidence request. It probes the live configuration:
 
   - capability enforcement (``maverick.capability.capability_enforced``)
   - per-user tenant isolation (``maverick.paths.tenant_by_user_enabled``)

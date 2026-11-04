@@ -1,6 +1,6 @@
 """``maverick cortex`` -- the company brain from the command line.
 
-Split out of cli/__init__.py. Registered by importing this module at the end
+Registered by importing this module at the end
 of the package __init__ so the @main.group decorators fire on package import.
 The kernel surface is :mod:`maverick.cortex`; this module only renders it.
 """

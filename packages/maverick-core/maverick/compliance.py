@@ -1,9 +1,8 @@
 """EU AI Act Article 50 transparency disclosure for channel users.
 
-The EU AI Act becomes enforceable Aug 2 2026 — see May 2026 Commission
-guidelines covering agentic AI as a single high-risk system. Article 50
-mandates that users interacting with a chatbot must be informed they
-are talking to AI unless that fact is obvious from context.
+Article 50 of the EU AI Act (applicable from 2 August 2026) mandates
+that users interacting with a chatbot must be informed they are talking
+to AI unless that fact is obvious from context.
 
 This module gives the channel server a single function:
 
@@ -258,10 +257,10 @@ def compliance_report() -> list[ControlCheck]:
 
     # GDPR Art. 25 & 32 — data protection by design. Secret redaction is
     # UNCONDITIONAL, but PII redaction (email/SSN/phone) only runs under anon
-    # mode (default off). Reporting one combined "active" control overstated the
+    # mode (default off). One combined "active" control would overstate the
     # default posture -- an auditor would read it as "email/SSN redacted from
-    # logs", which is false by default (user-testing finding). Split them so
-    # each control reflects what is actually applied.
+    # logs", which is false by default. Split them so each control reflects
+    # what is actually applied.
     from .crypto_at_rest import at_rest_enabled
     from .privacy import anon_enabled
     checks.append(ControlCheck(

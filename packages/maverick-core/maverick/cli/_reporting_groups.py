@@ -1,6 +1,6 @@
 """Analytics, outcomes, and cost-reporting CLI commands.
 
-Split out of cli/__init__.py. Registered by importing this module at the end
+Registered by importing this module at the end
 of the package __init__ so the @main.command decorators fire on package import.
 
 open_world is resolved lazily inside each command that opens the world DB, so

@@ -6,7 +6,7 @@ offset relative to the physical display. When model space and screen space
 disagree, every click lands a little off and computer-use sessions degrade
 into retry loops.
 
-This is the fix: show the operator (or the agent itself) a deterministic grid
+Calibration corrects this: show the operator (or the agent itself) a deterministic grid
 of known targets (:func:`calibration_targets`), record where each click was
 *expected* to land (the target's true screen position) versus what the model
 *observed*/emitted, and fit a per-axis affine transform

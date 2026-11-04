@@ -1,10 +1,9 @@
 """Firecracker microVM sandbox backend.
 
-May-2026 research: plain Docker is "considered insufficient for
-adversarial agents" (Northflank, 2026). Firecracker microVM is the
-new 2026 baseline (Vercel Sandbox, E2B, Daytona all migrated). It
-boots in ~125ms, gives kernel-level isolation, and constrains
-network/disk by default.
+Plain Docker shares the host kernel, which is weak isolation for
+adversarial agents. A Firecracker microVM boots in ~125ms, gives
+kernel-level isolation, and constrains network/disk by default; hosted
+sandboxes such as Vercel Sandbox, E2B and Daytona use it.
 
 This backend talks to a local Firecracker API socket (firecracker-go
 is the canonical impl; the python client at github.com/firecracker-
@@ -19,7 +18,7 @@ For E2B-hosted deployments (a managed Firecracker service), the
 socket. That path is the realistic config for VPS users who don't
 want to operate Firecracker themselves.
 
-Status (May 2026): SCAFFOLD. Full microVM lifecycle (kernel image,
+Status: experimental SCAFFOLD. Full microVM lifecycle (kernel image,
 rootfs, network bridge, balloon, snapshot/restore) is operator-side
 work that varies per host distro; this module gives the agent loop
 the same ``.exec(cmd) -> ExecResult`` interface and routes to either
@@ -330,7 +329,7 @@ class FirecrackerBackend:
                     "pip install httpx"
                 ),
             )
-        # E2B API shape (May 2026): POST /sandboxes -> {id};
+        # E2B API shape: POST /sandboxes -> {id};
         # POST /sandboxes/{id}/processes {cmd} -> {stdout,stderr,exitCode}.
         # Full lifecycle (start/poll/tear down) is in the e2b SDK; this
         # scaffold uses the raw REST.

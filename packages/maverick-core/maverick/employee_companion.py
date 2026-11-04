@@ -12,8 +12,8 @@ history fallback. Expiry runs on employee access or policy update, not in a
 background sweeper; backups and replicas require separate retention controls.
 The last 200 metadata events and 50 exchanges per employee are retained. This
 bounded local event journal is not an immutable compliance audit archive. State
-is host-local even when the existing world model uses a shared database; this
-increment does not support multiple control-plane hosts.
+is host-local even when the existing world model uses a shared database; the
+preview does not support multiple control-plane hosts.
 
 Model turns reserve a short metadata lease before any provider call. Receipts
 consume their request ID even after failure or expiry; this prevents duplicate

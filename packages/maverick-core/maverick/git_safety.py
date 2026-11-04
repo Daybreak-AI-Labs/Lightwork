@@ -19,15 +19,14 @@ Every host-side git call against a workdir in that position must:
      secrets), repo-local fsmonitor and repo-local hooks are never in scope
      even when (1) is a false negative.
 
-This was previously implemented once, inside `orchestrator.py`'s best-of-N
-candidate path, and nowhere else -- `edit_format.render_diff`,
-`reviewer.get_diff`, and `coding_mode`'s candidate evaluation each ran `git`
-on the host with none of these protections, which allowed host-side code
-execution through git and secret leakage into the child environment.
+`orchestrator.py`'s best-of-N candidate path, `edit_format.render_diff`,
+`reviewer.get_diff` and `coding_mode`'s candidate evaluation all run `git` on
+the host, and all share these protections. Without them, host-side git allows
+code execution through repository config and leaks secrets into the child
+environment.
 
-Known limits: this is a static scan of what git will read, not a sandbox. The
-real fix is to run these git calls through `sandbox.exec()`. Until then a
-workdir whose git
+Known limits: this is a static scan of what git will read, not a sandbox, and
+these git calls do not run through `sandbox.exec()`. So a workdir whose git
 settings define a filter at all -- git-lfs included -- is refused, because the
 host cannot tell a legitimate clean/smudge command from a planted one.
 """

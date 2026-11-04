@@ -1,11 +1,11 @@
 """MCP client: let Lightwork consume external MCP servers as tools.
 
-v0.1.6 hardening:
-  - Env passed to the child process is now an EXPLICIT allowlist, not
-    full ``os.environ``. Compromised npm MCP servers no longer exfil
+Hardening:
+  - Env passed to the child process is an EXPLICIT allowlist, not
+    full ``os.environ``, so a compromised npm MCP server cannot exfil
     ANTHROPIC_API_KEY / MAVERICK_DASHBOARD_TOKEN / GITHUB_TOKEN / AWS_*.
   - stderr is drained by a background task so the pipe buffer never fills
-    (was deadlocking the server after sustained logging).
+    and sustained logging cannot deadlock the server.
   - returncode is checked before sending each request; we fail loudly
     instead of hanging on a dead pipe.
 """
@@ -967,8 +967,8 @@ class StreamableHttpMCPClient:
     which is what consuming a remote server's tools needs. POSTs JSON-RPC and
     accepts either a single ``application/json`` response or a Streamable-HTTP
     SSE stream carrying the response event. Server->client SSE streaming (push
-    notifications, server-initiated elicitation over HTTP) is future work; this
-    client advertises no such capability.
+    notifications, server-initiated elicitation over HTTP) is not supported;
+    this client advertises no such capability.
 
     Exposes the same surface the registry uses (``spec``, ``tools``,
     ``call_tool``, ``stop``) so it's a drop-in alongside the stdio MCPClient."""

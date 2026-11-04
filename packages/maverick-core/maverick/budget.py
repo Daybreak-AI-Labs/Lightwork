@@ -1,13 +1,12 @@
 """Budget tracking. Long-horizon agents need hard caps.
 
-v0.2 cost-correctness fix:
+Cost correctness:
   - record_tokens() takes the actual model id (default falls back to
-    Sonnet rate for back-compat). Before this, an Opus orchestrator
-    call was billed at Sonnet rate, so max_dollars=5 was letting
-    ~$25 of real spend through.
-  - Cache tokens are priced correctly. Anthropic charges 0.1x for
-    cache reads and 1.25x for cache writes. The provider used to
-    collapse everything into ``input_tokens`` at full price.
+    Sonnet rate for back-compat), so an Opus orchestrator call is billed
+    at the Opus rate and max_dollars caps real spend.
+  - Cache tokens are priced separately. Anthropic charges 0.1x for
+    cache reads and 1.25x for cache writes, so they are not folded into
+    ``input_tokens`` at full price.
 """
 from __future__ import annotations
 

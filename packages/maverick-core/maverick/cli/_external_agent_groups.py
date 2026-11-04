@@ -2,7 +2,7 @@
 
 Everything the External Agents dashboard page does, as CLI verbs — so a
 headless or air-gapped install can manage enrollment without the dashboard.
-Split out of cli/__init__.py; registered by importing this module at the end
+Registered by importing this module at the end
 of the package __init__ so the @main.group decorators fire on package import.
 """
 from __future__ import annotations

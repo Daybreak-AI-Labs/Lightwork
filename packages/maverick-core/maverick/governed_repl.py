@@ -29,13 +29,13 @@ The session directory IS the sandbox workdir, so the driver, the statement and
 the result file are visible from both sides. A backend with no shared workdir
 (ssh, kubernetes) therefore cannot host a session in v1.
 
-No tool access in v1
---------------------
+No tool access
+--------------
 The kernel gets plain Python and nothing else -- it has no bridge into the
 ``ToolRegistry``, deliberately. A kernel that could call tools would dispatch
 them outside :func:`maverick.tool_authz.authorize`: unauthorized, unpriced, and
 invisible to the dispatch-contract CI gate that fails the build on exactly that
-pattern. Tool bridging is future work and must route every call through
+pattern. Any tool bridge would have to route every call through
 ``tool_authz.authorize`` before it reaches a registry, not around it.
 
 OFF by default (``[repl] enable``, or ``MAVERICK_REPL=1``) per kernel rule 1:

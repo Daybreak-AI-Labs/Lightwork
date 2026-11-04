@@ -1,7 +1,7 @@
 """`maverick doctor`: end-to-end health check with remediation.
 
-v0.1.6: every red/yellow row now ends with an actionable verb so users
-aren't told "something's wrong" without knowing what to do.
+Every red/yellow row ends with an actionable verb so users aren't told
+"something's wrong" without knowing what to do.
 """
 from __future__ import annotations
 
@@ -24,9 +24,8 @@ YELLOW = click.style("!", fg="yellow")
 RED = click.style("✗", fg="red")
 
 # diagnose() accumulates the labels of failed (✗) checks here so the CLI can
-# exit nonzero when the install is actually broken. doctor used to print red
-# rows but always exit 0, so `maverick doctor && deploy` and CI health gates
-# couldn't tell a broken deployment from a healthy one (user-testing finding).
+# exit nonzero when the install is actually broken, so `maverick doctor &&
+# deploy` and CI health gates can tell a broken deployment from a healthy one.
 _FAILURES: list[str] = []
 
 
@@ -562,9 +561,9 @@ def _check_channels(cfg: dict) -> None:
 
 
 def _check_world_db() -> None:
-    # Open the SAME configured backend as the runtime.  Inspecting a local
-    # workspace path here used to report a healthy SQLite mirror even when the
-    # deployment's authoritative world was Postgres.
+    # Open the SAME configured backend as the runtime. A local workspace path
+    # can hold a healthy SQLite mirror while the deployment's authoritative
+    # world is Postgres, so inspecting that path would report the wrong store.
     from .workspace import Workspace
     from .world_model import close_world_if_owned, open_world
     from .world_model_backends import is_postgres_configured

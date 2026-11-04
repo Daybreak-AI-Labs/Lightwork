@@ -11,7 +11,7 @@ turn. The compaction policy:
 * **Summarize**: every DIGEST_EVERY turns, fold prior turns into one
   ``<digest>`` block prepended to the messages list; raw turns are
   removed.
-* **Vector-index** (v0.3): episode digests get embedded so RAG can
+* **Vector-index**: episode digests get embedded so RAG can
   recover deep history. See ``DigestIndex`` / ``recall_relevant_digests``
   below -- an opt-in, fail-open retrieval path. The embedder is injected
   (``Embedder`` protocol); the default one lazily wraps the repo's

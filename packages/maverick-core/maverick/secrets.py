@@ -26,8 +26,8 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
         # Preferred: the whole block when an END marker is present. Bounded
         # body ({0,65536}) so many BEGIN markers with no END can't scan to EOF
         # per marker (ReDoS guard); the 64KB bound covers real key formats so a
-        # key whose body exceeds 8192 chars no longer leaks its trailing
-        # material + END line (mirrors the secret_detector fix).
+        # key whose body exceeds 8192 chars does not leak its trailing
+        # material + END line (the same bound as secret_detector).
         r".{0,65536}?-----END (?:[A-Z0-9 ]+ )?PRIVATE KEY-----"
         r"|"
         # Fallback: a BEGIN header + base64 body but NO END marker (a key

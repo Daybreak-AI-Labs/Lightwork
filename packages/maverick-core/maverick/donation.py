@@ -19,10 +19,9 @@ function. The flywheel only works if the upload is:
    cases where the swarm learned something the solo agent couldn't.
    Everything else is noise.
 
-The outbox is a local directory; the actual upload (HTTP POST to a
-collection endpoint) is a follow-up commit and will only fire when
-the user explicitly runs ``maverick donate-upload``. This commit gets
-the data in the right shape and on disk; it does NOT phone home.
+The outbox is a local directory that ``maverick dream --donations-dir``
+can replay. This module only writes records in the right shape to disk;
+it does NOT phone home.
 """
 from __future__ import annotations
 

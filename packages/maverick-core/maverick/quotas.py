@@ -1,4 +1,4 @@
-"""Per-principal usage quotas — the P2 "cost as a managed resource" primitive.
+"""Per-principal usage quotas — the "cost as a managed resource" primitive.
 
 :class:`Budget` caps a *single run*. Quotas cap a *principal* across runs over
 a rolling time-window (a calendar day), so an operator can do chargeback /

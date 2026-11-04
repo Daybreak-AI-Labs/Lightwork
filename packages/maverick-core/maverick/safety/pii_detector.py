@@ -55,9 +55,9 @@ _IPV6 = re.compile(
     # fe80::1, ::1), i.e. IPv6 PII was essentially never redacted.
     #
     # Order matters: Python's `|` is leftmost-match, NOT longest-match, so every
-    # form that ends in a hextet MUST precede the bare "trailing ::" form. The
-    # old order put `(?:hex:){1,7}:` first, so "2001:db8::1" matched only
-    # "2001:db8::" and leaked the final hextet (user-testing finding).
+    # form that ends in a hextet MUST precede the bare "trailing ::" form. With
+    # `(?:hex:){1,7}:` first, "2001:db8::1" would match only "2001:db8::" and
+    # leak the final hextet.
     # Alternatives are ordered by DESCENDING count of hextets after "::" so the
     # longest match always wins under leftmost-match. A 1-trailing-hextet form
     # ahead of a 2-trailing one would leak the tail (2001:db8::dead:beef ->
@@ -77,11 +77,11 @@ _IPV6 = re.compile(
 )
 # Credit card candidates. A maximal run of >=13 digits with optional single
 # space/dash separators, anchored on DIGIT boundaries (look-arounds, not \b).
-# The old `\b(?:\d[ -]*?){13,19}\b` could not match a run of >=20 digits at all
+# A bounded `\b(?:\d[ -]*?){13,19}\b` cannot match a run of >=20 digits at all
 # -- no word boundary lands exactly 13-19 digits in from either end -- so a real
 # card concatenated with extra digits (an order id, card+expiry, an unspaced CSV
-# cell) was NEVER redacted and leaked to logs / model context. We now match the
-# whole run and Luhn-scan it (see _cc_run_has_card).
+# cell) would never be redacted and would leak to logs / model context. So match
+# the whole run and Luhn-scan it (see _cc_run_has_card).
 _CC = re.compile(
     r"(?<!\d)\d(?:[ -]*\d){12,}(?!\d)"
 )

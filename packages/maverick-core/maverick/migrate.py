@@ -361,9 +361,8 @@ def render(report: MigrationReport) -> str:
         lines.append(f"backup: {report.backup_path}")
     if not report.wrote:
         # Distinguish "ran --apply but there was nothing to mechanically
-        # rewrite" from a plain dry run -- both used to print the identical
-        # "(dry run …)" line, so an operator could not tell their --apply was
-        # accepted (user-testing finding).
+        # rewrite" from a plain dry run, so an operator can tell their --apply
+        # was accepted.
         if report.apply_requested:
             lines.append("(--apply: no mechanical rewrites were needed)")
         else:

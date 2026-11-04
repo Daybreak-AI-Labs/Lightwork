@@ -7,8 +7,8 @@ operator-configured). The ACTIVE style is the dashboard runtime overlay
 (``styles.active`` in ``runtime-overrides.toml``); unset = no style block, i.e.
 today's default voice.
 
-Built-ins live here. Custom user styles and per-conversation selection are
-deliberate follow-ons; this module is the registry + the prompt renderer.
+Built-ins live here; there are no custom user styles or per-conversation
+selection. This module is the registry + the prompt renderer.
 """
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ _warned: set[str] = set()
 
 
 def all_styles() -> dict[str, str]:
-    """Every selectable style (built-ins; custom styles are a follow-on)."""
+    """Every selectable style (the built-ins)."""
     return dict(BUILTIN_STYLES)
 
 

@@ -16,9 +16,9 @@ adapts the SAME REST shape into the governed-action surface
 The actual request reuses the SSRF-safe + enterprise-egress request path from
 :mod:`maverick.tools._rest_connector` -- the very boundary the Tool form
 enforces -- so a governed write is held to identical egress rules (host
-IP-pinning, no redirects, metadata-IP denial). This is the reference path that
-turns the framework (which previously shipped only an in-memory connector) into
-something that wraps real writes to a system of record.
+IP-pinning, no redirects, metadata-IP denial). This is the reference path for
+wrapping real writes to a system of record; the framework's other built-in
+connector is in-memory.
 
 Opt-in/additive per kernel rule 1: importing this changes nothing; an operator
 registers a connector explicitly (or via ``[governed_connectors] enable``).

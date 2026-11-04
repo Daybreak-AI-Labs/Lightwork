@@ -1,6 +1,6 @@
 """Finance and tax CLI groups (finance-agent-suite / tax-prep).
 
-Split out of cli/__init__.py; registered via import at the end of the package
+Registered via import at the end of the package
 __init__ so the @main.group decorators fire on package import.
 """
 from __future__ import annotations

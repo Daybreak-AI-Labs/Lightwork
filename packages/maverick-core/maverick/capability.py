@@ -1,4 +1,4 @@
-"""Signed, attenuating capabilities for agents — the P0 identity layer.
+"""Signed, attenuating capabilities for agents — the identity layer.
 
 A :class:`Capability` is a scoped grant (which tools, up to what risk) bound
 to a *principal*. Unlike the static config ACL (:mod:`maverick.safety.tool_acl`),

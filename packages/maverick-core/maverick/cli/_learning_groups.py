@@ -1,6 +1,6 @@
 """Learning-proof, domains, and insights CLI commands.
 
-Split out of cli/__init__.py. Registered by importing this module at the end
+Registered by importing this module at the end
 of the package __init__ so the @main.command decorators fire on package import.
 """
 from __future__ import annotations

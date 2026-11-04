@@ -1,6 +1,6 @@
 """Ops-maintenance CLI groups: cache, retention, encryption, local-runtime.
 
-Split out of cli/__init__.py. Registered by importing this module at the end of
+Registered by importing this module at the end of
 the package __init__ so the @main.group decorators fire on package import.
 """
 from __future__ import annotations

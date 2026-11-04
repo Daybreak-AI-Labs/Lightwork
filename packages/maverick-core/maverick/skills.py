@@ -1,10 +1,10 @@
 """Skill auto-generation, community install, and retrieval.
 
-v0.1.6 security hardening:
+Security hardening:
   - install_skill validates frontmatter BEFORE writing to disk
   - gh:org/repo format strictly validated against a regex
   - file:// / ftp:// / gopher:// URLs rejected
-  - new ``trusted_local`` flag: REST API can disable the local-path branch
+  - ``trusted_local`` flag: REST API can disable the local-path branch
     so attackers can't POST {"source": "/etc/passwd"} and read host files
 """
 from __future__ import annotations

@@ -17,7 +17,7 @@ to evidence somebody else can re-derive:
    Completion is evidenced separately by a correlated ``tool_result`` row.
 2. **bounded_self_improvement** -- the learning loop never granted itself
    authority it did not already have. The bundle's distinctive claim, and the
-   reason :class:`maverick.self_improvement.PromotionRecord` now records *how*
+   reason :class:`maverick.self_improvement.PromotionRecord` records *how*
    the capability gate judged each promotion: the gate always refused a widening
    change, but a receipt that omits the grading leaves "proven bounded" and
    "never checked" indistinguishable to anybody reading the ledger afterwards.

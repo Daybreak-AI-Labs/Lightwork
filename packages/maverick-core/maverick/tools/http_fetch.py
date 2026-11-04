@@ -123,7 +123,7 @@ def _is_private_ip(host: str) -> bool:
 
     Covers the cloud metadata endpoint (169.254.169.254 is link-local)
     plus reserved/multicast/unspecified ranges (0.0.0.0, 224.0.0.0/4,
-    240.0.0.0/4, ...) that the previous version missed.
+    240.0.0.0/4, ...).
 
     NOTE: this is the pre-flight validation only. A name that fails to resolve
     here is treated as BLOCKED (fail closed) -- the same fail-closed stance as

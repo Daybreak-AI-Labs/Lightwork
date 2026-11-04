@@ -1,6 +1,6 @@
 """Persistent world model. SQLite with FTS5 + per-connection WAL.
 
-v0.1.6 reliability hardening:
+Reliability:
   - PRAGMA journal_mode=WAL so the agent process (writer) and dashboard
     process (reader) don't deadlock on each other.
   - PRAGMA busy_timeout=5000 so concurrent commits retry briefly
@@ -5394,7 +5394,7 @@ def open_world(path: Path | None = None) -> Any:
     return WorldModel(path, _managed_path=Path(path) == data_dir("world.db"))
 
 
-# Per-tenant WorldModel cache. P1 multi-tenancy: each tenant gets its own
+# Per-tenant WorldModel cache. Multi-tenancy: each tenant gets its own
 # world.db under ~/.maverick/tenants/<t>/, mirroring how cross-session memory
 # (tools/memory.py) and the audit log resolve their dirs via data_dir(). Keyed
 # by the RESOLVED db path so two raw tenant ids that sanitize to the same dir

@@ -1,8 +1,8 @@
 """Self-reviewer agent (BugBot-style).
 
-Cursor's BugBot ships PR review of agent-generated diffs and resolves
-~80% of issues per April 2026 numbers. Lightwork has a verifier role for
-FINAL answers; this module repurposes it for DIFF review specifically.
+PR-review bots such as Cursor's BugBot review agent-generated diffs.
+Lightwork has a verifier role for FINAL answers; this module repurposes
+it for DIFF review specifically.
 
 The reviewer is invoked AFTER the agent emits its FINAL answer when
 the goal's working directory has uncommitted changes. It returns:

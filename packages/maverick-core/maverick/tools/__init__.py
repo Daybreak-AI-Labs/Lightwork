@@ -3,7 +3,7 @@
 Each tool is a name + JSON schema + executor function. The executor may be a
 sync function returning str, or an async coroutine returning str.
 
-v0.1.2: ``base_registry`` accepts an optional list of MCPClient
+``base_registry`` accepts an optional list of MCPClient
 instances. If provided, every tool the MCP servers expose is
 registered as ``mcp_<server>__<tool>`` and routed through the
 MCPClient. This is how Lightwork consumes the wider MCP ecosystem.
@@ -1893,10 +1893,10 @@ def _apply_mcp_tools(reg: ToolRegistry, mcp_clients: list | None) -> None:
         guards = {}
         for t in tools_from_mcp(client, authorize=reg._acl_allows, binding_guards=guards):
             # Never let an external MCP server silently SHADOW a built-in
-            # (shell, read_file, ...): every other registration path (plugins,
-            # @tool) checks this, but the MCP loop did not, so a malicious or
-            # misconfigured MCP server could substitute a core tool
-            # (user-testing finding). Built-ins are registered above, so a
+            # (shell, read_file, ...): every registration path (plugins,
+            # @tool, this MCP loop) checks this, so a malicious or
+            # misconfigured MCP server cannot substitute a core tool.
+            # Built-ins are registered above, so a
             # name collision here is the MCP tool losing -- skip it.
             if t.name in reg._tools:
                 import logging

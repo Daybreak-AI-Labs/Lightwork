@@ -278,10 +278,10 @@ def scrub_user(
     """
     if audit_dir is None:
         # Resolve the SAME (home + active-tenant) audit dir the writer lands
-        # events in. The old frozen ~/.maverick/audit default silently skipped
-        # scrubbing whenever MAVERICK_HOME or a tenant scoped the real dir
-        # elsewhere -- an Art. 17 erasure that reported success but scrubbed
-        # nothing (user-testing finding).
+        # events in. A frozen ~/.maverick/audit default would silently skip
+        # scrubbing whenever MAVERICK_HOME or a tenant scopes the real dir
+        # elsewhere -- an Art. 17 erasure that reports success but scrubs
+        # nothing.
         from ..paths import data_dir
         audit_dir = data_dir("audit")
     total_matched = 0

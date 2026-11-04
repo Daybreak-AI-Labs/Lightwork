@@ -5,8 +5,8 @@ children in parallel via asyncio.gather and returns their findings.
 
 Both respect the swarm's max_depth and the shared budget.
 
-v0.2: added a fan-out anomaly cap. An agent
-asking to spawn 50 siblings burns budget before refusal triggers.
+A fan-out anomaly cap stops an agent that asks to spawn 50 siblings
+from burning budget before refusal triggers.
 ``MAVERICK_MAX_SWARM_FANOUT`` (default 8) caps the per-call branching
 factor. Excess agents are dropped with a warning posted to the
 blackboard.

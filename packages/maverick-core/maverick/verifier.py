@@ -186,10 +186,10 @@ async def verify_proposal(
     honest -- a flaky verifier can only make the system MORE careful,
     not less.
 
-    Cross-family guard (May 2026 research): if the verifier model is in
+    Cross-family guard: if the verifier model is in
     the same family as the proposer (e.g. both Anthropic), they can be
     jailbroken in lockstep (Anthropic's alignment-faking paper
-    arxiv:2412.14093 + 2026 deceptive-alignment follow-ups). When the
+    arxiv:2412.14093 and later deceptive-alignment work). When the
     proposer_model is passed and matches the verifier's family, we swap
     to a cross-family verifier — but ONLY when one is explicitly
     configured via ``MAVERICK_CROSS_FAMILY_VERIFIER`` (users own model

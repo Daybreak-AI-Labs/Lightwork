@@ -1,7 +1,7 @@
 """Compliance & governance CLI commands: soc2, enterprise, ropa, dpia, ai-act,
 controls, hunt, remediate, assess, dsar.
 
-Split out of cli/__init__.py; registered via import at the end of the package
+Registered via import at the end of the package
 __init__ so the @main.group/@main.command decorators fire on package import.
 """
 from __future__ import annotations

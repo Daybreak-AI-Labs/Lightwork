@@ -666,8 +666,7 @@ def _run_computer_action(args: dict[str, Any]) -> str:
 
     # Return an error STRING (like the screenshot path above), not a raised
     # ImportError: the tool fn contract is ``-> str``, and a raised exception
-    # crashed direct callers and was inconsistent with the browser tool
-    # (user-testing finding).
+    # would crash direct callers and be inconsistent with the browser tool.
     try:
         pyautogui = _ensure_pyautogui()
     except ImportError as e:

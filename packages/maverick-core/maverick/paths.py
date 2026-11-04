@@ -1,4 +1,4 @@
-"""Tenant-aware data paths — the P1 multi-tenancy primitive.
+"""Tenant-aware data paths — the multi-tenancy primitive.
 
 Lightwork keeps its state under ``~/.maverick``. For multi-tenant deployments,
 a *tenant* namespaces that state so one tenant's data (cross-session memory,
@@ -15,9 +15,9 @@ With **no** tenant, paths resolve to the legacy ``~/.maverick/<...>`` locations,
 so single-tenant deployments are completely unchanged. With tenant ``t``, they
 resolve under ``~/.maverick/tenants/<t>/<...>``.
 
-This increment routes the cross-session **memory** store through here (the most
-leak-sensitive per-tenant store); the world model and audit log are migrated in
-follow-on increments.
+Tenant-aware stores resolve their paths here, including the cross-session
+**memory** store (the most leak-sensitive per-tenant store), the world model,
+the audit log and the usage ledger.
 """
 
 from __future__ import annotations

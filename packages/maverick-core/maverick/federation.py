@@ -1449,8 +1449,8 @@ class FederationService:
         deadline_ms = _to_int(payload.get("deadline_ms"))
         from .federation_admission import FederationAdmissionRejected
         # Clamp the run's budget to the peer's registry ceiling (down only):
-        # both wall-clock AND dollars. max_dollars was previously parsed and
-        # advertised but enforced nowhere — wire it into the delegated run.
+        # both wall-clock AND dollars. The parsed max_dollars is enforced on
+        # the delegated run, not only advertised.
         try:
             capped_dollars, capped_wall = agent_trust.clamp_budget(
                 decision.agent,

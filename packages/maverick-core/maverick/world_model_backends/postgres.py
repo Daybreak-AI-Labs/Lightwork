@@ -57,7 +57,7 @@ from ..webhook_subscriptions import POSTGRES_SCHEMA as _WEBHOOK_SUBSCRIPTION_SCH
 log = logging.getLogger(__name__)
 
 # Read by the schema_version property (health.py / audit events). Driven from
-# the migration ladder below: the highest migration version. PG now carries the
+# the migration ladder below: the highest migration version. PG carries the
 # tenant-isolation migration (v10), which the SQLite backend implements
 # structurally instead (one world.db file per tenant under ~/.maverick/tenants/).
 

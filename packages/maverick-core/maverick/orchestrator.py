@@ -1,7 +1,7 @@
 """Run a top-level goal through the swarm.
 
-v0.1.3: attaches blackboard to world model so every post mirrors into
-`goal_events`. Dashboard reads from there to stream live progress.
+The run's blackboard is attached to the world model so every post mirrors
+into `goal_events`; the dashboard reads from there to stream live progress.
 """
 from __future__ import annotations
 
@@ -3192,8 +3192,8 @@ def _capture_workdir_diff(workdir) -> str:
     is nothing to capture (fail-open).
 
     Fallback for when the agent edited files via tools (apply_patch / ast_edit /
-    write_file -> the working tree) but emitted no diff in its final answer --
-    that real on-disk work was previously dropped. HEAD-relative (``--cached
+    write_file -> the working tree) but emitted no diff in its final answer,
+    so that real on-disk work is not dropped. HEAD-relative (``--cached
     HEAD`` after ``add -A``) so it applies in evaluate_candidate's
     checked-out-at-HEAD worktree; ``add -A`` makes untracked files appear as
     proper ``--- /dev/null`` new-file hunks; the trailing ``reset`` un-stages so

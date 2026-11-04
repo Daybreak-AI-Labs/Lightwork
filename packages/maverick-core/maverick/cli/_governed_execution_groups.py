@@ -3,7 +3,7 @@ run forking.
 
 Everything the modules do, as verbs — so an operator can drive and inspect
 them on a headless install, and so a human can exercise the kernel without an
-agent turn. Split out of cli/__init__.py; registered by importing this module
+agent turn. Registered by importing this module
 at the end of the package __init__ so the @main.group decorators fire on
 package import.
 """

@@ -3199,8 +3199,8 @@ def tenant_list() -> None:
     for t in rows:
         cap = f"${t.max_daily_dollars:g}/day" if t.max_daily_dollars else "unlimited"
         # Surface tenants that are at/over today's spend cap -- enforcement
-        # happens at serve time, but an operator had no way to SEE which tenants
-        # are currently over quota from the CLI (user-testing finding). Only
+        # happens at serve time, and this is how an operator SEES which tenants
+        # are currently over quota from the CLI. Only
         # capped tenants are checked (a ledger read each), so unlimited tenants
         # (the common case) cost nothing extra.
         flag = ""
@@ -3245,10 +3245,10 @@ def tenant_quota(tenant_id: str, max_daily_dollars: float) -> None:
     import math
 
     from ..tenant.registry import UnknownTenant, set_quota
-    # A negative cap was silently clamped to 0 (= UNLIMITED), so a typo'd `-5`
-    # quietly removed the cap; nan/inf likewise slipped past as "unlimited" /
-    # "$inf/day" -- both disable the cap (user-testing finding). Require a
-    # finite, non-negative amount; use 0 for unlimited.
+    # Clamping a negative cap to 0 (= UNLIMITED) would let a typo'd `-5`
+    # quietly remove the cap, and nan/inf would slip past as "unlimited" /
+    # "$inf/day" -- both disable the cap. Require a finite, non-negative
+    # amount; use 0 for unlimited.
     if not math.isfinite(max_daily_dollars) or max_daily_dollars < 0:
         click.echo(f"ERROR: quota must be a finite, non-negative amount "
                    f"(got {max_daily_dollars:g}); use 0 for unlimited.", err=True)
@@ -5105,11 +5105,10 @@ def resume(ctx, goal_id_arg, goal_id, max_depth: int, max_dollars, max_wall_seco
         max_dollars=max_dollars,
         max_wall_seconds=max_wall_seconds,
     )
-    # Honor the configured [sandbox] backend on resume too -- without this,
-    # resume always fell back to run_goal's default local backend, ignoring a
-    # user who configured docker/podman (a quiet safety + consistency gap).
-    # --sandbox overrides it, so an operator who ran `start --sandbox docker`
-    # keeps the same isolation on resume (user-testing finding); None = config.
+    # Honor the configured [sandbox] backend on resume too, rather than
+    # falling back to run_goal's default local backend and ignoring a user who
+    # configured docker/podman. --sandbox overrides it, so an operator who ran
+    # `start --sandbox docker` keeps the same isolation on resume; None = config.
     sandbox = k.build_sandbox(backend=sandbox_backend)
     result = k.run_goal_sync(llm, world, bud, goal_id,
                              sandbox=sandbox, max_depth=max_depth,

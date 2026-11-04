@@ -856,7 +856,7 @@ def _redact_event(payload: dict[str, Any]) -> dict[str, Any]:
         if depth > 64:
             # Past the recursion guard, do NOT str() the value: str(dict)/str(list)
             # dumps nested secrets in cleartext, and returning a bare string would
-            # skip redaction (user-testing finding -- secrets leaked at depth > 64).
+            # skip redaction (secrets would leak at depth > 64).
             # Scalars are safe as-is; a leaf string is still redacted; any deeper
             # container collapses to an opaque marker.
             if isinstance(v, (int, float, bool, type(None))):

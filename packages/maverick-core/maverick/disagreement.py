@@ -7,10 +7,8 @@ blackboard, so the orchestrator's verify branch and the trajectory-donation
 selector can read how much the proposers diverged.
 
 Estimation is intentionally cheap: a normalized hash-cluster entropy over the
-first ~256 chars of each answer. Real production would use an embedding model;
-that's a v0.3 follow-up. (Acting on the signal -- adaptive re-fan-out on high
-disagreement -- is deliberately deferred to that follow-up; today the signal is
-observability only.)
+first ~256 chars of each answer, not an embedding model. The signal is
+observability only: nothing re-fans-out adaptively on high disagreement.
 """
 from __future__ import annotations
 

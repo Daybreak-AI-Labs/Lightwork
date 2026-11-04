@@ -41,11 +41,9 @@ TIER_PREMIUM = 2
 
 # (provider, model_id, tier). The per-million input/output rates are NOT
 # duplicated here: llm.MODEL_PRICING_PROVIDER is the source of truth, so the
-# router derives every rate and its provenance from it. Earlier the
-# table hard-coded its own numbers AND its own model ids (gpt-5*, grok-4,
-# gemini-2.5-*, a date-suffixed Haiku) that had no canonical quote — they
-# scored against stale rates and billed at the Sonnet fallback. Every id here
-# now resolves in the versioned rate card.
+# router derives every rate and its provenance from it. Every id here
+# resolves in the versioned rate card; an id with no canonical quote would
+# score against stale rates and bill at the Sonnet fallback.
 _TIERS: list[tuple[str, str, int]] = [
     # Anthropic
     ("anthropic", "claude-haiku-4-5",   TIER_CHEAP),

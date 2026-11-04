@@ -33,14 +33,11 @@ When on, it enforces:
   author called anything. Tools that surface a denial as an error string still
   call :func:`enterprise_egress_denial` directly for the better message.)
 
-  This clause used to read "enforced at each tool's request", which was false: the
-  check existed at 11 call sites while 87 of the 94 modules that make outbound HTTP
-  had no gate at all, including ``gmail``, ``salesforce``, ``slack_bot`` and the
-  knowledge-store embedder. It is stated here because the boundary is the property
-  this mode is sold on, and the gap between the sentence and the code was three
-  years wide. The remaining hole is recorded, not hidden: see
-  :mod:`maverick.egress_contract`, whose CI gate fails when a module reaches the
-  network through a library the guard does not wrap.
+  The guard wraps the client libraries rather than individual tools, so a
+  connector such as ``gmail``, ``salesforce``, ``slack_bot`` or the
+  knowledge-store embedder is covered without calling anything itself.
+  :mod:`maverick.egress_contract` records the remaining hole: its CI gate fails
+  when a module reaches the network through a library the guard does not wrap.
 
   What it still does not cover, stated so the sentence above stays honest:
 
@@ -349,8 +346,8 @@ def _configured_openai_compatible_base_url() -> str | None:
 
 # Cloud instance-metadata endpoints are link-local but are NOT operator-controlled
 # local services -- they expose instance role credentials. In the enterprise egress
-# boundary they must be treated as off-limits, not "local" (user-testing finding;
-# defense-in-depth -- http_fetch's SSRF guard already blocks these, but the REST
+# boundary they must be treated as off-limits, not "local" (defense-in-depth --
+# http_fetch's SSRF guard already blocks these, but the REST
 # connector relies on the egress check alone). Compared as parsed IPs so IPv6
 # normalization can't sneak an equivalent form past a string match.
 _IMDS_IPS = frozenset(

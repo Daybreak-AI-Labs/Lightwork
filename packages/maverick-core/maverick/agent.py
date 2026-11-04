@@ -1,8 +1,7 @@
 """Recursive async agent.
 
-v0.1.4: appends ``persona.render_persona_prompt()`` to the system
-prompt of every agent so users can give the swarm a name and voice
-without patching the kernel.
+Every agent's system prompt ends with ``persona.render_persona_prompt()``,
+so users can give the swarm a name and voice without patching the kernel.
 """
 from __future__ import annotations
 
@@ -352,7 +351,7 @@ def _plan_facts(agent) -> tuple[list[str], list[str], float | None]:
 # MAVERICK_BB_RENDER_ENTRY_CHARS.
 _BB_TURN_DELTA_ENTRIES = max(0, env_int("MAVERICK_BB_TURN_DELTA_ENTRIES", 12))
 
-# P0 filesystem-resource layer. In-process tools run in the Lightwork process,
+# Filesystem-resource layer. In-process tools run in the Lightwork process,
 # outside Docker's read-only bind mounts, so every workspace path they read or
 # write is described here and enforced at the common dispatch chokepoint.
 #
@@ -674,7 +673,7 @@ _IN_PROCESS_WORKSPACE_WRITERS = frozenset(
     }
 )
 
-# P0 capability layer (host resource-scopes): the network tools whose URL
+# Capability layer (host resource-scopes): the network tools whose URL
 # argument a capability's allow_hosts globs gate at the _run_tool chokepoint,
 # mapped to the arg name that carries that URL. Conservative on purpose --
 # only tools whose URL arg is verified against its real input_schema appear
@@ -1859,7 +1858,7 @@ class Agent:
             knowledge_sources if knowledge_sources is not None
             else list(getattr(parent, "knowledge_sources", []) or [])
         )
-        # P0 identity layer: the capability grant this agent runs under. An
+        # Identity layer: the capability grant this agent runs under. An
         # explicit arg (passed by an attenuating spawn) wins; otherwise inherit
         # the run's root grant; otherwise the depth-0 orchestrator mints the
         # root grant from config when enforcement is enabled. None ==
@@ -2907,7 +2906,7 @@ class Agent:
         )
 
     def _capability_path_denial(self, name: str, args: dict, cap) -> str | None:
-        # P0 capability layer (path resource-scopes): for known filesystem
+        # Capability layer (path resource-scopes): for known filesystem
         # tools, gate the canonical workspace-relative path(s) they will touch.
         # This mirrors the tools' own resolution behavior, so raw paths like
         # "allowed/../secret.txt" are checked as "secret.txt". ``list_dir``
@@ -3026,7 +3025,7 @@ class Agent:
         )
 
     def _capability_host_denial(self, name: str, args: dict, cap) -> str | None:
-        # P0 capability layer (host resource-scopes): for a known network tool,
+        # Capability layer (host resource-scopes): for a known network tool,
         # the grant's allow_hosts globs also gate the host its URL reaches.
         # No-op unless a host-restricted grant is active (empty == all).
         # Unclassified network authority fails closed. Known tools must also
@@ -3949,7 +3948,7 @@ class Agent:
                     f"{'; '.join(verdict.reasons)}. The tool was not executed."
                 )
 
-        # P0 capability layer: a per-agent grant (attenuated from the parent
+        # Capability layer: a per-agent grant (attenuated from the parent
         # on spawn) gates the tool surface. None == unrestricted, so this is a
         # no-op unless capability enforcement was opted in. Deny wins -- the
         # tool never runs and the model gets a clear, non-leaky refusal.

@@ -256,7 +256,7 @@ class Solver:
                 "budget": {"questions_left": self.questions_left, "effort_points_left": self.effort_left},
                 "strong_authored_baseline": {"method": "Exhaustive complete-state acquisition with identical shared cache, permissions, outcomes, budget and objective.",
                     "selected_fact": baseline_selected, "same_selection": baseline_selected == (selected["fact"] if selected else None),
-                    "claim": "No novelty or superiority has been established. P14's additional computational claim remains rejected."},
+                    "claim": "No novelty or superiority has been established."},
                 "unknown": selected is None}
 
 

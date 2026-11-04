@@ -7,7 +7,7 @@ but ``rename-symbol`` is a whole-word *textual* substitution (``\\bname\\b``) â€
 it is NOT scope-aware, so it also rewrites matching identifiers in unrelated
 scopes/strings/comments. Use it for unambiguous, file-local renames.
 
-Python only for now. The tool is opt-in (agent picks it for refactor-
+It supports Python only. The tool is opt-in (agent picks it for refactor-
 style work); plain ``str_replace_editor`` is still the go-to for
 small targeted patches.
 

@@ -5,7 +5,7 @@ tool-call depth > 3 -> Opus with thinking budget on second-pass failure.
 
 This module is a stateless picker: callers ask for a model spec
 for a (role, signal) tuple, get back the best fit for the current
-cost/quality budget. Defaults match May 2026 Anthropic pricing.
+cost/quality budget. Defaults follow the Haiku < Sonnet < Opus price ladder.
 
 The cascade is opt-in; the legacy ``model_for_role`` path remains
 the default. Turn it on with ``[models] cascade = true`` or

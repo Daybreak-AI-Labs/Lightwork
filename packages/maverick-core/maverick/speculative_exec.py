@@ -26,11 +26,10 @@ disabled, no configured draft model, no world-model, or any error,
 behaviour is byte-identical to today. No model is ever hard-coded; the draft
 model is whatever the operator configures (``[speculative] draft_model``).
 
-NOTE: this ships the *draft* half (downshift on confident turns). The full
-verify-and-rollback -- re-running a turn on the frontier model when the cheap
-draft's action diverges from the prediction (:func:`accepted` is the hook) -- is a
-deliberate follow-up seam; the strict confidence gate keeps the downshift
-conservative in the meantime.
+NOTE: this is the *draft* half only (downshift on confident turns). There is
+no verify-and-rollback that re-runs a turn on the frontier model when the cheap
+draft's action diverges from the prediction (:func:`accepted` is the hook for
+one); the strict confidence gate keeps the downshift conservative.
 """
 from __future__ import annotations
 

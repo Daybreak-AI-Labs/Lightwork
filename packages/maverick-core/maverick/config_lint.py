@@ -243,8 +243,8 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
     "event_triggers": {"enable"},
     # The dashboard reads more than the auth token: theme/density/allow_extension
     # (app.py) and a [dashboard.themes] subtable (themes.py). Listing only
-    # "token" made config-lint warn "unknown key" on documented operator
-    # settings like `[dashboard] theme = "dark"` (user-testing finding).
+    # "token" would make config-lint warn "unknown key" on documented operator
+    # settings like `[dashboard] theme = "dark"`.
     # public_url: the externally-reachable base URL used to build signed flow
     # approval links (automation_queue._public_base_url); without it here a client
     # configuring actionable channel approvals got a false "unknown key".
@@ -5074,8 +5074,7 @@ def lint_config(cfg: dict) -> list[Finding]:
             elif key in numeric_keys and not _is_valid_numeric_cap(kval):
                 # A negative cap bricks every run (immediate BudgetExceeded); a
                 # non-finite cap (TOML nan/inf) silently DISABLES enforcement.
-                # Both pass an isinstance check but are never valid caps
-                # (user-testing finding).
+                # Both pass an isinstance check but are never valid caps.
                 findings.append(
                     Finding(
                         section=section,
@@ -5318,8 +5317,8 @@ def warn_config_at_startup(*, strict: bool | None = None) -> list[Finding]:
             "on",
         }
     # Strict mode fails on ANY finding, not just error-level ones: an unknown
-    # key (a typo that silently uses a default -- the dangerous case M5 is
-    # about) is reported as a *warning*, so an error-only gate would miss it. A
+    # key (a typo that silently uses a default, the dangerous case) is
+    # reported as a *warning*, so an error-only gate would miss it. A
     # regulated/strict deployment wants a clean config or no start.
     if strict and findings:
         raise SystemExit(

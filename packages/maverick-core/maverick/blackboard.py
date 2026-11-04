@@ -4,10 +4,10 @@ Specialists never talk to each other directly. They post observations,
 findings, and artifacts to the blackboard. The orchestrator reads it to
 decide what to do next.
 
-v0.1.3: blackboard now optionally mirrors entries into ``world.goal_events``
-so the dashboard can stream live progress. Wiring is opt-in via
-``Blackboard.attach_world(world, goal_id)`` so unit tests + the old
-behavior keep working.
+The blackboard can mirror entries into ``world.goal_events`` so the
+dashboard can stream live progress. Mirroring is opt-in via
+``Blackboard.attach_world(world, goal_id)``; a blackboard with no world
+attached stays in memory only.
 """
 from __future__ import annotations
 
@@ -144,10 +144,10 @@ class Blackboard:
         # a value legitimately passed between siblings must survive), but the
         # mirror to world.goal_events (world.db on disk + the live dashboard
         # stream), the offline replay trace, and the external observation
-        # channel must not leak a credential an agent reported -- a secret was
-        # persisting in cleartext to disk and to any dashboard viewer even in a
-        # fully local deployment (security finding). Mirrors how the audit log
-        # already redacts its persisted record.
+        # channel must not leak a credential an agent reported -- otherwise a
+        # secret would persist in cleartext to disk and to any dashboard viewer
+        # even in a fully local deployment. Mirrors how the audit log redacts
+        # its persisted record.
         mirror_content = content
         try:
             from .safety.secret_detector import redact as _redact
@@ -236,10 +236,10 @@ class Blackboard:
         """Entries posted after ``cursor`` by OTHER agents, rendered like
         :meth:`render`, plus the new cursor.
 
-        The orchestrator used to read the blackboard once, on its first turn,
-        so fan-out caps, quarantine seals, sibling findings and disagreement
-        notes posted afterwards never reached a running agent. Callers keep a
-        per-agent cursor and append this delta to each tool-running turn.
+        Fan-out caps, quarantine seals, sibling findings and disagreement
+        notes posted after an agent's first turn must still reach it, so
+        callers keep a per-agent cursor and append this delta to each
+        tool-running turn.
         Sealed agents' posts are withheld exactly as in ``render``; the
         caller's own posts (``exclude_agent``) are skipped since it wrote
         them; and the block is bounded to the newest ``max_entries`` entries

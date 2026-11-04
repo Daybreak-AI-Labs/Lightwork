@@ -183,7 +183,7 @@ class DomainProfile:
     def capability(self, principal: str):
         """Build the Capability envelope agents in this domain run under.
 
-        Ties the factory to the P0 identity layer: the profile's tool / risk /
+        Ties the factory to the identity layer: the profile's tool / risk /
         path / host scopes become an attenuating grant (:mod:`maverick.capability`).
         """
         from .capability import Capability

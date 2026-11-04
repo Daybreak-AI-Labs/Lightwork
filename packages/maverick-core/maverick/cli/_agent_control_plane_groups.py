@@ -2,7 +2,7 @@
 
 ``maverick control-plane status|list|ledger`` read; ``suspend|resume|contain|
 release|attenuate|halt|clear-halt`` act (and refuse while ``[control_plane]
-enable`` is off). Split out of cli/__init__.py; registered by importing this
+enable`` is off). Registered by importing this
 module at the end of the package __init__ so the @main.group decorator fires
 on package import.
 """

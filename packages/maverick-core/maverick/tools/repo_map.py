@@ -34,10 +34,10 @@ _IGNORE_DIRS = {
 # Cache per-workdir so a chatty agent calling
 # repo_map every turn doesn't pay the walk cost N times.
 # Bounded LRU. Best-of-N
-# with future per-attempt worktrees would each carry a distinct
+# with per-attempt worktrees would each carry a distinct
 # cache key; a 500-instance × 4-attempt sweep would otherwise
 # accumulate ~2000 entries (60MB+) in this dict. Also: cache key
-# now includes workdir mtime so the cache invalidates when files
+# includes workdir mtime so the cache invalidates when files
 # change. Cap at 64 entries.
 _CACHE: OrderedDict[str, str] = OrderedDict()
 _CACHE_MAX = 64

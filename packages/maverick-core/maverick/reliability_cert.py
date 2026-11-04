@@ -17,8 +17,7 @@ Checks composed (each already exists; this is the certification harness):
 * **WAL contention** — 16 concurrent writers, zero lock errors (inlined
   probe mirroring the CI audit).
 
-(A query-plan / EXPLAIN index check is planned but not yet part of
-``DEFAULT_CHECKS``.)
+(``DEFAULT_CHECKS`` has no query-plan / EXPLAIN index check.)
 
 ``python -m maverick.reliability_cert`` writes
 ``data_dir("reliability_cert.json")`` and exits non-zero when any check
