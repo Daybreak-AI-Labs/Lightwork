@@ -1,16 +1,17 @@
 """Audit readers and rewriters must handle at-rest-sealed closed day-files.
 
-#1015 added at-rest sealing of closed audit day-files. The transparent reader
-(`sealing.segment_text`) was wired into the verifier/exporter, but three paths
-still read or rewrite a day-file as raw plaintext:
+Closed audit day-files are sealed at rest. The verifier and exporter read them
+through the transparent reader (`sealing.segment_text`), and so must the three
+other paths that read or rewrite a day-file:
 
   - `AuditLog.tail` / `AuditLog.grep` for an explicit past `day`,
   - `erase._process_file` (GDPR Art. 17 scrub/delete),
   - `signing.reanchor_file`'s write-back.
 
-On a sealed segment the readers hit `UnicodeDecodeError` (a ValueError, not the
-`OSError` they catch) and crash; the GDPR erase both crashes and never scrubs
-the sealed data; and a rewrite silently replaces the sealed blob with plaintext.
+Read as raw plaintext, a sealed segment raises `UnicodeDecodeError` (a
+ValueError, not the `OSError` the readers catch), so a reader would crash, the
+GDPR erase would crash and never scrub the sealed data, and a rewrite would
+silently replace the sealed blob with plaintext.
 """
 from __future__ import annotations
 

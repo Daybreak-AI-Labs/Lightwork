@@ -1,8 +1,7 @@
-"""Preflight is wired onto the live LLM dispatch (was dead code).
+"""Preflight is wired onto the live LLM dispatch.
 
-Regression for the launch-audit finding that preflight() was built + tested
-but never called by LLM.complete/complete_async. It's now invoked via
-llm._run_preflight, mode-controlled by MAVERICK_PREFLIGHT (default 'warn').
+LLM.complete/complete_async must call preflight(), via llm._run_preflight,
+mode-controlled by MAVERICK_PREFLIGHT (default 'warn').
 """
 from __future__ import annotations
 

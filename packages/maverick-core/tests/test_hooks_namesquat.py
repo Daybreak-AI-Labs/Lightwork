@@ -1,10 +1,10 @@
 """Hook entry-point load-time defense: dist-qualified allowlist + name-squat.
 
-Issue #594: ``hooks.load_from_entry_points()`` gated by entry-point name only
-(``plugins._is_allowed``), so a hostile package registering a ``maverick.hooks``
+``hooks.load_from_entry_points()`` must not gate by entry-point name only
+(``plugins._is_allowed``), or a hostile package registering a ``maverick.hooks``
 entry point under an allowlisted name got ``ep.load()``-ed and its hook ran on
-lifecycle events. The loader now reuses ``plugins._gate``, inheriting the same
-name-squat refusal #522 added for the four plugin slots: a name published by
+lifecycle events. The loader reuses ``plugins._gate``, inheriting the same
+name-squat refusal as the four plugin slots: a name published by
 2+ distributions is refused unless pinned ``name@dist``; a single-dist
 allowlisted name still loads.
 """
@@ -119,7 +119,7 @@ def test_pinning_resolves_the_hook_squat(monkeypatch):
 
 
 def test_single_dist_allowlisted_hook_loads(monkeypatch):
-    """A single-dist allowlisted hook name still loads (preserves #594 semantics)."""
+    """A single-dist allowlisted hook name still loads."""
     monkeypatch.setenv("MAVERICK_PLUGINS_ALLOW", "audit")
     _set_eps(monkeypatch, [
         _FakeEP("audit", _spec_factory(), dist=_FakeDist("audit-pkg")),

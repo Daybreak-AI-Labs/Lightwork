@@ -1,4 +1,4 @@
-"""Locked, backend-portable fact helpers on WorldModel (#470).
+"""Locked, backend-portable fact helpers on WorldModel.
 
 kv_memory (and others) used to reach into ``world.conn.execute(... ?)`` directly,
 bypassing the read lock and using SQLite-only ``?`` placeholders. These helpers

@@ -1,4 +1,4 @@
-"""The clipboard tool gates read AND write through the consent path (#476).
+"""The clipboard tool gates read AND write through the consent path.
 
 The clipboard holds passwords / 2FA codes / tokens, and it's host-bound so it
 can't be sandbox-mediated. Both read and write therefore require a fresh human

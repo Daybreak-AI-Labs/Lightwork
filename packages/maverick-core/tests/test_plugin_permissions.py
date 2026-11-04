@@ -116,7 +116,7 @@ def test_ungranted_permission_skipped_when_enforced(monkeypatch):
 
 
 def test_ungranted_permission_skipped_by_default(monkeypatch):
-    # #463: default is now enforce -- a manifest requesting an ungranted
+    # The default is enforce -- a manifest requesting an ungranted
     # permission is NOT loaded. (Manifest-less plugins declare none -> see
     # test_unmanifested_plugin_loads_even_when_enforced.)
     monkeypatch.setenv("MAVERICK_PLUGINS_ALLOW", "*")  # default _plugins_config -> {} (enforce)

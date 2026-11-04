@@ -1,4 +1,4 @@
-"""World-DB learning store (fleet-shared state, phase 1) -- the store seam,
+"""World-DB learning store (fleet-shared state) -- the store seam,
 routing rule, lifecycle round-trips, and the migrate-store CLI."""
 from __future__ import annotations
 

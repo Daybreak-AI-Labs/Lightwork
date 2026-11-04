@@ -1,4 +1,4 @@
-"""#396 quality gate: auto-distilled skills must pass the same validation +
+"""Distillation quality gate: auto-distilled skills must pass the same validation +
 shield scan as installed skills, and must NOT land on disk if they fail.
 
 A skill distilled from a trajectory can inherit injected content from tool

@@ -22,7 +22,7 @@ def _ctrl(tmp_path, *, max_auto_rung="policy"):
     )
 
 
-# -- Phase 3: tool outcome tracker + promotion -----------------------------
+# -- Tool outcome tracker + promotion --------------------------------------
 
 def test_tool_tracker_counts_and_rate(tmp_path):
     t = ToolOutcomeTracker(path=tmp_path / "to.json")
@@ -85,7 +85,7 @@ def test_propose_tool_rejected_without_capability_proof(tmp_path, monkeypatch):
     assert any(g.gate == "capability" and not g.ok for g in v.gates)
 
 
-# -- Phase 1/2/4: verifier / policy / prompt -------------------------------
+# -- Verifier / policy / prompt producers ----------------------------------
 
 def test_propose_verifier_adopts_better_discriminator(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_SELF_IMPROVEMENT", "1")
@@ -143,7 +143,7 @@ def test_propose_policy_requires_evidence(tmp_path, monkeypatch):
     assert not v.ok  # too few samples for the policy rung
 
 
-# -- Phase 5: code self-mod through the validate seam ----------------------
+# -- Code self-modification through the validate seam ----------------------
 
 def test_propose_code_blocked_by_failing_validate(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_SELF_IMPROVEMENT", "1")
@@ -163,7 +163,7 @@ def test_propose_code_requires_human_even_when_valid(tmp_path, monkeypatch):
     assert not verdict.ok and "signature" in verdict.blocking_reason.lower()
 
 
-# -- Phase 6: weights ------------------------------------------------------
+# -- Weights ---------------------------------------------------------------
 
 def test_propose_weights_is_human_gated(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_SELF_IMPROVEMENT", "1")

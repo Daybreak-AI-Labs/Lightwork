@@ -1,7 +1,7 @@
 """Provider-key entry + capability/feature toggles via the dashboard config
 overlay (~/.maverick/dashboard-config.toml, deep-merged in config.load_config).
 Neither path touches config.toml. (Per-role models live in the separate runtime
-overlay shipped by #1319.)"""
+overlay.)"""
 from __future__ import annotations
 
 import pytest

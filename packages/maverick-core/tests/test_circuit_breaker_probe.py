@@ -1,8 +1,8 @@
 """HALF_OPEN admits exactly one probe.
 
-Regression for the launch-audit finding that CircuitBreaker.call() only
-fast-failed on OPEN, so after the cooldown flipped OPEN->HALF_OPEN every
-concurrent caller passed the gate and re-stormed the dead dependency.
+CircuitBreaker.call() must not fast-fail only on OPEN: after the cooldown
+flips OPEN->HALF_OPEN, letting every concurrent caller pass the gate would
+re-storm the dead dependency.
 """
 from __future__ import annotations
 

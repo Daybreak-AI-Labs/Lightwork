@@ -105,7 +105,7 @@ def test_saving_and_resetting_an_agent_writes_the_changelog(tmp_path, monkeypatc
     rows = changelog.entries("proc_po_chaser", include_workspace=False)
     assert rows and rows[0]["changes"] == ["Changed its instructions"]
     generation = client.get("/api/v1/agents/proc_po_chaser").json()["generation"]
-    # A reset without the complete review changes nothing (#2529).
+    # A reset without the complete review changes nothing.
     bare = client.delete("/api/v1/agents/proc_po_chaser/override", params={"expected_generation": generation})
     assert bare.status_code == 409 and "Nothing was changed" in bare.text
     assert changelog.entries("proc_po_chaser", include_workspace=False)[0]["changes"] == ["Changed its instructions"]

@@ -1,4 +1,4 @@
-"""CLAP audio understanding (2027-H1): pure ranking math + tool wiring with
+"""CLAP audio understanding: pure ranking math + tool wiring with
 injected fake embedders. Offline; the real CLAP adapter is never loaded."""
 from __future__ import annotations
 

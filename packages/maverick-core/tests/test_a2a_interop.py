@@ -1,7 +1,5 @@
-"""A2A interop tests (the roadmap's "ACD interop tests", per the recorded
-docs/specs/a2a-vs-acd-decision.md: the homegrown ACD was cut for A2A, so
-interop is proven against the A2A Agent Card — both directions: the card
-Lightwork SERVES conforms, and cards OTHER agents serve are consumable).
+"""A2A interop tests against the A2A Agent Card, in both directions: the card
+Lightwork SERVES conforms, and cards OTHER agents serve are consumable.
 """
 from __future__ import annotations
 

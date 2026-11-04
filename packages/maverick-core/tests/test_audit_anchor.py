@@ -1,6 +1,6 @@
 """Cross-file tip-ledger: deleting/truncating a WHOLE day-file is detectable.
 
-Issue #462/#443: each YYYY-MM-DD.ndjson is an independent Ed25519 hash-chain,
+Each YYYY-MM-DD.ndjson is an independent Ed25519 hash-chain,
 so per-file ``verify_chain`` can't notice that a whole day-file is *missing*.
 ``ensure_anchors`` records a signed, chained tip (hash + row count) per completed
 day in ``anchors.ndjson``; ``verify_anchors`` confirms every anchored day still

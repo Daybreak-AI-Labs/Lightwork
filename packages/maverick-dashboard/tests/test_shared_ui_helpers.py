@@ -53,36 +53,33 @@ _KEPT_WRAPPERS = {
     # previous sign-in is dropped between the two.
     ("lightwork-source-analysis.js", "json"),
     ("lightwork-workspace-members.js", "api"),
-    # From the owner's PR #2529 (Settings recovery, taught-workflow releases,
-    # instruction records, the privacy handoff and workflow action forms):
-    # each shows the server's own detail sentence as written, and its own
+    # Settings recovery, taught-workflow releases, instruction records, the
+    # privacy handoff and workflow action forms: each shows the server's own detail sentence as written, and its own
     # status-specific wording, where mvFetchJSON would put mvErrorText's
-    # words. Kept as the owner wrote them until they are moved deliberately.
+    # words. Kept as written until they are moved deliberately.
     ("lightwork-webhook-recovery.js", "request"),
     ("lightwork-local-flow-release.js", "request"),
     ("lightwork-instruction-capture.js", "request"),
     ("lightwork-dsar-handoff.js", "call"),
     ("flow_designer_action_fields.js", "task"),
-    # Also from #2529 (local AI runtime, retention maintenance): each shows the
+    # Local AI runtime and retention maintenance: each shows the
     # server's own detail and checks the workspace context of the reply
     # before it counts, in the page's own words.
     ("lightwork-local-runtime.js", "call"),
     ("lightwork-retention-maintenance.js", "call"),
-    # From the owner's later commits on #2529 (answer feedback, questionnaires,
-    # notices). The answer panel checks that the answer it reviewed is still
+    # Answer feedback, questionnaires and notices: the answer panel checks that the answer it reviewed is still
     # the live one between the reply and its body, before any access
     # decision, and counts a 404 as lost access only while it is live. The
     # questionnaire builder and notice proposals pass the server's sentence
     # through mvPlainDetail and fall back to their own, and the builder
-    # names a cancel by the page as a timeout. The other wrappers from these
-    # commits now go through mvFetchJSON's serverDetail, messages and
+    # names a cancel by the page as a timeout. The other wrappers for these
+    # pages go through mvFetchJSON's serverDetail, messages and
     # onContextChange options.
     ("lightwork-answer-panel.js", "request"),
     ("lightwork-compliance-questionnaire-builder.js", "call"),
     ("lightwork-privacy-notice-proposals.js", "call"),
-    # From the owner's reviewed-decision pages on #2529 (human conversations,
-    # Knowledge sources, the learning cycle, specialist drafts, vendor
-    # profiles): each checks that the view it asked for is still current
+    # Reviewed-decision pages (human conversations, Knowledge sources, the
+    # learning cycle, specialist drafts, vendor profiles): each checks that the view it asked for is still current
     # between the reply and its body, clears private state on lost access
     # before reading any detail, and otherwise shows the server's own sentence
     # with its own wording for an unconfirmed reply, so a lost answer is read

@@ -1,4 +1,4 @@
-"""Phase 5 — headless provisioning (`init --from-file`) + the runtime-protoc
+"""Headless provisioning (`init --from-file`) + the runtime-protoc
 opt-out for immutable/locked-down images."""
 from __future__ import annotations
 

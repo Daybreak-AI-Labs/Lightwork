@@ -736,8 +736,7 @@ class TestMetrics:
         MAVERICK_DASHBOARD_TOKEN set, /healthz must NOT leak the
         absolute DB path in error messages (it exposes the OS username).
 
-        Issue #468 hardens this further: the auth-exempt payload now drops
-        the whole ``checks`` block under a token (which also leaked
+        Under a token the auth-exempt payload also drops the whole ``checks`` block under a token (which also leaked
         ``llm_key`` and a live in-flight gauge), collapsing to just the
         status. So no DB path can appear at all.
         """

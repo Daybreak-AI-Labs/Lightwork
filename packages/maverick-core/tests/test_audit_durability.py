@@ -1,4 +1,4 @@
-"""Unsigned audit rows are fsync'd so a crash can't lose them (#462).
+"""Unsigned audit rows are fsync'd so a crash can't lose them.
 
 The signed path (signing.py) already fsyncs every committed row; this pins the
 unsigned path to the same durability so an audit log is just as crash-safe
@@ -20,7 +20,7 @@ def test_unsigned_record_fsyncs_the_row(tmp_path, monkeypatch):
     ok = log.record(AuditEvent(ts=1.0, kind="tool_call", agent="a", payload={}))
 
     assert ok is True
-    assert fsynced, "unsigned audit write must fsync the row (durability, #462)"
+    assert fsynced, "unsigned audit write must fsync the row (durability)"
     # The row is also actually on disk.
     files = list(tmp_path.glob("*.ndjson"))
     assert files and files[0].read_text().strip()

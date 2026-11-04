@@ -1,10 +1,10 @@
 """Tool subprocesses must run with secrets scrubbed and freeform media args
 filtered.
 
-~10 tools shelled out directly with
-the full os.environ (leaking provider keys to the child) and several appended
-a model-controlled freeform args[] to argv (pandoc --lua-filter = code exec,
-ffmpeg -i /etc/passwd = arbitrary file read). PR3 adds:
+A tool that shells out with the full os.environ leaks provider keys to the
+child, and one that appends a model-controlled freeform args[] to argv allows
+code execution or arbitrary file reads (pandoc --lua-filter, ffmpeg -i
+/etc/passwd). The controls:
   - tools.scrub_child_env(): child env via sandbox.local.scrub_env (no secrets)
   - tools.safe_media_args(): drop dangerous flags from freeform args by
     default; MAVERICK_ALLOW_RAW_MEDIA_ARGS=1 opts back in.
@@ -177,7 +177,7 @@ def test_media_tools_route_through_sandbox_chokepoint():
 
 
 # ---------- host_exec: explicit host-bound (NOT sandbox-mediated) path ----------
-# Issue #437: device/clipboard tools act on host hardware (USB adb device, iOS
+# Device/clipboard tools act on host hardware (USB adb device, iOS
 # simulator, desktop clipboard) that the sandbox container can't reach, so they
 # are intentionally direct. host_exec makes that choice auditable + scrubs env.
 
@@ -252,7 +252,7 @@ def test_ios_simctl_routes_through_host_exec(monkeypatch):
     assert calls["argv"][:2] == ["xcrun", "simctl"]
 
 
-# ---------- option-injection / path hardening (issue #476) ----------
+# ---------- option-injection / path hardening ----------
 
 import importlib  # noqa: E402
 

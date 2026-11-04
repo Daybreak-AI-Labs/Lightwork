@@ -1,7 +1,7 @@
 """`maverick skills` group: bare list + stats + evict subcommands.
 
 `skills` became a group (invoke_without_command) so the bare command still
-lists, and `skills stats` / `skills evict` expose the #436 maintenance surface.
+lists, and `skills stats` / `skills evict` expose the maintenance surface.
 """
 from __future__ import annotations
 

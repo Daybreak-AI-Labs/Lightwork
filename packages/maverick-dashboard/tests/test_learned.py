@@ -1,4 +1,4 @@
-"""Learned-capability ledger panel + generated-tool removal (#427)."""
+"""Learned-capability ledger panel + generated-tool removal."""
 from __future__ import annotations
 
 import hashlib

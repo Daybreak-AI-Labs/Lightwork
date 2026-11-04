@@ -518,7 +518,7 @@ class TestCatalogSearch:
 
 
 class TestSemanticSearch:
-    """Embedding-based ranking when fastembed is available (#425)."""
+    """Embedding-based ranking when fastembed is available."""
 
     @staticmethod
     def _two_skills():
@@ -1074,7 +1074,7 @@ class TestGeneratedToolShadowing:
 
 
 class TestGeneratedToolAudit:
-    """Static AST enforcement of the stdlib-only contract (#424)."""
+    """Static AST enforcement of the stdlib-only contract."""
 
     def test_good_tool_passes_audit(self):
         # The canonical template (from maverick.tools import Tool) is allowed.
@@ -1158,7 +1158,7 @@ class TestGeneratedToolAudit:
 
 
 class TestGeneratedToolIsolationAndConsent:
-    """Out-of-host import validation + consent gate (#424)."""
+    """Out-of-host import validation + consent gate."""
 
     def test_malicious_module_rejected_without_host_exec(self, monkeypatch):
         # A module whose import would touch the host (here: write a marker at

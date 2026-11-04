@@ -116,7 +116,7 @@ class TestCacheFriendlyOrdering:
 
 
 class TestReasoningEffortMapping:
-    """Issue #466: thinking_budget was silently dropped for OpenAI. It now maps
+    """thinking_budget must not be silently dropped for OpenAI: it maps
     to reasoning_effort for o-series/gpt-5, and is skipped for non-reasoning
     models (gpt-4o/4.1 want max_completion_tokens but reject reasoning_effort)."""
 

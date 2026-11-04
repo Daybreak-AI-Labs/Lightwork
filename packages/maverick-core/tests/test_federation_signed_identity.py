@@ -1,6 +1,6 @@
-"""Phase 2 — signed-identity for federation delegation. The pinned Ed25519 key
-becomes load-bearing: a leaked shared token alone can no longer impersonate a
-peer that has a pinned key. Covers round-trip verify, unsigned/ tampered/
+"""Signed identity for federation delegation. The pinned Ed25519 key is
+load-bearing: a leaked shared token alone cannot impersonate a peer that has a
+pinned key. Covers round-trip verify, unsigned/ tampered/
 replayed/ stale refusals, require_signed, and the disengaged/migration paths."""
 from __future__ import annotations
 

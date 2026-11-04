@@ -897,8 +897,8 @@ def test_p1_builder_refinements(monkeypatch, tmp_path):
     assert "mvCopy(" in t                                # shared copy primitive
 
 
-def test_p0_design_fixes_builder(monkeypatch, tmp_path):
-    # P0 design fixes on the builder page.
+def test_builder_summary_heading_cron_words_and_label_association(monkeypatch, tmp_path):
+    # Accessibility and readability details on the builder page.
     _isolate(monkeypatch, tmp_path)
     t = _client().get("/workflow-builder").text
     assert 'role="heading" aria-level="3"' in t      # <summary> regained heading semantics

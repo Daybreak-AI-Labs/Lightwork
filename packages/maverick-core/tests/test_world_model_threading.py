@@ -1,15 +1,14 @@
 """Regression: WorldModel write serialisation.
 
-PR #98 introduced a per-DB-path WorldModel singleton in the dashboard
-so requests stopped reopening SQLite + reapplying migrations. That's
-the right call for perf, but ``check_same_thread=False`` alone is not
-thread-safe: two FastAPI threadpool workers driving execute()+commit()
+The dashboard keeps a per-DB-path WorldModel singleton so requests do
+not reopen SQLite and reapply migrations. ``check_same_thread=False``
+alone is not thread-safe: two FastAPI threadpool workers driving execute()+commit()
 on the same connection can interleave their writes so one transaction
 silently includes the other's row. Worst case: thread A errors and
 rolls back, thread B's "successful" insert vanishes.
 
-The ``_writing()`` context manager + RLock added in this PR make every
-mutating method commit exactly one logical write. These tests prove
+The ``_writing()`` context manager + RLock make every mutating method
+commit exactly one logical write. These tests prove
 it under load.
 """
 from __future__ import annotations

@@ -1,7 +1,7 @@
-"""Durable execution Phase 2 — rewind/fork of a checkpointed run.
+"""Durable execution: rewind/fork of a checkpointed run.
 
 Exercises the checkpoint-manipulation mechanics directly against the world model
-(no LLM): the continuation itself reuses the shipped Phase-1 resume path.
+(no LLM): the continuation itself reuses the crash-resume path.
 """
 from __future__ import annotations
 

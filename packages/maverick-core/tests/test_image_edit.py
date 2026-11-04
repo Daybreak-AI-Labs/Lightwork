@@ -1,4 +1,4 @@
-"""Image edit tool (2027-H1): remote inpaint/variation/upscale over a faked
+"""Image edit tool: remote inpaint/variation/upscale over a faked
 httpx (mirrors replicate_tool's auth + request shape) and local Pillow ops
 over a faked PIL. Offline and deterministic."""
 

@@ -1,4 +1,4 @@
-"""Tests for PRM-in-loop guidance (Phase 0: make the reward model steer)."""
+"""Tests for PRM-in-loop guidance: the reward model steers the agent loop."""
 from __future__ import annotations
 
 from maverick.prm_guidance import PromiseWindow, maybe_nudge, should_nudge

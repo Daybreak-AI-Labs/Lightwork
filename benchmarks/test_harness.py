@@ -38,7 +38,7 @@ def test_dry_run_produces_row(harness, tmp_path, monkeypatch):
 
     assert row["agent"] == "maverick"
     # Provenance: auto-measured rows are tagged so they can't be confused
-    # with hand-added comparator rows (#320).
+    # with hand-added comparator rows.
     assert row["source"] == "measured"
     assert row["outcome"] == "dry-run"
     assert row["wall_seconds"] >= 0

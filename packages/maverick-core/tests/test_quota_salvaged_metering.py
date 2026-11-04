@@ -1,24 +1,20 @@
-"""Quota metering on the Wave-12 *salvaged-patch* completion path (PR #744).
+"""Quota metering on the *salvaged-patch* completion path.
 
 ``orchestrator.run_goal`` records each run's spend to the principal's daily
-usage ledger via the ``_record_quota_usage`` helper. The metering gap PR #744
-flagged was that the salvaged-patch branch -- the success-ish path inside
+usage ledger via the ``_record_quota_usage`` helper, which every terminal path
+calls. The salvaged-patch branch -- the success-ish path inside
 ``if result.error:`` that returns a usable ``result.final_patch`` despite the
 agent erroring (e.g. it hit max_steps but had already written a diff via
-str_replace_editor) -- returned WITHOUT charging the ledger, so that spend
-escaped the quota accounting.
-
-The fix (generalized by #759 into the single ``_record_quota_usage`` helper
-called on every terminal path) is exercised here for this specific branch.
-The code path was covered but had no test pinning it; without one a future
-refactor of the salvaged branch could silently drop the metering again.
+str_replace_editor) -- must charge the ledger too, or that spend escapes the
+quota accounting. This test pins the metering on that specific branch, so a
+future refactor of it cannot silently drop the charge.
 
 Hermetic, mirroring tests/test_quota_enforcement.py (FakeLLM + tmp world db +
 LocalBackend + real UsageLedger under the per-test isolated ``~/.maverick``).
 The salvaged branch is reached by monkeypatching ``Agent.run`` to return an
 ``AgentResult`` whose ``error`` is set AND whose ``final_patch`` looks like a
-diff -- the exact shape the orchestrator salvages -- exactly as #759's failed
-run tests drive the other error paths. No network.
+diff -- the exact shape the orchestrator salvages -- the same way the
+failed-run tests drive the other error paths. No network.
 """
 from __future__ import annotations
 
@@ -120,7 +116,7 @@ async def test_salvaged_patch_path_records_usage(
     assert calls == 1
 
     # Metering fired exactly once on this path, with this run's principal and
-    # final budget totals -- the spend the gap (PR #744) let escape.
+    # final budget totals -- the spend that would otherwise escape.
     assert len(recorded) == 1
     (args, _kwargs) = recorded[0]
     assert args[0] == "user:local"

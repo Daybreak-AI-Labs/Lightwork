@@ -1,4 +1,4 @@
-"""Exposed-deployment hardening (issue #468): dashboard resource limits.
+"""Exposed-deployment hardening: dashboard resource limits.
 
 Covers:
   * SSE goal-event stream concurrency cap (503 past the limit).

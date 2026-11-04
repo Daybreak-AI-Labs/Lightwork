@@ -1,4 +1,4 @@
-"""Phase 6 — per-client export + right-to-erasure. Provably complete because one
+"""Per-client export + right-to-erasure. Provably complete because one
 deployment = one client = one data root; fail-closed so it never targets the
 shared root."""
 from __future__ import annotations

@@ -1749,7 +1749,7 @@ def test_risk_limited_cycle_does_not_silently_disable_failed_metamorphic_check(
                for reason in report.skipped)
 
 
-# ---------- wave 6: confidence, cost/latency, adaptive support ----------
+# ---------- confidence, cost/latency, adaptive support ----------
 
 def test_wilson_lower_bound_rewards_more_evidence():
     # same 100% rate, more samples -> higher (more confident) lower bound
@@ -2032,7 +2032,7 @@ def test_runner_pass_applies_config_floors(monkeypatch, store):
     assert rep.promoted == 0 and any("no held-out cases" in s for s in rep.skipped)
 
 
-# ---------- wave 7: structured proposer + best-of-N (Pareto) selection ----------
+# ---------- structured proposer + best-of-N (Pareto) selection ----------
 
 def test_proposal_parts_str_and_mapping():
     assert sh._proposal_parts("just a line") == ("just a line", "")
@@ -2283,7 +2283,7 @@ def test_candidates_per_signature_config(monkeypatch):
     assert sh.settings()["candidates_per_signature"] == 3
 
 
-# ---------- wave 8: semantic mining (similarity_fn seam + offline default) ----------
+# ---------- semantic mining (similarity_fn seam + offline default) ----------
 
 def test_semantic_similarity_helper():
     # identical -> 1.0; symmetric; bounded
@@ -2388,7 +2388,7 @@ def test_runner_pass_applies_semantic_config(monkeypatch, store):
     assert rep.mined == 1 and rep.promoted == 1     # config flag drove semantic clustering
 
 
-# ---------- wave 9: per-domain mining granularity (bucket_by) ----------
+# ---------- per-domain mining granularity (bucket_by) ----------
 
 def _refl_d(model, fclass, goal, domain):
     return {"owner": "", "goal_id": 0, "model_id": model, "failure_class": fclass, "goal_text": goal,
@@ -2449,7 +2449,7 @@ def test_run_self_harness_bucket_by_domain(monkeypatch, store):
     assert rep.mined == 2 and rep.promoted == 2     # one scoped line per department
     # scoped lines are NOT in the model-wide block...
     assert sh.recall_addendum("M", store) == ""
-    # ...they recall only for their own department (wave 19 scoped recall)
+    # ...they recall only for their own department (scoped recall)
     fin = sh.recall_addendum("M", store, domain="finance")
     sal = sh.recall_addendum("M", store, domain="sales")
     assert "domain=finance" in fin and "domain=sales" not in fin
@@ -2787,7 +2787,7 @@ def test_runner_pass_applies_bucket_by_config(monkeypatch, store):
     assert rep.mined == 2 and rep.promoted == 2     # config drove per-domain mining
 
 
-# ---------- wave 10: driver cycle (mine -> gate -> retire) ----------
+# ---------- driver cycle (mine -> gate -> retire) ----------
 
 def test_cycle_dry_pass_no_scorer(monkeypatch, store):
     _enable(monkeypatch)
@@ -2847,7 +2847,7 @@ def test_cycle_no_retire_when_days_zero(monkeypatch, store):
     assert retired == 0 and "old line" in sh.recall_addendum("M", store)
 
 
-# ---------- wave 11: governance-readiness visibility ----------
+# ---------- governance-readiness visibility ----------
 
 def test_governance_readiness_helper(monkeypatch):
     # default: not frozen, gate state from si.enabled()
@@ -2907,7 +2907,7 @@ def test_report_gate_disabled_is_recorded(monkeypatch, store):
     assert rep.gate_enabled is False and rep.promoted == 0
 
 
-# ---------- wave 12: worker-model learning (fleet sweep) ----------
+# ---------- worker-model learning (fleet sweep) ----------
 
 def test_harness_fleet_models_distinct_sorted(monkeypatch):
     from maverick import llm
@@ -2946,7 +2946,7 @@ def test_run_all_models_disabled_is_empty(monkeypatch):
     assert runner.run_self_harness_all_models() == {}
 
 
-# ---------- wave 17: outcome-correlated efficacy ----------
+# ---------- outcome-correlated efficacy ----------
 
 def test_note_outcome_counters_and_efficacy(monkeypatch, store):
     ctrl = _enable(monkeypatch)
@@ -3002,7 +3002,7 @@ def test_review_efficacy_no_cases_is_noop(monkeypatch, store):
     assert "kept line" in sh.recall_addendum("M", store)         # nothing demoted
 
 
-# ---------- wave 18: canary / staged rollout ----------
+# ---------- canary / staged rollout ----------
 
 def test_run_self_harness_canary_marks_promoted_line(monkeypatch, store):
     ctrl = _enable(monkeypatch)
@@ -3068,7 +3068,7 @@ def test_review_canaries_failures_win_ties(monkeypatch, store):
     assert res["demoted"] == ["mixed line"] and res["graduated"] == []  # failures win
 
 
-# ---------- wave 19: per-domain scoped recall ----------
+# ---------- per-domain scoped recall ----------
 
 def test_scoped_key_namespaces():
     assert sh._scoped_key("M", "") == "M"                        # model-wide unchanged

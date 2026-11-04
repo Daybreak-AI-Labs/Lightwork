@@ -1,4 +1,4 @@
-"""Structure test for the reusable GitLab CI template (issue #604).
+"""Structure test for the reusable GitLab CI template.
 
 The template is a CI wrapper around `maverick start`. These assertions pin
 the safety defaults: non-interactive consent, a hard budget cap, and a

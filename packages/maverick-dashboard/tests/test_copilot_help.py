@@ -57,7 +57,7 @@ def test_asking_for_a_task_answers_with_steps_and_a_link_that_focuses_the_contro
 def test_unrelated_action_requests_keep_the_plain_cannot_do_that_answer():
     payload = client.post("/api/v1/copilot", json={"message": "Cancel my running goal", "page": "/goals",
                                                    "history": []}).json()
-    # #2529's wording: the reply says up front that nothing was changed.
+    # The reply says up front that nothing was changed.
     assert payload["reply"].startswith("I can explain the steps, but I haven't changed anything.")
 
 

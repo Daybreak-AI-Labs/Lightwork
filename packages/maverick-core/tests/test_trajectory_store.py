@@ -1,4 +1,4 @@
-"""Tests for governed trajectory capture (Phase 0 data foundation)."""
+"""Tests for governed trajectory capture."""
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor

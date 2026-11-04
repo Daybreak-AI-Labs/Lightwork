@@ -1,4 +1,4 @@
-"""Inbound channels must dedup a retried webhook ATOMICALLY (issue #473).
+"""Inbound channels must dedup a retried webhook ATOMICALLY.
 
 Twilio resends the same MessageSid within ~15s when a handler is slow. The old
 code did is_processed_message() (check) -> handler (slow goal) -> mark (after),

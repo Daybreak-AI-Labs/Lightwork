@@ -1,4 +1,4 @@
-"""Semantic cross-run recall over the vector_store adapters (#432).
+"""Semantic cross-run recall over the vector_store adapters.
 
 The heavy backends (chromadb/qdrant) aren't installed in CI, so the wiring
 is exercised with a FakeStore implementing the same add/query/delete

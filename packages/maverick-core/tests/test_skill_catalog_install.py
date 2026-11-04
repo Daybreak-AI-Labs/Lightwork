@@ -127,7 +127,7 @@ def test_example_index_sha_matches_committed_skill():
     assert pinned == actual, "example index sha256 drifted from the example SKILL.md"
 
 
-# --- Supply-chain authenticity (#464): catalog install resolves to a skill
+# --- Supply-chain authenticity: catalog install resolves to a skill
 # whose Ed25519 signature verifies against a trusted publisher; sha256 alone is
 # integrity-in-transit only (same unauthenticated host serves bytes + hash). ---
 

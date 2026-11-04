@@ -662,7 +662,7 @@ def test_ask_answer_open_questions(world):
 
 
 def test_answer_unknown_question_id_returns_false(world):
-    # #394 parity: a typo'd id is reported, not a false success.
+    # Parity with SQLite: a typo'd id is reported, not a false success.
     assert world.answer(987_654_321, "nope") is False
 
 
@@ -879,7 +879,7 @@ def test_decide_approval_is_tenant_scoped(world):
         reset_tenant(tok)
 
 
-# ---------- #469: reclaim_orphan_goals + schema_version ----------
+# ---------- reclaim_orphan_goals + schema_version ----------
 
 def test_reclaim_orphan_goals(world):
     g = world.create_goal("orphan")
@@ -914,7 +914,7 @@ def test_schema_version_is_int(world):
     assert world.schema_version >= 1
 
 
-# ---------- #469: conversations / turns (multi-turn channel memory) ----------
+# ---------- conversations / turns (multi-turn channel memory) ----------
 
 def test_get_or_create_conversation_is_idempotent(world):
     c1 = world.get_or_create_conversation("telegram", "u123")
@@ -980,7 +980,7 @@ def test_prune_conversations_keeps_fresh(world):
         assert any(c.id == conv.id for c in world.list_conversations())
 
 
-# ---------- #469: messages, attachments, dedup, pruning (final batch) ----------
+# ---------- messages, attachments, dedup, pruning ----------
 
 def test_append_message(world, monkeypatch):
     # Search_messages was removed (zero production callers on either

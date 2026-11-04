@@ -1,4 +1,4 @@
-"""The wizard can configure plugin permissions (#593): `[plugins].grant` and
+"""The wizard can configure plugin permissions: `[plugins].grant` and
 `enforce_permissions`. Rule-6 integrity check — the keys the wizard writes are
 exactly the ones `maverick.plugins` reads."""
 from __future__ import annotations

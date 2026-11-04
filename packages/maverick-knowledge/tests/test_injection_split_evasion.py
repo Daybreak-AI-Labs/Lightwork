@@ -1,8 +1,8 @@
-"""Regression for the boundary-split injection-evasion gap (audit finding c6).
+"""Boundary-split injection evasion.
 
-The per-chunk _INJECTION_RE screen could be bypassed by straddling a tripwire
+A per-chunk _INJECTION_RE screen alone can be bypassed by straddling a tripwire
 phrase across a chunk edge (or choosing a small chunk_size) so no single chunk
-matched, even though the full document did -- and the poison got ingested.
+matches, even though the full document does -- and the poison gets ingested.
 """
 from maverick_knowledge.base import KnowledgeBase
 

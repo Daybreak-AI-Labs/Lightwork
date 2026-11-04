@@ -1,9 +1,9 @@
-"""Human-in-the-loop resume flow, surfaced by dogfooding.
+"""Human-in-the-loop resume flow.
 
-Before this fix, `ask_user` -> `maverick answer` -> `maverick resume` looped
-forever: the resumed run never saw the answer, so the agent re-asked the same
-question and re-blocked. run_goal now threads answered questions into the brief.
-Also: resume must honor the configured sandbox, not silently fall back to local.
+`ask_user` -> `maverick answer` -> `maverick resume` must not loop forever: if
+the resumed run never saw the answer, the agent would re-ask the same question
+and re-block, so run_goal threads answered questions into the brief. Resume
+must also honor the configured sandbox, not silently fall back to local.
 """
 from __future__ import annotations
 

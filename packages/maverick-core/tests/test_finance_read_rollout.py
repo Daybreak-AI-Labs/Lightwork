@@ -1,5 +1,5 @@
 """Finance read-seat rollout: every read/draft tower now has an executable,
-LOW-risk vendor read connector wired into its allow_tools (extending the #1054
+LOW-risk vendor read connector wired into its allow_tools (extending the
 treasury reference across the suite), so the whole CFO office can pull its own
 data -- while each tower's money seal stays intact. This closes, for finance, the
 domain-action gap that test_fleet_spine documented as "wired on paper"."""

@@ -290,7 +290,7 @@ class TestHTTPNotifications:
 
 @pytest.mark.skipif(not _have_fastapi(), reason="fastapi not installed")
 class TestHTTPTasks:
-    """Async MCP tasks over the Streamable HTTP transport (opt-in, ROADMAP B1).
+    """Async MCP tasks over the Streamable HTTP transport (opt-in).
 
     Tasks are off by default over HTTP; MAVERICK_MCP_HTTP_TASKS=1 enables a
     bearer-scoped task store shared across requests on the same server instance.

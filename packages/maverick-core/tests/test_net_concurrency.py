@@ -1,4 +1,4 @@
-"""Per-host concurrency caps for parallel network reads (#434).
+"""Per-host concurrency caps for parallel network reads.
 
 Same-host network reads in one turn are throttled by a per-host semaphore;
 cross-host reads and local reads stay fully concurrent.

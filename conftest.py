@@ -147,7 +147,7 @@ def _isolate_dynamic_maverick_home(tmp_path, monkeypatch):
     # overrides, so a test that set an allow-list without patching
     # OVERRIDES_PATH wrote the shared session home, and any later test on the
     # same worker resolving a model was silently capped to it (seen as the
-    # cost-routing test returning the older Opus under xdist, #2410).
+    # cost-routing test returning the older Opus under xdist).
     try:
         from maverick import runtime_overrides as _runtime_overrides
     except Exception:  # pragma: no cover -- core not installed in this env
@@ -197,7 +197,7 @@ def _restore_environ():
     ``LIGHTWORK_*`` alias layer mirrors into ``MAVERICK_*``, the moat preflight
     sets ``MAVERICK_SUPPRESS_SANDBOX_WARNING``. Each of those stayed set for
     every later test in the worker, and pytest-xdist's size-first file order
-    made "later" mean any file at all (#2410). Restoring the snapshot keeps
+    made "later" mean any file at all. Restoring the snapshot keeps
     each test's environment its own without making every test pre-record the
     keys its code under test might mirror.
     """
@@ -250,8 +250,8 @@ def _fail_the_test_that_forks_a_module():
     through the attribute) patches the copy while call-time imports in the
     code under test get the original -- a leak that only shows once files
     run in a different order, i.e. under pytest-xdist, and then in whichever
-    unrelated file happens to follow (nine victims across four files in
-    #2410). Checking after every test names the culprit instead.
+    unrelated file happens to follow (nine victims across four files at
+    once). Checking after every test names the culprit instead.
     """
     yield
     forked = []
@@ -341,7 +341,7 @@ def _reset_provider_health():
     and does not reset leaves that exclusion in place for every later test in
     the worker -- seen as the cost-routing test resolving the orchestrator to
     the previous Opus generation once xdist's file order put such a test
-    ahead of it (#2410).
+    ahead of it.
     """
     def _reset() -> None:
         try:

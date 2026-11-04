@@ -1,4 +1,4 @@
-"""Reliability fixes surfaced by dogfooding the consumer run path.
+"""Reliability of the consumer run path.
 
 - A config-only provider (local / OpenAI-compatible model, key in config not a
   well-known env var) must not be wrongly blocked by the key gate.

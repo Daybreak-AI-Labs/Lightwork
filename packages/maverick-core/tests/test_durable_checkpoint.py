@@ -1,4 +1,4 @@
-"""Durable execution — Phase 1 crash-resume tests.
+"""Durable execution: crash-resume tests.
 
 Covers checkpoint.py (the store + budget round-trip) and the Agent.run()
 integration: a run checkpointed mid-loop resumes from the last committed step
@@ -371,7 +371,7 @@ def test_resume_from_checkpoint_noop_when_disabled(tmp_path, monkeypatch):
 def test_resume_from_checkpoint_noop_for_deep_worker(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_DURABLE", "1")
     ctx, world, gid = _mk_ctx(tmp_path, _ScriptedLLM([]))
-    # depth > 0: durable resume is scoped to the root agent (Phase 1).
+    # depth > 0: durable resume is scoped to the root agent.
     agent = Agent(ctx=ctx, role="researcher", brief="x", depth=1)
     orig = [{"role": "user", "content": "fresh"}]
     ckpt, start_step, messages = agent._resume_from_checkpoint(orig, ctx.blackboard, 0)

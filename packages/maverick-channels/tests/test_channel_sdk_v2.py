@@ -1,4 +1,4 @@
-"""Channel SDK v2 (RFC 0001 C2): structured Reply + str shim + dispatch."""
+"""Channel SDK v2: structured Reply + str shim + dispatch."""
 from __future__ import annotations
 
 import asyncio

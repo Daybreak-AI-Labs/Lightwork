@@ -805,7 +805,7 @@ def test_data_map_key_is_left_to_the_integrations_rows():
     assert not any(row.id.startswith("data_map.") for row in ROWS)
 
 
-# ------------------------------- installation defaults and caps (wave 2)
+# ------------------------------- installation defaults and caps
 def test_consent_script_cache_follows_the_edge_cache_settings(audit_rows):
     _modules_on("consent_preferences", "consent_preferences.publishing",
                 "consent_preferences.public_api")

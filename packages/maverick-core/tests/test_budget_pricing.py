@@ -54,8 +54,8 @@ def test_router_selectable_models_bill_at_real_rate_not_fallback():
     """Every model the cost-router can SELECT must bill at its canonical
     rate, not the Sonnet $3/$15 fallback.
 
-    Issue #465 reconciled cost_router._PRICING to llm.MODEL_PRICES (one
-    source of truth), so every router id now lives in MODEL_PRICES and the
+    cost_router._PRICING is reconciled to llm.MODEL_PRICES (one source of
+    truth), so every router id lives in MODEL_PRICES and the
     rates are derived from it. This walks the router's own table and asserts
     Budget bills each id at the MODEL_PRICES rate -- catching any future id
     that drifts out of the canonical catalog and silently bills at fallback.
@@ -303,7 +303,7 @@ def test_cache_read_default_is_anthropic_tenth_rate():
 
 
 def test_cache_read_openai_half_rate_is_5x_default():
-    # Issue #465: non-Anthropic cache reads are ~0.5x, not 0.1x. Passing the
+    # Non-Anthropic cache reads are ~0.5x, not 0.1x. Passing the
     # OpenAI multiplier bills 5x the Anthropic-default amount for the same read.
     from maverick.budget import CACHE_READ_MULT_OPENAI
     assert CACHE_READ_MULT_OPENAI == 0.5

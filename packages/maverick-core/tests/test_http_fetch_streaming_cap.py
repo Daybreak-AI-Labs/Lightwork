@@ -1,4 +1,4 @@
-"""http_fetch streams with a hard byte cap (issue #477, task 1).
+"""http_fetch streams with a hard byte cap.
 
 Regression: _run_fetch used ``client.request()`` + ``resp.content[:max_bytes]``,
 which buffered the ENTIRE body into memory before slicing -- ``max_bytes``

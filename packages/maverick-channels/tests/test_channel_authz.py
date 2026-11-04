@@ -223,7 +223,7 @@ class _FakeWorldModel:
     ``marked`` tracks the SIDs *currently* claimed: a claim adds, a release
     removes. ``mark_message_processed`` returns True on first claim / False on
     a duplicate, mirroring the real INSERT-under-UNIQUE-constraint behavior the
-    channels now rely on (claim-first dedup, issue #473)."""
+    channels now rely on (claim-first dedup)."""
 
     instances: list = []
 

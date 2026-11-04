@@ -194,7 +194,7 @@ class TestE2BSandboxTeardown:
 class TestContainerResourceCaps:
     """Docker/Podman must bound host RAM by default (OOM is the catastrophic,
     non-recoverable host-DoS); CPU is opt-in since the per-exec timeout already
-    bounds a busy-loop. Issue #461."""
+    bounds a busy-loop."""
 
     @staticmethod
     def _argv(monkeypatch, Backend, verify_attr, tmp_path, **kw):
