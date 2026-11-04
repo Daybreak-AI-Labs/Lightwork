@@ -43,7 +43,7 @@ dependencies = [
     # omit the system database. Finance off-hours rules require IANA zones.
     "tzdata>=2026.3",
     # Explicit, content-free desktop recording works after normal installation.
-    "pyobjc-framework-Cocoa>=11,<13; sys_platform=='darwin'",
+    "pyobjc-framework-Cocoa>=11,<14; sys_platform=='darwin'",
     "python-xlib==0.33; sys_platform=='linux'",
 ]
 
