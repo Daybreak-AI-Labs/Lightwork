@@ -865,7 +865,7 @@ def test_decide_approval_is_tenant_scoped(world):
     tok = set_tenant("globex")
     try:
         assert all(x.id != aid for x in world.pending_approvals())
-        # ...and cannot decide it either (the bug: this must not return True).
+        # ...and cannot decide it either (this must not return True).
         assert world.decide_approval(aid, "approved") is False
     finally:
         reset_tenant(tok)
