@@ -21,9 +21,8 @@ atomic private-file helpers, mirroring :mod:`maverick.fleet_memory`. SLA and
 status computation is PURE over an injected ``world`` -- no LLM, no new run
 state, read-only -- so it is trivially testable and never invents a number.
 
-On by default (``[shoring] enable`` / ``MAVERICK_SHORING``): shoring is core
-functionality, not a licence-gated feature, so there is no entitlement gate --
-the knob only lets an operator turn the surface off.
+On by default (``[shoring] enable`` / ``MAVERICK_SHORING``): the knob only
+lets an operator turn the surface off.
 """
 from __future__ import annotations
 
@@ -110,7 +109,7 @@ def enabled() -> bool:
 
     Mirrors :func:`maverick.fleet_memory.enabled` in shape -- an env override
     (``MAVERICK_SHORING``) wins, else the ``[shoring] enable`` config knob --
-    but shoring is the product, so it DEFAULTS ON and has no entitlement gate.
+    but shoring DEFAULTS ON.
     """
     _v = env_flag("MAVERICK_SHORING")
     if _v is not None:
