@@ -311,6 +311,13 @@ enforce           = false                 # or MAVERICK_LICENSE_ENFORCE=1
 # api_token         = "${MAVERICK_LICENSE_API_TOKEN}"
 # refresh_interval_seconds = 60
 
+[release]
+# Publisher PUBLIC keys whose signed update bundles `python -m
+# maverick.release_update verify-bundle|apply|rollback` accepts (also
+# MAVERICK_RELEASE_PUBKEYS). With none set, every bundle is refused unless the
+# command's --pubkey names a key.
+# publisher_pubkeys = ["<publisher public key hex>"]
+
 [rehearsal]
 # Predict outcomes for high-impact actions. Predictions are observed by default;
 # they do not stop tool calls or replace Shield, capability, or consent checks.

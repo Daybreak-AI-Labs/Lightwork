@@ -396,6 +396,7 @@ class TestBypassRegression:
     @pytest.mark.parametrize("mod", [
         "entitlements.py", "budget.py", "promotion_effect.py", "llm.py",
         "evaluator_evolution.py", "migration_governance.py", "approval_delegation.py",
+        "release_manifest_signing.py",
     ])
     def test_newly_protected_governance_modules(self, mod):
         assert sm.is_protected(f"packages/maverick-core/maverick/{mod}") is True

@@ -234,6 +234,9 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "api_token",
         "refresh_interval_seconds",
     },
+    # The publisher keys whose signed update bundles release_update accepts
+    # (maverick.release_manifest_signing).
+    "release": {"publisher_pubkeys"},
     # user_name: the operator's name the wizard collects for greetings and
     # writes under [persona] -- lint must never warn on the wizard's own output.
     "persona": {"name", "style", "addendum", "user_name"},

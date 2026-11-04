@@ -103,6 +103,9 @@ KNOWN_SECTIONS = frozenset({
     "privacy_automation", "privacy_ops", "provider_failover", "providers", "queue", "quotas",
     "spending_limits",
     "rate_limits", "reflexion",
+    # [release] publisher_pubkeys: the keys whose signed update bundles
+    # release_update accepts (maverick.release_manifest_signing).
+    "release",
     "tech_risk_compliance", "third_party_management",
     "repl", "harness_refine", "session_tree",
     "retention", "role_assignments", "roles", "routing", "safety",

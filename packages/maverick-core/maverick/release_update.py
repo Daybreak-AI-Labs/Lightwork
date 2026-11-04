@@ -1,13 +1,13 @@
 """Governed release updates — verify + plan upgrades, offline-capable.
 
-A **release manifest** is an Ed25519-signed JSON document (same trust anchor as
-licenses, see :mod:`maverick.entitlements`) describing one release: its version,
-its artifacts (name + sha256 + size), the **minimum version it can upgrade
-from**, and the ordered list of **governed migrations** it introduces. Because
-it verifies **offline**, an air-gapped bank can receive an update bundle
-out-of-band (physical media / one-way transfer), verify the signature **and**
-every artifact hash, and apply it under change control — no network, no
-"trust the vendor," and every step reproducible.
+A **release manifest** is an Ed25519-signed JSON document (signed and verified
+by :mod:`maverick.release_manifest_signing`) describing one release: its
+version, its artifacts (name + sha256 + size), the **minimum version it can
+upgrade from**, and the ordered list of **governed migrations** it introduces.
+Because it verifies **offline**, an air-gapped bank can receive an update
+bundle out-of-band (physical media / one-way transfer), verify the signature
+**and** every artifact hash, and apply it under change control — no network,
+no "trust the vendor," and every step reproducible.
 
 This module owns the *decision* layer — verify a manifest, verify a bundle's
 contents against it, and compute a safe upgrade **plan**. Swapping the running
@@ -25,7 +25,11 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .entitlements import _trusted_pubkeys, sign_license, verify_license
+from .release_manifest_signing import (
+    sign_manifest,
+    trusted_publisher_keys,
+    verify_manifest_signature,
+)
 
 
 def _within(base: Path, candidate: Path) -> bool:
@@ -65,12 +69,12 @@ def build_manifest(version: str, artifacts: list[dict], *, min_from: str,
         "migrations": list(migrations or []),
         "notes": notes,
     }
-    return sign_license(payload, private_key_hex)  # generic signed-doc envelope
+    return sign_manifest(payload, private_key_hex)
 
 
 def verify_manifest(doc: dict, trusted_pubkeys: list[str] | None = None) -> tuple[bool, str]:
     """Authenticate a manifest against the shipped publisher key set."""
-    return verify_license(doc, _trusted_pubkeys(trusted_pubkeys))
+    return verify_manifest_signature(doc, trusted_publisher_keys(trusted_pubkeys))
 
 
 @dataclass

@@ -4,7 +4,7 @@
     "CI_ONLY": 14,
     "CLI_ONLY": 33,
     "PRODUCTION": 2253,
-    "TEST_ONLY": 20,
+    "TEST_ONLY": 21,
     "UNREACHED": 2
   },
   "modules": {
@@ -809,6 +809,7 @@
     "maverick.relay_reference": "TEST_ONLY",
     "maverick.release_canary": "PRODUCTION",
     "maverick.release_identity_transition": "PRODUCTION",
+    "maverick.release_manifest_signing": "TEST_ONLY",
     "maverick.release_runtime": "PRODUCTION",
     "maverick.release_update": "CLI_ONLY",
     "maverick.reliability_cert": "PRODUCTION",

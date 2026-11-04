@@ -51,6 +51,7 @@ _PROTECTED_FILES = frozenset({
     "learning_guard.py",         # learning-job emergency-stop boundary
     "pilot_learning.py",         # frozen pilot learning-exclusion authority
     "release_identity_transition.py",  # dual-signed native update trust admission
+    "release_manifest_signing.py",  # update-bundle signatures and their trust anchor
     "learning_proof.py",         # proof/evidence authority
     "factory_learning.py",       # factory promotion/evidence consumer
     "approval_signing.py",       # cryptographic human approval

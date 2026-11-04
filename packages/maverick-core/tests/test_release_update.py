@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from maverick import entitlements as E
+from maverick import release_manifest_signing as S
 from maverick import release_update as R
 
 pytest.importorskip("cryptography")
@@ -13,7 +13,7 @@ pytest.importorskip("cryptography")
 
 @pytest.fixture
 def keys():
-    priv, pub = E.new_keypair()
+    priv, pub = S.new_publisher_keypair()
     return priv, [pub]
 
 
@@ -31,6 +31,17 @@ def test_manifest_sign_verify_and_tamper(keys):
     doc["version"] = "v9.9.9"  # tamper
     ok, why = R.verify_manifest(doc, trust)
     assert not ok and why == "bad_signature"
+
+
+def test_verify_manifest_defaults_to_the_configured_release_keys(keys, monkeypatch):
+    priv, trust = keys
+    doc = R.build_manifest("v0.1.7", [], min_from="v0.1.5", migrations=[],
+                           private_key_hex=priv)
+    monkeypatch.setattr(S, "_release_cfg", dict)
+    monkeypatch.delenv("MAVERICK_RELEASE_PUBKEYS", raising=False)
+    assert R.verify_manifest(doc) == (False, "no_trust_anchor")
+    monkeypatch.setenv("MAVERICK_RELEASE_PUBKEYS", trust[0])
+    assert R.verify_manifest(doc) == (True, "ok")
 
 
 def test_bundle_verifies_signature_and_hashes(tmp_path, keys):

@@ -10014,7 +10014,7 @@
       "observed_mechanism_markers": {},
       "source_sites": [
         {
-          "line": 140,
+          "line": 144,
           "function": "_stage_verified_bundle",
           "kind": "write_text",
           "expression": "(staged / 'manifest.json').write_text(json.dumps(manifest), encoding='utf-8')"

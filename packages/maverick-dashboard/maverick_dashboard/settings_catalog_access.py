@@ -965,7 +965,7 @@ def _journal(S) -> tuple:  # noqa: N803 -- the catalog's row type
 def _server(S) -> tuple:  # noqa: N803 -- the catalog's row type
     grp = "Server & deployment"
     store, queue, grpc = "Record store", "Shared work queue", "Remote workers"
-    fed, lic, ent = "Linked Lightwork servers", "License", "Enterprise boundary"
+    fed, lic, upd, ent = "Linked Lightwork servers", "License", "Updates", "Enterprise boundary"
     return (
         S("governed_records", "backend", "Where governed records are kept",
           "Governed records (approvals, receipts and other records that need an owner) can be "
@@ -1225,6 +1225,13 @@ def _server(S) -> tuple:  # noqa: N803 -- the catalog's row type
           maximum=10000, integer=True, restart=True,
           env=("MAVERICK_FEDERATION_MAX_CONCURRENT",),
           none_text="As many as the threads above"),
+        # ------------------------------------------------------ updates
+        S("release", "publisher_pubkeys", "Trusted update publishers",
+          "Only update bundles signed by one of these publishers are accepted.",
+          "keys", grp, [], "maverick.release_manifest_signing", subgroup=upd,
+          env=("MAVERICK_RELEASE_PUBKEYS",), weaker="grow",
+          warning="Update bundles from another publisher will be accepted.",
+          aliases="publisher keys update bundle release"),
         # ------------------------------------------------------ license
         S("license", "enforce", "Limit features to the license",
           "Turn off the features your license does not include. Off: every feature works.",
