@@ -1,12 +1,12 @@
 """Regression: the audit Ed25519 key must not be a general-purpose
 signing oracle.
 
-Before this fix, ``sign_detached_digest`` (dashboard evidence exports) and
-``sign_envelope`` (federation exchange) both signed the bare SHA-256 digest of
-their canonical JSON -- byte-for-byte what ``AuditSigner.write`` signs for a
-chain row whose ``hash`` field equals that digest. Anyone who could obtain a
-detached-digest signature or a federation envelope signature for an
-attacker-chosen payload could therefore mint a row that ``verify_chain``
+If ``sign_detached_digest`` (dashboard evidence exports) and ``sign_envelope``
+(federation exchange) signed the bare SHA-256 digest of their canonical JSON --
+byte-for-byte what ``AuditSigner.write`` signs for a chain row whose ``hash``
+field equals that digest -- anyone who could obtain a detached-digest
+signature or a federation envelope signature for an attacker-chosen payload
+could mint a row that ``verify_chain``
 accepted as genuinely signed by the audit key, without ever touching the
 private key. Domain-separating each non-row use closes that reuse.
 """

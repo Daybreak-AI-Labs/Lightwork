@@ -146,7 +146,7 @@ def test_purge_episodes_before_nulls_dangling_fact_references(tmp_path: Path):
     # Canonical path: facts.source_episode_id / fact_history.source_
     # episode_id REFERENCE episodes(id) with no ON DELETE clause, and the
     # world opens with foreign_keys ON. Deleting an aged-out episode that a
-    # still-live fact cites used to raise sqlite3.IntegrityError and abort
+    # still-live fact cites must not raise sqlite3.IntegrityError and abort
     # the whole retention run -- older episodes were never pruned.
     from maverick.world_model import WorldModel
 

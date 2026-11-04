@@ -1,5 +1,5 @@
 'use strict';
-// Page scripts for operations that used to be command-line only: each sends
+// Page scripts for operations that also exist on the command line: each sends
 // nothing until the person acts, confirms destructive or outside actions with
 // mvConfirm (declining sends nothing), and shows plain results and errors.
 const { test } = require('node:test');

@@ -66,7 +66,7 @@ def test_gmail_send_confirmed(monkeypatch):
 
 def test_gmail_extract_plain_malformed_base64_never_raises():
     # A sender-controlled text/plain body whose base64url length is 1 (mod 4)
-    # used to crash _extract_plain (binascii.Error from the over-padding
+    # must not crash _extract_plain (binascii.Error from the over-padding
     # `+ "==="`). It must reject cleanly (return "") instead.
     import base64
 

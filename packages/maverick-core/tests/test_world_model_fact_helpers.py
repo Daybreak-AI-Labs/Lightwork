@@ -1,7 +1,7 @@
 """Locked, backend-portable fact helpers on WorldModel.
 
-kv_memory (and others) used to reach into ``world.conn.execute(... ?)`` directly,
-bypassing the read lock and using SQLite-only ``?`` placeholders. These helpers
+kv_memory (and others) must not reach into ``world.conn.execute(... ?)`` directly,
+which would bypass the read lock and use SQLite-only ``?`` placeholders. These helpers
 are the locked replacements; this pins their behavior, especially LIKE-escaping
 so a key/query containing % or _ is matched literally.
 """

@@ -94,8 +94,8 @@ def test_logging_audit_signing_matches_compliance_report(monkeypatch, tmp_path):
 def test_logging_audit_signing_is_probed_not_read_from_config(monkeypatch, tmp_path):
     """A config key alone must not be able to fake the posture either way.
 
-    The old implementation was a single config lookup, so it could be flipped by
-    writing a key regardless of whether signing actually worked. Setting the env
+    A single config lookup could be flipped by writing a key regardless of
+    whether signing actually worked. Setting the env
     var that the real resolver honours must move the reported posture; that is
     only true if we are probing the resolver rather than reading one key.
     """

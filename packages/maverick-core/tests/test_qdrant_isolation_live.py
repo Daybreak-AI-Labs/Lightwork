@@ -4,7 +4,7 @@ Skipped unless MAVERICK_QDRANT_URL points at a running server (the dedicated CI
 qdrant job); needs qdrant-client + fastembed. The mock-based unit tests live in
 test_qdrant_store.py. This proves the behaviour a mock can't: a real Qdrant
 server only accepts uint/UUID point ids, so the store's tenant-namespaced string
-ids used to be rejected with a 400 -- now they're deterministic UUIDs with the
+ids must not be rejected with a 400 -- they're deterministic UUIDs with the
 logical id in the payload, and add/query/delete are tenant-scoped end to end.
 """
 from __future__ import annotations

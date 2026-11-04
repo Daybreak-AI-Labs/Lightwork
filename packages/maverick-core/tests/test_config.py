@@ -798,7 +798,7 @@ def test_a_cached_corrupt_file_still_counts_as_an_error(config_home):
 @pytest.mark.skipif(os.name == "nt", reason="POSIX symlink loop")
 def test_an_overlay_that_cannot_be_checked_is_reported_not_skipped(config_home):
     # Path.exists() hides ELOOP: a settings overlay turned into a symlink loop
-    # used to be dropped silently, losing every Settings-saved policy.
+    # must not be dropped silently, losing every Settings-saved policy.
     from maverick import config
 
     overlay = config.dashboard_overrides_path()

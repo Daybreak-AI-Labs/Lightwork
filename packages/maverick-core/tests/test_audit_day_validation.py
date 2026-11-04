@@ -131,7 +131,7 @@ def test_cli_audit_tail_accepts_valid_day(_home):
 
 
 def test_is_valid_day_rejects_impossible_calendar_dates():
-    # Shape-valid but not a real date: a typo'd --day used to pass and report a
+    # Shape-valid but not a real date: a typo'd --day must not pass and report a
     # misleading "OK / no entries" instead of a friendly error (UX finding).
     from maverick.audit.events import is_valid_day
     assert not is_valid_day("2026-13-99")  # month 13, day 99

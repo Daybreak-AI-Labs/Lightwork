@@ -1,6 +1,6 @@
 'use strict';
-// lightwork-ops-panels.js: the buttons for operations that used to need the
-// terminal. Each panel is loaded from its real partial template.
+// lightwork-ops-panels.js: the buttons for operations that also exist on the
+// command line. Each panel is loaded from its real partial template.
 const {test} = require('node:test'), assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), {JSDOM} = require('jsdom');
 const {shell} = require('./_shell');

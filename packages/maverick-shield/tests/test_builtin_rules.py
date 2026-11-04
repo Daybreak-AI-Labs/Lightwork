@@ -27,7 +27,7 @@ class TestBuiltinRules:
 
     def test_rm_rf_root_split_flags_blocked(self):
         """Splitting the flags across
-        tokens (functionally identical to `rm -rf /`) used to bypass the
+        tokens (functionally identical to `rm -rf /`) must not bypass the
         rule entirely because neither single token contained both r and f."""
         for cmd in (
             "rm -r -f /",

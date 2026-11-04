@@ -1,10 +1,9 @@
 """The dashboard's aggregate pages against a LIVE Postgres world.
 
 Runs only when MAVERICK_PG_DSN is set (the CI ``postgres`` job; locally with a
-scratch server). Every route here used to reach into ``world.conn`` with
-SQLite-only SQL and crashed on the psycopg connection in production:
-``psycopg.ProgrammingError: the query has 0 placeholders but 3 parameters were
-passed`` on the Workforce board, the same with 1 parameter on Overview.
+scratch server). No route here may reach into ``world.conn`` with SQLite-only
+SQL, which fails on the psycopg connection (``psycopg.ProgrammingError: the
+query has 0 placeholders but 3 parameters were passed``).
 """
 from __future__ import annotations
 

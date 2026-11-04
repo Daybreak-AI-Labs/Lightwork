@@ -199,9 +199,9 @@ def test_agent_from_profile_depth_zero_root_is_goal_root(tmp_path):
 
 
 def test_domain_routed_root_gets_orchestrator_template_with_persona(tmp_path):
-    # Before the fix, select_base_template picked the WORKER template
+    # select_base_template must not pick the WORKER template
     # ("You are a specialist agent... depth 0") for ANY role other than
-    # literally "orchestrator" -- so a domain pack's root never got the
+    # literally "orchestrator" -- or a domain pack's root would never get the
     # orchestrator framing that tells it to decompose/delegate/verify. The
     # persona is layered on separately (apply_role_overlays), so fixing the
     # base template must not lose it.
@@ -219,9 +219,8 @@ def test_domain_routed_root_gets_orchestrator_template_with_persona(tmp_path):
 
 @pytest.mark.asyncio
 async def test_domain_routed_root_invokes_the_final_verifier(tmp_path, monkeypatch):
-    # End-to-end regression: before the fix, a domain-routed root's
-    # FINAL was accepted with verifier_confidence=1.0 and no verifier LLM
-    # call at all -- indistinguishable from a genuinely-verified answer to
+    # End-to-end regression: a domain-routed root's FINAL must not be
+    # accepted with verifier_confidence=1.0 and no verifier LLM call at all -- indistinguishable from a genuinely-verified answer to
     # every downstream consumer (trajectory donation, the autonomy servo,
     # the dashboard). This reproduces run_goal's real path (agent_from_profile
     # at depth 0, no parent) rather than a bare Agent(role=...) construction.

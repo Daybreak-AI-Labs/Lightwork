@@ -261,7 +261,7 @@ def _hardening_input(monkeypatch, kind, entered):
 
 
 def test_hardening_keeps_whole_numbers_exact_beyond_two_to_the_53(monkeypatch):
-    # A float cannot hold 2**53 + 1; it used to be saved as 9007199254740992.
+    # A float cannot hold 2**53 + 1; it must not be saved as 9007199254740992.
     assert _hardening_input(monkeypatch, "integer", "9007199254740993") == {"limit": 9007199254740993}
     assert _hardening_input(monkeypatch, "integer", 9007199254740993) == {"limit": 9007199254740993}
     assert _hardening_input(monkeypatch, "integer", " 25 ") == {"limit": 25}

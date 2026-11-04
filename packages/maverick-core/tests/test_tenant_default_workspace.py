@@ -4,8 +4,8 @@ implicit default one.
 A fresh install runs every task inside its bound tenant (``MAVERICK_TENANT``
 or the ``[client] id`` floor) and no roster file exists, so admission is
 open. The moment an operator creates the first named workspace the roster
-comes into being and, before this fix, the implicit default had no row in
-it -- so every task was refused with ``tenant is suspended or unknown``.
+comes into being, and the implicit default must have a row in it, or every
+task is refused with ``tenant is suspended or unknown``.
 """
 from __future__ import annotations
 
@@ -68,8 +68,8 @@ def test_an_install_that_already_hit_the_bug_is_repaired_on_admission(monkeypatc
     # Roster written while unbound: only "acme" exists.
     tr.create_tenant("acme")
     assert tr.get_tenant("owner-browser") is None
-    # The deployment is bound to owner-browser; before the fix this raised
-    # TenantSuspended and the chat showed the raw text.
+    # The deployment is bound to owner-browser; this must not raise
+    # TenantSuspended and show the raw text in the chat.
     monkeypatch.setenv("MAVERICK_TENANT", "owner-browser")
 
     tr.assert_tenant_active("owner-browser")

@@ -1,7 +1,7 @@
 """Regression: file/path/source tools must not crash on non-string model args.
 
 Each of these takes a path/patch/source straight from the model; a non-string
-value (int/list/dict) used to raise an uncaught AttributeError/TypeError.
+value (int/list/dict) must not raise an uncaught AttributeError/TypeError.
 """
 from __future__ import annotations
 

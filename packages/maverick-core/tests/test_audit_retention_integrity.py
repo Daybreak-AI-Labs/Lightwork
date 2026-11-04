@@ -598,9 +598,8 @@ def test_an_unsigned_writer_also_survives_a_concurrent_erase(
 def test_the_chain_still_verifies_after_a_concurrent_erase(audit_dir) -> None:
     """Zero loss is only half of it: the surviving chain must be intact.
 
-    The old code produced a chain that verified clean *because* it had been
-    re-signed over the truncated content, so "verify_chain is empty" alone was
-    never evidence. Paired with the row-count assertions above, it is.
+    A chain re-signed over truncated content verifies clean, so "verify_chain
+    is empty" alone is not evidence. Paired with the row-count assertions above, it is.
     """
     _concurrent_erase(audit_dir, delete=False)
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")

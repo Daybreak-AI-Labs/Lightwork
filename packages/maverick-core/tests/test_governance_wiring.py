@@ -231,7 +231,7 @@ def test_consult_ledger_false_ignores_prior_grant(monkeypatch, tmp_path):
 
 def test_scopeless_persistent_grant_is_honored(monkeypatch, tmp_path):
     # Regression: a scope-less grant_persistent(action) must be matched by the
-    # ledger (a trailing-tab strip used to drop it, re-prompting forever).
+    # ledger (a trailing-tab strip must not drop it, re-prompting forever).
     import maverick.safety.consent as consent
     monkeypatch.setattr(consent, "CONSENT_LEDGER_PATH", tmp_path / "consent.ledger")
     monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-deny")  # only a real grant can pass

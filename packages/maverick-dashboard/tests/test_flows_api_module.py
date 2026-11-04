@@ -2,7 +2,7 @@
 
 These pin what keeps the move invisible to callers and tests: every name is
 still reachable as ``maverick_dashboard.api.<name>``, the router is included
-where the handlers used to be (same precedence), the routes keep the parent
+at the same point in the api module (same precedence), the routes keep the parent
 router's prefix and tag, and workflow dependencies are explicitly bound by
 the application composition root.
 """

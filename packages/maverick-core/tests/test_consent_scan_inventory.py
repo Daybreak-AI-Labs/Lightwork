@@ -504,7 +504,7 @@ def test_property_schedule_cas_idempotency_and_exact_origin_boundaries(
 def test_non_ascii_stored_digests_are_refused_not_type_errors(
     environment: Environment,
 ) -> None:
-    # Edited digests used to raise TypeError from hmac.compare_digest instead
+    # Edited digests must not raise TypeError from hmac.compare_digest instead
     # of the idempotency conflict and integrity refusals.
     _seed(environment)
     with sqlite3.connect(environment.inventory.path) as connection:

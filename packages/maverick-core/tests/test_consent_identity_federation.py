@@ -249,7 +249,7 @@ def test_verified_oidc_contract_fails_closed(material, mutation):
 
 def test_non_ascii_nonce_claim_and_stored_digest_are_refused_not_type_errors(material):
     # The nonce claim comes from the presented IdP token and stored digests can
-    # be edited; non-ASCII text in either used to raise TypeError from
+    # be edited; non-ASCII text in either must not raise TypeError from
     # hmac.compare_digest instead of the denial or integrity refusal.
     _clock, _preferences, pairing, base = material
     verifier = "n" * 64

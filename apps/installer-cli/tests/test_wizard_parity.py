@@ -1355,7 +1355,7 @@ def test_pick_notifications_writes_the_keys_the_kernel_reads(monkeypatch):
                    "personal_external": True, "personal_dashboard_url": "https://lightwork.example",
                    "metric_alerts": True}
     # Private delivery refuses anything but an HTTPS origin at send time, so the
-    # step does not save one it would refuse (it used to keep "my-alerts").
+    # step does not save one it would refuse (it must not keep "my-alerts").
     for origin in ("my-alerts", "http://lightwork.example", "https://lightwork.example/app"):
         monkeypatch.setattr(wizard, "_q_select", lambda *_a, **_k: "ntfy      - free, no signup, push to phone via ntfy.sh")
         monkeypatch.setattr(wizard, "_q_text", lambda message, origin=origin, **_k: (

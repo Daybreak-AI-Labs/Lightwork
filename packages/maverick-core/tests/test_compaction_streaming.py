@@ -327,7 +327,7 @@ def test_concurrent_folds_on_different_conversations_all_persist(tmp_path):
 def test_concurrent_folds_survive_transient_replace_denials(tmp_path, monkeypatch, caplog):
     """Windows refuses to replace sidecar.json while another handle on it is open
     (a concurrent fold reading it), so the first rename of a save can fail with
-    PermissionError. That save used to be dropped with only a warning. Deny the
+    PermissionError. That save must not be dropped with only a warning. Deny the
     first rename of every save here: all N conversations must still persist."""
     import errno
     import threading
@@ -375,8 +375,8 @@ def test_concurrent_folds_survive_transient_replace_denials(tmp_path, monkeypatc
 
 def test_locked_reload_failure_never_overwrites_other_conversations(tmp_path, monkeypatch):
     """A sidecar that cannot be re-read under the lock must not be saved over: the
-    reload used to fall back to an empty dict, so one fold rewrote the file with
-    only its own conversation and dropped every other one. On Windows a reader
+    reload must not fall back to an empty dict, or one fold would rewrite the
+    file with only its own conversation and drop every other one. On Windows a reader
     can hold sidecar.json open for longer than the reload waits."""
     from pathlib import Path
 

@@ -1269,7 +1269,7 @@ def test_receipt_lookup_is_exact_tenant_scoped_and_integrity_checked(
 def test_non_ascii_stored_digests_are_refused_not_type_errors(
     store: ConsentPreferenceStore,
 ) -> None:
-    # Edited digests used to raise TypeError from hmac.compare_digest instead
+    # Edited digests must not raise TypeError from hmac.compare_digest instead
     # of the idempotency conflict and integrity refusals.
     _policy(store)
     _profile(store)

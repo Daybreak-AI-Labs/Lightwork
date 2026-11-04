@@ -425,7 +425,7 @@ def test_integrity_verification_detects_token_tampering(tmp_path):
 
 
 def test_non_ascii_stored_digests_are_integrity_errors_not_type_errors(tmp_path):
-    # Edited ledger digests used to raise TypeError from hmac.compare_digest
+    # Edited ledger digests must not raise TypeError from hmac.compare_digest
     # on the request paths instead of the store's integrity refusal.
     service, *_rest = _service(tmp_path)
     minted = service.mint_token("doc-non-ascii", idempotency_key="mint-non-ascii")

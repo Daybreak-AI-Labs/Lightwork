@@ -91,10 +91,9 @@ async def test_unpriced_model_gives_pricing_message_not_a_cap_message(
 ):
     """UnpricedModelError is a BudgetExceeded subclass (so the run
     still aborts), but it is NOT a spending/time cap -- it's Lightwork
-    refusing to bill a model with no verified price. The old behavior
-    reported this identically to a real cap trip ('hit your spending or
-    time limit ... resume with a higher cap'), so the user raised the cap,
-    re-ran, and failed identically forever; the real fix (price the model,
+    refusing to bill a model with no verified price. Reporting it like a
+    real cap trip ('hit your spending or time limit ... resume with a higher
+    cap') would send the user round raising the cap and failing forever; the real fix (price the model,
     or set [budget] strict_pricing=false) was visible only in the debug log.
     """
     world = WorldModel(tmp_path / "world.db")

@@ -235,7 +235,7 @@ def test_integrity_and_tenant_boundaries_fail_closed(tmp_path: Path) -> None:
 
 
 def test_non_ascii_stored_digests_are_refused_not_type_errors(tmp_path: Path) -> None:
-    # Edited digests used to raise TypeError from hmac.compare_digest instead
+    # Edited digests must not raise TypeError from hmac.compare_digest instead
     # of the idempotency conflict and integrity refusals.
     path = tmp_path / "profiles.sqlite3"
     _prepare_source(path)

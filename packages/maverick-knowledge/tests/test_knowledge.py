@@ -39,7 +39,7 @@ class TestBuildStore:
         assert isinstance(build_store({}), S)
 
     def test_pgvector_no_longer_not_implemented(self, monkeypatch):
-        # Regression: build_store used to raise NotImplementedError for pgvector.
+        # Regression: build_store must not raise NotImplementedError for pgvector.
         # It now constructs PgVectorStore, which fails on a real precondition
         # (psycopg missing, or no DSN) -- never NotImplementedError.
         from maverick_knowledge.store import build_store
@@ -721,7 +721,7 @@ class TestSearchFormatted:
         assert "da" in out and "db" in out
 
     def test_query_embedded_once_across_collections(self):
-        # search_formatted used to re-embed the identical query once per
+        # search_formatted must not re-embed the identical query once per
         # collection; the vector must be computed once and reused.
         calls = []
 

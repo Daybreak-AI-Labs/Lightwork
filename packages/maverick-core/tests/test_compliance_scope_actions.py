@@ -796,7 +796,7 @@ def test_current_plan_must_match_latest_immutable_history(authority) -> None:
 
 
 def test_non_ascii_stored_digests_are_integrity_errors_not_type_errors(authority) -> None:
-    # An edited export signature or row digest used to raise TypeError from
+    # An edited export signature or row digest must not raise TypeError from
     # hmac.compare_digest instead of the store's integrity refusal.
     store, actor, clock, _scope, _calls, _applier = authority
     approved = approve_plan(store, actor, clock)

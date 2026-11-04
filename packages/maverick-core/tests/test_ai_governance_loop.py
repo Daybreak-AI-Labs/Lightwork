@@ -882,7 +882,7 @@ def test_non_ascii_stored_digests_are_refused_not_type_errors(
     store: loop.AIGovernanceLoopStore,
     clock: Clock,
 ) -> None:
-    # Edited digests used to raise TypeError from hmac.compare_digest instead
+    # Edited digests must not raise TypeError from hmac.compare_digest instead
     # of the store's idempotency conflict and integrity refusals.
     reader = Reader(snapshot(clock))
     original = trigger(clock)

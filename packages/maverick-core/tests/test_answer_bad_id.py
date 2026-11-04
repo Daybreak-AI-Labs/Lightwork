@@ -1,6 +1,6 @@
 """`maverick answer <id>` must not report success for a non-existent question.
 
-A typo'd question id used to print 'answered #99999' and exit 0 (the UPDATE
+A typo'd question id must not print 'answered #99999' and exit 0 (the UPDATE
 silently matched zero rows). world.answer() now returns whether a row matched
 so the CLI can flag the bad id.
 """

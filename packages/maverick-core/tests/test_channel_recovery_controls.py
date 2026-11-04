@@ -117,7 +117,7 @@ def test_interrupted_legacy_readback_keeps_exact_float_and_original_time(tmp_pat
 
 
 def test_non_ascii_finish_receipt_is_refused_not_a_crash(tmp_path):
-    # The receipt is a submitted form value; non-ASCII text used to raise
+    # The receipt is a submitted form value; non-ASCII text must not raise
     # TypeError from hmac.compare_digest instead of the refusal below.
     root, path, item, marker, answers = setup_record(tmp_path, "message")
     options = dict(decryptor=None, tenant="acme", workspace=root)

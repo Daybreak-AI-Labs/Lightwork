@@ -9,7 +9,7 @@ from fastapi import HTTPException
 
 
 def test_a_world_without_local_custody_is_a_plain_refusal_not_a_server_error(monkeypatch):
-    # A Postgres world has no local write connection; the check used to call it
+    # A Postgres world has no local write connection; the check must not call it
     # before the custody check and fail with AttributeError (a 500).
     from maverick_dashboard import private_task_computation_store as store
 

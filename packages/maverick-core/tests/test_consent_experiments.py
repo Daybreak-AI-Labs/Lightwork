@@ -592,7 +592,7 @@ def test_tampered_definition_and_aggregate_are_rejected(
 def test_non_ascii_stored_macs_are_integrity_errors_not_type_errors(
     authority: ConsentExperimentAuthority,
 ) -> None:
-    # A MAC column edited to non-ASCII text used to raise TypeError from
+    # A MAC column edited to non-ASCII text must not raise TypeError from
     # hmac.compare_digest instead of the integrity refusal.
     _create_and_activate(authority)
     with sqlite3.connect(authority.path) as connection:

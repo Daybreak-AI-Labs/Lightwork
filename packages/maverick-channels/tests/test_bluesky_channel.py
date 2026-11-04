@@ -280,7 +280,7 @@ def test_bluesky_poll_filters_and_advances_cursor(monkeypatch):
 def test_bluesky_poll_delivers_out_of_order_notification(monkeypatch):
     """A genuinely-new notification indexed BEFORE the newest one (AT-proto
     indexedAt is not monotonic) must still be delivered -- a strict high-water-
-    mark on indexedAt used to silently drop it."""
+    mark on indexedAt must not silently drop it."""
     from maverick_channels.bluesky import BlueskyChannel
 
     state = {"notifs": [

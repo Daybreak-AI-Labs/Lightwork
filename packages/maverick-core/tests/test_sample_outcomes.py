@@ -241,8 +241,8 @@ def _start_sample(monkeypatch, tmp_path, *args, backend="local", sandbox_workdir
 
 
 def test_the_printed_sample_command_runs_the_dashboard_brief(monkeypatch, tmp_path):
-    # The command setup prints used to pass only the title and pack, so the run
-    # never learned which sample files to read or that its output was sample data.
+    # The command setup prints must pass more than the title and pack, or the
+    # run never learns which sample files to read or that its output is sample data.
     result, seen = _start_sample(monkeypatch, tmp_path, *so.cli_command("finance").split()[2:])
     assert result.exit_code == 0, result.output
     outcome = so.get("finance")

@@ -112,9 +112,9 @@ def test_spend_read_warns_on_unreadable_ledger(monkeypatch, caplog):
 async def test_allowance_exhausted_by_in_flight_holds_is_refused_before_the_run(
     tmp_path: Path, fake_llm, make_llm_response, monkeypatch,
 ):
-    """With the cap fully held by runs in flight, the gate used to pass
-    (it compared only recorded spend), reserve_tenant_budget granted $0, and
-    the goal failed on its first model call with 'budget exceeded'. It must be
+    """With the cap fully held by runs in flight, the gate must not pass on
+    recorded spend alone (reserve_tenant_budget would grant $0 and the goal
+    would fail on its first model call with 'budget exceeded'). It must be
     refused up front with the over-quota message and never call the LLM."""
     from maverick.budget import budget_from_config
 

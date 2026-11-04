@@ -3,9 +3,9 @@ never shows internal text to the person reading the chat.
 
 Reproduces the fresh-install defect: signed in as the local owner (the
 deployment bound to ``owner-browser``), create the first workspace on the
-Workspaces page, then submit a task in Chat. Before the fix the run stopped
-with ``over quota: tenant policy unavailable or inactive: tenant is suspended
-or unknown: 'owner-browser'`` and suggested a spending limit.
+Workspaces page, then submit a task in Chat. The run must not stop with
+``over quota: tenant policy unavailable or inactive: tenant is suspended or
+unknown: 'owner-browser'`` and suggest a spending limit.
 """
 from __future__ import annotations
 
@@ -101,7 +101,7 @@ def test_dashboard_startup_repairs_an_install_that_already_hit_the_bug(env, monk
     from maverick.tenant import registry
     from maverick_dashboard import app as dashboard
 
-    registry.create_tenant("acme")          # roster written before the fix
+    registry.create_tenant("acme")          # a roster without the default
     monkeypatch.setenv("MAVERICK_TENANT", "owner-browser")
     assert registry.get_tenant("owner-browser") is None
     dashboard.repair_default_workspace()

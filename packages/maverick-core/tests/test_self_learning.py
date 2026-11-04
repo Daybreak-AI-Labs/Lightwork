@@ -1475,8 +1475,8 @@ class TestGeneratedToolIsolationAndConsent:
         assert sandbox.commands == []
 
     def test_write_never_performs_a_final_host_import(self):
-        # Validation gives the module the probe name. The old implementation
-        # then imported it again under a host-only name and hit this branch.
+        # Validation gives the module the probe name. Importing it again under
+        # a host-only name would hit this branch.
         # The hardened path persists a proxy without any second host import;
         # only an actual proxy invocation reaches the runtime-name branch, and
         # that failure remains inside the sandbox child.

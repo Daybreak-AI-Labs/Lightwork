@@ -606,7 +606,7 @@ class TestTestRunResult:
             fail_to_pass_passing=1, fail_to_pass_total=1, fail_to_pass_failing=1,
             pass_to_pass_passing=5, pass_to_pass_total=5,
         )
-        assert r.all_pass is False          # was True before the fix
+        assert r.all_pass is False          # an aborted chunk is not a pass
         assert r.score < 1.0                # no full credit with a live failure
 
     def test_sibling_pass_inflation_does_not_false_negative(self):

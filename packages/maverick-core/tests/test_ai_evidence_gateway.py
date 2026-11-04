@@ -1652,7 +1652,7 @@ def test_index_tamper_and_missing_segment_state_never_verify_clean(monkeypatch):
 
 def test_non_ascii_index_metadata_is_rebuilt_not_a_type_error(monkeypatch):
     # A damaged derivative index is rebuilt from the signed ledger; non-ASCII
-    # metadata used to raise TypeError from hmac.compare_digest instead.
+    # metadata must not raise TypeError from hmac.compare_digest instead.
     _enable(monkeypatch)
     _policy()
     _deliver(conversation_id="one", idempotency_key="one")
@@ -1998,10 +1998,10 @@ def test_segment_byte_bound_rolls_before_oversized_append(monkeypatch):
 def test_append_verifies_a_bounded_number_of_rows_regardless_of_segment_size(
     monkeypatch,
 ):
-    # Append() used to re-verify every row in the active segment (via
-    # _verify_file -> _iter_verified_rows) on EVERY call, so one delivery's
-    # cost grew with the whole segment instead of staying bounded -- measured
-    # 64ms -> 237ms across a 4,096-row segment, under a lock that serializes
+    # Append() must not re-verify every row in the active segment (via
+    # _verify_file -> _iter_verified_rows) on EVERY call, or one delivery's
+    # cost would grow with the whole segment instead of staying bounded --
+    # roughly 4x across a 4,096-row segment, under a lock that serializes
     # ALL governed-output delivery. A call-count assertion is used instead of
     # wall-clock timing: it directly proves the fixed shape (append() checks
     # only the row(s) IT wrote) without being sensitive to machine speed.

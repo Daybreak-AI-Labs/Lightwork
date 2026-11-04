@@ -177,9 +177,9 @@ class TestWriteRecord:
 
     def test_record_persists_goal_id_for_world_join(self, tmp_path, monkeypatch):
         """training.ingest / export_texts join a record to the world DB by
-        goal_id; it must survive into the written payload. It used to be absent
-        from the dataclass entirely, so the join hit goal_id=0, fetched no
-        goal_events, and every trajectory came back step-less + transcript-less.
+        goal_id; it must survive into the written payload. Without it on the
+        dataclass the join would hit goal_id=0, fetch no goal_events, and every
+        trajectory would come back step-less + transcript-less.
         """
         monkeypatch.setattr(donation, "_donations_enabled", lambda: True)
         monkeypatch.setattr(donation, "_text_donations_enabled", lambda: False)

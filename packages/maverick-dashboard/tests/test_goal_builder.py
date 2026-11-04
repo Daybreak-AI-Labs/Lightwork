@@ -78,7 +78,7 @@ def test_compose_assembles_brief_and_runs_with_budget(client, world, runner_stub
 
 
 # With no operator ceiling the request is still bounded by the REST safety ceiling
-# ($100) POST /goals applies; it used to pass straight through.
+# ($100) POST /goals applies; it must not pass straight through.
 @pytest.mark.parametrize("ceiling,expected", [(None, 100.0), (25.0, 25.0), (0.0, 0.0)])
 def test_compose_budget_clamped_to_configured_server_cap(
     client, world, runner_stub, monkeypatch, ceiling, expected,

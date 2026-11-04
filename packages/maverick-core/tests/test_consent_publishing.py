@@ -650,7 +650,7 @@ def test_cas_and_exact_idempotency_replay_and_rebind(tmp_path: Path) -> None:
 
 
 def test_non_ascii_stored_digests_are_refused_not_type_errors(tmp_path: Path) -> None:
-    # Edited digests used to raise TypeError from hmac.compare_digest instead
+    # Edited digests must not raise TypeError from hmac.compare_digest instead
     # of the idempotency conflict and integrity refusals.
     path = tmp_path / "publishing.sqlite3"
     store = _store(path)

@@ -723,7 +723,7 @@ def test_signature_and_row_tampering_are_detected(authority) -> None:
 
 
 def test_non_ascii_export_signature_is_an_integrity_error_not_a_type_error(authority) -> None:
-    # An edited non-ASCII signature used to raise TypeError from
+    # An edited non-ASCII signature must not raise TypeError from
     # hmac.compare_digest instead of the signature refusal.
     store, actor, clock = authority
     publish_questionnaire(store, actor)

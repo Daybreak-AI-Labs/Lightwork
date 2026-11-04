@@ -2713,9 +2713,8 @@ def test_validate_rotated_small_pool_falls_back_to_single_split():
 
 def test_validate_rotated_samples_is_distinct_pool_not_k_times_inflated():
     # k-fold means every goal in `pool` appears in EVERY fold, so summing each
-    # fold's `samples` (the old behavior) inflated the reported evidence count
-    # by ~k -- a 3-goal pool with rotations=5 falsely cleared a min_samples=5
-    # gate it shouldn't have. `samples` must report the true distinct pool size.
+    # fold's `samples` would inflate the reported evidence count by ~k -- a
+    # 3-goal pool with rotations=5 would falsely clear a min_samples=5 gate. `samples` must report the true distinct pool size.
     p = sh.HarnessProposal("M", "sig", "the line", "r", source_goal_ids=(0,))
     vr = sh._validate_rotated(
         p, pool=["a", "b", "c"], rotations=5,

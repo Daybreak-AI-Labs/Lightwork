@@ -1,4 +1,4 @@
-"""Work operations that used to be command-line only, now in the app.
+"""Work operations from the command line, available in the app.
 
 Covers ``journal list/revert``, ``export``, ``share`` (gist), ``schedule add``,
 ``template add``, ``onboard``, ``ekko run``, ``plan-reflect``, the debate job,

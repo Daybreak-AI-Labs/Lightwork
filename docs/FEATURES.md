@@ -1884,8 +1884,8 @@ Settings and the installation wizard.
 - **Current-rights Knowledge** (`knowledge_access.py`,
   `knowledge_content_projection.py`, dashboard `/knowledge-access`, default-on
   `[knowledge_access] enable` / `MAVERICK_KNOWLEDGE_ACCESS`) — a named-user,
-  tenant-scoped search/detail/export and source-rights workflow over exact F07
-  dataset versions. Human display is a distinct `read` use: export or analysis
+  tenant-scoped search/detail/export and source-rights workflow over exact
+  research dataset versions. Human display is a distinct `read` use: export or analysis
   authority may imply that narrower read, while training-only authority never
   does. Every direct read and cache hit re-resolves current purpose, requested
   action, approval, checksum, license/usage constraints, freshness, consent,

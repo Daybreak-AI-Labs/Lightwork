@@ -621,7 +621,7 @@ def test_registry_capacity_and_audit_tampering_are_detected(tmp_path) -> None:
 
 
 def test_non_ascii_stored_digests_are_integrity_errors_not_type_errors(tmp_path) -> None:
-    # Edited digests used to raise TypeError from hmac.compare_digest in the
+    # Edited digests must not raise TypeError from hmac.compare_digest in the
     # shared comparison helper instead of the registry's integrity refusal.
     _clock, authority, registry, _private, _device = _enrolled(tmp_path)
     with sqlite3.connect(registry.path) as connection:

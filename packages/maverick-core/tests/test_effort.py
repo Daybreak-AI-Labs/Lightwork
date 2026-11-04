@@ -112,7 +112,7 @@ def test_max_clamped_off_opus_tier(monkeypatch):
     assert effort_for_role("coder", OPUS) == "max"        # opus 4.8 supports max
     # Sonnet 4.6 supports "max" too (verified against
     # https://platform.claude.com/docs/en/build-with-claude/effort) -- it
-    # used to be wrongly clamped down to "high" here.
+    # must not be wrongly clamped down to "high" here.
     assert effort_for_role("coder", SONNET) == "max"
     # Sonnet 4.5 doesn't support effort at all (see test_effort_supported_matrix).
     assert effort_for_role("coder", SONNET45) is None

@@ -162,7 +162,7 @@ def test_create_is_idempotent_and_rebinding_is_rejected(tmp_path: Path) -> None:
 
 
 def test_non_ascii_stored_digests_are_refused_not_type_errors(tmp_path: Path) -> None:
-    # Edited digests used to raise TypeError from hmac.compare_digest instead
+    # Edited digests must not raise TypeError from hmac.compare_digest instead
     # of the store's idempotency conflict and integrity refusals.
     now = [1_800_000_000.0]
     store = _store(tmp_path, now)

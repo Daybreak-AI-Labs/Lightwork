@@ -345,8 +345,7 @@ def test_binder_detached_signature_verifies_with_saved_public_key(
     # digest -- a plain verify_ed25519 against the raw digest bytes (what a
     # forged AuditSigner chain-row signature, or a federation envelope
     # signature, over this same digest would look like) must NOT verify.
-    # Before the fix this assertion failed: the detached signature WAS a
-    # valid signature over the bare digest.
+    # A detached signature over the bare digest would make this fail.
     assert not signing.verify_ed25519(
         public_key,
         str(artifact["signature"]),

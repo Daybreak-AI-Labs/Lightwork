@@ -14,7 +14,7 @@ def _client():
 # ---------- bearer auth: query-token branch deleted ----------
 
 def test_query_token_no_longer_accepted(monkeypatch, tmp_path):
-    """`?token=...` used to leak via Referer/history/access logs. Killed."""
+    """`?token=...` would leak via Referer/history/access logs, so it is refused."""
     monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "sekret")
     from maverick import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")

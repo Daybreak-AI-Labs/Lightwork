@@ -562,7 +562,7 @@ def test_total_spend_accepts_owner_kwarg(world):
 
 def test_create_goal_accepts_domain_and_project_id(world):
     """create_goal(domain=..., project_id=...)
-    used to raise TypeError on this backend -- checkpoint sub-goal spawning
+    must not raise TypeError on this backend -- checkpoint sub-goal spawning
     and the finance CLI pass both kwargs, matching the SQLite signature."""
     project_id = world.create_project("Q3 rollout", owner="admin@corp.test")
     gid = world.create_goal(
@@ -865,7 +865,7 @@ def test_decide_approval_is_tenant_scoped(world):
     tok = set_tenant("globex")
     try:
         assert all(x.id != aid for x in world.pending_approvals())
-        # ...and cannot decide it either (the bug: this used to return True).
+        # ...and cannot decide it either (the bug: this must not return True).
         assert world.decide_approval(aid, "approved") is False
     finally:
         reset_tenant(tok)
@@ -2281,7 +2281,7 @@ def test_erase_conversations_deletes_all_goal_child_rows(world):
     # GDPR erase of a goal that carries a row in EVERY child table referencing
     # goals(id). Postgres enforces FKs per statement (no ON DELETE CASCADE), so
     # DELETE FROM goals fails unless artifacts/share_links/signoffs/goal_origins
-    # are deleted first -- the erase used to raise ForeignKeyViolation and roll
+    # are deleted first -- the erase must not raise ForeignKeyViolation and roll
     # the whole subject deletion back, leaving all their data intact.
     import time
     conv = world.get_or_create_conversation("slack", f"erase-{time.time()}")

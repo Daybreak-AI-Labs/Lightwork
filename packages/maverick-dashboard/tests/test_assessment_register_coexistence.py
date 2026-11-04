@@ -3,8 +3,8 @@ the finance board or the question analytics.
 
 The capability-review register is saved as ``assessments/register.json``, in
 the same directory as the per-subject questionnaire records. The metrics that
-feed those screens iterate that directory, and used to raise on the register
-file, so the first agent assessment turned all four screens into a 500."""
+feed those screens iterate that directory, and must not raise on the register
+file, or the first agent assessment would turn all four screens into a 500."""
 from __future__ import annotations
 
 import pytest

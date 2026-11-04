@@ -98,7 +98,7 @@ def test_evaluator_gate_rejects_locked_anchors_deleted_from_disk(
 
     A lock with entries and nothing on disk means released anchors were removed.
     validate() walks what is present, so it cannot see an absence; this is the
-    case that used to slip through as "OK / 0 anchor(s)".
+    case that must not slip through as "OK / 0 anchor(s)".
     """
     monkeypatch.setattr(evaluator_evolution, "discover_anchors", dict)
     monkeypatch.setattr(evaluator_evolution, "load_lock",

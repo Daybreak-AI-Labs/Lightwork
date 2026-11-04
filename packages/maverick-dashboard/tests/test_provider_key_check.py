@@ -46,7 +46,7 @@ def test_chat_send_blocks_when_no_provider_key(monkeypatch, tmp_path):
 
 
 def test_chat_send_accepts_openai_key(monkeypatch, tmp_path):
-    """Previously this would 400 because the check looked only at ANTHROPIC."""
+    """An OpenAI key is enough: the check does not look only at ANTHROPIC."""
     from maverick import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)

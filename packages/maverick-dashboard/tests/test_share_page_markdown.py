@@ -1,7 +1,7 @@
 """The public read-only page shows the answer as formatted prose.
 
-The page used to print the model's markdown inside a monospace ``<pre>``
-("## Summary", "**bold**" shown literally). It now hands the text to the same
+The page must not print the model's markdown inside a monospace ``<pre>``
+("## Summary", "**bold**" shown literally). It hands the text to the same
 safe renderer the chat page uses, which builds DOM from text only, and the
 renderer script is reachable by a recipient who has no dashboard sign-in.
 """

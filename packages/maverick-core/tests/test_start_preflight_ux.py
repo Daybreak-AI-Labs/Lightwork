@@ -209,9 +209,9 @@ def test_known_model_via_local_prefix_uses_local_zero_metering():
 
 
 def test_debate_and_plan_reflect_refuse_cleanly_when_unconfigured(tmp_path, monkeypatch):
-    """Both commands used to skip the provider preflight, and an
-    unconfigured install got a raw anthropic-SDK TypeError traceback. They
-    must refuse like `start` does: friendly message, exit 2, no traceback."""
+    """Neither command may skip the provider preflight, or an unconfigured
+    install gets a raw anthropic-SDK TypeError traceback. They must refuse
+    like `start` does: friendly message, exit 2, no traceback."""
     _isolate(monkeypatch, tmp_path)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "none.toml"))

@@ -251,8 +251,8 @@ class TestActiveTenantSealContext:
             blob = v._path().read_bytes()
             kms._clear_cache()
             # Readable with the canonical RAW-id KMS context -> oauth seals the
-            # same way as everything else. Before the fix (encoded id) this
-            # raised on the AEAD tag mismatch.
+            # same way as everything else (an encoded-id context would fail on
+            # the AEAD tag mismatch).
             raw = unseal_text_for_tenant(tid, blob)
             assert json.loads(raw)["notion"]["access_token"] == "secret-at"
         finally:

@@ -244,7 +244,7 @@ class TestExpressions:
 
     def test_nested_function_calls_evaluate(self):
         # a nested call's inner comma must not split the outer args, and the
-        # inner call must actually evaluate (was silently "" before the fix)
+        # inner call must actually evaluate (not silently render "")
         assert render("{{upper(default(x, 'fallback'))}}", {}) == "FALLBACK"
         assert render("{{upper(default(x, 'fallback'))}}", {"x": "here"}) == "HERE"
         assert render("{{concat(upper(first), ' ', lower(last))}}",

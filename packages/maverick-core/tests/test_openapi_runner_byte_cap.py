@@ -1,10 +1,9 @@
 """openapi_runner bounds model/user-supplied HTTP bodies (DoS guard).
 
 ``safe_client`` only validates the host -- it does not cap the response size.
-Before this fix ``_load_spec`` and ``_op_call`` did ``r.text``, buffering the
-entire body into memory before parsing/truncating, so a spec/endpoint URL
-pointing at an endless body exhausted memory. Both now stream with a hard byte
-ceiling (mirroring ``http_fetch._stream_fetch``). These tests prove only the
+``r.text`` would buffer the entire body into memory before parsing/truncating,
+so a spec/endpoint URL pointing at an endless body could exhaust memory.
+``_load_spec`` and ``_op_call`` stream with a hard byte ceiling (mirroring ``http_fetch._stream_fetch``). These tests prove only the
 capped prefix is ever read off the wire.
 """
 from __future__ import annotations

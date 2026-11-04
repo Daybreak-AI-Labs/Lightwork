@@ -8,9 +8,9 @@ constant. The repo-root ``conftest.py`` redirects ``HOME`` before any
 collection import; these tests pin that contract by checking the frozen
 constants against the OS-level home (``pwd``), which env vars cannot fool.
 
-Observed before the fix: 4 fake swe-bench goals + $0.25 phantom spend in the
-real ``maverick budget``, junk ``good``/``bad`` skills auto-loaded into real
-runs, and test rows in the real audit log.
+Without it, test runs leave fake goals and phantom spend in the real
+``maverick budget``, junk ``good``/``bad`` skills auto-loaded into real runs,
+and test rows in the real audit log.
 """
 from __future__ import annotations
 

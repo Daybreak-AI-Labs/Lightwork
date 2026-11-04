@@ -70,7 +70,7 @@ def test_pii_detector_empty():
 
 def test_pii_value_preview_never_embeds_raw_pii():
     # Previews are persisted to the audit log, so they must not leak raw PII
-    # (the old code stored the first 4 chars -> SSN area number, partial phone).
+    # (even the first 4 chars would leak an SSN area number or partial phone).
     from maverick.safety.pii_detector import scan
     matches = scan("SSN 123-45-6789, phone (415) 555-2671, ip 192.168.1.100")
     assert matches

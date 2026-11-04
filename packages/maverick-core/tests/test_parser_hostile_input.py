@@ -2,7 +2,7 @@
 
 The MCP client reads JSON-RPC from a server that may be hostile or buggy.
 A malformed-but-valid-JSON message -- the right keys with the wrong *types*
--- used to reach an unguarded ``.get()`` and raise ``AttributeError``,
+-- must not reach an unguarded ``.get()`` and raise ``AttributeError``,
 killing the read loop and failing every in-flight call.
 
 These tests fuzz the parser with type-confused / truncated / deeply

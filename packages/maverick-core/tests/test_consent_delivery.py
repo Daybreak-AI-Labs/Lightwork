@@ -1044,7 +1044,7 @@ def test_audit_chain_is_tenant_scoped_and_valid(tmp_path: Path) -> None:
 
 
 def test_non_ascii_stored_digests_are_refused_not_type_errors(tmp_path: Path) -> None:
-    # Edited digests used to raise TypeError from hmac.compare_digest instead
+    # Edited digests must not raise TypeError from hmac.compare_digest instead
     # of the idempotency conflict and audit-integrity refusals.
     path = tmp_path / "delivery.db"
     store = _store(path)
