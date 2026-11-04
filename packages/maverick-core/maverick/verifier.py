@@ -194,7 +194,7 @@ async def verify_proposal(
     to a cross-family verifier — but ONLY when one is explicitly
     configured via ``MAVERICK_CROSS_FAMILY_VERIFIER`` (users own model
     choice; we never implicitly switch to a provider whose credentials
-    the operator may not have). #612: if no fallback is configured, the
+    the operator may not have). If no fallback is configured, the
     same-family verifier runs and we log the lockstep risk ONCE rather
     than silently pretending a cross-family swap happened.
     """
@@ -640,7 +640,7 @@ def _warn_same_family_verifier(model: str) -> None:
     """Log the lockstep-jailbreak risk ONCE when the verifier shares the
     proposer's family and no cross-family fallback is configured.
 
-    #612: the contract promises a cross-family swap to defend against
+    The contract promises a cross-family swap to defend against
     lockstep jailbreaks, but the swap only happens when
     ``MAVERICK_CROSS_FAMILY_VERIFIER`` is set. When it isn't, surface the
     residual risk instead of leaving the gap silent.

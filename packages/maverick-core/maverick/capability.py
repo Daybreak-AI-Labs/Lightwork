@@ -5,7 +5,7 @@ to a *principal*. Unlike the static config ACL (:mod:`maverick.safety.tool_acl`)
 a capability can only be **attenuated** (narrowed) as it propagates to child
 agents, so a sub-agent can never exceed what its parent was granted — least
 privilege by construction, which is the "agent exceeded its permissions"
-failure mode the 2026 enterprise surveys flag as the #1 risk.
+failure mode enterprise surveys rank as the top agent risk.
 
 Grants can be Ed25519-signed so they are independently verifiable and
 auditable, reusing the audit-signing key primitives (no new crypto).

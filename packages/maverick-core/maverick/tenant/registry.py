@@ -1282,7 +1282,7 @@ def tenant_spend_today(tenant_id: str) -> float:
 def _enforce_plan_caps() -> bool:
     """Opt-in: when a tenant has no explicit registry spend cap, fall back to its
     billing plan's entitlement-level daily cap so a config-defined plan cap is
-    actually enforced rather than decorative (audit #81).
+    actually enforced rather than decorative.
 
     Off by default: a registry cap of 0 means "unlimited" today, so enabling this
     changes already-provisioned tenants. ``MAVERICK_ENFORCE_PLAN_CAPS`` env wins
@@ -1374,7 +1374,7 @@ def _tenant_daily_cap(tenant_id: str) -> float:
 # The usage ledger is written only at run END, so N runs that START for one
 # tenant before any of them records spend would each read the same remaining
 # allowance and each clamp to the full remainder -- collectively overshooting
-# the daily ceiling by up to N x (finding #2). A run therefore RESERVES its
+# the daily ceiling by up to N x. A run therefore RESERVES its
 # clamped per-run dollar cap here at start; tenant_remaining_today subtracts
 # outstanding (non-expired) reservations as well as recorded spend, so a
 # concurrent start sees the in-flight hold. Each reservation carries a TTL, so a
@@ -1600,9 +1600,9 @@ def tenant_remaining_today(tenant_id: str | None) -> float | None:
     enforcement off) so callers leave their own ceiling untouched. Otherwise the
     non-negative remainder ``cap - spent_today - outstanding_reservations`` --
     which a per-run budget can clamp to so a single run can't overshoot the
-    tenant's aggregate ceiling (#78). Subtracting outstanding in-flight
+    tenant's aggregate ceiling. Subtracting outstanding in-flight
     reservations (spend that concurrent runs have committed to but not yet
-    recorded) is what closes the concurrency hole in finding #2: two runs that
+    recorded) is what closes that concurrency hole: two runs that
     start before either records spend see each other's holds instead of both
     clamping to the full remainder. Coordinates the per-run cap with the
     per-tenant cap; without it the over-quota gate only fires *between* runs,

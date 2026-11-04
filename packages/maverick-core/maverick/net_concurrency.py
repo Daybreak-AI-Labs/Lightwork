@@ -1,4 +1,4 @@
-"""Per-host concurrency caps for parallel network-read tools (#434).
+"""Per-host concurrency caps for parallel network-read tools.
 
 The agent loop runs a turn's ``parallel_safe`` tool calls concurrently
 (asyncio.gather). Idempotent network reads (http_fetch, arxiv, wikipedia,

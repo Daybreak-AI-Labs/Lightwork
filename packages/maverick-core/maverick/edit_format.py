@@ -715,8 +715,7 @@ def render_diff(workdir: Path,
         )
         if proc.returncode == 0:
             raw = proc.stdout.decode("utf-8", errors="replace")
-            # May 26 smoke fix (grader audit): SWE-bench's evaluator
-            # tries `git apply --verbose` first; that command rejects
+            # SWE-bench's evaluator tries `git apply --verbose` first; that command rejects
             # patches with mixed line endings. If our agent edited a
             # file that originally had CRLF line endings (or if any
             # editor / Python file write injected CR), the rendered

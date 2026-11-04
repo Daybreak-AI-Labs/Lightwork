@@ -98,12 +98,12 @@ def select_base_template(
 
     Coding mode, when enabled, overrides role: the orchestrator emits the FINAL
     and must speak unified diffs, not prose, or the patch validator and
-    test-driven verifier operate on prose and reject every output (Wave 9). With
+    test-driven verifier operate on prose and reject every output. With
     coding mode off it is the orchestrator template for the planner and the
     worker template for every other role. First side-effect-free seam extracted
     from ``Agent._build_system`` (god-module decomposition: PromptBuilder).
 
-    ``is_root`` (W1-24): a domain-routed goal's depth-0 agent has
+    ``is_root``: a domain-routed goal's depth-0 agent has
     ``role=profile.name`` (e.g. ``"finance_controller"``), not
     ``"orchestrator"`` -- it still emits the goal's FINAL and needs the
     orchestrator template, not the "specialist worker" one. The domain
@@ -247,11 +247,11 @@ def apply_memory_brief(base: str, *, depth: int) -> str:
     return base
 
 
-# #611: fraction of the budget reserved for the TOP-level goal's synthesis /
-# write step. A deeper worker (depth > 0) stops once cumulative spend crosses
+# Fraction of the budget reserved for the TOP-level goal's synthesis / write
+# step. A deeper worker (depth > 0) stops once cumulative spend crosses
 # (1 - this) of the cap, so a recursive research swarm can't burn the budget
-# the orchestrator needs to actually produce the answer (the dogfooded failure:
-# 35 agents, $7.85 spent, zero report). 0 disables it.
+# the orchestrator needs to actually produce the answer (for example, dozens
+# of agents spending the whole cap without a report). 0 disables it.
 def _budget_reporting_settings() -> tuple[float, float]:
     """Read bounded startup choices; an explicit environment value still wins."""
     from .env_setting import env_or_config_float
@@ -264,7 +264,7 @@ def _budget_reporting_settings() -> tuple[float, float]:
         interval = 5.0
     return reserve, interval
 
-# #614: how often (seconds) the root agent mirrors running spend onto its
+# How often (seconds) the root agent mirrors running spend onto its
 # open episode row so `maverick runs` / `maverick budget` show mid-run spend.
 # Throttled so we don't write the row on every step of a fast loop.
 _SYNTHESIS_RESERVE, _SPEND_MIRROR_INTERVAL = _budget_reporting_settings()
@@ -318,7 +318,7 @@ _STEP_BUDGET_WARNING = _step_budget_warning_setting()
 
 # How many of an agent's recent tool calls speculative reads predict from.
 _SPECULATION_HISTORY = 20
-# AI-3: one plan decision per task run, shared by every agent in it.
+# Plan confirmation: one plan decision per task run, shared by every agent in it.
 _PLAN_DECISIONS: dict[tuple, bool] = {}
 _PLAN_DECISIONS_LOCK = threading.Lock()
 # Runs whose first action is being asked about right now: the other agents of
@@ -346,7 +346,7 @@ def _plan_facts(agent) -> tuple[list[str], list[str], float | None]:
     cap = getattr(getattr(agent.ctx, "budget", None), "max_dollars", None)
     return steps, tools, (float(cap) if isinstance(cap, int | float) else None)
 
-# W1-44: how many blackboard entries posted by OTHER agents since this agent's
+# How many blackboard entries posted by OTHER agents since this agent's
 # last tool-running turn are appended to that turn's tool_results message, so
 # a running orchestrator sees fan-out caps, seals, denials and sibling findings
 # instead of only what the blackboard held on its first turn. 0 disables.
@@ -1183,7 +1183,7 @@ def _cascade_draft(role: str, model: str) -> str | None:
 
 
 def _budget_error_label(e: BudgetExceeded) -> str:
-    """W1-30: distinguish a genuinely unpriced model from a real cap trip.
+    """Distinguish a genuinely unpriced model from a real cap trip.
 
     ``UnpricedModelError`` is a ``BudgetExceeded`` subclass (so it still
     aborts the run and skips billing), but it is not a spending/time cap
@@ -1226,7 +1226,7 @@ def _audit_summary(value: Any, limit: int = 200) -> str:
 
 # Argument names that say what a tool reads or changes: a file, an address,
 # a table. Their values go in the activity record as the resources an AI
-# action accessed (ADM-5), bounded like every other summary.
+# action accessed, bounded like every other summary.
 _RESOURCE_ARGS = ("path", "file", "file_path", "filename", "url", "uri", "table", "database",
                   "bucket", "repo", "repository", "channel", "to", "recipient", "dataset")
 
@@ -1298,12 +1298,11 @@ _DEFAULT_TOOL_RESULT_BYTES = 32_000
 _MAX_TOOL_RESULT_BYTES = max(
     2_000, env_int("MAVERICK_MAX_TOOL_RESULT_BYTES", _DEFAULT_TOOL_RESULT_BYTES))
 
-# W1-27: cap on total "please revise your patch" round-trips per goal, across
-# BOTH the apply-check block and the ground-truth test-verifier block (they
-# share `_patch_revision_attempts`, which -- unlike `_patch_validated` -- is
-# never reset per FINAL). 1 matches the "one retry max" every reject site
-# already documented in its own comments before the #612 fix's per-FINAL
-# reset silently defeated it.
+# Cap on total "please revise your patch" round-trips per goal, across BOTH
+# the apply-check block and the ground-truth test-verifier block (they share
+# `_patch_revision_attempts`, which -- unlike `_patch_validated` -- is never
+# reset per FINAL), so the per-FINAL reset cannot defeat it. 1 matches the
+# "one retry max" every reject site documents.
 _MAX_PATCH_REVISION_ATTEMPTS = max(
     1, env_int("MAVERICK_MAX_PATCH_REVISION_ATTEMPTS", 1))
 
@@ -1433,16 +1432,15 @@ class AgentResult:
     # Verifier signals (only populated on the orchestrator's FINAL).
     verifier_confidence: float = 1.0
     verifier_critique: str = ""
-    # Wave 12: rendered unified diff produced by the FINAL handler
-    # (SEARCH/REPLACE blocks applied + `git diff` rendered, or unified
-    # diff extracted from FINAL). Best-of-N reads this directly instead
-    # of re-extracting from prose at orchestrator.py:364 — the prior
-    # path silently dropped SR-only candidates that produced a perfect
+    # Rendered unified diff produced by the FINAL handler (SEARCH/REPLACE
+    # blocks applied + `git diff` rendered, or unified diff extracted from
+    # FINAL). Best-of-N reads this directly instead of re-extracting from
+    # prose, which would drop SR-only candidates that produced a perfect
     # rendered diff but had no `--- a/` substring in `result`.
     final_patch: str | None = None
-    # W1-33: WHY the loop stopped, as a structured tag the orchestrator
-    # branches on instead of substring-matching ``error`` (a review-checkpoint
-    # stop used to be reported as "a HALT file is present"). One of
+    # WHY the loop stopped, as a structured tag the orchestrator branches on
+    # instead of substring-matching ``error`` (which would report a
+    # review-checkpoint stop as "a HALT file is present"). One of
     # "killswitch" | "review_checkpoint" | "budget" | "unpriced_model" |
     # "usage_accounting"; None for every other outcome. ``stop_detail``
     # carries the machine-readable specifics (e.g. "tool_calls=100").
@@ -1805,7 +1803,7 @@ class Agent:
         self.brief = brief
         self.depth = depth
         self.parent = parent
-        # W1-24: whether this agent owns the GOAL's FINAL synthesis --
+        # Whether this agent owns the GOAL's FINAL synthesis --
         # verification, the review checkpoint, prompt-cache prewarm, the
         # thinking budget, and the base system template all keyed on
         # role == "orchestrator" alone, so a domain-routed goal's depth-0
@@ -1873,7 +1871,7 @@ class Agent:
         # intersects it with ambient authority so verified delegations are bound
         # to execution instead of existing only as model-facing text.
         self._handoff_capability = None
-        # Wave 11: Scale Labs' Pro empirical study (arxiv 2509.16941)
+        # Scale Labs' SWE-Bench Pro empirical study (arxiv 2509.16941)
         # shows "most successful solutions resolve in ~25 rounds; long-
         # tail iteration past that has diminishing returns." Allow ops
         # to override globally via MAVERICK_MAX_STEPS, default 25.
@@ -1932,7 +1930,7 @@ class Agent:
         from .prm_guidance import PromiseWindow
         self._promise_window = PromiseWindow()
         self._last_prm_nudge_step = -100
-        # Live-spend mirror throttle (#614): the root agent periodically
+        # Live-spend mirror throttle: the root agent periodically
         # mirrors running totals onto its open episode row so `maverick runs`
         # / `maverick budget` reflect accruing mid-run spend instead of
         # $0.00 / 0 tools. Throttled to once per _SPEND_MIRROR_INTERVAL s.
@@ -1945,7 +1943,7 @@ class Agent:
         # consecutive count) triple, success or failure. Feeds the identical-
         # result nudge and, past _LOOP_GUARD_BLOCK, the pre-exec suppression.
         self._identical_streak: tuple[str, str, int] | None = None
-        # W1-25: whether the one-shot "please restate with FINAL:" nudge has
+        # Whether the one-shot "please restate with FINAL:" nudge has
         # already been used this run. A text-only response with no tool
         # calls and no FINAL: marker skips the ENTIRE verify/patch-check/
         # STOP-hook pipeline (it only runs inside the FINAL-marker branch);
@@ -2009,7 +2007,7 @@ class Agent:
 
     def _narrowed_to_run_grant(self, explicit):
         """An explicit grant (a domain pack's envelope) only ever NARROWS the
-        run's own grant -- it never replaces it (UX-012).
+        run's own grant -- it never replaces it.
 
         The run's grant is what the requester is allowed to do: the caller's
         capability, or at the goal root the one minted from the requester's RBAC
@@ -2036,7 +2034,7 @@ class Agent:
         uniqueness), so it can't key a checkpoint that must survive a
         fresh-process resume. The depth-0 agent is the single orchestrator of
         its episode, so ``"{role}-0"`` is stable and unique within
-        (goal_id, episode_id). Phase 2 will extend this for spawned children.
+        (goal_id, episode_id). Spawned children are not checkpointed.
         """
         return f"{self.role}-{self.depth}"
 
@@ -2331,13 +2329,11 @@ class Agent:
         self._instruction_source_goals = set()
         self._instruction_capture_ready = True
         self._instruction_preferences_owner = ""
-        # Wave 9 fix: coding mode applies to the ORCHESTRATOR too, not
-        # just workers. The orchestrator emits the FINAL; if it's still
-        # using ORCHESTRATOR_SYSTEM_TEMPLATE (prose-oriented), the patch
-        # validator + test-driven verifier both operate on prose, every
-        # extract_unified_diff returns None, every git apply --check
-        # rejects -> Wave 8 contributes negative value. (council code
-        # reviewer finding #1)
+        # Coding mode applies to the ORCHESTRATOR too, not just workers. The
+        # orchestrator emits the FINAL; if it used ORCHESTRATOR_SYSTEM_TEMPLATE
+        # (prose-oriented), the patch validator + test-driven verifier would
+        # both operate on prose, every extract_unified_diff would return None
+        # and every git apply --check would reject.
         try:
             from .coding_mode import from_env as _cm_from_env
             _coding_cfg = _cm_from_env()
@@ -2429,7 +2425,7 @@ class Agent:
             # Pass this run's domain AND its available tools so guidance mined
             # SCOPED to a department or a tool is recalled only when it applies
             # (model-wide guidance always is): a finance lesson on finance runs, a
-            # `web_fetch` lesson only when `web_fetch` is on hand (#7). Defaults to
+            # `web_fetch` lesson only when `web_fetch` is on hand. Defaults to
             # the model-wide block when the agent has no domain and no scoped tools.
             _dom = getattr(self, "domain", None)
             _tools = self._harness_tool_names()
@@ -2504,7 +2500,7 @@ class Agent:
             return 4096
 
     def _extract_and_apply_patch(self, final: str):
-        """Wave 11: unify SEARCH/REPLACE and unified-diff extraction.
+        """Unify SEARCH/REPLACE and unified-diff extraction.
 
         Returns (patch_str_or_None, sr_summary_or_None). The patch is
         the rendered unified diff (suitable for `git apply --check` /
@@ -2514,7 +2510,7 @@ class Agent:
         Caller is responsible for resetting the workdir AFTER capturing
         the patch.
 
-        Wave 11: also runs `ast.parse` on every modified Python file
+        Also runs `ast.parse` on every modified Python file
         before rendering the diff. SyntaxError gets surfaced via a
         synthesized ApplySummary so the agent re-emits, instead of
         submitting a patch that breaks pytest collection (32% of Opus
@@ -2564,7 +2560,7 @@ class Agent:
                 candidate = _Path(temp_root.name) / "worktree"
                 hooks_dir = _Path(temp_root.name) / "hooks"
                 try:
-                    # UX-013: this is HOST git against a workdir the agent (or
+                    # This is HOST git against a workdir the agent (or
                     # a container it controls) can write. A repo-local
                     # `filter.<x>.smudge` runs during the checkout below and
                     # `core.hooksPath` does not stop it, so refuse outright
@@ -2680,7 +2676,7 @@ class Agent:
             git_metadata_may_execute_filters,
         )
         workdir = _Path(getattr(sandbox, "workdir", "."))
-        # UX-013: host git on an agent-writable workdir -- a planted
+        # Host git on an agent-writable workdir -- a planted
         # `filter.<x>.smudge` runs during `reset --hard`. Skip rather than run.
         if git_metadata_may_execute_filters(workdir):
             log.warning(
@@ -2743,7 +2739,7 @@ class Agent:
             git_env_without_user_config,
             git_metadata_may_execute_filters,
         )
-        # UX-013: `git apply` runs a repo-local clean/smudge filter too, so the
+        # `git apply` runs a repo-local clean/smudge filter too, so the
         # host fallback refuses a workdir that carries filter metadata.
         if git_metadata_may_execute_filters(workdir):
             log.warning(
@@ -3667,7 +3663,7 @@ class Agent:
         execution_status = "error"
         execution_unknown = False
         try:
-            # W1-31: enforce the wall-clock cap and killswitch DURING
+            # Enforce the wall-clock cap and killswitch DURING
             # dispatch, not only at turn boundaries -- a tool with no timeout
             # of its own (a plugin, an MCP server with a large default, a
             # browser/file-watcher wait) could otherwise hold the goal
@@ -3992,7 +3988,7 @@ class Agent:
             return _NotExecutedToolResult(d)
 
         # Autonomy servo (Loop 2): low run-trust tightens the risk ceiling.
-        # AI-3: with [autonomy] confirm_plan on, a person confirms the plan
+        # With [autonomy] confirm_plan on, a person confirms the plan
         # before the task's first action that could reach outside Lightwork.
         if ((d := self._autonomy_denial(name, cap)) is not None
                 or (d := await self._plan_denial(name, args)) is not None):
@@ -4067,7 +4063,7 @@ class Agent:
             principal=principal,
             input_summary=_audit_summary(args),
             # Which model acted and what it reached, so an AI action's record
-            # says both (ADM-5).
+            # says both.
             model=str(getattr(self, "model", "") or ""),
             resources=_resources_accessed(args),
             **_checked_tags(name, keys=_compliance_profiles),
@@ -4298,10 +4294,9 @@ class Agent:
     def _make_tool_result(tool_use_id: str, output: str) -> dict:
         """Build a tool_result block, flagging errors for the model.
 
-        May 26 council fix (API audit #4): set ``is_error: true`` on
-        tool_results that surface an error. Per Anthropic docs, this
-        tells Claude the tool failed so it can recover instead of
-        treating the error string as a normal output. Our tool registry
+        Sets ``is_error: true`` on tool_results that surface an error. Per
+        Anthropic docs, this tells Claude the tool failed so it can recover
+        instead of treating the error string as a normal output. Our tool registry
         prefixes errors with "ERROR: " and the shield emits
         "BLOCKED by Shield".
         """
@@ -4598,7 +4593,7 @@ class Agent:
             pass
 
     def _mirror_live_spend(self, episode_id: int) -> None:
-        """Throttled write of running totals onto the open episode row (#614).
+        """Throttled write of running totals onto the open episode row.
 
         Only the root agent (depth 0) of a goal-scoped run mirrors; sub-agents
         share the goal's single episode and budget, so the orchestrator's
@@ -4630,10 +4625,9 @@ class Agent:
         """Whether an operator cancelled this goal (POST /goals/{id}/cancel).
 
         The global killswitch/budget checks above stop every run; this is
-        the goal-scoped analogue -- without it, nothing in the loop ever
-        read goal status, so the dashboard Cancel button flipped the row to
-        'cancelled' but the swarm kept spending until FINAL, max_steps, or
-        the budget cap (#W1-23). `get_goal` is a single indexed
+        the goal-scoped analogue -- without it, the dashboard Cancel button
+        would flip the row to 'cancelled' while the swarm kept spending until
+        FINAL, max_steps, or the budget cap. `get_goal` is a single indexed
         primary-key read at the same cadence as the untimed killswitch.check()
         /budget.check() calls beside it, so no throttling here. The status read
         fails open (a transient world-read error must not itself stop the run);
@@ -4687,11 +4681,11 @@ class Agent:
         time left, so an already-exhausted budget never creates (and then
         silently abandons, as an "await" warning) the underlying call.
 
-        W1-31: shared by ``_complete_guarded`` (LLM calls) and tool dispatch
-        (``_run_dispatched_tool``) — a hung tool with no timeout of its own
-        (a plugin, an MCP server, a browser/file-watcher wait) previously had
-        no equivalent guard, so it could hold a goal 'active' past
-        ``max_wall_seconds`` and ignore ``maverick halt`` until it returned.
+        Shared by ``_complete_guarded`` (LLM calls) and tool dispatch
+        (``_run_dispatched_tool``), so a hung tool with no timeout of its own
+        (a plugin, an MCP server, a browser/file-watcher wait) cannot hold a
+        goal 'active' past ``max_wall_seconds`` or ignore ``maverick halt``
+        until it returns.
         """
         from .template_connections import recheck_active
         recheck_active()
@@ -4894,7 +4888,7 @@ class Agent:
         corrupt/unavailable history or exhausted current caps blocks execution.
         Usage is restored into the authoritative shared Budget.
 
-        W1-28: ``messages[0]`` on entry is the brief this run was JUST built
+        ``messages[0]`` on entry is the brief this run was JUST built
         with (for the orchestrator, `run_goal` bakes in any newly-answered
         `ask_user` question there -- see the ``qa_block`` in orchestrator.py).
         The checkpoint's own ``messages[0]`` is that same slot from BEFORE

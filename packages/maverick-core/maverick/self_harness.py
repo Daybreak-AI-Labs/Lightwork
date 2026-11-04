@@ -407,7 +407,7 @@ def recall_addendum(model_id: str | None, path: Path | None = None, *,
     role is appended (so an orchestrator lesson doesn't tax a coder prompt of
     the same model); when ``tools`` are given, guidance mined scoped to each tool
     the run has on hand is appended (so a ``web_fetch`` lesson rides only runs
-    that can call ``web_fetch`` -- #7 component profiles). With none (the default)
+    that can call ``web_fetch`` -- per-component profiles). With none (the default)
     this is exactly the model-wide block, MODULO the recall-time re-screen
     (see :func:`_rescreen_block`) every contributing block passes through."""
     return recall_addendum_with_sources(model_id, path, domain=domain, tools=tools, role=role)[0]
@@ -1096,7 +1096,7 @@ def count_eligible(reflexions: list[dict], *, model_id: str) -> int:
 # tracked on the reflexion and used by dreaming for per-department consolidation.
 # ``tool`` is the component the failure occurred in -- the tool in play when the
 # run failed (the last of ``tools_used``) -- so a weakness can be mined PER TOOL
-# and its guidance recalled only when that tool is on hand (#7 component profiles).
+# and its guidance recalled only when that tool is on hand (per-component profiles).
 # ``role`` is the agent role in play at failure (stamped on the reflexion), so a
 # weakness can be mined PER ROLE and its guidance recalled only into that role's
 # prompts -- an orchestrator lesson stops taxing worker prompts of the same model.

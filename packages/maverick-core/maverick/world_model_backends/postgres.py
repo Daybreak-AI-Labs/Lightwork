@@ -845,7 +845,7 @@ def _strict_tenant_isolation() -> bool:
 
     Resolution: ``MAVERICK_STRICT_TENANT_ISOLATION`` env wins over
     ``[world_model] strict_tenant_isolation`` config, which wins over enterprise
-    mode (auto-on, #51/#57). Off for the default single-tenant install."""
+    mode (auto-on). Off for the default single-tenant install."""
     explicit = _explicit_toggle("MAVERICK_STRICT_TENANT_ISOLATION", "strict_tenant_isolation")
     if explicit is not None:
         return explicit
@@ -861,7 +861,7 @@ def _rls_enabled() -> bool:
     tenant), which is why enterprise auto-on is gated by a boot preflight.
 
     Resolution: ``MAVERICK_PG_RLS`` env wins over ``[world_model] rls`` config,
-    which wins over enterprise mode (auto-on, #51/#57). Off otherwise."""
+    which wins over enterprise mode (auto-on). Off otherwise."""
     explicit = _explicit_toggle("MAVERICK_PG_RLS", "rls")
     if explicit is not None:
         return explicit
@@ -1475,7 +1475,7 @@ class PostgresWorldModel:
         ``[world_model] rls = true``) they have knowingly opted into the strict
         boundary, so we skip this gate and let ``_apply_rls`` install the
         fail-closed policy as before. But when RLS was *auto-enabled* by
-        enterprise mode (#51/#57), forcing the policy on a store that still holds
+        enterprise mode, forcing the policy on a store that still holds
         legacy ``tenant_id IS NULL`` rows would freeze those rows invisibly --
         data loss by side effect. So we run the read-only :func:`pg_rls.preflight`
         and raise with a remediation pointer instead of booting.

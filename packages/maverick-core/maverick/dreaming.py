@@ -484,8 +484,8 @@ def promote_shared_insights(
     any cluster that includes a department marker.
     """
     promoted: list[DreamInsight] = []
-    # Shared (domain=None) insights must be both generic (no department marker,
-    # per #1238) AND unscoped (no channel/user_id, per #1241): a department- or
+    # Shared (domain=None) insights must be both generic (no department marker)
+    # AND unscoped (no channel/user_id): a department- or
     # user-scoped failure may carry compartment-local or attacker-influenced
     # text and must never cross into the globally-recallable pool.
     generic_unscoped_failures = [

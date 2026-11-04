@@ -1,4 +1,4 @@
-"""Pluggable secret resolution (#54).
+"""Pluggable secret resolution.
 
 A single seam for reading deployment secrets so they can be sourced from a
 mounted vault instead of only the process environment. The default backend is

@@ -923,11 +923,10 @@ def _cheating_overlap_check(patch: str, gold_patch: str, result) -> None:
 
     ours_tokens = _sample(ours_all)
     theirs_tokens = _sample(theirs_all)
-    # May 26 smoke fix (pallets/flask-5014 false positive):
-    # the cheating detector was rejecting tiny obvious fixes
-    # where any agent would independently produce the same
-    # code (e.g. adding a one-line empty-name guard). Require
-    # a MINIMUM gold patch size before applying the detector
+    # Tiny obvious fixes are ones any agent would independently
+    # produce (e.g. adding a one-line empty-name guard), so the
+    # cheating detector must not reject them. Require a MINIMUM
+    # gold patch size before applying the detector
     # — a 5-token gold patch can't meaningfully signal
     # cheating because the match is forced. 30 tokens
     # corresponds to roughly a 5-line non-trivial change.

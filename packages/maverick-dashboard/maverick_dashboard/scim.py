@@ -68,7 +68,7 @@ def _scim_secrets() -> list[str]:
     ``sha256:<hex>`` digest, so the plaintext secret need not sit in the process
     environment. Order does not matter; all are checked constant-time.
 
-    Routed through the secret provider (#54) so a mounted vault file can supply
+    Routed through the secret provider so a mounted vault file can supply
     the token; default backend reads ``MAVERICK_SCIM_TOKEN`` from env as before."""
     from maverick.secret_provider import get_secret
     raw = get_secret("MAVERICK_SCIM_TOKEN", "") or ""

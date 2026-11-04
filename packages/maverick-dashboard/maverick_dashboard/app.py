@@ -1170,7 +1170,7 @@ async def _lifespan(app: FastAPI):
     require_enterprise_or_die()
     from maverick.residency import require_residency_or_die
 
-    require_residency_or_die()  # strict region pin (#41); no-op unless opted in
+    require_residency_or_die()  # strict region pin; no-op unless opted in
     from maverick.supply_chain import startup_check
 
     startup_check()  # dependency pin check; no-op unless [safety] supply_chain_pinning
@@ -5079,7 +5079,7 @@ async def skills_page(request: Request) -> HTMLResponse:
 @app.get("/learned", response_class=HTMLResponse)
 async def learned_page(request: Request) -> HTMLResponse:
     """Self-learning observability: the learned-capability ledger + the
-    on-disk generated tools, with a remove action per generated tool (#427)."""
+    on-disk generated tools, with a remove action per generated tool."""
     from .api import _learned_snapshot
 
     can_manage = has_global_permission(request, "admin")

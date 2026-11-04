@@ -106,7 +106,7 @@ _KEY_ID_RE = re.compile(r"^[0-9a-f]{16}$")
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 _SIG_RE = re.compile(r"^[0-9a-f]{128}$")
 
-# Cross-file tip-ledger (#462/#443): a signed, chained ledger recording each
+# Cross-file tip-ledger: a signed, chained ledger recording each
 # completed day-file's tip hash + row count, so deleting or truncating a WHOLE
 # day-file is detectable (per-file verify_chain only sees within one file).
 ANCHOR_FILENAME = "anchors.ndjson"
@@ -1210,7 +1210,7 @@ def trusted_audit_public_keys() -> dict[str, str]:
     return registry
 
 
-# ---- cross-file tip-ledger (#462/#443) -------------------------------------
+# ---- cross-file tip-ledger -------------------------------------------------
 
 def _file_tip_and_count(path: Path) -> tuple[str, int]:
     """Return ``(last_row_hash, non_empty_row_count)`` for a signed day-file."""
@@ -1603,7 +1603,7 @@ def _reanchor_file_locked(
         raw = atomic_read_bytes(path)
     except OSError:
         return -1
-    # A closed day-file may be at-rest *sealed* (#1015). Re-chain its decrypted
+    # A closed day-file may be at-rest *sealed*. Re-chain its decrypted
     # NDJSON, but remember the sealed state so the rewrite below writes it back
     # sealed -- a re-anchor (e.g. after a GDPR erase) must not silently unseal a
     # confidential segment to plaintext.

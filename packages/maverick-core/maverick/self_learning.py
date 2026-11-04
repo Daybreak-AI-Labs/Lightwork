@@ -32,7 +32,7 @@ remains a separate explicit trust decision, as do MCP and auxiliary provider
 egress.
 Generated source is AST-constrained to stdlib-only, scanned through the Shield
 (when installed), and bound to tenant/name/digest consent before it is executed
-or persisted (#424). Both shape validation and every later ``fn`` call run in
+or persisted. Both shape validation and every later ``fn`` call run in
 an isolated sandbox; the kernel process only handles bounded JSON metadata and
 string results. The generation LLM call is metered against the run Budget
 (kernel rule 3).
@@ -687,7 +687,7 @@ Hard rules:
 - Be small and correct. The whole module should read like the example above."""
 
 
-# Static audit of generated tool source (#424). The TOOL_AUTHOR_SYSTEM prompt
+# Static audit of generated tool source. The TOOL_AUTHOR_SYSTEM prompt
 # *asks* for stdlib-only, no subprocess/file/env access — this ENFORCES it
 # before the module is ever imported, so a generated (LLM-authored) module
 # that strays from the contract is rejected instead of executed. This is a

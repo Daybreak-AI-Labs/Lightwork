@@ -32,7 +32,7 @@ def _max_fanout_setting() -> int:
 
 MAX_SWARM_FANOUT = _max_fanout_setting()
 
-# #611: budget reserved for the top-level goal's synthesis/write step. Once
+# Budget reserved for the top-level goal's synthesis/write step. Once
 # cumulative spend crosses (1 - this) of the cap, spawn_swarm refuses new
 # fan-out so a recursive research swarm can't consume the budget needed to
 # actually produce the answer. Mirrors agent.py's per-worker soft-stop.
@@ -78,7 +78,7 @@ def _fanout_cap_for_depth(depth: int) -> int:
 def _synthesis_reserve_block(parent: Agent) -> str | None:
     """If spend has crossed the synthesis reserve, return a refusal string.
 
-    #611: once cumulative spend crosses ``(1 - SYNTHESIS_RESERVE)`` of the cap,
+    Once cumulative spend crosses ``(1 - SYNTHESIS_RESERVE)`` of the cap,
     refuse new fan-out so the budget the top-level goal needs to write its
     answer isn't consumed by deeper spawning. Returns ``None`` when spawning is
     still allowed. Shared by ``spawn_swarm`` and ``spawn_subagent`` so a
@@ -189,7 +189,7 @@ async def _run_child_and_report(parent, child) -> str:
 
     Shared by ``spawn_subagent`` and ``spawn_specialist``: registers the child
     with quarantine before execution, refuses already sealed children, returns
-    the spawn slot if the child RAISES (#612), emits ``SUBAGENT_STOP``, withholds
+    the spawn slot if the child RAISES, emits ``SUBAGENT_STOP``, withholds
     a sealed child's (attacker-influenced) output (Rung 1), then normalizes the
     result.
     """
@@ -255,7 +255,7 @@ def spawn_subagent_tool(parent: Agent) -> Tool:
         # specific max_steps value.
         # Release the reserved slot if construction raises before the child can
         # run -- otherwise a failed Agent()/_child_capability() permanently
-        # erodes the per-goal spawn cap (#612 covers the run() path only).
+        # erodes the per-goal spawn cap (the run() path releases its own).
         try:
             child = Agent(
                 ctx=parent.ctx,
@@ -557,7 +557,7 @@ async def _run_swarm(parent: Agent, args: dict) -> str:
     if parent.depth + 1 > parent.ctx.max_depth:
         return f"ERROR: max depth {parent.ctx.max_depth} reached"
 
-    # #611 synthesis reserve: once spend crosses (1 - reserve) of the cap,
+    # Synthesis reserve: once spend crosses (1 - reserve) of the cap,
     # refuse new fan-out so the budget the top-level goal needs to write its
     # answer isn't consumed by deeper research. Tell the agent to synthesize.
     _blocked = _synthesis_reserve_block(parent)
@@ -565,7 +565,7 @@ async def _run_swarm(parent: Agent, args: dict) -> str:
         return _blocked
 
     # Cap per-call fan-out, DECAYING with depth so a recursive swarm can't
-    # explode geometrically (#611). An agent asking for 50 siblings on a
+    # explode geometrically. An agent asking for 50 siblings on a
     # trivial sub-goal is almost always confused / under attack too.
     cap = _resolve_swarm_fanout(parent)
     dropped_specs: list = []
@@ -615,7 +615,7 @@ async def _run_swarm(parent: Agent, args: dict) -> str:
     results = await asyncio.gather(*(c.run() for c in children), return_exceptions=True)
     _absorb_child_labels(parent, children)
 
-    # #612: every child that RAISED never consumed its slot productively;
+    # Every child that RAISED never consumed its slot productively;
     # return those slots so a swarm with transient child failures doesn't
     # permanently erode the per-goal spawn cap. Children that returned
     # (even with result.error set) legitimately ran and keep their slot.

@@ -1,8 +1,7 @@
 """Governed connectors -- act on external systems of record through typed,
 audited Actions (NOT a data-integration platform).
 
-Palantir borrow #4, kept on-strategy: agents must read and write systems of
-record (CRM, ticketing, ERP) -- but every such operation should be a typed,
+Agents must read and write systems of record (CRM, ticketing, ERP) -- but every such operation should be a typed,
 risk-classed, lineage-tracked :class:`~maverick.governed_actions.ActionSpec`,
 never a raw call. A :class:`Connector` adapts one external system into governed
 Actions named ``<connector>.read`` (low risk) and ``<connector>.write`` (high

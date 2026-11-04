@@ -24,7 +24,7 @@ _GIT_GOLD_LEAK_PATTERNS = [
     re.compile(r"\bgit\s[^\n;&|]*?\bblame\b"),
     # `git diff` HEAD-vs-worktree is fine; block ref-vs-ref diffs.
     re.compile(r"\bgit\s[^\n;&|]*?\bdiff\s+\S+\.\."),
-    # #474: a SINGLE ref (no `..`) — `git diff main` / `origin/main` /
+    # A SINGLE ref (no `..`) — `git diff main` / `origin/main` /
     # `HEAD~1` / `<sha>` — compares that ref against the working tree,
     # which IS the inverted gold patch. Block `git diff <ref>` for any
     # ref other than HEAD / the working tree. We allow the bare options
@@ -41,7 +41,7 @@ _GIT_GOLD_LEAK_PATTERNS = [
     ),
     re.compile(r"\bgit\s[^\n;&|]*?\bstash\s+(?:list|show)\b"),
     re.compile(r"\bgit\s[^\n;&|]*?\breflog\b"),
-    # #474: patch-emitting porcelain. `format-patch --stdout`,
+    # Patch-emitting porcelain. `format-patch --stdout`,
     # `whatchanged -p`, `archive`, `bundle create` all materialize the
     # tree/history (and thus the gold patch) outside the blocked verbs.
     # Bare `git log --format=%H` / `--pretty=%H` leaks the gold SHA,
@@ -83,7 +83,7 @@ _GIT_GOLD_LEAK_PATTERNS = [
         r"|refs(?:/|\b)|objects(?:/|\b)|index\b)",
     ),
     re.compile(r"\bfind\s+\.git\b"),
-    # #474: `.git` laundering. The rule above anchors on the literal
+    # `.git` laundering. The rule above anchors on the literal
     # `.git/<file>` token, so relocating/aliasing the dir to a non-`.git`
     # name evades it: `cp -r .git /tmp/g && cat /tmp/g/HEAD`,
     # `ln -s .git gd && cat gd/HEAD`, `tar cf - .git`, `rsync -a .git x`.

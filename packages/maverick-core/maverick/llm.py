@@ -53,7 +53,8 @@ from .providers.conversation import (
 )
 from .runtime_overrides import RuntimeOverridesSecurityError
 
-# Latest Claude family as of 2026-05.
+# Last-resort default model ids. Users own model choice: resolve models through
+# config.get_role_model(role) (kernel rule 2).
 MODEL_OPUS = "claude-opus-4-8"
 MODEL_SONNET = "claude-sonnet-4-6"
 MODEL_HAIKU = "claude-haiku-4-5"
@@ -423,19 +424,18 @@ class LLMResponse:
     cache_creation_tokens: int = 0
     cache_read_tokens: int = 0
     raw: Any = None
-    # May 26 smoke fix: thinking-block signatures.
-    # Anthropic emits one signature per thinking block; when those
-    # blocks come back as assistant history, EACH must carry its
-    # own original signature. The earlier single-string field
-    # `thinking_signature` worked for single-block adaptive runs
-    # but corrupts multi-block interleaved thinking (Opus 4.7).
-    # Now: store the original (text, signature) pairs so agent.py
-    # can reconstruct multiple thinking blocks faithfully.
+    # Thinking-block signatures. Anthropic emits one signature per
+    # thinking block; when those blocks come back as assistant history,
+    # EACH must carry its own original signature. A single-string field
+    # covers single-block adaptive runs but corrupts multi-block
+    # interleaved thinking (Opus 4.7), so store the original
+    # (text, signature) pairs and let agent.py reconstruct multiple
+    # thinking blocks faithfully.
     thinking_blocks: list[tuple[str, str | None]] = None  # type: ignore
     # Legacy field kept for back-compat with mocks; equals
     # thinking_blocks[0][1] if thinking_blocks present.
     thinking_signature: str | None = None
-    # May 28 fix: the model's output blocks in their ORIGINAL order,
+    # The model's output blocks in their ORIGINAL order,
     # already in Anthropic content-block dict form (thinking /
     # redacted_thinking / text / tool_use, interleaved as returned).
     # Anthropic forbids rearranging the thinking-block sequence

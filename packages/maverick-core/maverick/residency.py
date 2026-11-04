@@ -1,4 +1,4 @@
-"""Data residency / region pinning (#41).
+"""Data residency / region pinning.
 
 Declares the deployment's data region and the set of regions data is permitted
 to live in, and -- in **strict** mode -- refuses to boot when the declared

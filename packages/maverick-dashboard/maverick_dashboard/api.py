@@ -7111,7 +7111,7 @@ async def remove_skill_endpoint(request: Request, name: str, payload: dict | Non
     return await run_in_threadpool(remove_sealed, request, reviewed, expected_name=name)
 
 
-# ---------- self-learning: learned ledger + generated tools (#427) ----------
+# ---------- self-learning: learned ledger + generated tools ----------------
 
 
 def _learned_snapshot(limit: int = 50, *, include_pending_items: bool = False, request: Request | None = None) -> dict:
@@ -12944,8 +12944,8 @@ def run_fleet_agent(
         # `fleet create`, but the dashboard run endpoint stays lenient so a
         # previously-runnable fleet keeps working: fall back to the base grant,
         # which is attenuated to the caller below -- a non-admin can therefore
-        # never exceed their own capability. (capability_for_role was made
-        # strict in #931, which otherwise 500s this legacy path.)
+        # never exceed their own capability. (capability_for_role is strict, so
+        # without this fallback a legacy fleet would fail with a 500.)
         cap = capability_from_config(agent_principal, user_id=agent_principal)
     if principal is not None and not is_admin:
         caller_cap = capability_from_config(principal, user_id=principal)

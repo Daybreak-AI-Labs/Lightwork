@@ -202,7 +202,7 @@ def _process_file_locked(
         if strict:
             raise
         return 0, 0
-    # A closed day-file may be at-rest *sealed* (#1015). Read its NDJSON via the
+    # A closed day-file may be at-rest *sealed*. Read its NDJSON via the
     # transparent decryptor (reading raw bytes as UTF-8 would crash on the
     # ciphertext), and remember the sealed state so the rewrite below preserves
     # it instead of silently unsealing a confidential segment to plaintext.

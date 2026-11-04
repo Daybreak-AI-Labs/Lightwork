@@ -197,7 +197,7 @@ def _load_oidc_config() -> OIDCConfig:
     client_id = os.environ.get("MAVERICK_OIDC_CLIENT_ID") or str(
         section.get("client_id", "") or ""
     )
-    # OIDC client/session secrets route through the secret provider (#54) so a
+    # OIDC client/session secrets route through the secret provider so a
     # mounted vault file can supply them without putting the secret in the
     # process env; default backend reads env exactly as before.
     from .secret_provider import get_secret

@@ -532,7 +532,7 @@ def _timestamp_fresh(timestamp: str, max_age: int | None) -> bool:
 
 def inbound_secret() -> str | None:
     """Resolve the dedicated inbound control-plane HMAC secret."""
-    from .secret_provider import get_secret  # vault-mountable secret (#54)
+    from .secret_provider import get_secret  # vault-mountable secret
     return get_secret("MAVERICK_INBOUND_WEBHOOK_SECRET") or None
 
 

@@ -68,10 +68,11 @@ def _default_config_path() -> Path:
 
 
 def __getattr__(name: str):
-    # Back-compat: `DEFAULT_CONFIG_PATH` used to be a module-level constant, but
-    # caching it bound Path.home() at import time (stale under HOME changes /
-    # monkeypatch — exactly what the comment above warns against). Resolve it
-    # lazily on attribute access so every read reflects the current HOME.
+    # Back-compat: `DEFAULT_CONFIG_PATH` stays importable, but caching it as a
+    # module-level constant would bind Path.home() at import time (stale under
+    # HOME changes / monkeypatch — exactly what the comment above warns
+    # against). Resolve it lazily on attribute access so every read reflects
+    # the current HOME.
     if name == "DEFAULT_CONFIG_PATH":
         return _default_config_path()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
@@ -93,10 +94,10 @@ GOVERNED_LEARNING_DEFAULT = True
 # runtime-overrides.toml (denied_tools / models / budget, read via own hooks).
 DASHBOARD_OVERRIDES_BASENAME = "dashboard-config.toml"
 
-# Accept lower/mixed-case names too: a hand-edited config referencing a
-# lowercase env var (`${my_token}`) previously left the literal `${my_token}`
-# in the value, silently un-substituted. The docstring promises "${VAR_NAME}
-# is replaced" with no case restriction.
+# Accept lower/mixed-case names too, so a hand-edited config referencing a
+# lowercase env var (`${my_token}`) is substituted rather than left as the
+# literal `${my_token}`. The docstring promises "${VAR_NAME} is replaced" with
+# no case restriction.
 _ENV_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 
@@ -381,9 +382,8 @@ def _tree_contains_sealed_value(value: object) -> bool:
 # resolve the active tenant -> client id -> ``load_config()`` -> this overlay
 # again. A nested load only ever needs plaintext keys (``[client] id`` is never
 # sealed), so it gets the tree with its tokens left opaque instead of a second
-# unseal -- which, before this guard, was an import cycle that killed every
-# production task at boot (2026-09-10) and would otherwise be unbounded
-# recursion. A ContextVar, not a global: concurrent requests on other tasks
+# unseal. Without this guard that is an import cycle that stops every
+# production task at boot, and otherwise unbounded recursion. A ContextVar, not a global: concurrent requests on other tasks
 # must not observe one another's in-progress unseal.
 _UNSEALING: ContextVar[bool] = ContextVar("maverick_config_unsealing", default=False)
 
@@ -692,9 +692,10 @@ class _SharedRead:
 
 # One authorization decision asks a dozen questions of the deployment-global
 # configuration (the sign-in methods, the profile, the client binding, the
-# dashboard token). Each used to read the files again and, once a secret had
-# been saved from Settings, resolve the at-rest key and decrypt it: about 15
-# reads per decision and 350 per dashboard page. Inside ``single_read()`` the
+# dashboard token). Without sharing, each would read the files again and, once
+# a secret has been saved from Settings, resolve the at-rest key and decrypt
+# it: about 15 reads per decision and 350 per dashboard page. Inside
+# ``single_read()`` the
 # first clean read is shared and every caller gets its own copy. A read that
 # itself ran into an unreadable, corrupt or undecryptable source (recorded in
 # ``_READ_ERRORS`` as it happens, never inferred from process-wide state) is
@@ -1382,10 +1383,9 @@ def any_provider_configured() -> bool:
          unset, so an empty interpolation does not count).
       4. an existing Codex CLI login at ``$CODEX_HOME/auth.json``.
 
-    Found by running the platform as a user: the CLI preflight, the LLM
-    clients, and the dashboard each implemented a different subset, so a
-    keyless self-hosted setup was accepted by one component and rejected by
-    the next. Use this helper instead of growing a fourth variant.
+    The CLI preflight, the LLM clients and the dashboard all use this one
+    helper, so a keyless self-hosted setup is accepted or rejected the same
+    way everywhere. Use it instead of writing another variant.
     """
     # Read config FIRST: load_config() also exports the wizard-persisted
     # ~/.maverick/.env into the environment (setdefault), so the env-var checks
@@ -2253,8 +2253,8 @@ def get_self_learning(*, config: dict[str, Any] | None = None) -> dict:
     separate, explicit authority decisions.
 
     Back-compat: a config that still carries the retired ``add_mcp_servers``
-    key is tolerated (it is simply ignored) — agent-driven MCP acquisition
-    was removed in #392, so the knob no longer does anything.
+    key is tolerated (it is simply ignored): agent-driven MCP acquisition is
+    not supported, so the knob does nothing.
 
     ``config`` lets a caller reuse an already-loaded config snapshot; see
     :func:`get_calibration` for the same pattern.
@@ -2280,7 +2280,7 @@ def get_self_learning(*, config: dict[str, Any] | None = None) -> dict:
         # Agent-proposed MCP-server acquisition is the highest-trust knob:
         # even gated behind catalog-pinning + operator consent it can start
         # a third-party subprocess, so it ships OFF independently of the
-        # self-learning master switch (#422). Env override:
+        # self-learning master switch. Env override:
         # MAVERICK_ALLOW_MCP_ACQUISITION.
         "allow_mcp_acquisition": cfg.get("allow_mcp_acquisition") is True,
         # Extra learning-only model calls may select a different configured
@@ -2623,7 +2623,7 @@ def get_autonomy() -> dict:
 
     return {
         "enable": bool(cfg.get("enable", False)),
-        # AI-3: show the plan and wait for a person before a task's first
+        # Plan confirmation: show the plan and wait for a person before a task's first
         # action with an outside effect. Independent of ``enable``; off by default.
         "confirm_plan": cfg.get("confirm_plan", False) is True,
         "min_confidence": _clamp01("min_confidence", 0.5),

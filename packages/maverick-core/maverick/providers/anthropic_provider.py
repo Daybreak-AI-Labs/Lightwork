@@ -57,10 +57,9 @@ def _default_cache_ttl() -> str:
 
 
 def _ephemeral(obj: dict) -> dict:
-    # Anthropic regressed the default cache TTL from 1h to 5m in early
-    # March 2026 (issue #46829 on anthropics/claude-code). For agent
-    # workloads -- where system prompts and tool catalogs are reused
-    # across many turns inside a single goal -- 5m is too short and
+    # The API's default cache TTL is 5m. For agent workloads -- where system
+    # prompts and tool catalogs are reused across many turns inside a single
+    # goal -- 5m is too short and
     # forces ~20% extra spend on re-creates. Explicitly set 1h on every
     # cache control block so we get the discount we expect.
     # In coding-mode (SWE-bench style), default to 5m since
@@ -442,8 +441,8 @@ class AnthropicClient:
                     min_tokens, model_for_min, min_tokens,
                 )
                 _LOW_CACHE_WARNING_EMITTED[model_for_min] = True
-        # Thinking + interleaved-thinking handling per
-        # Anthropic's May 2026 docs (platform.claude.com/docs/.../adaptive-thinking):
+        # Thinking + interleaved-thinking handling per Anthropic's docs
+        # (platform.claude.com/docs/.../adaptive-thinking):
         #
         #   - Opus 4.7:  ONLY adaptive mode accepted. Manual
         #                `thinking={"type":"enabled"}` returns 400.
@@ -580,11 +579,11 @@ class AnthropicClient:
         # second turn (Anthropic rejects the assistant message
         # because the signature doesn't match the text).
         thinking_blocks: list[tuple[str, str | None]] = []
-        # May 28 fix: capture blocks in their ORIGINAL order. Anthropic
-        # rejects a rearranged thinking-block sequence ("the latest
-        # assistant message ... cannot be modified"), which the old
-        # bucket-by-type reconstruction triggered on interleaved Opus
-        # 4.7 turns (thinking between tool_use). We replay these verbatim.
+        # Capture blocks in their ORIGINAL order. Anthropic rejects a
+        # rearranged thinking-block sequence ("the latest assistant
+        # message ... cannot be modified"), which a bucket-by-type
+        # reconstruction would produce on interleaved Opus 4.7 turns
+        # (thinking between tool_use). We replay these verbatim.
         content_blocks: list[dict] = []
         for block in resp.content:
             t = getattr(block, "type", None)

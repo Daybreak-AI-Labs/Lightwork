@@ -605,7 +605,7 @@ def _maybe_store_learning_cache(goal, summary: str, confidence: float | None) ->
 
 
 def _maybe_recall_prior_work(world, goal, shield) -> str | None:
-    """Auto-recall the most similar PRIOR goals into a brief addendum (#431).
+    """Auto-recall the most similar PRIOR goals into a brief addendum.
 
     Mirrors the reflexion-recall wiring but for finished prior goals + their
     results, so the swarm reuses what it already did rather than waiting for
@@ -616,7 +616,7 @@ def _maybe_recall_prior_work(world, goal, shield) -> str | None:
     text) and redacted if flagged. Never raises.
 
     Prefers the indexed semantic store when a ``[memory] backend`` is
-    configured (#432), else falls back to the lexical/embedding linear scan.
+    configured, else falls back to the lexical/embedding linear scan.
     Tunables: ``MAVERICK_AUTO_RECALL_K`` (default 3); min similarity 0.10.
     """
     from .env_setting import env_or_config
@@ -2316,7 +2316,7 @@ def _record_goal_success(*, world: WorldModel, goal: Any, goal_id: int, summary:
     audit_event(EventKind.GOAL_END, goal_id=goal_id, agent="orchestrator",
                 status="succeeded",
                 result=(_res[:500] + "…") if _res and len(_res) > 500 else _res)
-    # Index this finished goal into the semantic store (#432) so future
+    # Index this finished goal into the semantic store so future
     # runs recall it via vector search. No-op unless a [memory] backend is
     # configured; re-reads the goal so the indexed status/result reflect
     # the just-written 'done' state. Never blocks the finalize path.

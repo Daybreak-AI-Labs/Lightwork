@@ -546,7 +546,7 @@ class MCPClient:
             # req_id is already on the wire; without a cancel the server runs
             # the call to completion and emits a late reply. De-register the
             # Future so the reader drops that late reply, then tell the server
-            # to stop (#541 behavior). Our own timeout, not a caller cancel, so
+            # to stop. Our own timeout, not a caller cancel, so
             # the bounded notice is awaited: it is on the wire when this raises.
             self._pending.pop(req_id, None)
             await self._bounded_send_cancel(req_id)

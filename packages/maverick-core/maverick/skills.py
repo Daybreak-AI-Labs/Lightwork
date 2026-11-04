@@ -1443,7 +1443,7 @@ def distill(
         if generated.name in {skill.name for skill in load_builtin_skills()}:
             raise ValueError("automatic learning cannot replace a built-in skill")
         # Route distilled skills through the SAME validation + shield scan
-        # as install_skill (#396 quality gate). A skill distilled from a
+        # as install_skill (the skill quality gate). A skill distilled from a
         # trajectory can inherit injected content from tool output, and its
         # body is later concatenated into future agents' system prompts via
         # render_for_prompt -- so it must be frontmatter-validated and

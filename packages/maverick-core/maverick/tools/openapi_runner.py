@@ -39,9 +39,9 @@ log = logging.getLogger(__name__)
 def _confine_local(source: str, workdir: Path | None) -> Path:
     """Resolve a local spec path, confined to the workspace.
 
-    #612: every other file-reading tool (fs / ocr / pdf_reader / view_image)
-    confines local paths to the workdir; ``openapi_runner`` did ``open(source)``
-    on any host path (``/etc/passwd``, ``~/.ssh/id_rsa``). Confine here too.
+    Like every other file-reading tool (fs / ocr / pdf_reader / view_image),
+    ``openapi_runner`` confines local paths to the workdir, so a spec path
+    cannot read an arbitrary host file (``/etc/passwd``, ``~/.ssh/id_rsa``).
     An absolute path is allowed only when it resolves INSIDE the workspace —
     so loading a spec by absolute path (a tested feature) keeps working for
     in-workspace files, while a path escape raises. ``~`` is expanded first so
@@ -145,7 +145,7 @@ def _stream_text(client: Any, method: str, url: str, max_bytes: int,
 
 def _load_spec(source: str, workdir: Path | None = None) -> dict:
     is_url = source.startswith(("http://", "https://"))
-    # #612: confine local reads to the workspace BEFORE the cache lookup so a
+    # Confine local reads to the workspace BEFORE the cache lookup so a
     # path escape can't slip through a warm cache (and is rejected even if the
     # same bad path was attempted before).
     local_path = None if is_url else _confine_local(source, workdir)
@@ -412,7 +412,7 @@ def _run(args: dict[str, Any], workdir: Path | None = None) -> str:
 
 
 def openapi_runner(sandbox: Any = None) -> Tool:
-    # #612: thread the sandbox workdir so local spec reads are confined to the
+    # Thread the sandbox workdir so local spec reads are confined to the
     # workspace (URL specs are unaffected). None -> falls back to cwd-confine.
     workdir = None
     wd = getattr(sandbox, "workdir", None)

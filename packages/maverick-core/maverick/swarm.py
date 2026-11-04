@@ -240,10 +240,9 @@ class SwarmContext:
     def release_spawns(self, n: int) -> None:
         """Return ``n`` reserved spawn slots after a child genuinely FAILED.
 
-        ``try_reserve_spawns`` bumps ``_spawns_used`` at reservation time, but
-        nothing ever gave the slot back: a long run with transient child
-        errors would burn through ``max_total_spawns`` and hit the per-goal
-        cap prematurely (#612). Callers release only on a child that RAISED
+        ``try_reserve_spawns`` bumps ``_spawns_used`` at reservation time;
+        without a release, a long run with transient child errors would burn
+        through ``max_total_spawns`` and hit the per-goal cap prematurely. Callers release only on a child that RAISED
         (a real failure) -- a successful child legitimately consumed its slot.
         Synchronous, so atomic on the event loop; clamped at 0.
         """

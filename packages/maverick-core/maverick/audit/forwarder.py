@@ -1,4 +1,4 @@
-"""Push audit events to a SIEM endpoint (#56).
+"""Push audit events to a SIEM endpoint.
 
 The pull-based ``maverick audit export`` re-emits the tamper-evident log as
 JSONL/CEF to a file or stdout; this module is the *push* counterpart, shipping

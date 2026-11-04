@@ -872,8 +872,8 @@ def core_tool_names(role: str, *, extra=()) -> frozenset[str]:
     names.update(str(t).strip() for t in (extra or ()) if str(t).strip())
     return frozenset(names)
 
-# Credentialed SaaS/cloud tools that may use ambient host credentials (PR
-# #124): they only register when the operator opts in via
+# Credentialed SaaS/cloud tools that may use ambient host credentials: they
+# only register when the operator opts in via
 # MAVERICK_ENABLE_CRED_TOOLS=true (see base_registry below). These names are
 # reserved -- the always-on enterprise_connectors catalog must never reuse one
 # (see test_no_collision_with_opt_in_ambient_cred_tools).
@@ -1565,7 +1565,7 @@ def base_registry(
         reg.deferrable_names.add(_conn.name)
     from .database_tool import database_tool
     reg.register(database_tool())
-    # Credentialed SaaS/cloud tools are opt-in (PR #124): they can use
+    # Credentialed SaaS/cloud tools are opt-in: they can use
     # ambient host credentials, so they only register when the operator
     # sets MAVERICK_ENABLE_CRED_TOOLS=true. Their names are reserved in
     # AMBIENT_CRED_TOOL_NAMES above -- keep that set in sync with this list.
