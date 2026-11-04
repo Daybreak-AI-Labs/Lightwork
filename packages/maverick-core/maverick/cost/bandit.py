@@ -1,9 +1,9 @@
-"""Cost-aware routing v3 — contextual bandit.
+"""Cost-aware routing — contextual bandit.
 
-v2 (``cost_router``) picks the cheapest *viable* provider by a static tier +
-health table. v3 *learns*: which provider actually delivers the best
-reward-per-dollar **for this kind of task**, adapting as quality and prices
-drift. It's a contextual multi-armed bandit — arms are provider:model specs,
+``cost.router`` picks the cheapest *viable* provider by a static tier +
+health table. This module learns which of those viable providers delivers the
+best reward-per-dollar **for this kind of task**, adapting as quality and
+prices drift. It's a contextual multi-armed bandit — arms are provider:model specs,
 the context is a coarse task class (role + tier), the reward is operator-
 defined (default: success ÷ dollars).
 
@@ -12,10 +12,11 @@ epsilon-greedy policy over an injectable PRNG, so a test pins exactly what it
 explores. Persists the learned table to ``data_dir("router_bandit.json")``
 (atomic 0600) so learning survives restarts.
 
-Opt-in and layered ON TOP of v2: v3 only chooses among the arms v2 already
-deems viable+healthy (it never routes to a down or unaffordable provider),
-and it falls back to v2's pick on a cold context. ``[routing] bandit = true``
-(env ``MAVERICK_ROUTING_BANDIT``); off by default — v2 behavior unchanged.
+Opt-in and layered on top of ``cost.router``: the bandit only chooses among
+the arms the router already deems viable and healthy (it never routes to a
+down or unaffordable provider), and it falls back to the router's pick on a
+cold context. ``[routing] bandit = true`` (env ``MAVERICK_ROUTING_BANDIT``);
+off by default, which leaves the router's choice unchanged.
 """
 from __future__ import annotations
 
@@ -220,11 +221,12 @@ def reset_shared() -> None:
 def pick(role: str, tier: int, viable_arms: list[str],
          *, bandit: ContextualBandit | None = None,
          fallback: Callable[[], str | None] | None = None) -> str | None:
-    """v3 entry point: learn-and-choose among v2's viable arms.
+    """Learn and choose among the router's viable arms.
 
-    ``viable_arms`` MUST already be the healthy/affordable set v2 produced —
-    v3 only reorders *within* it, never routes somewhere v2 rejected. On a
-    cold context (or empty arms) it defers to ``fallback`` (v2's pick).
+    ``viable_arms`` MUST already be the healthy/affordable set ``cost.router``
+    produced — the bandit only reorders *within* it, never routes somewhere the
+    router rejected. On a cold context (or empty arms) it defers to
+    ``fallback`` (the router's pick).
     """
     if not enabled() or not viable_arms:
         return fallback() if fallback else None
@@ -263,7 +265,7 @@ class _RoutedModel(str):
         return str, (str(self),)
 
 
-_pending: ContextVar[_RoutingCredit | None] = ContextVar("router_v3_choice", default=None)
+_pending: ContextVar[_RoutingCredit | None] = ContextVar("cost_bandit_choice", default=None)
 _USE_PENDING = object()
 
 
@@ -284,8 +286,9 @@ def _current_credit(credit: object, arm: str) -> bool:
 def capture_call(model: str) -> _RoutingCredit | None:
     """Bind a logical call only to the original live routed model value.
 
-    An equal explicit string is not evidence that v3 selected this call. This
-    also clears pending credit when the caller uses a fixed or non-v3 model.
+    An equal explicit string is not evidence that the bandit selected this
+    call. This also clears pending credit when the caller uses a fixed or
+    unrouted model.
     """
     clear_choice()
     credit = model._credit if isinstance(model, _RoutedModel) else None

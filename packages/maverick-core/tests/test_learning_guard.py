@@ -342,7 +342,7 @@ def test_dream_cli_reports_halt_as_a_clean_refusal(
 def test_halt_armed_during_distillation_blocks_the_skill_save(
     monkeypatch, _clean_killswitch, tmp_path,
 ):
-    from maverick.skill import distillation_v2
+    from maverick.skill import distillation
 
     called = 0
 
@@ -354,7 +354,7 @@ def test_halt_armed_during_distillation_blocks_the_skill_save(
         raise AssertionError("HALT callback must not return")
 
     monkeypatch.setattr(
-        distillation_v2, "distill_and_save_gated", arm_before_save)
+        distillation, "distill_and_save_gated", arm_before_save)
 
     with pytest.raises(killswitch.Halted, match="source=file"):
         dreaming._distill_department_skills(

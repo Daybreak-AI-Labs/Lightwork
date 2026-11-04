@@ -1332,7 +1332,7 @@ def _distill_department_skills(
 
     Returns the paths of the skills written THIS cycle (the benchmark canary
     gate quarantines exactly these when the tracked suite is regressing)."""
-    from .skill import distillation_v2 as _v2
+    from .skill import distillation as _v2
     saved_paths: list[Path] = []
     for trajectories in by_domain.values():
         if len(trajectories) < max(1, min_cluster):

@@ -504,7 +504,8 @@ def test_a_model_chosen_for_the_role_is_never_replaced(monkeypatch, audit_rows):
 # ------------------------------------------------ learning router
 def test_router_consults_the_bandit_and_learns_from_calls(monkeypatch, audit_rows):
     from maverick import llm
-    from maverick.cost import router, router_v3
+    from maverick.cost import bandit as bandit_module
+    from maverick.cost import router
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")  # pragma: allowlist secret
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")  # pragma: allowlist secret
@@ -513,24 +514,24 @@ def test_router_consults_the_bandit_and_learns_from_calls(monkeypatch, audit_row
     assert cheapest
 
     # Credit is kept only by the installation's stored bandit, so use one.
-    stored = router_v3._storage_binding()[1]
+    stored = bandit_module._storage_binding()[1]
     stored.parent.mkdir(parents=True, exist_ok=True)
-    bandit = router_v3.ContextualBandit(epsilon=0.0, path=stored)
-    monkeypatch.setattr(router_v3, "shared", lambda: bandit)
-    router_v3.reset_shared()
+    bandit = bandit_module.ContextualBandit(epsilon=0.0, path=stored)
+    monkeypatch.setattr(bandit_module, "shared", lambda: bandit)
+    bandit_module.reset_shared()
     seen: dict = {}
-    real_pick = router_v3.pick
+    real_pick = bandit_module.pick
 
     def spy(role, tier, arms, **kw):
         seen["arms"] = list(arms)
         return real_pick(role, tier, arms, **kw)
 
-    monkeypatch.setattr(router_v3, "pick", spy)
+    monkeypatch.setattr(bandit_module, "pick", spy)
     assert _save([{"id": "routing.bandit", "value": True}]).status_code == 200
     router.pick(router.signal_for_role("researcher"))
     arms = seen["arms"]
     assert arms[0] == cheapest and len(arms) > 1
-    context = router_v3.context_key("researcher", router.signal_for_role("researcher").tier)
+    context = bandit_module.context_key("researcher", router.signal_for_role("researcher").tier)
     for arm in arms:
         for _ in range(2):
             bandit.record(context, arm, 100.0 if arm == arms[-1] else 1.0)
@@ -540,7 +541,7 @@ def test_router_consults_the_bandit_and_learns_from_calls(monkeypatch, audit_row
     provider, model = chosen.split(":", 1)
     before = bandit.stats(context)[chosen]["pulls"]
     # A finished call is credited to the exact routed choice it was made with.
-    llm._note_bandit(provider, model, False, 0.02, router_v3.capture_call(chosen))
+    llm._note_bandit(provider, model, False, 0.02, bandit_module.capture_call(chosen))
     assert bandit.stats(context)[chosen]["pulls"] == before + 1
 
     monkeypatch.setenv("MAVERICK_ROUTING_BANDIT", "0")  # the environment wins

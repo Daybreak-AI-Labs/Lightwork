@@ -695,7 +695,7 @@ def offline_model_for_role(
 
 def model_for_role(role: str, *, domain_models: Mapping[str, str] | None = None) -> str:
     """Resolve the live model route and enforce the admin hard allow-list."""
-    from .cost.router_v3 import clear_choice
+    from .cost.bandit import clear_choice
 
     clear_choice()
     return _apply_allowed_model_policy(_resolve_model_for_role(role, domain_models=domain_models))
@@ -703,7 +703,7 @@ def model_for_role(role: str, *, domain_models: Mapping[str, str] | None = None)
 
 def _capture_routing_credit(model: str):
     try:
-        from .cost.router_v3 import capture_call
+        from .cost.bandit import capture_call
 
         return capture_call(model)
     except Exception:  # pragma: no cover -- learning never fails a call
@@ -715,7 +715,7 @@ def _note_bandit(provider: str, model_id: str, error: object, dollars: object,
                  routing_credit=None) -> None:
     """Credit a finished call to the routing bandit ([routing] bandit)."""
     try:
-        from .cost.router_v3 import note_call
+        from .cost.bandit import note_call
 
         note_call(provider, model_id, success=not error, dollars=float(dollars or 0.0),
                   credit=routing_credit)

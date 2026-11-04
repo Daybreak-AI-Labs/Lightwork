@@ -14875,9 +14875,9 @@
       ]
     },
     {
-      "path": "packages/maverick-core/maverick/cost/router_v3.py",
+      "path": "packages/maverick-core/maverick/cost/bandit.py",
       "contract": "learning",
-      "owner": "packages/maverick-core/maverick/cost/router_v3.py",
+      "owner": "packages/maverick-core/maverick/cost/bandit.py",
       "purpose": "Cost-aware routing v3 \u2014 contextual bandit.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",

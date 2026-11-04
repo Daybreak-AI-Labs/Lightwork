@@ -123,7 +123,7 @@ def _skill_match(goal_text: str, skills_dir: Path, *, min_overlap: float = 0.34)
     if not skills_dir.is_dir():
         return None
     try:
-        from .skill.distillation_v2 import _tokens as _sk_tokens
+        from .skill.distillation import _tokens as _sk_tokens
     except Exception:  # pragma: no cover
         return None
     gt = _sk_tokens(goal_text)

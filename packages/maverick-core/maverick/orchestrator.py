@@ -2512,7 +2512,7 @@ async def _finish_goal_learning(*, world: WorldModel, goal: Any, goal_id: int,
             ]
             # v2: gate on evidence + dedup against the learned-skills store
             # so the loop doesn't accumulate near-duplicate skills each run.
-            from .skill import distillation_v2 as _sdl2
+            from .skill import distillation as _sdl2
             path, _why = _sdl2.distill_and_save_gated(trajectories)
             if path:
                 blackboard.post("orchestrator", "skill",

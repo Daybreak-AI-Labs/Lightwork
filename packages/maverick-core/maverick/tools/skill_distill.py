@@ -1,9 +1,8 @@
-"""Auto-skill distillation v2.
+"""Skill distillation tool.
 
-Turn a successful execution trace into a reusable skill spec. v1 naively
-replayed every recorded action; v2 distills — it keeps only the steps that
-actually succeeded (``ok``), drops no-op/noise actions, de-duplicates the tools
-needed, and records ordered steps plus the goal as a trigger. The result is a
+Turn a successful execution trace into a reusable skill spec: it keeps only the
+steps that actually succeeded (``ok``), drops no-op/noise actions, de-duplicates
+the tools needed, and records ordered steps plus the goal as a trigger. The result is a
 compact ``{name, triggers, tools_needed, steps}`` the planner can reuse.
 
 ops:
@@ -96,8 +95,8 @@ def skill_distill_v2() -> Tool:
         description=(
             "Distill a successful trace into a reusable skill spec. "
             "op=distill with 'trace' ([{action, tool, ok}]) and 'goal' -> "
-            "{name, triggers, tools_needed, steps}. Improves on v1 by dropping "
-            "failed (!ok) and noise steps and de-duplicating tools. "
+            "{name, triggers, tools_needed, steps}. Drops failed (!ok) and "
+            "noise steps and de-duplicates tools. "
             "Deterministic, offline."
         ),
         input_schema=_SCHEMA,

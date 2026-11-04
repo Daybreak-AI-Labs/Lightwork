@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from maverick.tools.skill_distill_v2 import skill_distill_v2
+from maverick.tools.skill_distill import skill_distill_v2
 
 
 def _distill(trace, goal):

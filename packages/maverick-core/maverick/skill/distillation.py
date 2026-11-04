@@ -1,17 +1,18 @@
-"""Auto-skill distillation v2.
+"""Evidence-gated auto-skill distillation.
 
-v1 (:mod:`maverick.skill_distillation_local`) distills recent successful runs
-into a ``SKILL.md`` — but it runs after *every* goal, so a learned-skills store
-slowly fills with near-duplicates of the same lesson, and a one-off success can
-mint a skill that never recurs. v2 adds the two quality gates that make
-continuous learning actually usable:
+:mod:`maverick.skill.distillation_local` distills recent successful runs into a
+``SKILL.md``. Run after every goal on its own, a learned-skills store would fill
+with near-duplicates of the same lesson, and a one-off success could mint a
+skill that never recurs. This module adds the two quality gates that keep
+continuous learning useful:
 
 * **gate on evidence** — don't distill from fewer than ``min_examples``
   successful trajectories (a single success is noise, not a repeatable skill);
 * **dedup against the store** — don't save a skill whose content is already
   covered by one already learned (lexical **overlap/containment** over the skill
   text — the right metric when a compact candidate is checked against a fuller
-  saved skill; same zero-dep / no-embedding-model approach v1 uses), so the
+  saved skill; the same zero-dep / no-embedding-model approach as
+  ``distillation_local``), so the
   store stays a set of *distinct* lessons.
 * **gate on quality** — don't save a skill too generic to retrieve precisely:
   one whose content signature is mostly glue words would over-fire on unrelated
@@ -111,7 +112,7 @@ def distill_gated(trajectories: list[dict], *,
                   top_k: int = 3, min_examples: int = DEFAULT_MIN_EXAMPLES,
                   dedup_threshold: float = DEFAULT_DEDUP_THRESHOLD,
                   min_signal: int = DEFAULT_MIN_SIGNAL_TOKENS) -> tuple[dict | None, str]:
-    """Distill with the v2 gates (evidence, quality, dedup). Returns
+    """Distill with the evidence, quality and dedup gates. Returns
     ``(skill_or_None, reason)``."""
     skill = distill(trajectories, top_k=top_k)
     if skill is None:

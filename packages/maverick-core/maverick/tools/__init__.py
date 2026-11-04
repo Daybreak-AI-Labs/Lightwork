@@ -1242,7 +1242,7 @@ def base_registry(
     from .serial_tool import serial_tool
     from .ses_tool import ses_tool
     from .shopify_tool import shopify_tool
-    from .skill_distill_v2 import skill_distill_v2
+    from .skill_distill import skill_distill_v2
     from .sla_breach import sla_breach
     from .slack_bot import slack_bot
     from .slack_workflow import slack_workflow

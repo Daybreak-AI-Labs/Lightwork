@@ -392,7 +392,7 @@ Settings and the installation wizard.
   source tasks on Skills, then explicitly admits one exact version into the
   installed-skill store; the guarded Copilot learning actions use the same
   admission and withdrawal services.
-  **v2** (`skill_distillation_v2.py`) adds two quality gates so the loop stays
+  Gated distillation (`skill/distillation.py`) adds two quality gates so the loop stays
   useful: it won't distill from fewer than N successful trajectories (a one-off
   success is noise), and it dedups a candidate against the learned-skills store
   by lexical containment so near-duplicate lessons don't accumulate — the
@@ -3176,11 +3176,12 @@ floor) and provider failover (`provider_failover.py`) with a **policy engine**
 fail over — plus per-model cooldowns), all opt-in. **Local-first routing**
 prefers a reachable local model before remote (`provider_local_first.py`);
 **energy-aware routing** downgrades to a cheaper model on low battery
-(`energy_aware_router.py`); both opt-in and default-OFF. **Cost-aware routing
-v3** (`cost_router_v3.py`) layers a contextual **epsilon-greedy bandit** on top
-of v2: it learns reward-per-dollar per coarse task class (role + tier) and
-reorders *only within* the healthy/affordable arm set v2 already produced —
-never routing somewhere v2 rejected, falling back to v2 on a cold context. The
+(`energy_aware_router.py`); both opt-in and default-OFF. **Learned cost-aware
+routing** (`cost/bandit.py`) layers a contextual **epsilon-greedy bandit** on
+top of the cost router: it learns reward-per-dollar per coarse task class
+(role + tier) and reorders *only within* the healthy/affordable arm set the
+router already produced — never routing somewhere the router rejected, falling
+back to the router's pick on a cold context. The
 learned table persists atomically (`router_bandit.json`, 0600); opt-in via
 `[routing] bandit` and default-OFF.
 

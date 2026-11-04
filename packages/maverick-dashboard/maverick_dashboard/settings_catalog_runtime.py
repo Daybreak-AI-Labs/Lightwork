@@ -256,7 +256,7 @@ def _models(S, C) -> tuple:
         S("routing", "bandit", "Learn which AI service works best",
           "When picking the cheapest model, try the suitable services and learn which one "
           "gives the most successful answers for the money for each kind of work.",
-          "toggle", "AI models", False, "maverick.cost.router_v3", subgroup="Model choices",
+          "toggle", "AI models", False, "maverick.cost.bandit", subgroup="Model choices",
           env=("MAVERICK_ROUTING_BANDIT",)),
         S("models", "cascade", "Start with a lower-cost model",
           "Agents without a model of their own start on the low-cost first-try model and "

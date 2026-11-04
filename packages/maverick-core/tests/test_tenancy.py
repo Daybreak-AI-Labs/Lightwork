@@ -446,7 +446,7 @@ def test_lazy_skill_distillation_store_follows_active_tenant(monkeypatch, tmp_pa
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
 
     from maverick.paths import tenant_scope
-    from maverick.skill import distillation_local, distillation_v2
+    from maverick.skill import distillation, distillation_local
 
     skill = {
         "name": "tenant-skill",
@@ -459,12 +459,12 @@ def test_lazy_skill_distillation_store_follows_active_tenant(monkeypatch, tmp_pa
     with tenant_scope(tenant="tenant-a"):
         path_a = distillation_local.save_skill(skill)
         assert path_a.parent == tmp_path / "tenants" / "tenant-a" / "learned-skills"
-        assert distillation_v2.signatures_from_store()
+        assert distillation.signatures_from_store()
 
     with tenant_scope(tenant="tenant-b"):
         path_b = distillation_local.save_skill(skill)
         assert path_b.parent == tmp_path / "tenants" / "tenant-b" / "learned-skills"
-        assert distillation_v2.signatures_from_store()
+        assert distillation.signatures_from_store()
         assert not (tmp_path / "tenants" / "tenant-b" / "learned-skills" / "missing.md").exists()
 
 
