@@ -2,8 +2,9 @@
 
 The contract deliberately lives below any one RL vendor.  A Lightwork
 environment is a versioned set of provenance-bearing cases plus a deterministic
-JSON rubric.  The same pack can be evaluated locally, exported to Verifiers, or
-handed to another training backend without changing its decision boundary.
+JSON rubric.  The same pack can be evaluated locally or exported as
+backend-neutral rows for an external training backend without changing its
+decision boundary.
 
 Built-in packs contain public/synthetic seed cases only.  They are useful for
 integration tests and base-model bakeoffs; :func:`promotion_readiness` refuses

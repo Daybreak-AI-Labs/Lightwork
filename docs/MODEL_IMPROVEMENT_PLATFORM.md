@@ -5,8 +5,9 @@
 Lightwork provides the governance and evaluation substrate for specialist
 models. GPU training runs only through an optional, operator-provisioned
 training backend. The platform is
-vendor-neutral: Prime Intellect is a strong optional training backend, not an
-architectural dependency and not a trust boundary.
+vendor-neutral: an external training system such as Prime Intellect's prime-rl
+is not an architectural dependency and not a trust boundary, and Lightwork
+ships no integration with one.
 
 Lightwork does not train a foundation model. The design goal is:
 
@@ -33,7 +34,7 @@ per-tenant learning loop, without claiming results that have not been measured.
 | Qualification | Current catalog candidate plus exact base/adapter/tokenizer/runtime/hardware tuple with quality, safety, calibration, latency, throughput, memory, cost, and freshness gates | Built; policy floors cannot be weakened and no model has passed until a real run supplies measurements |
 | Training receipt | Tenant-private, hash-chained, digest-bound run evidence with separate human and platform signatures and minimal public commitment | Built; verification checks the full store prefix, while signed tail rollback needs an externally published latest commitment |
 | Model Risk connection | Training evidence is part of the weights-change assurance path | See Model Risk section and tests |
-| External backend | Version-pinned, non-executing export/run specifications | Optional operator path; never auto-installs or uploads |
+| External backend | Backend-neutral row export (`environments.export_rows`) | No backend integration ships; an operator provisions and runs one |
 | Real specialist weights | None claimed | Requires authorized real data, sealed holdout, GPU run, and approval |
 
 ## Architecture
@@ -56,8 +57,8 @@ flowchart LR
 ```
 
 The environment, receipt, qualification, and promotion contracts are Lightwork
-contracts. A Prime, local DPO/QLoRA, or future training implementation plugs in
-below them.
+contracts. An external backend, local DPO/QLoRA, or another training
+implementation plugs in below them.
 
 ## Data and privacy boundary
 
@@ -109,8 +110,8 @@ Every answer is strict JSON. Citations use `{source_id, quote, start, end}` and
 must match the exact source-evidence region, not prompt instructions. Missing
 or unclear requirements use separate deterministic reason codes.
 
-Trainer exports contain only the `train` split. Validation and holdout bundles
-are evaluation-only and are refused by training run specifications. The shipped
+A trainer receives only the `train` split; validation and holdout splits are
+for evaluation, and `export_rows` refuses to export sealed answers. The shipped
 packs have three train, three validation, and three holdout
 families. Their answers are public in the wheel, so the promotion gate
 deliberately reports them as not ready. A promotion taskset needs at least 20
@@ -175,50 +176,24 @@ compatibility, deployment manifest, runtime lock, hardware, context, and
 concurrency are all bound. Edge, standard, and throughput profiles differ only
 in measured deployment constraints; none relaxes the safety/quality floor.
 
-## Prime Intellect integration
+## External training backends
 
-Lightwork targets explicit compatibility profiles, pinned exactly:
+Lightwork ships no integration with an external training system such as
+Prime Intellect's prime-rl or Verifiers. `environments.export_rows` returns
+backend-neutral rows (prompt, case and environment digests, and the answer
+unless it is sealed) that an operator can hand to a backend they provision and
+run themselves. An asynchronous multi-process trainer such as prime-rl is not
+compatible with the synchronous preference-pair `adapter_rung.Trainer`
+protocol, so it runs outside Lightwork.
 
-- [prime-rl v0.7.0](https://github.com/PrimeIntellect-ai/prime-rl/tree/d334ea52940b47f426293a7d146239e3fbf91caa)
-  at commit `d334ea52940b47f426293a7d146239e3fbf91caa`, with its bundled editable
-  [Verifiers v0.2.0 submodule](https://github.com/PrimeIntellect-ai/verifiers/tree/6c64ce6a3a01e8edde7c3c0e8e5315fb236e9faa)
-  at commit `6c64ce6a3a01e8edde7c3c0e8e5315fb236e9faa`.
-- Standalone [Verifiers v0.2.1](https://github.com/PrimeIntellect-ai/verifiers/tree/ab65b6e8d34b03d162408d4bcb854430a86809e6)
-  at commit `ab65b6e8d34b03d162408d4bcb854430a86809e6`
-  is a separate evaluation profile. A prime-rl run refuses that bundle.
+Whatever backend produces a candidate, the training receipt records the backend
+and its version, the dependency lock and container image, the egress policy,
+the final checkpoint and the evaluation metrics, and promotion still needs the
+qualification gate and human approval below.
 
-Verifiers models an environment as tasksets plus harness/reward functions.
-prime-rl is an asynchronous multi-process training system; it is not compatible
-with the synchronous preference-pair `adapter_rung.Trainer` protocol. Lightwork
-therefore uses a separate training-backend lifecycle with prepare, status,
-cancel, and resume semantics.
-
-The integration:
-
-- creates a self-contained, content-addressed environment bundle whose verified
-  `src` directory is exposed only through the run specification's isolated
-  `PYTHONPATH`; inherited caller `PYTHONPATH` values are discarded, the Prime
-  entrypoint uses Python safe-path mode, and child interpreters inherit
-  `PYTHONSAFEPATH=1` plus `PYTHONNOUSERSITE=1`;
-- generates train-only trainer bundles and separate evaluation-only bundles;
-- ships the exact deterministic scorer source inside the bundle, commits its
-  bytes in the runtime lock, and verifies those bytes before execution without
-  depending on an ambient Lightwork installation;
-- emits exact argv and configuration for an operator-provisioned workspace;
-- selects the environment with Prime v0.7's Verifiers v1
-  `taskset = { id = ... }` configuration shape;
-- revalidates the source pack, protected active-tenant evidence registry,
-  boundary decision, tenant/target admission, and every materialized file at
-  prepare and resume;
-- disables upload/telemetry and strips non-allowlisted environment variables by
-  default;
-- never runs a remote installer, installs from `main`, or executes a shell;
-- records the backend version/commit, lock/container, config, egress policy,
-  checkpoints, metrics, and output artifact in the training receipt.
-
-Prime hosted training is an option only when the deployment's data agreements
-and consent boundary permit it. Local Prime, local DPO/QLoRA, or another backend remains available
-for sovereign deployments.
+Hosted training is an option only when the deployment's data agreements and
+consent boundary permit it. Local DPO/QLoRA or another local backend remains
+available for sovereign deployments.
 
 ## Promotion lifecycle
 
@@ -248,7 +223,7 @@ for sovereign deployments.
 - Qualification gate.
 - Signed training receipts.
 - Default-off configuration and installer controls.
-- Optional external-backend export specifications.
+- Backend-neutral environment row export.
 
 No trained specialist weights ship with Lightwork. Producing one requires
 authorized real data, a sealed holdout, a GPU training run and the approvals

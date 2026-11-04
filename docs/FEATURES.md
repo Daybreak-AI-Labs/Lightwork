@@ -4333,15 +4333,12 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   dual-signed, hash-chained, tenant-private training receipts verified against
   server-owned trust policy. Public seed packs are bakeoff fixtures and
   deliberately fail promotion readiness because their holdout answers are
-   published. Cross-tenant training is refused. Optional Verifiers/prime-rl
-   integration uses separate pinned Prime v0.7.0/Verifiers v0.2.0 and standalone
-   Verifiers v0.2.1 profiles, is operator-provisioned, and never auto-installs or
-   uploads. Prime v0.7 specs use the Verifiers v1 taskset shape, replace inherited
-   `PYTHONPATH` with the exact verified bundle source, and verify the bundle's
-   digest-bound, self-contained scorer before execution. Live pointers bind the
-   effective policy and resolve approver
-  fingerprints through global deployment trust. The complete design, model
-  matrix, and rollout gates are in
+  published. Cross-tenant training is refused. No external training-backend
+  integration ships: `environments.export_rows` returns backend-neutral rows
+  and refuses sealed answers, and an operator-provisioned backend records its
+  run in the training receipt. Live pointers bind the effective policy and
+  resolve approver fingerprints through global deployment trust. The complete
+  design, model matrix, and rollout gates are in
   [`MODEL_IMPROVEMENT_PLATFORM.md`](./MODEL_IMPROVEMENT_PLATFORM.md).
 - **Domain packs** — spawn domain agents from profiles (legal / privacy / generic
   packs) on the sector-seal foundation.

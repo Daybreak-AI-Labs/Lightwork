@@ -70,10 +70,10 @@ between initial marker creation and the first journal append can leave a safe
 hold with no automatic repair path. A snapshot from before both files existed
 has no absence proof and can still replay the submission.
 
-Caller-configured paths, such as the optional benchmark coordinator's state file,
-cannot be assigned a safe bootstrap policy from their extension. They require the
-owning module's schema, signer and idempotency contract and an explicit target/path
-binding. The same rule applies to research archives and user workspace state.
+Caller-configured state paths cannot be assigned a safe bootstrap policy from
+their extension. They require the owning module's schema, signer and idempotency
+contract and an explicit target/path binding. The same rule applies to research
+archives and user workspace state.
 The inventory lists these owners; it does not claim an automatic migration for
 every custom path.
 

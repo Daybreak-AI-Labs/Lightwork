@@ -124,13 +124,6 @@
       "recovery": "Local backup does not restore external service state; reconcile effects at provider",
       "limits": "A socket connect, read-only driver or user file edit is not a new Lightwork store"
     },
-    "coordinator": {
-      "owner": "Opt-in externally composed benchmark coordinator; caller supplies state path and signer",
-      "transactions": "Bounded versioned review/contribution/idempotency state under process/cross-process guard and atomic write",
-      "migration": "Quiesce exact configured coordinator path and authenticate signing custody, schema and existing receipts; no automatic shared backend",
-      "recovery": "Custom path needs explicit recovery admission; do not classify as disposable output",
-      "limits": "Standalone service owner, not an always-enabled dashboard namespace"
-    },
     "draft": {
       "owner": "Private draft/support/import staging owner",
       "transactions": "Encrypted owner/context-bound payload and retention/preview receipt; applying draft still needs current live authority",
