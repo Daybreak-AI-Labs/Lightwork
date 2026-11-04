@@ -1,30 +1,31 @@
 # Self-hosted relay reference
 
-A small shim that fronts inbound webhooks and applies the **ack-then-run**
-split: quick questions are answered inside the device's deadline; long tasks
-are acknowledged immediately, run in the background, and delivered to a
-secondary channel when done.
+A self-hosted relay that sits between Lightwork and an external device or
+client, fronts its inbound requests and applies the **ack-then-run** split:
+quick questions are answered inside the caller's deadline; long tasks are
+acknowledged immediately, run in the background, and delivered to a secondary
+channel when done.
 
-This is the OpenClaw-bridge pattern (the Even Realities G2 "bring your own
-agent" write-up) without OpenClaw's hosted dependency. OpenClaw's bridge is a
-Cloudflare Worker; ours ships as framework-agnostic logic
-(`maverick.relay_reference`) you run **as a Worker** or **as a small local /
-edge service**. No mandatory paid edge.
+The relay ships as framework-agnostic logic (`maverick.relay_reference`) that
+you run **as a small local / edge service** or **as a Worker**. Nothing is
+hosted for you, and no paid edge is required.
 
 ## Why a relay at all
 
-A wearable like the G2 has a hard, short request budget (~30 s, on-device STT,
-HUD-only output). Inside that budget you can answer a fact or a short chat. You
+An external client, such as a voice assistant, a wearable or a chat
+integration, often waits only a short, fixed time for a reply (the default here
+is 30 seconds). Inside that budget you can answer a fact or a short chat. You
 cannot write an article, do research, or deploy something. The relay is the
 piece that decides which is which and routes accordingly:
 
-- **Quick query** → proxied synchronously to the agent, answered on the HUD.
+- **Quick query** → proxied synchronously to the agent and answered within the
+  deadline.
 - **Long task** → instant ack ("Got it! result will be sent to Telegram"),
   forwarded to the existing inbound `POST /webhook/start`, with the full result
   delivered later to a secondary channel.
 
-The quick-vs-ack-then-run boundary **is the point** — it's where the
-long-horizon design shows up on a 30-second device.
+The quick-vs-ack-then-run boundary **is the point**: it is where long-horizon
+work meets a client that cannot wait for it.
 
 ## What the reference gives you
 
@@ -43,7 +44,7 @@ You supply three transport seams:
 
 - **`sync_handler(text) -> str`** — drive the agent for a quick query. The relay
   races it against `deadline_seconds` and downgrades to ack-then-run if it
-  overruns or raises (the device always gets a reply).
+  overruns or raises (the caller always gets a reply).
 - **`starter(start_url, payload, *, secret) -> dict`** — POST the task to the
   existing inbound `POST /webhook/start`. Return a handle (`{"run_id": ...}`).
 - **`deliver(channel, result, *, context)`** — push a finished result to the
@@ -67,13 +68,13 @@ config = RelayConfig(
     start_url="http://localhost:8080/webhook/start",
     secondary_channel="telegram",
     hmac_secret="...",  # matches MAVERICK_INBOUND_WEBHOOK_SECRET on the receiver
-    inbound_auth_token="...",  # separate bearer token required from the device/user
+    inbound_auth_token="...",  # separate bearer token required from the device or client
 )
 
 def sync_handler(text: str) -> str:
-    # Drive the agent synchronously for a quick query (your call into the kernel).
-    from maverick.runner import answer_quick
-    return answer_quick(text)
+    # Drive the agent synchronously for a quick query. Lightwork ships no
+    # quick-answer helper; plug in your own call into the kernel here.
+    return my_quick_answer(text)
 
 def starter(start_url, payload, *, secret=None):
     body, headers = build_start_request(payload, config)
@@ -96,7 +97,7 @@ async def relay_endpoint(req: Request, authorization: str | None = Header(defaul
         raise HTTPException(status_code=401, detail="unauthorized relay request")
 
     body = await req.json()
-    resp = relay.handle(body["text"], context={"source": "wearable"}, auth_token=token)
+    resp = relay.handle(body["text"], context={"source": "device"}, auth_token=token)
     return {"reply": resp.immediate, "kind": resp.kind.value, "started": resp.started}
 ```
 
@@ -137,8 +138,8 @@ export default {
     }
 
     // Long: ack now, forward to /webhook/start, let the run deliver to Telegram.
-    const payload = JSON.stringify({ goal: text, deliver_to: "telegram", source: "wearable" });
-    // Fire-and-forget so the ack returns inside the device budget.
+    const payload = JSON.stringify({ goal: text, deliver_to: "telegram", source: "device" });
+    // Fire-and-forget so the ack returns inside the caller's deadline.
     request.waitUntil?.(
       fetch(env.START_URL, {
         method: "POST",
@@ -168,14 +169,9 @@ construction as `maverick.webhooks`, so the existing inbound `/webhook/start`
 receiver verifies the relay's forward. Set the relay's HMAC key to the distinct
 `MAVERICK_INBOUND_WEBHOOK_SECRET` configured on the receiving server.
 
-## Caveats (verify before committing)
+## Fitting it to your client
 
-The G2 device specifics (the ~30 s timeout, on-device STT behavior, HUD payload
-limits) are third-party-reported. Re-check them against Even Realities' own G2
-SDK before treating any number here as a hard guarantee. The relay core is
-device-agnostic; only the deadline and HUD-formatting constraints are
-device-specific.
-
-**Sources:**
-[G2 × OpenClaw bridge write-up](https://blog.juchunko.com/en/even-realities-g2-openclaw-bridge/) ·
-[Even Support Center — G2 "Bring Your Own Agent"](https://support.evenrealities.com/hc/en-us/categories/13489714076815-G2)
+The relay core does not depend on any particular device or client. Set
+`RelayConfig.deadline_seconds` to the reply deadline your client actually
+enforces, and shape quick answers to what it can display; both come from that
+client's own documentation, not from this reference.

@@ -80,7 +80,7 @@ class TestInboundAuth:
         rec = _Recorder()
         relay = Relay(RelayConfig(), sync_handler=lambda t: "should not run",
                       starter=rec.starter, deliver=rec.deliver)
-        resp = relay.handle("research competitor pricing", context={"source": "glasses"})
+        resp = relay.handle("research competitor pricing", context={"source": "device"})
         assert resp.error == "unauthorized inbound relay request"
         assert resp.started is False
         assert rec.started == []
@@ -149,7 +149,7 @@ class TestAckThenRun:
         rec = _Recorder()
         relay = Relay(_cfg(), sync_handler=lambda t: "should not be called",
                       starter=rec.starter, deliver=rec.deliver)
-        resp = relay.handle("write a detailed report on ducks", context={"source": "glasses"})
+        resp = relay.handle("write a detailed report on ducks", context={"source": "device"})
         assert resp.kind is RequestKind.ACK_THEN_RUN
         assert "telegram" in resp.immediate
         assert resp.started is True
@@ -160,7 +160,7 @@ class TestAckThenRun:
         assert sent["url"] == "http://relay/webhook/start"
         assert sent["payload"]["goal"] == "write a detailed report on ducks"
         assert sent["payload"]["deliver_to"] == "telegram"
-        assert sent["payload"]["source"] == "glasses"
+        assert sent["payload"]["source"] == "device"
 
     def test_start_failure_still_acks_fail_open(self):
         def bad_starter(url, payload, *, secret=None):

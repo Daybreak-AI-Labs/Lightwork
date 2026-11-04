@@ -1,13 +1,12 @@
 """Self-hosted relay reference.
 
-A reference implementation of the self-hostable relay that fronts inbound
-webhooks for a "bring your own agent" device such as the Even Realities G2
-(the OpenClaw-bridge pattern). OpenClaw's bridge is a Cloudflare Worker (a hosted
-dependency); ours ships as framework-agnostic *logic* you run as a Worker OR a
-small local/edge service (see ``docs/self-hosted-relay.md``).
+A reference implementation of a self-hostable relay that fronts inbound
+requests from an external device or client and forwards work to Lightwork. It
+ships as framework-agnostic *logic* you run as a small local/edge service OR a
+Worker (see ``docs/self-hosted-relay.md``).
 
-The relay's whole job is the **quick-vs-ack-then-run split** on a deadline-
-constrained device (the G2's ~30 s budget):
+The relay's whole job is the **quick-vs-ack-then-run split** for a client that
+waits only a short, fixed time for a reply (30 s by default):
 
   * **Quick query** (a fact, short chat) -> proxied synchronously to the agent
     and answered inside the deadline.
@@ -63,7 +62,7 @@ DEFAULT_LONG_TASK_PATTERN = r"\b(write|build|create|research|deploy|refactor|gen
 class RelayConfig:
     """Relay policy. All transport/IO is injected into ``Relay``, not here.
 
-    ``deadline_seconds`` is the device budget (G2 ~30 s). ``long_task_pattern``
+    ``deadline_seconds`` is the client's reply deadline. ``long_task_pattern``
     is the configurable regex that classifies a message as a long task. The
     pattern is matched case-insensitively against the message text.
     """
@@ -83,9 +82,9 @@ class RelayConfig:
 
 @dataclass
 class RelayResponse:
-    """What the relay returns to the device for one inbound request.
+    """What the relay returns to the device or client for one inbound request.
 
-    ``immediate`` is the text to render on the HUD right now (either the quick
+    ``immediate`` is the text to show the caller right now (either the quick
     answer, or the ack for a long task). ``kind`` records the branch taken.
     ``started`` is True iff a background run was kicked off. ``error`` carries a
     fail-open message when transport raised (the device still gets a reply).
