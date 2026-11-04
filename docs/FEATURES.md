@@ -5611,7 +5611,7 @@ tested without spawning py-spy.
   supplier evidence journey.
 - **Embeddable widgets** — two dependency-free `<script>`-tag surfaces,
   both self-hosted: the floating **chat widget**
-  (`extensions/chat-widget/maverick-widget.js`) posting to your own dashboard's
+  (`extensions/chat-widget/maverick-chat-widget.js`) posting to your own dashboard's
   `/chat/send`, and the read-only **status widget**
   (`extensions/widget/maverick-widget.js`): a Shadow-DOM pill → panel
   polling the real goals API and bucketing counts client-side, with the

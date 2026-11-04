@@ -5,7 +5,7 @@ Lightwork dashboard's chat endpoint. Self-hostable: it posts to **your**
 dashboard origin, not a hosted service.
 
 ```html
-<script src="/widget/maverick-widget.js"
+<script src="/widget/maverick-chat-widget.js"
         data-maverick-url="https://your-dashboard.example.com"
         data-maverick-title="Ask Lightwork"></script>
 ```

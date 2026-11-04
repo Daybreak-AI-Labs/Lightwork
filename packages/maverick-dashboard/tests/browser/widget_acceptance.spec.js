@@ -5,7 +5,7 @@
 const {test, expect} = require('@playwright/test');
 const fs = require('node:fs');
 const path = require('node:path');
-const widget = fs.readFileSync(path.resolve(__dirname, '../../../../extensions/chat-widget/maverick-widget.js'), 'utf8');
+const widget = fs.readFileSync(path.resolve(__dirname, '../../../../extensions/chat-widget/maverick-chat-widget.js'), 'utf8');
 
 async function host(page, {width = 320, height = 740, direction = 'ltr', zoom = 1, keyboardHeight} = {}) {
   await page.setViewportSize({width, height});
