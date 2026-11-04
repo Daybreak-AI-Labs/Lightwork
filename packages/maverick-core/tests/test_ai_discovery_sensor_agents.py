@@ -28,6 +28,7 @@ from maverick.ai_discovery_sensor_clients import (
     NormalizedSensorEvent,
     SensorBinding,
     SignedDiscoverySensorClient,
+    normalize_identity_audit,
 )
 from maverick.ai_discovery_sensor_test_estate import (
     ConsentingDiscoveryTestEstate,
@@ -377,6 +378,64 @@ def test_browser_and_oauth_agents_have_fixed_sensor_category(
         agent.normalize({**_browser_event(12), "provider_code": "employee_42"})
     with pytest.raises(SensorAgentConfigError, match="safe taxonomy"):
         agent.normalize({**_browser_event(13), "context_codes": ["alice"]})
+
+
+class _RecordingTransport:
+    def __init__(self) -> None:
+        self.requests = []
+
+    def send(self, request):
+        self.requests.append(request)
+        return TransportResponse(201)
+
+
+def _identity_event(index: int, **changes) -> NormalizedSensorEvent:
+    values = {
+        "source_event_sha256": f"{index:064x}",
+        "observed_at": _NOW + index / 1000,
+        "ai_service_code": "openai",
+        "ai_product_code": "chatgpt",
+        "provider_code": "openai",
+        "environment_code": "consenting_test",
+        "context_codes": ("managed_device",),
+    }
+    values.update(changes)
+    return normalize_identity_audit(**values)
+
+
+def test_identity_agent_queues_only_closed_reviewed_identity_events(tmp_path: Path) -> None:
+    transport = _RecordingTransport()
+    agent = DiscoverySensorAgent(
+        _config(tmp_path, source_kind="identity_directory"),
+        signer=lambda _message: b"s" * 64, transport=transport, clock=_Clock(),
+    )
+
+    report = agent.ingest_normalized([
+        _identity_event(1),
+        _identity_event(1),
+        None,
+        _identity_event(2, environment_code="other_estate"),
+        _identity_event(3, ai_product_code="employee_42"),
+        _identity_event(4, context_codes=()),
+        {"provider_code": "openai", "user": "private.person@example.test"},
+    ])
+
+    assert report == {"input": 7, "normalized": 1, "unmatched": 1, "invalid": 4, "duplicate": 1}
+    assert agent.deliver_once()["delivered"] == 1
+    assert len(transport.requests) == 1
+    assert b"private.person@example.test" not in agent.config.spool_file.read_bytes()
+    # Raw identity-provider records never take the generic intake path.
+    with pytest.raises(SensorAgentConfigError, match="reviewed identity audit adapter"):
+        agent.normalize({"userPrincipalName": "private.person@example.test"})
+
+
+def test_only_identity_agents_accept_normalized_identity_events(tmp_path: Path) -> None:
+    agent = DiscoverySensorAgent(
+        _config(tmp_path), signer=lambda _message: b"s" * 64, clock=_Clock(),
+    )
+    with pytest.raises(SensorAgentConfigError, match="source_kind identity_directory"):
+        agent.ingest_normalized([_identity_event(1)])
+    assert agent.spool.counts()["pending"] == 0
 
 
 def test_outage_retry_and_expired_lease_recover_without_raw_event(tmp_path: Path) -> None:

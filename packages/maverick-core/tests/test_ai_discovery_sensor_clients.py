@@ -10,6 +10,7 @@ from maverick.ai_discovery_sensor_clients import (
     SensorBinding,
     SignedDiscoverySensorClient,
     normalize_browser_oauth,
+    normalize_identity_audit,
     normalize_network_egress,
     safe_request_digest,
 )
@@ -107,6 +108,36 @@ def test_browser_oauth_normalizer_is_closed_and_sorted() -> None:
     assert event.domain_category == "oauth_grant"
     assert event.provider_code == "microsoft"
     assert event.context_codes == ("admin_consent", "delegated")
+
+
+def test_identity_audit_normalizer_takes_only_reviewed_codes() -> None:
+    event = normalize_identity_audit(
+        source_event_sha256=_EVENT_SHA,
+        observed_at=1_700_000_000,
+        ai_service_code="OpenAI",
+        ai_product_code="ChatGPT",
+        provider_code="openai",
+        environment_code="Workforce",
+        context_codes=("managed_device",),
+    )
+
+    assert event.domain_category == "identity_directory"
+    assert event.deployment_type == "saas"
+    assert (event.ai_service_code, event.ai_product_code) == ("openai", "chatgpt")
+    assert set(event.__dataclass_fields__) == {
+        "event_sha256", "observed_at", "ai_service_code", "ai_product_code",
+        "provider_code", "domain_category", "deployment_type", "environment_code",
+        "context_codes",
+    }
+    with pytest.raises(DiscoverySensorClientError, match="provider_code"):
+        normalize_identity_audit(
+            source_event_sha256=_EVENT_SHA,
+            observed_at=1_700_000_000,
+            ai_service_code="openai",
+            ai_product_code="chatgpt",
+            provider_code="raw_url",
+            environment_code="workforce",
+        )
 
 
 def test_signed_request_binds_exact_body_identity_tenant_and_nonce() -> None:
