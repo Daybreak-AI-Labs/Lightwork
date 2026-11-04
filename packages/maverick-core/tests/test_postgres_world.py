@@ -1609,7 +1609,7 @@ def test_concurrent_migrate_does_not_race(world):
     assert world.schema_version == _PG_SCHEMA_VERSION
 
 
-# ---------- audit round 6: Postgres backend at-rest / tenant parity ----------
+# ---------- Postgres backend at-rest / tenant parity ----------
 
 @pytest.mark.skipif(
     importlib.util.find_spec("cryptography") is None,

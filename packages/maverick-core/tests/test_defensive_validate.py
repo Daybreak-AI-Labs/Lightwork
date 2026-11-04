@@ -306,7 +306,7 @@ class TestCheatingDetectorMinSize:
 
 class TestQuotedPaths:
     """git quotes paths with spaces / non-ASCII.
-    The pre-Wave-12 \\S+ regex matched only the first whitespace-delimited
+    A plain \\S+ regex matches only the first whitespace-delimited
     segment, silently bypassing the test-file blocker."""
 
     def test_path_with_space_extracted(self):

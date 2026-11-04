@@ -133,7 +133,7 @@ def test_runner_exception_marks_task_failed():
 
 
 def test_result_call_block_is_bounded_independent_of_ttl():
-    """Audit round 12: a single tasks/result call must not block a worker thread
+    """A single tasks/result call must not block a worker thread
     for the task's whole ttl (up to 24h). result() runs on the HTTP dispatch
     pool, so an unbounded wait lets a few large-ttl tasks pin every thread and
     freeze the server. The per-call block is capped (result_block_ms); on timeout

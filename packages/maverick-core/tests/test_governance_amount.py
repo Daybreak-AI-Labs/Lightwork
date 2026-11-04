@@ -27,7 +27,7 @@ def test_wildcard_threshold_applies_to_all_actions():
 
 def test_wildcard_floor_binds_lower_than_exact_action():
     # Strictest-wins: a "*" catch-all is a FLOOR, so a per-action key can only
-    # tighten it, never loosen it (audit round 15). release_payment is gated at
+    # tighten it, never loosen it. release_payment is gated at
     # min(10000, 1000)=1000, NOT its own higher 10000.
     pol = Policy(require_human_above={"*": 1000, "release_payment": 10000})
     # $5k release_payment trips the $1k catch-all floor (used to ALLOW under the
