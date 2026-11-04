@@ -1751,6 +1751,34 @@ def test_release_input_assembler_accepts_only_the_exact_producer_cohort(tmp_path
     }
 
 
+def test_release_checksum_manifest_accepts_the_complete_assembled_cohort(tmp_path):
+    workflow = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text(
+        encoding="utf-8"
+    )
+    step = _workflow_step(workflow, "Generate a complete release checksum manifest")
+    source = step.split("python - <<'PY'\n", 1)[1].rsplit("\n          PY", 1)[0]
+    input_root, output_root = _release_input_fixture(tmp_path)
+    assert _run_release_input_assembler(tmp_path, input_root).returncode == 0
+    # The release job adds the container promotion plan before checksumming.
+    (output_root / "maverick-container-v1.2.3.json").write_text("{}\n", encoding="utf-8")
+    env = os.environ.copy()
+    env["RELEASE_TAG"] = "v1.2.3"
+
+    result = subprocess.run(
+        [sys.executable, "-I", "-c", textwrap.dedent(source)],
+        cwd=tmp_path,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "checksummed 5 release artifacts" in result.stdout
+    manifest = (output_root / "maverick-release-v1.2.3.sha256").read_text(encoding="utf-8")
+    assert len(manifest.splitlines()) == 5
+
+
 def test_release_input_assembler_rejects_an_extra_producer_file_before_copy(
     tmp_path,
 ):

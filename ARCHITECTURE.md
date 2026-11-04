@@ -153,7 +153,7 @@ No prebuilt binaries, container images or PyPI packages have been published yet.
 
 `.github/workflows/release.yml` runs when a `v*` tag is pushed, and `.github/workflows/publish.yml` runs after it; `RELEASING.md` describes the procedure.
 
-- **GitHub Releases**: PyInstaller single-file binaries for Linux x86_64, macOS arm64 and Windows x86_64, source archives of four demo applications, and CycloneDX SBOMs, each **Sigstore-signed keyless** (cosign via GitHub OIDC — `.sig` + `.pem` per artifact, logged to Rekor; verify with `deploy/verify-release.sh`); plus the Python wheels and sdists with their Sigstore bundles.
+- **GitHub Releases**: PyInstaller single-file binaries for Linux x86_64, macOS arm64 and Windows x86_64, and CycloneDX SBOMs, each **Sigstore-signed keyless** (cosign via GitHub OIDC — `.sig` + `.pem` per artifact, logged to Rekor; verify with `deploy/verify-release.sh`); plus the Python wheels and sdists with their Sigstore bundles.
 - **GHCR**: one container image tag per release, `ghcr.io/daybreak-ai-labs/lightwork:<version>`, promoted from a signed staging digest.
 - **PyPI**: the eight distributions in `release-cohort.toml` (`maverick-agent` for the core package, whose import and CLI name remain `maverick`, plus `maverick-shield`, `maverick-channels`, `maverick-evolve`, `maverick-dashboard`, `maverick-mcp-server`, `maverick-knowledge` and `maverick-installer`) through PyPI trusted publishing. Publishing to PyPI is switched off until the repository variable `MAVERICK_PUBLIC_PYPI_ENABLED` is set to `true`.
 

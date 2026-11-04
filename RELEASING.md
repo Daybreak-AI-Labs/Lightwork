@@ -157,15 +157,15 @@ to match the release manifest. To enable it:
 
 ## What a release contains
 
-- A GitHub release for the tag with the three binaries, the four demo source
-  archives, the SBOMs, the container promotion plan, the checksum files and a
-  `.sig` and `.pem` for each; plus the eight wheels, eight sdists,
+- A GitHub release for the tag with the three binaries, the SBOMs, the
+  container promotion plan, the checksum files and a `.sig` and `.pem` for
+  each; plus the eight wheels, eight sdists,
   `SHA256SUMS`, `release-manifest.json` and a `.cosign.bundle` for each of
   those.
 - The container image `ghcr.io/<owner>/lightwork:<version>`.
 - When PyPI publishing is enabled, the eight distributions on PyPI.
 
-Users can verify a downloaded binary, archive, checksum manifest or SBOM with
+Users can verify a downloaded binary, checksum manifest or SBOM with
 `deploy/verify-release.sh <file> <tag>`, which checks its signature against
 the release workflow's identity for that tag.
 

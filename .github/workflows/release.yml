@@ -657,7 +657,7 @@ jobs:
               and path != target
               and path.suffix not in {".pem", ".sig"}
           )
-          if len(files) < 8:
+          if len(files) < 5:
               raise SystemExit(f"incomplete release artifact set: only {len(files)} files")
           lines = [
               f"{hashlib.sha256(path.read_bytes()).hexdigest()}  "
