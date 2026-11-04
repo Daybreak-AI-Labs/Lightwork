@@ -193,11 +193,11 @@ def _restore_environ():
 
     ``monkeypatch`` restores what a test set through it, but not what the code
     under test sets: the config loader mirrors a wizard-written ``.env`` into
-    the environment with ``setdefault`` (``ANTHROPIC_API_KEY``), the
-    ``LIGHTWORK_*`` alias layer mirrors into ``MAVERICK_*``, the moat preflight
-    sets ``MAVERICK_SUPPRESS_SANDBOX_WARNING``. Each of those stayed set for
-    every later test in the worker, and pytest-xdist's size-first file order
-    made "later" mean any file at all. Restoring the snapshot keeps
+    the environment with ``setdefault`` (``ANTHROPIC_API_KEY``), and the
+    ``LIGHTWORK_*`` alias layer mirrors into ``MAVERICK_*``. Without a restore,
+    each of those would stay set for every later test in the worker, and
+    pytest-xdist's size-first file order makes "later" mean any file at all.
+    Restoring the snapshot keeps
     each test's environment its own without making every test pre-record the
     keys its code under test might mirror.
     """

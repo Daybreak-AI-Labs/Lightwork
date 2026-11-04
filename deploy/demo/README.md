@@ -1,27 +1,25 @@
 # Lightwork browser demo
 
 Run Lightwork as a **website** — the dashboard (web UI + REST API) in a browser
-— instead of the terminal, for live demos. All three options below
-serve the **same** hardened image (`deploy/docker/Dockerfile`, unprivileged
-uid 1000) running `maverick dashboard`; they differ only in *where* it runs and
-*how* it's reached. Pick whichever fits the moment — having all three means a
-fallback if one platform is down.
+— instead of the terminal, for a demonstration instance. All three options
+below serve the **same** hardened image (`deploy/docker/Dockerfile`,
+unprivileged uid 1000) running `maverick dashboard`; they differ only in
+*where* it runs and *how* it's reached.
 
 > The dashboard refuses to serve its admin surface off `localhost` without a
 > bearer token, so every option here is **token-gated** — via the
-> `Authorization: Bearer <TOKEN>` header, not a `?token=` query parameter
-> (removed: it leaked the bearer through browser history, server logs, and
-> the `Referer` header). A browser navigation can't set that header, so
-> there is no plain clickable demo link; see each model below for how to
-> actually reach it. Treat the token like a password either way.
+> `Authorization: Bearer <TOKEN>` header. The dashboard does not accept a
+> `?token=` query parameter, which would leak the bearer through browser
+> history, server logs and the `Referer` header. A browser navigation can't
+> set that header, so there is no plain clickable demo link; see each option
+> below for how to reach it. Treat the token like a password either way.
 
 ---
 
-## Model 1 — Local one-command (laptop demos)
+## Option 1 — Local, one command
 
-Zero hosting cost. The published port binds to host loopback. Use a current
-Docker release and an appropriate host firewall; best for a live demo on your
-own machine or a screen-share.
+Runs on your own machine. The published port binds to host loopback. Use a
+current Docker release and an appropriate host firewall.
 
 ```bash
 cd deploy/demo
@@ -34,10 +32,10 @@ the container, waits for `/livez`, and prints `http://localhost:8765/` plus
 the token and a ready-to-use `curl -H "Authorization: Bearer …"` command.
 For an actual click-through link on your own machine, put a header-injecting
 browser extension (e.g. ModHeader) in front, or use the nginx pattern from
-Model 2. Stop with `docker compose -f docker-compose.yml down` (add `-v` to
+Option 2. Stop with `docker compose -f docker-compose.yml down` (add `-v` to
 wipe demo state for a clean slate).
 
-## Model 2 — Hosted public URL (send a link)
+## Option 2 — Hosted HTTPS URL on a VPS
 
 A reachable HTTPS URL, on a VPS behind a TLS-terminating proxy.
 
@@ -51,17 +49,17 @@ caddy run --config deploy/demo/Caddyfile
 
 `deploy/demo/Caddyfile` only terminates TLS — it does not inject the
 `Authorization` header, so `https://demo.example.com/` still needs the
-Bearer header (curl/Postman/a header-injecting extension), same as Model 1.
-For an actual send-a-link demo where the proxy injects the header so
-viewers get a plain clickable URL, use
+Bearer header (curl/Postman/a header-injecting extension), same as Option 1.
+For a proxy that injects the header so viewers get a plain clickable URL,
+use
 `deploy/reference-architectures/demo-cluster/nginx.conf.template` instead
 (it sets `proxy_set_header Authorization "Bearer ${MAVERICK_DASHBOARD_TOKEN}"`)
 — treat that link like a password, since anyone who has it is authenticated.
 
-## Model 3 — One-click cloud blueprint (managed)
+## Option 3 — Managed platform blueprint
 
-Infrastructure-as-code so you can spin up an isolated instance
-on a managed platform. Two ready-to-use blueprints:
+Infrastructure-as-code for an isolated instance on a managed platform. Two
+blueprints:
 
 - **Render** — `deploy/demo/render.yaml`. In Render: *New → Blueprint*, point at
   this repo. `MAVERICK_DASHBOARD_TOKEN` is generated; set `ANTHROPIC_API_KEY`
@@ -97,7 +95,7 @@ ships conservative guardrails you can tune via env:
 
 **Sandbox note:** in this demo configuration agent-generated code runs in the
 container's *local* sandbox — the container (unprivileged user, ephemeral
-state) is the isolation boundary. That's fine for a controlled demo. For a
+state) is the isolation boundary, which suits a controlled demonstration. For a
 hardened, internet-exposed, or multi-tenant deployment, enable a container
 sandbox backend and enterprise mode (egress lock, fail-closed consent) — see
 `docs/enterprise/deployment-playbook.md` and `docs/enterprise/single-client-deployment.md`.

@@ -1,4 +1,4 @@
-# Lightwork hosted demo — Render blueprint (Model 3: one-click cloud).
+# Lightwork hosted demo — Render blueprint (Option 3 in README.md).
 #
 # Push this repo to GitHub, then in Render: New > Blueprint and point it at the
 # repo. Render builds the single image from deploy/docker/Dockerfile and runs
@@ -8,7 +8,7 @@
 #
 # Your demo link is then https://<service-name>.onrender.com/ — authenticate
 # with the dashboard token via the Authorization: Bearer header (the dashboard
-# no longer accepts ?token= in the URL, to keep the bearer out of logs/Referer).
+# does not accept ?token= in the URL, which keeps the bearer out of logs/Referer).
 # Copy the generated token from the service's Environment tab.
 #
 # Render auto-detects the listening port (8765) and routes 443 -> it with TLS.

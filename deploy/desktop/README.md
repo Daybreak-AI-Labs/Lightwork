@@ -16,8 +16,8 @@ bash deploy/desktop/install.sh
 On Windows, set `$env:MAVERICK_REF` and run `deploy/desktop/install.ps1`.
 The Windows bootstrap requires `pipx` to be installed for the selected Python
 from a source you trust. On Unix systems, install `pipx` with a supported system
-package manager when it is not already present. The bootstrap no longer installs
-or upgrades pip and pipx directly from a Python package index.
+package manager when it is not already present. The bootstrap does not install
+or upgrade pip or pipx from a Python package index.
 Both scripts fail before changing the machine when the ref is missing or
 mutable, and neither falls back to installing Lightwork from a public index.
 The cohort installer still resolves third-party dependencies from its configured

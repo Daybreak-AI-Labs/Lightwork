@@ -117,7 +117,7 @@ data "aws_iam_policy_document" "deployer" {
   # The deploy identity creates and changes the database and the state
   # volume but can never delete them or their backups: retiring either is a
   # separately reviewed operation under a different identity
-  # (NEXT_STEPS.md, "Database protection on an existing deployment"). A Deny
+  # (README.md, "Database protection on an existing deployment"). A Deny
   # wins over every Allow above, including rds:* and elasticfilesystem:*.
   statement {
     sid    = "NeverDeleteDataStores"

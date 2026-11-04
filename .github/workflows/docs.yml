@@ -18,10 +18,8 @@ on:
       - 'CLA.md'
       - 'requirements/docs.txt'
       - '.github/workflows/docs.yml'
-  # Also on PRs. This workflow ran only on pushes to main behind a paths
-  # filter, so a --strict failure was invisible until after merge -- and the
-  # site had failed every build for 30 consecutive runs without anyone seeing
-  # a red check. A docs build nobody watches is not a gate.
+  # Also on PRs, so a --strict build failure blocks the merge instead of
+  # surfacing only after it.
   pull_request:
     branches: [main]
     paths:

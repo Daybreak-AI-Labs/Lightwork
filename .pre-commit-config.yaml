@@ -8,7 +8,7 @@
 # hooks run on the WHOLE repo (pass_filenames: false), matching `ruff check .`
 # and the repo-wide tomllib grep -- a change can break ruff in a file it
 # doesn't touch (e.g. an unused import orphaned elsewhere), and a per-file
-# hook would miss that, which is precisely how CI has been broken before.
+# hook would miss that.
 repos:
   - repo: local
     hooks:

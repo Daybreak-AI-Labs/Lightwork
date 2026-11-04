@@ -112,8 +112,8 @@ runs:
             exit 1
             ;;
         esac
-        # Two exact-main jobs previously survived until GitHub's six-hour
-        # ceiling. pytest-timeout catches a stuck test; GNU timeout also
+        # Bound every slice well under GitHub's six-hour job ceiling.
+        # pytest-timeout catches a stuck test; GNU timeout also
         # bounds interpreter shutdown/non-daemon-thread leaks after the last
         # test and SIGABRT gives faulthandler a chance to print stacks.
         #

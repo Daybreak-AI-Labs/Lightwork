@@ -1,4 +1,4 @@
-# Lightwork — one-command browser demo (Model 1: local).
+# Lightwork — one-command browser demo (Option 1 in README.md: local).
 #
 # Boots the dashboard (web UI + REST API) in a container and publishes it on
 # http://localhost:8765. The demo audience never opens a terminal beyond the

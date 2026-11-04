@@ -1,8 +1,8 @@
 # Reproducible dependency constraints for the Python test and posture jobs.
 #
-# Seeded from the successful Python 3.12 environment in exact-main CI run
-# 30315811092 (2026-07-27), then completed with the test/posture toolchain and
-# common transitive resolutions for the supported interpreters.
+# Pins one known-good Python environment, including the test/posture
+# toolchain and the common transitive resolutions for the supported
+# interpreters.
 # Package manifests retain supported ranges for consumers; CI intentionally
 # resolves one reviewed environment so a dependency release cannot silently
 # change the security-posture baseline. Dependabot/security review should bump

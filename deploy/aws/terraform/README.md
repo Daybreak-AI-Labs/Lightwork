@@ -1,25 +1,25 @@
 # Lightwork AWS deploy — runbook
 
 Everything needed to stand up Lightwork on AWS from the Terraform stack in
-this directory. The steps assume the AWS CLI profile `lightwork`; substitute
-your own profile name throughout.
+this directory. The examples use the AWS CLI profile `lightwork`, the region
+`us-east-2` and the `lightwork-prod` resource names; substitute your own
+throughout.
 
 ## Created out of band (before the first apply)
 
 - **AWS account:** the target AWS account, reached through the `lightwork`
   profile.
-- **Region:** `us-east-2` for everything except the CodeBuild-triggering
-  commands, which are also `us-east-2` (the stack does not use `us-east-1`
-  anywhere).
+- **Region:** one region for everything, `us-east-2` in these examples,
+  including the CodeBuild commands.
 - **Terraform state bucket:** `lightwork-tfstate-<account-id>` — versioned,
   SSE-encrypted, public access blocked. Created directly via `aws s3api`
   (it can't bootstrap itself via Terraform). `versions.tf` names everything
   about the backend except the bucket; that comes from the git-ignored
   `backend.hcl` (copy `backend.hcl.example`) passed to `terraform init`.
-- **Budget guardrail:** an AWS Budget named `lightwork-monthly`, $200/mo cost
-  alert. Created directly via `aws budgets create-budget` (not Terraform
-  state). If a re-run errors "already exists" on either of these two, that's
-  fine — skip and move on.
+- **Budget guardrail (recommended):** an AWS Budget with a monthly cost
+  alert, for example `lightwork-monthly` at $200/month. Created directly via
+  `aws budgets create-budget` (not Terraform state). If a re-run reports
+  "already exists" for the bucket or the budget, skip that step.
 - **Terraform stack:** `deploy/aws/terraform/`. Everything else — VPC, RDS,
   ECR, ECS, ALB — is created by `terraform apply`.
 
@@ -70,9 +70,8 @@ terraform version || {
 ### 1b. Create the untracked operator inputs
 
 Deployment-specific identifiers and the shared key digest belong in
-`local.auto.tfvars`, which git ignores. The previously tracked
-`oidc.auto.tfvars` has been removed; move its values into the operator file or
-the deployment pipeline's protected variables:
+`local.auto.tfvars`, which git ignores, or in the deployment pipeline's
+protected variables:
 
 ```bash
 test -e deploy/aws/terraform/local.auto.tfvars || \
@@ -81,11 +80,10 @@ test -e deploy/aws/terraform/local.auto.tfvars || \
 # domain, OIDC settings, encryption digest and any feature flags in use.
 ```
 
-An existing deployment must supply these values before its next `terraform
-apply`; inspect the plan carefully before applying. The domain and encryption
-digest are required inputs. A running deployment's current values
-are the `MAVERICK_DASHBOARD_ADMINS` and `EMAIL_FROM` environment variables of
-its task definition, whose family is `<project>-<environment>`:
+The domain and encryption digest are required inputs. For a running
+deployment, the current values are the `MAVERICK_DASHBOARD_ADMINS` and
+`EMAIL_FROM` environment variables of its task definition, whose family is
+`<project>-<environment>`; inspect the plan carefully before applying:
 
 ```bash
 aws ecs describe-task-definition --task-definition lightwork-prod \
@@ -103,10 +101,10 @@ reviewed operation under a different identity.
 
 ### 2. Apply the stack
 
-**Critical gotcha:** the `aws login` credential store (`~/.aws/login/`) is a
-newer mechanism the Terraform AWS provider's SDK can't read directly. Bridge
-it into plain env vars first — every terraform invocation needs this in the
-same shell:
+**Credentials:** the Terraform AWS provider's SDK cannot read the
+`aws login` credential store (`~/.aws/login/`) directly. Export the
+credentials as plain environment variables first; every terraform invocation
+needs this in the same shell:
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
@@ -129,10 +127,9 @@ running — that's expected, not a failure.
 ### Database protection on an existing deployment
 
 Before applying a change to an existing stack, inspect the plan for
-`aws_db_instance.main`. The safety update should enable AWS deletion
-protection and configure a final snapshot **in place**. Stop and review any
-plan that replaces or destroys the database; `prevent_destroy` is meant to
-block that apply. A plain `terraform destroy` will also be blocked. An
+`aws_db_instance.main`. AWS deletion protection and the final snapshot are
+configured **in place**. Stop and review any plan that replaces or destroys
+the database; `prevent_destroy` blocks that apply. A plain `terraform destroy` will also be blocked. An
 intentional retirement needs a separately reviewed plan, a verified backup,
 and explicit removal of both the Terraform and AWS deletion guards; the
 final snapshot must then complete before the database is removed. The snapshot
@@ -176,9 +173,9 @@ aws codebuild batch-get-builds --ids "$(aws codebuild list-builds-for-project --
 
 ### 4. Set the real Anthropic API key
 
-The Secrets Manager entry is currently a placeholder (`REPLACE_ME`) —
-Terraform is configured with `ignore_changes` on it so re-applying will never
-stomp a real value once set:
+The Secrets Manager entry starts as a placeholder (`REPLACE_ME`). Terraform
+sets `ignore_changes` on it, so re-applying never overwrites a real value once
+set:
 
 ```bash
 aws secretsmanager put-secret-value \

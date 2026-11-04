@@ -79,6 +79,9 @@ On upgrades, relocate files from an older workdir before replacing its container
 and verify persistence after replacement. A saved path is not rewritten just
 because the deployment default changed.
 
+To run the dashboard from the same image as a token-gated browser demo,
+locally, on a VPS or on a managed platform, follow `deploy/demo/README.md`.
+
 ## VPS
 
 Always-on, accessible from anywhere via channel adapters.

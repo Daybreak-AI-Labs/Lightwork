@@ -50,8 +50,8 @@ def test_identifiers_of_people_are_not_tracked():
     assert "<sub>" in example and "<name>" in example  # placeholders, not people
     ignored = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
     assert "deploy/aws/terraform/local.auto.tfvars" in ignored
-    handoff = _tf("NEXT_STEPS.md")
-    assert "cp deploy/aws/terraform/local.auto.tfvars.example deploy/aws/terraform/local.auto.tfvars" in handoff
+    runbook = _tf("README.md")
+    assert "cp deploy/aws/terraform/local.auto.tfvars.example deploy/aws/terraform/local.auto.tfvars" in runbook
 
 
 def test_the_deployer_is_region_bound_and_cannot_delete_the_data_stores():
@@ -82,5 +82,5 @@ def test_the_service_can_be_pinned_to_an_image_digest():
     assert 'var.image_digest != ""' in ecs
     assert '"${aws_ecr_repository.app.repository_url}@${var.image_digest}"' in ecs
     assert '"${aws_ecr_repository.app.repository_url}:${var.image_tag}"' in ecs
-    assert "### 4b. Pin the image you just built" in _tf("NEXT_STEPS.md")
+    assert "### 4b. Pin the image you just built" in _tf("README.md")
 

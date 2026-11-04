@@ -1,4 +1,4 @@
-# Lightwork hosted demo — Fly.io blueprint (Model 3: one-click cloud).
+# Lightwork hosted demo — Fly.io blueprint (Option 3 in README.md).
 #
 # Run these from the REPO ROOT (the build context must include every package):
 #   flyctl launch --copy-config --config deploy/demo/fly.toml --no-deploy
@@ -8,8 +8,8 @@
 #   flyctl deploy --config deploy/demo/fly.toml
 #
 # Your demo link is then https://<app-name>.fly.dev/ — authenticate with the
-# dashboard token via the Authorization: Bearer header (the dashboard no longer
-# accepts ?token= in the URL, to keep the bearer out of logs/Referer headers).
+# dashboard token via the Authorization: Bearer header (the dashboard does not
+# accept ?token= in the URL, which keeps the bearer out of logs/Referer headers).
 
 app = "maverick-demo"
 primary_region = "iad"

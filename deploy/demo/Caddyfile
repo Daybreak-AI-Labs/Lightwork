@@ -1,4 +1,4 @@
-# Lightwork hosted demo — TLS reverse proxy (Model 2: hosted public URL).
+# Lightwork hosted demo — TLS reverse proxy (Option 2 in README.md: hosted HTTPS URL).
 #
 # Put Caddy in front of the demo container so a public domain gets automatic
 # HTTPS (Caddy provisions and renews a Let's Encrypt certificate). The
