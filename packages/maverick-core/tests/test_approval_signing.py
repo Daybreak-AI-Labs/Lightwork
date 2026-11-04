@@ -108,7 +108,7 @@ class TestSignVerify:
 
     def test_string_payload_digest_matches_raw_sha256(self):
         # payload_digest of a str/bytes payload hashes the raw bytes, so it equals
-        # the sha256(patch.encode()) the creation sites (swebench/dgm) record --
+        # the sha256(patch.encode()) the creation sites record --
         # keeping sign, ledger, and the independent auditor consistent.
         import hashlib
         patch = "diff --git a/x b/x\n-old\n+new\n"
