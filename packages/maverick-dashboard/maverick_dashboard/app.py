@@ -15569,13 +15569,8 @@ async def livez() -> dict:
 
 
 def _readiness_deep_checks() -> tuple[bool, dict[str, str]]:
-    """Compatibility export for the extracted operational probe service."""
+    """The deep readiness checks behind ``/readyz`` and ``/healthz``."""
     return _health_routes.readiness_deep_checks()
-
-
-def _health_should_redact() -> bool:
-    """Compatibility export for the extracted probe disclosure policy."""
-    return _health_routes.health_should_redact()
 
 
 @app.get("/healthz")
@@ -15605,13 +15600,6 @@ async def readyz() -> JSONResponse:
         world_provider=_world,
         provider_key_set=_any_provider_key_set,
     )
-
-
-def _bounded_user_spend_series(
-    spend_by_principal: dict[str, float],
-) -> list[tuple[str, float]]:
-    """Compatibility export for the extracted metric-cardinality helper."""
-    return _health_routes.bounded_user_spend_series(spend_by_principal)
 
 
 @app.get("/metrics", response_class=PlainTextResponse)

@@ -65,20 +65,6 @@ def _seed(collection: str | None) -> dict[str, int]:
         kb.close()
 
 
-def _reindex(collection: str) -> int:
-    from maverick.knowledge_admin import open_knowledge_base
-
-    kb = open_knowledge_base(require_existing=True)
-    if kb is None:
-        raise RuntimeError("knowledge is turned off")
-    try:
-        if collection not in kb.collections():
-            raise LookupError("unknown collection")
-        return int(kb.reindex(collection))
-    finally:
-        kb.close()
-
-
 async def _call(function, *args):
     try:
         return await run_in_threadpool(function, *args)

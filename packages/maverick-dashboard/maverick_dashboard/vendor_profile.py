@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from urllib.parse import urlencode
 
 from fastapi import HTTPException
 from maverick import config
@@ -275,7 +274,3 @@ def apply(request, prepared, operation):
         raise
     return original(request, prepared, operation)
 
-
-def profile_link(identifier, family):
-    page = {"lifecycle": "/third-party/lifecycle", "intelligence": "/third-party/intelligence", "contracts": "/third-party/contracts"}[family]
-    return page + "?" + urlencode({"registered_vendor": identifier})

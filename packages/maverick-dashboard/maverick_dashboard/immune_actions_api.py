@@ -26,7 +26,6 @@ from .auth import (
 )
 
 log = logging.getLogger(__name__)
-_MAX_DOC_ITEMS = 5000
 
 
 class ImmuneSettingsIn(BaseModel):

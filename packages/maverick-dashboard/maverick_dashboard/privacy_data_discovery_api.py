@@ -57,10 +57,6 @@ ProviderName = Annotated[
     str,
     StringConstraints(strict=True, min_length=1, max_length=64, pattern=_PROVIDER),
 ]
-EnvironmentRef = Annotated[
-    str,
-    StringConstraints(strict=True, min_length=2, max_length=128, pattern=_ENV),
-]
 SavedCredentialRef = Annotated[str, StringConstraints(strict=True, min_length=2, max_length=128,
     pattern=r"^(?:[A-Z][A-Z0-9_]{1,127}|connection:[a-z0-9][a-z0-9_-]{0,63}:[0-9a-f]{32})$")]
 EvidenceKeyRef = Annotated[str, StringConstraints(strict=True, min_length=2, max_length=128,

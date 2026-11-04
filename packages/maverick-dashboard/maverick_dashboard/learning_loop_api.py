@@ -826,21 +826,6 @@ async def holdout(request: Request) -> dict:
 
 # ---- changes that spend evaluation budget ----------------------------------
 
-def _gate_place() -> str:
-    from .learning_ops_api import part_place
-    return part_place("self_improvement")
-
-
-def _report_view(report: Any, retired: int) -> dict:
-    return {"model": str(getattr(report, "model_id", "") or ""),
-            "patterns_found": int(report.mined), "ideas_tried": int(report.proposed),
-            "passed_testing": int(report.validated), "adopted": int(report.promoted),
-            "retired": int(retired or 0),
-            "paused_for_calibration": bool(report.frozen),
-            "promotion_gate_off": not bool(report.gate_enabled),
-            "gate_place": _gate_place() if not report.gate_enabled else "",
-            "new_lessons": [_clip(ln) for ln in list(report.applied_lines)[:20]],
-            "back_on_trial": [_clip(ln) for ln in list(getattr(report, "relapsed", []) or [])[:20]]}
 
 
 def _instructions(text: str | None) -> str | None:

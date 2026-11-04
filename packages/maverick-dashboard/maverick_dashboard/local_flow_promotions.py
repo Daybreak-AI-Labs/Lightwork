@@ -188,10 +188,6 @@ def qualified_bundle(flow, *, permit_fallback=False, retained_manifest=None,
                 "taught_count": taught}
 
 
-def _pure(flow, *, permit_fallback=False):
-    qualified_bundle(flow, permit_fallback=permit_fallback)
-
-
 def _current(tenant, owner, flow_id):
     _owner_authority(tenant, owner)
     flow = store.load_flow(flow_id)

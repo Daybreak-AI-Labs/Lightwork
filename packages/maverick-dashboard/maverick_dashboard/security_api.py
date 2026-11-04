@@ -2160,12 +2160,6 @@ def _configured_environment_connector_factory(env_hunt):
     return factory
 
 
-def environment_hunt_tool_registry():
-    """Production callable for hosts that install enabled connector tools."""
-    env_hunt = _environment_module()
-    return _configured_environment_connector_factory(env_hunt).tool_registry()
-
-
 def _configured_environment_enrichment_providers() -> tuple[tuple[Any, ...], tuple[str, ...]]:
     from maverick.config import config_source_errors, load_config
 

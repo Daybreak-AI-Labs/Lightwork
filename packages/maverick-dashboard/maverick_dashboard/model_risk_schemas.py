@@ -2287,7 +2287,6 @@ _AI_IDENTITY_PRINCIPAL_REF = r"^prn_[0-9a-f]{32}$"
 _AI_IDENTITY_PROVIDER_SUBJECT = r"^(?:sub|idn)_[0-9a-f]{32}$"
 _AI_IDENTITY_CODE = r"^[a-z][a-z0-9_.:-]{0,127}$"
 _AI_IDENTITY_ASSET_ID = r"^ast_[0-9a-f]{32}$"
-_AI_IDENTITY_INTENT_ID = r"^IGPW-[0-9a-f]{32}$"
 _AI_IDENTITY_IDEMPOTENCY = r"^[A-Za-z0-9][A-Za-z0-9_.:-]{7,255}$"
 
 

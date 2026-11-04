@@ -53,7 +53,7 @@ from starlette.responses import (
 )
 
 from . import step_up
-from ._event_stream import TERMINAL_RUN_STATUSES, replay_cursor
+from ._event_stream import replay_cursor
 from ._shared import (
     _any_provider_key_set,
     _get_sse_semaphore,
@@ -1693,8 +1693,6 @@ def _sse_event(e) -> str:
 
     return sse_event(e)
 
-
-_TERMINAL_STATUSES = TERMINAL_RUN_STATUSES
 
 # ----- v1 SSE stream resource limits -----
 # Match the legacy dashboard stream hardening: open SSE streams hold an async
@@ -7262,30 +7260,6 @@ def _harness_guidance() -> tuple[list[dict], bool]:
         return [], False
 
 
-def _resolve_generated_tool(name: str):
-    """Resolve ``name`` to a ``*.py`` file strictly inside GENERATED_TOOLS_DIR.
-
-    Path-safety guard for the removal endpoint: the resolved target must be
-    a direct child of the generated-tools dir and end in ``.py``. Rejects
-    traversal (``..``), absolute paths, and subdirectory escapes by
-    comparing the resolved parent against the resolved dir. Returns the
-    Path or raises HTTPException(400).
-    """
-    from maverick import self_learning
-
-    d = self_learning.GENERATED_TOOLS_DIR
-    # A legitimate generated-tool filename is a bare ``<name>.py`` with no
-    # separators; reject anything with a path separator or traversal token
-    # before touching the filesystem.
-    if "/" in name or "\\" in name or name in ("", ".", "..") or not name.endswith(".py"):
-        raise HTTPException(status_code=400, detail="invalid generated-tool name")
-    target = (d / name).resolve()
-    base = d.resolve()
-    if target.parent != base:
-        raise HTTPException(status_code=400, detail="path outside generated_tools")
-    return target
-
-
 @router.get("/learned")
 async def learned_api(request: Request) -> dict:
     """Learned-capability ledger entries + on-disk generated tool filenames."""
@@ -8898,19 +8872,6 @@ def _require_scheduling() -> None:
     require_scheduling()
 
 
-def _schedule_out(job) -> ScheduleOut:
-    p = job.payload or {}
-    return ScheduleOut(
-        id=job.id,
-        cron=str(p.get("__cron__") or ""),
-        kind=job.kind,
-        title=(str(p.get("title") or p.get("text") or ""))[:200],
-        next_run=job.run_at,
-        schedule_id=str(p.get("schedule_id") or ""),
-        zone=str(p.get("__tz__") or ""),
-    )
-
-
 @router.get("/schedules")
 async def list_schedules(request: Request) -> dict:
     """Durable schedule definitions remain visible during runs and while paused."""
@@ -9057,53 +9018,6 @@ async def delete_schedule(request: Request, job_id: int) -> dict:
 # it runs only an operator-registered template, never arbitrary text.
 
 _WEBHOOK_RUN_PATH = "/webhook/run"
-_IMPORT_MAX_DEFINITIONS = 25
-_IMPORT_MAX_DEFINITION_BYTES = 64_000
-_IMPORT_MAX_TOTAL_DEFINITION_BYTES = 512_000
-_IMPORT_MAX_RENDERED_BODY_CHARS = 16_000
-
-
-def _definition_size(raw: dict) -> int:
-    return len(json.dumps(raw, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
-
-
-def _bounded_import_definitions(raws: list[dict]) -> list[dict]:
-    if len(raws) > _IMPORT_MAX_DEFINITIONS:
-        raise HTTPException(
-            status_code=413,
-            detail=f"too many import definitions (max {_IMPORT_MAX_DEFINITIONS})",
-        )
-    total = 0
-    for raw in raws:
-        size = _definition_size(raw)
-        if size > _IMPORT_MAX_DEFINITION_BYTES:
-            raise HTTPException(
-                status_code=413,
-                detail=(
-                    f"import definition is too large (max {_IMPORT_MAX_DEFINITION_BYTES} bytes)"
-                ),
-            )
-        total += size
-        if total > _IMPORT_MAX_TOTAL_DEFINITION_BYTES:
-            raise HTTPException(
-                status_code=413,
-                detail=(
-                    "import definitions are too large "
-                    f"(max {_IMPORT_MAX_TOTAL_DEFINITION_BYTES} bytes total)"
-                ),
-            )
-    return raws
-
-
-def _ensure_import_body_size(body: str) -> None:
-    if len(body) > _IMPORT_MAX_RENDERED_BODY_CHARS:
-        raise HTTPException(
-            status_code=413,
-            detail=(
-                "rendered import template is too large "
-                f"(max {_IMPORT_MAX_RENDERED_BODY_CHARS} characters)"
-            ),
-        )
 
 
 def _require_triggers() -> None:
@@ -11267,23 +11181,6 @@ def _record_agent_autonomy_intent(request: Request, name: str, before: dict, aft
             verb="specialist_independence_change_requested",
             actor=caller_principal(request) or "local administrator", specialist=name,
             before=before, requested=after, approved_samples=sample,
-        )
-    except AuditRefused as exc:
-        raise HTTPException(status_code=503, detail="The activity record is unavailable; no change was made.") from exc
-    if not recorded:
-        raise HTTPException(status_code=503, detail="The activity record is unavailable; no change was made.")
-
-
-def _record_agent_reset_intent(request: Request, name: str, fields: list[str]) -> None:
-    """Record an override removal before built-in permissions can return."""
-    from maverick.audit import AuditRefused, EventKind, audit_event
-
-    try:
-        recorded = audit_event(
-            EventKind.CONTROL_PLANE_ACTION, agent="dashboard",
-            verb="specialist_override_reset_requested",
-            actor=caller_principal(request) or "local administrator", specialist=name,
-            removed_fields=fields, requested={"reset_to_builtin": True},
         )
     except AuditRefused as exc:
         raise HTTPException(status_code=503, detail="The activity record is unavailable; no change was made.") from exc

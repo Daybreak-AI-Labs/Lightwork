@@ -73,11 +73,6 @@ def lookup_receipt(world, *, key, owner, kind):
     return receipt, goal
 
 
-def claim_api_dispatch(world, receipt, intent, *, effect_guard=None):
-    if not try_claim_api_dispatch(world, receipt, intent, **({"effect_guard": effect_guard} if effect_guard is not None else {})):
-        raise HTTPException(status_code=409, detail="Request retained; execution admission is unconfirmed. Reconcile before retrying.")
-
-
 def try_claim_api_dispatch(world, receipt, intent, *, effect_guard=None) -> bool:
     """Move an admitted request's draft goal to pending exactly once. ``False``
     when another request (a concurrent replay) already claimed it."""

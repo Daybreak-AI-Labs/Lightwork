@@ -82,14 +82,6 @@ def _run(fn, *args, **kwargs):
         ) from exc
 
 
-def _visible_key(request: Request, key_id: str) -> api_keys.ApiKey:
-    key = _run(api_keys.get_key, key_id)
-    if key is None or (not _is_admin(request) and key.owner != _caller(request)):
-        # 404, not 403: a key id must not reveal whether someone else's key exists.
-        raise HTTPException(status_code=404, detail="That key does not exist.")
-    return key
-
-
 def _overview(request: Request, everyone: bool) -> dict:
     caller = _caller(request)
     admin = _is_admin(request)

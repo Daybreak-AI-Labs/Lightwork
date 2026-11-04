@@ -1023,13 +1023,6 @@ def episodes_by_goal_batch(world, goal_ids, *, per_goal: int) -> dict | None:
         return None
 
 
-def _goal_event_from_row(row) -> GoalEvent:
-    """Build a GoalEvent from a row, decrypting the sealed content field."""
-    d = dict(row)
-    d["content"] = _dec_field(d.get("content"))
-    return GoalEvent(**_row_for(GoalEvent, d))
-
-
 def _goal_events_from_rows(rows: list) -> list[GoalEvent]:
     """Build goal events while resolving encryption policy and keys once."""
     decoded = _dec_fields([row["content"] for row in rows])
@@ -5325,15 +5318,6 @@ class WorldModel:
             return cur.rowcount
 
 
-class PostgresAtRestUnsupported(RuntimeError):
-    """Encryption-at-rest is on but the Postgres backend is selected.
-
-    The Postgres backend does not seal content at rest yet (the SQLite backend
-    does, via ``crypto_at_rest``). Rather than silently storing regulated /
-    encrypted-at-rest data as plaintext, :func:`open_world` fails closed. See
-    ``docs/encryption.md``."""
-
-
 def reclaim_window_seconds(default: float = 60.0) -> float:
     """The orphan-reclaim staleness window in seconds.
 
@@ -5431,11 +5415,6 @@ _tenant_worlds_lock = threading.Lock()
 def _world_cache_key(path: Path) -> str:
     """Host-independent key that cannot split a case-insensitive DB path."""
     return os.path.normcase(os.path.abspath(os.fspath(path))).casefold()
-
-
-class TenantWorldLimitError(RuntimeError):
-    """Retained for back-compat. No longer raised: the cache now evicts the
-    least-recently-used tenant rather than hard-failing at the ceiling."""
 
 
 def world_for_tenant(tenant: str | None = None) -> WorldModel:
