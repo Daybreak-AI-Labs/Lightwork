@@ -3169,7 +3169,7 @@ llama.cpp, Together, Groq, etc.), and **Codex CLI**
 `codex exec` subprocess — auth from `CODEX_ACCESS_TOKEN` or `codex login`,
 token fed on STDIN only; tool calls emulated via a fenced-JSON protocol;
 spend is subscription-metered so `codex_cli:` ids price $0 while token /
-wall-clock / tool-call budget caps still enforce). Cost-aware routing (`cost_router.py`) with **per-role
+wall-clock / tool-call budget caps still enforce). Cost-aware routing (`cost/router.py`) with **per-role
 policies** (`[routing.roles.<role>]`: provider allow/deny, cost ceiling, tier
 floor) and provider failover (`provider_failover.py`) with a **policy engine**
 (`failover_policy.py`: error-class gating — auth fails fast, 429/timeout/5xx
@@ -4769,12 +4769,12 @@ regression beyond tolerance, gating a release the way tests do. Deterministic;
 the snapshot store is an atomic JSON keyed by release tag.
 
 **Marketplace moderation**
-(`marketplace_moderation.py`, `python -m maverick.marketplace_moderation
+(`marketplace/moderation.py`, `python -m maverick.marketplace.moderation
 <path>`): static pre-publication checks over a submitted skill/plugin —
 manifest completeness, permission-escalation (declared vs used), secret scan
 (reuses the secret detector), prohibited patterns, license — with a
 strictest-wins approve/flag/reject verdict. **Skill search engine**
-(`skill_search.py`, `python -m maverick.skill_search`): zero-dep BM25-lite
+(`skill/search.py`, `python -m maverick.skill.search`): zero-dep BM25-lite
 ranked search over the local skill library with HF-dataset export/import
 (`skills.jsonl`, network via an injected fetcher; pulled skills re-validated
 through the skill validator). **Self-hosted relay reference**
@@ -4827,10 +4827,10 @@ current history for its current query and budget. The obsolete background worker
 and lossy prefix-result cache have been removed. Optional model-assisted agent
 strategies use native async completion under the agent's wall/halt guard; the
 default heuristic makes no model call. See [compaction execution and feature
-reuse](operations/compaction-execution.md); **cost projection at plan time** (`cost_projection.py`): token/dollar
+reuse](operations/compaction-execution.md); **cost projection at plan time** (`cost/projection.py`): token/dollar
 estimates per plan step from the role's model + MODEL_PRICES, iterations
 multiplier, OK/TIGHT/OVER budget verdicts; **cross-run learning cache**
-(`learning_cache.py`, opt-in `[memory] learning_cache`): memoize *verified*
+(`cache/learning.py`, opt-in `[memory] learning_cache`): memoize *verified*
 sub-results across runs (required `verified_by` provenance, TTL + LRU cap,
 refuses to store anything the secret detector flags; the orchestrator keys
 each goal by owner + title + details, briefs a repeat run with the checked
@@ -4839,7 +4839,7 @@ actually ran and accepted it); **energy/CO2
 accounting** (`energy_accounting.py`; the `energy_accounting` tool's token and
 grid defaults come from its `[energy]` coefficients): clearly-labeled estimates from configurable
 Wh/1k-token + grid-CO2 coefficients (output tokens weighted 3x), disclaimer
-always rendered; **Redis tool cache** (`redis_tool_cache.py`,
+always rendered; **Redis tool cache** (`cache/redis_tool.py`,
 `[tools] output_cache_backend = "redis"`): cross-process/cross-host tier
 reusing the same key canonicalization, namespace-scoped purge, fail-open on
 any Redis error; **WAL contention audit** (`test_wal_contention.py`): pins the
@@ -4860,18 +4860,18 @@ clients); **streaming tool_result**
 return a sync generator of chunks — chunks stream to the registered listener
 (dashboard/TUI live view) as they're produced while the model still receives
 the joined text, so the model protocol is unchanged; **tool-output cache**
-for read-only tools (`tool_cache.py`) with opt-in **warm-on-start** (`[tools]
+for read-only tools (`cache/tool.py`) with opt-in **warm-on-start** (`[tools]
 output_cache_snapshot`: persist entries to a JSONL snapshot, reload the
 still-fresh ones on the next run's first lookup); **network egress accounting**
 (`egress_accounting.py`); **run health score** (`health_score.py`); **replayable
-trace** format (`replay_trace.py`) with **trace pinning to commit**
+trace** format (`replay/trace.py`) with **trace pinning to commit**
 (`trace_pin.py`: every run stamps a `trace_meta` event carrying the
 workspace's commit/branch/dirty state at start — best-effort, never blocks —
-and `trace_commit()` reads it back so replays tie to exact code); **cost split by tag** (`cost_by_tag.py`) and
-**provider cost-curve fitter** (`cost_curve_fitter.py`); provider health board
+and `trace_commit()` reads it back so replays tie to exact code); **cost split by tag** (`cost/by_tag.py`) and
+**provider cost-curve fitter** (`cost/curve_fitter.py`); provider health board
 (`provider_health.py`); proactive **provider rate-limit predictor**
 (`rate_limit_predictor.py`); shared tool-reliability layer (`tool_reliability.py`,
-`retry.py`); circuit breaker (`circuit_breaker.py`); adaptive thinking budget
+`retry/`); circuit breaker (`circuit_breaker.py`); adaptive thinking budget
 (`thinking_budget.py`). **Self-tuning budgets** (`budget_tuner.py`, `maverick
 budget-tune`): learn a `max_dollars` recommendation from the historical
 per-goal spend distribution (a high percentile + margin, so the common case
@@ -4975,7 +4975,7 @@ tested without spawning py-spy.
   `maverick config-lint` (validate `~/.maverick/config.toml` for unknown
   sections/keys + obvious type mistakes with closest-match suggestions;
   `config_lint.py`), and `maverick costs` (cross-run per-day spend from the
-  recorded episode ledger; `cost_report.py`).
+  recorded episode ledger; `cost/report.py`).
 - **GitHub App** — `/webhook/github` verifies event signatures, but automated
   issue-to-PR execution is unavailable until agent checkout and publication
   are isolated. **GitLab Issues** — `/webhook/gitlab`:
@@ -5024,7 +5024,7 @@ tested without spawning py-spy.
   token/dollar projection + OK/TIGHT/OVER verdict before a goal runs.
   **"Why this cost" drill-down** — `GET /api/v1/goals/{id}/cost-breakdown`:
   spend decomposed by episode outcome (dollars/tokens/counts).
-  **Replay export to MP4** — `replay_video.py` +
+  **Replay export to MP4** — `replay/video.py` +
   `GET /api/v1/goals/{id}/replay-storyboard`: a run rendered to a watchable
   video — the deterministic core builds a captioned frame storyboard with
   per-step durations from the event gaps (secret/PII-scrubbed), then encodes
@@ -5053,15 +5053,15 @@ tested without spawning py-spy.
   `t()` template helper; `?lang=` → cookie → `Accept-Language`; user data is
   never translated; catalog-completeness pinned by test).
 - **Cost** — per-run reports, live cost meter, `maverick start --dry-cost`
-  forecasting (`cost_forecast.py`).
+  forecasting (`cost/forecast.py`).
 - **Templates / marketplace v2** — starter-goals library + community template
   registry (`maverick template browse/add`), **hash-verified installs**
   (`catalog.py` sha256 pinning), **ratings**: indexes carry display-only
   `rating`/`ratings_count` aggregates (clamped, malformed-safe), `browse`
-  renders ★-bars, and a local ledger (`marketplace_ratings.py`,
+  renders ★-bars, and a local ledger (`marketplace/ratings.py`,
   `maverick template rate <name> <1-5>` / `ratings-export`) keeps your own
   ratings ready for an index-PR submission — no hosted ratings service.
-- **Marketplace stats** — `GET /api/v1/marketplace/stats` (`marketplace_stats.py`):
+- **Marketplace stats** — `GET /api/v1/marketplace/stats` (`marketplace/stats.py`):
   aggregates the local ratings ledger into total / average / 1–5★ distribution /
   per-kind breakdown / top-rated — the JSON face of the stats view. Self-host-first
   (the operator's own ratings; no hosted community service); pure aggregation.
@@ -5081,7 +5081,7 @@ tested without spawning py-spy.
   SELECT/WITH). This is the analytical use DuckDB is actually good at; the live
   transactional world model stays SQLite/Postgres (DuckDB is the wrong engine
   for the concurrent write path).
-- **Cost retrospective** — `maverick cost-retro` (`cost_retrospective.py`): a
+- **Cost retrospective** — `maverick cost-retro` (`cost/retrospective.py`): a
   spend review over the recorded per-goal/episode costs — the costliest goals,
   how much went to **failed** work (effort with no delivered result), how
   concentrated spend is (a Pareto signal), and rule-based observations to act
