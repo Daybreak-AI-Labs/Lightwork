@@ -146,7 +146,7 @@
 
 <section class="card" id="handoff" aria-labelledby="handoff-heading">
   <h2 id="handoff-heading">6. Prepare a mock delivery/review handoff</h2>
-  <aside class="boundary"><strong>No delivery occurs.</strong> This stores a receipt in a local mock tenant queue. ServiceNow GRC, Archer, and OneTrust GRC are selector labels only; this app never calls their APIs. Any real import and approval remain external/manual.</aside>
+  <aside class="boundary"><strong>No delivery occurs.</strong> This stores a receipt in a local mock tenant queue. GRC platform A, B and C are generic selector labels only; this app never calls a GRC product's API. Any real import and approval remain external/manual.</aside>
   <form id="handoff-form">
     <label for="handoff-record">Local source record
       <select id="handoff-record" name="record_id" required>
@@ -156,9 +156,9 @@
     </label>
     <label for="handoff-destination">Mock destination
       <select id="handoff-destination" name="destination" required>
-        <option value="servicenow_grc">ServiceNow GRC</option>
-        <option value="archer">Archer</option>
-        <option value="onetrust_grc">OneTrust GRC</option>
+        <option value="grc_platform_a">GRC platform A</option>
+        <option value="grc_platform_b">GRC platform B</option>
+        <option value="grc_platform_c">GRC platform C</option>
       </select>
     </label>
     <label for="handoff-prepared-by">Prepared by<input id="handoff-prepared-by" name="prepared_by" maxlength="160" required autocomplete="name"></label>
@@ -170,7 +170,7 @@
 
 <section class="card" id="review-queue" aria-labelledby="review-heading">
   <h2 id="review-heading">7. Local mock tenant human review queue</h2>
-  <p class="hint">Approve or reject the prepared packet inside this demo. The decision demonstrates a tenant review workflow only; it has no authority in ServiceNow GRC, Archer, OneTrust GRC, or Lightwork.</p>
+  <p class="hint">Approve or reject the prepared packet inside this demo. The decision demonstrates a tenant review workflow only; it has no authority in any GRC product or in Lightwork.</p>
   <div id="pending-review-list">
     {% for receipt in pending_handoffs %}
     <article class="queue-item" data-receipt-id="{{ receipt.id }}">

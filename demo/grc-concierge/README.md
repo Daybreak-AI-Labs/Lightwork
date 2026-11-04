@@ -37,9 +37,9 @@ accepts JSON only on a loopback Host, rejects cross-origin browser writes, and
 streams request bodies through a 512 KiB cap before parsing.
 
 The guided workflow can prepare a local mock review-handoff receipt labeled for
-ServiceNow GRC, Archer, or OneTrust GRC, then let a human approve or reject it in
-the app's local mock tenant queue. It never contacts those products, never
-claims delivery, and never records a Lightwork approval. The decision is only a
+one of three generic destinations (GRC platform A, B or C), then let a human
+approve or reject it in the app's local mock tenant queue. It never contacts a
+GRC product, never claims delivery, and never records a Lightwork approval. The decision is only a
 local demonstration; real import and approval remain external/manual. The speed
 story reports observed local elapsed seconds from source save to packet and from
 packet to review, not projected savings or external-system timings. Vendor

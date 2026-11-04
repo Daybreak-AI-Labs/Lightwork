@@ -208,7 +208,7 @@ text = response.text
 for marker in (
     'id="assessment-form"', 'id="evidence-form"', 'id="risk-form"',
     'id="poam-form"', 'id="handoff-form"', 'aria-live="polite"',
-    'ServiceNow GRC', 'Archer', 'OneTrust GRC', 'external/manual',
+    'GRC platform A', 'GRC platform B', 'GRC platform C', 'external/manual',
         'No delivery occurs', 'no chat model, voice service',
         'id="vendor-form"', 'id="review-queue"', 'Measured local workflow timing',
         'local mock tenant', 'field records whether it was new',
@@ -257,7 +257,7 @@ def no_network(*args, **kwargs):
 original_connect = socket.socket.connect
 socket.socket.connect = no_network
 handoff = client.post('/api/handoffs/mock', json={
-    'record_id':risk.json()['id'], 'destination':'servicenow_grc',
+    'record_id':risk.json()['id'], 'destination':'grc_platform_a',
     'prepared_by':'reviewer', 'note':'Import manually after approval',
     'expected_revision':3,
 })
@@ -266,7 +266,7 @@ assert handoff.status_code == 200, handoff.text
 data = handoff.json()
 receipt = data['receipt']
 assert receipt['type'] == 'mock_handoff_receipt'
-assert receipt['destination_label'] == 'ServiceNow GRC'
+assert receipt['destination_label'] == 'GRC platform A'
 assert receipt['network_call_made'] is False
 assert receipt['delivery_status'] == 'not_sent_mock_only'
 assert receipt['approval_authority'] == 'local_mock_reviewer_only'
@@ -295,12 +295,12 @@ invalid = client.post('/api/handoffs/mock', json={
 })
 assert invalid.status_code == 422
 missing = client.post('/api/handoffs/mock', json={
-    'record_id':'missing', 'destination':'archer',
+    'record_id':'missing', 'destination':'grc_platform_b',
     'prepared_by':'reviewer', 'expected_revision':5,
 })
 assert missing.status_code == 404
 receipt_source = client.post('/api/handoffs/mock', json={
-    'record_id':receipt['id'], 'destination':'onetrust_grc',
+    'record_id':receipt['id'], 'destination':'grc_platform_c',
     'prepared_by':'reviewer', 'expected_revision':5,
 })
 assert receipt_source.status_code == 422
@@ -354,7 +354,7 @@ def no_network(*args, **kwargs):
 original_connect = socket.socket.connect
 socket.socket.connect = no_network
 handoff = client.post('/api/handoffs/mock', json={
-    'record_id':vendor['id'], 'destination':'onetrust_grc',
+    'record_id':vendor['id'], 'destination':'grc_platform_c',
     'prepared_by':'bob', 'expected_revision':2,
 })
 assert handoff.status_code == 200, handoff.text

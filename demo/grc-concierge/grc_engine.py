@@ -73,9 +73,9 @@ CATALOG: dict[str, dict] = {
 }
 
 MOCK_HANDOFF_DESTINATIONS = {
-    "servicenow_grc": "ServiceNow GRC",
-    "archer": "Archer",
-    "onetrust_grc": "OneTrust GRC",
+    "grc_platform_a": "GRC platform A",
+    "grc_platform_b": "GRC platform B",
+    "grc_platform_c": "GRC platform C",
 }
 
 VENDOR_POSTURE_FIELDS = (
