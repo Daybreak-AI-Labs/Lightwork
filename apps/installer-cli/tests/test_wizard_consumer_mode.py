@@ -115,7 +115,6 @@ def test_run_express_enables_all_safe_features(monkeypatch, tmp_path: Path):
     # DGM is a separate, explicit production decision even in express mode.
     assert "self_modify" not in config
 
-
     # The smoke-test canary: sandbox survives the round-trip (no [flows] dup).
     assert config["sandbox"]["backend"] == "local"
 
