@@ -7,7 +7,7 @@ import stat
 
 import pytest
 
-# --- SEC-1/PRODUCT-1: tamper-evident audit log must actually be wired in ---
+# --- tamper-evident audit log must actually be wired in ---
 
 def _crypto_works() -> bool:
     # `cryptography` can import yet panic on use when its native backend is
@@ -51,7 +51,7 @@ def test_audit_log_signing_roundtrip_and_tamper(tmp_path, monkeypatch):
     assert verify_chain(path)                        # break detected
 
 
-# --- reliability H1: signer refuses to silently restart on a torn line ---
+# --- signer refuses to silently restart on a torn line ---
 
 def test_audit_signer_refuses_torn_resume(tmp_path, monkeypatch):
     if not _crypto_works():

@@ -5,7 +5,7 @@ import os
 
 import pytest
 
-# ---- S1: read_file refuses tests in benchmark opaque mode ----
+# ---- read_file refuses tests in benchmark opaque mode ----
 
 class TestReadFileOpaqueGuard:
     def _make_sandbox(self, tmp_path):

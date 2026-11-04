@@ -292,7 +292,7 @@ def test_the_navigation_reads_the_current_files_inside_a_render(tmp_path, monkey
         config.reset_config_cache()
 
 
-# --- SEC-7: dashboard serves loopback-only when no token is configured ---
+# --- dashboard serves loopback-only when no token is configured ---
 
 def test_dashboard_loopback_helper():
     app = pytest.importorskip("maverick_dashboard.app")

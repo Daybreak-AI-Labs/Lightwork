@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-# --- SEC-6: SSRF guard must block metadata/reserved/multicast/unspecified ---
+# --- SSRF guard must block metadata/reserved/multicast/unspecified ---
 
 @pytest.mark.parametrize(
     "host",
@@ -25,7 +25,7 @@ def test_is_private_ip_allows_public_literal():
     assert _is_private_ip("93.184.216.34") is False
 
 
-# --- API-contract MEDIUM: SSRF override is honored uniformly ---
+# --- SSRF override is honored uniformly ---
 
 def test_is_blocked_host_respects_override(monkeypatch):
     from maverick.tools.http_fetch import is_blocked_host

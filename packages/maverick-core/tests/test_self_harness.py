@@ -3402,7 +3402,7 @@ def test_evaluator_builders_use_bound_verifier_without_role_reresolution(
     ]
 
 
-# ---------- A1/A2: outcome attribution scoping + cycle drives the lifecycle ----------
+# ---------- outcome attribution scoping + cycle drives the lifecycle ----------
 
 def test_note_outcome_domain_attribution_is_scoped(monkeypatch, store):
     ctrl = _enable(monkeypatch)

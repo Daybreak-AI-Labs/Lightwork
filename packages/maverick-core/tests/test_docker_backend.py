@@ -351,7 +351,7 @@ def _separate_container_test_home(tmp_path, monkeypatch, _isolate_dynamic_maveri
     monkeypatch.setenv("MAVERICK_HOME", str(operator_home / ".maverick"))
 
 
-# --- REL-6: docker timeout cleanup must not mask the TIMEOUT result ---
+# --- docker timeout cleanup must not mask the TIMEOUT result ---
 
 def test_docker_timeout_cleanup_is_guarded(monkeypatch):
     from maverick.sandbox.docker import DockerBackend

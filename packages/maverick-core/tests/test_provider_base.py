@@ -1,7 +1,7 @@
 """Tests for the shared provider base (maverick.providers.base)."""
 from __future__ import annotations
 
-# --- ops CRITICAL: provider SDK clients get a bounded timeout ---
+# --- provider SDK clients get a bounded timeout ---
 
 def test_llm_http_timeout_is_bounded():
     from maverick.providers.base import llm_http_timeout

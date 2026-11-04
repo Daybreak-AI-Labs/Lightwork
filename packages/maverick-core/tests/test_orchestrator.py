@@ -276,7 +276,7 @@ async def test_explicit_opaque_capability_principal_binds_owner_and_runs(
     assert goal.status == "done"
 
 
-# --- PRODUCT-3: the initial goal text must pass through scan_input ---
+# --- the initial goal text must pass through scan_input ---
 
 def test_run_goal_scans_initial_goal_text(tmp_path, monkeypatch):
     import asyncio

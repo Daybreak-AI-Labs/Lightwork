@@ -5,7 +5,7 @@ import importlib.util
 
 import pytest
 
-# --- offensive C1: compute SymPy path must bound exponentiation ---
+# --- compute SymPy path must bound exponentiation ---
 
 @pytest.mark.parametrize("expr", ["9**9**9**9", "2**1000000", "(10**100)**100"])
 def test_compute_rejects_unbounded_pow(expr):

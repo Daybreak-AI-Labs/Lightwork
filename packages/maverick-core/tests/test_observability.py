@@ -10,7 +10,7 @@ def _boom(args):
     raise RuntimeError("kaboom")
 
 
-# --- ops HIGH: ToolRegistry must emit the tool_calls metric (was never wired) ---
+# --- ToolRegistry must emit the tool_calls metric ---
 
 def test_tool_registry_emits_tool_metric(monkeypatch):
     import maverick.observability as obs

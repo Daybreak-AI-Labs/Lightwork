@@ -531,7 +531,7 @@ def test_voice_refuses_missing_or_noncanonical_number_even_with_valid_bearer(mon
     assert seen == []
 
 
-# --- agent-safety H3: channel allowlist helpers ---
+# --- channel allowlist helpers ---
 
 def test_channel_allowlist_helpers():
     base = pytest.importorskip("maverick_channels.base")

@@ -20,7 +20,7 @@ def test_scrub_env_strips_passphrase_netrc_cookie_auth():
     assert out["PATH"] == "/usr/bin" and out["HOME"] == "/home/u"
 
 
-# --- SEC-3: the local shell backend must scrub secrets, not just 5 names ---
+# --- the local shell backend must scrub secrets, not just 5 names ---
 
 def test_scrub_env_strips_secrets_keeps_benign():
     from maverick.sandbox.local import scrub_env
@@ -43,7 +43,7 @@ def test_scrub_env_strips_secrets_keeps_benign():
     assert out == {"PATH": "/usr/bin", "HOME": "/home/x", "LANG": "en_US.UTF-8"}
 
 
-# --- offensive HIGH-2: scrub_env strips connection-string secrets too ---
+# --- scrub_env strips connection-string secrets too ---
 
 def test_scrub_env_strips_dsn_and_url_secrets():
     from maverick.sandbox.local import scrub_env

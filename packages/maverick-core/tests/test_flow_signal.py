@@ -11,7 +11,7 @@ def _flow(nodes, start="a", **kw):
     return Flow(id="f", name="f", start=start, nodes={n.id: n for n in nodes}, **kw)
 
 
-# ---- B7: approval decisions are grounded -----------------------------------
+# ---- approval decisions are grounded -----------------------------------
 
 def test_approval_decision_is_grounded():
     seen = {}
@@ -44,7 +44,7 @@ def test_human_resume_grounds_the_decision():
     assert ("a", 1.0) in seen          # the approval node is grounded on resume too
 
 
-# ---- A6: subflow success grounds 1.0 (symmetric with the 0.0 failure) ------
+# ---- subflow success grounds 1.0 (symmetric with the 0.0 failure) ------
 
 def test_subflow_success_grounds_one():
     seen = {}
@@ -57,7 +57,7 @@ def test_subflow_success_grounds_one():
     assert seen["a"] == 1.0
 
 
-# ---- A5: foreach publishes partial results as it goes ----------------------
+# ---- foreach publishes partial results as it goes ----------------------
 
 def test_foreach_publishes_partial_results_each_iteration():
     body = _flow([FlowNode(id="x", kind="agent", brief="do {{item}}", output="r")], start="x")
@@ -115,7 +115,7 @@ def test_manual_run_does_not_ground_a_trigger_outcome(tmp_path, monkeypatch):
     assert execution.TRIGGER_NODE not in node_outcomes.stats("f")
 
 
-# ---- A1: a node timeout bounds the agent goal's wall ------------------------
+# ---- a node timeout bounds the agent goal's wall ------------------------
 
 def test_node_timeout_bounds_agent_wall(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
@@ -132,7 +132,7 @@ def test_node_timeout_bounds_agent_wall(tmp_path, monkeypatch):
     assert got["wall"] == 30.0          # the node timeout reaches the runner as a wall cap
 
 
-# ---- A4: validation flags pause nodes buried in nested bodies/branches ------
+# ---- validation flags pause nodes buried in nested bodies/branches ------
 
 def test_validate_flags_approval_inside_foreach_body():
     body = _flow([FlowNode(id="x", kind="approval", prompt="each?")], start="x")

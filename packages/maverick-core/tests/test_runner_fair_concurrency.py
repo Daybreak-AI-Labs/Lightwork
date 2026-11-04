@@ -99,7 +99,7 @@ def test_one_user_full_lane_does_not_block_another(monkeypatch, tmp_path):
             assert not thread.is_alive()
 
 
-# --- REL-5: run_goal_in_thread must not block forever waiting for a slot ---
+# --- run_goal_in_thread must not block forever waiting for a slot ---
 
 def test_runner_refuses_when_no_concurrency_slot(monkeypatch):
     import threading

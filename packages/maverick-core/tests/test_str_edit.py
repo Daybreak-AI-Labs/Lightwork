@@ -5,7 +5,7 @@ import os
 
 import pytest
 
-# ---- B1: str_replace_editor tool ----
+# ---- str_replace_editor tool ----
 
 class TestStrReplaceEditor:
     def _make_sandbox(self, tmp_path):

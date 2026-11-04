@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import time
 
-# --- REL-8: the LLM cache must not evict the row it just stored ---
+# --- the LLM cache must not evict the row it just stored ---
 
 def test_llm_cache_keeps_just_stored_entry(tmp_path):
     from maverick.cache.llm import LLMCache

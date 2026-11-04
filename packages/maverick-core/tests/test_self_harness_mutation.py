@@ -40,7 +40,7 @@ from maverick import self_improvement as si
 MAX = sh._MAX_LINES_PER_MODEL
 
 
-# ---- M9: signature summarizer pins MOST-FREQUENT message -------------------
+# ---- signature summarizer pins MOST-FREQUENT message -------------------
 
 def test_signature_uses_most_frequent_not_longest_message():
     # Frequency and length deliberately disagree: "short" occurs twice, the
@@ -65,7 +65,7 @@ def test_signature_frequency_through_mine_failures():
     assert "rare long message" not in sigs[0].signature
 
 
-# ---- M10: the in-process lock is the sole serializer without flock ----------
+# ---- the in-process lock is the sole serializer without flock ----------
 
 def _promote(model, line_key, store):
     ctrl = si.SelfImprovementController(frozen_fn=lambda: False, ledger=si.PromotionLedger())

@@ -1,7 +1,7 @@
 """Tests for the swarm spawn cap (maverick.swarm)."""
 from __future__ import annotations
 
-# --- agent-safety M3: per-goal spawn cap ---
+# --- per-goal spawn cap ---
 
 def test_swarm_total_spawn_cap():
     from maverick.swarm import SwarmContext

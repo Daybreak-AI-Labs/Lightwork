@@ -1,7 +1,7 @@
 """Tests for environment-variable parsing (maverick._envparse)."""
 from __future__ import annotations
 
-# --- architecture H2: shared env_bool ---
+# --- shared env_bool ---
 
 def test_env_bool(monkeypatch):
     from maverick._envparse import env_bool

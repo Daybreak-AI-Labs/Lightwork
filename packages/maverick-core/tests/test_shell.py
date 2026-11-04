@@ -7,7 +7,7 @@ import os
 
 import pytest
 
-# ---- S2: shell refuses git log -p / git show in opaque mode ----
+# ---- shell refuses git log -p / git show in opaque mode ----
 
 class TestShellOpaqueGuard:
     @pytest.fixture(autouse=True)

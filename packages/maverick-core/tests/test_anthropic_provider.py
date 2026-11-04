@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import logging
 
-# ---- D1: MAVERICK_TEMPERATURE is read by the Anthropic provider ----
+# ---- MAVERICK_TEMPERATURE is read by the Anthropic provider ----
 
 class TestTemperatureWiredThrough:
     def test_build_request_includes_temperature_when_env_set(self, monkeypatch):

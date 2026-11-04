@@ -5,7 +5,7 @@ import time
 
 from maverick.provider_health import ProviderStat
 
-# --- REL-13: provider_health must cap distinct keys ---
+# --- provider_health must cap distinct keys ---
 
 def test_provider_health_caps_keys():
     from maverick.provider_health import ProviderHealth

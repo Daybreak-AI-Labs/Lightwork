@@ -127,7 +127,7 @@ def test_exec_success_and_failure_paths_unchanged(tmp_path):
     assert bad.stderr.strip() == "oops"
 
 
-# ---- D5: sandbox.exec accepts a per-call timeout kwarg ----
+# ---- sandbox.exec accepts a per-call timeout kwarg ----
 
 class TestSandboxExecTimeout:
     def test_local_backend_accepts_timeout_kwarg(self, tmp_path):

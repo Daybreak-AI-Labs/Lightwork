@@ -784,7 +784,7 @@ class TestRepoMapInRegistry:
         assert "repo_map" in names
 
 
-# ---- D2: extract_unified_diff supports `diff --git` headers + renames ----
+# ---- extract_unified_diff supports `diff --git` headers + renames ----
 
 class TestExtractUnifiedDiffGitFormat:
     def test_diff_git_prefix_before_minus_plus_passes(self):
@@ -824,7 +824,7 @@ class TestExtractUnifiedDiffGitFormat:
         assert "+new" in out
 
 
-# ---- C4: validate_patch accepts new-file diffs ----
+# ---- validate_patch accepts new-file diffs ----
 
 class TestValidatePatchNewFile:
     def test_dev_null_minus_passes_header_check(self, tmp_path):
@@ -859,7 +859,7 @@ class TestValidatePatchNewFile:
         assert "missing" not in v.reason
 
 
-# ---- D4: detect_test_runner takes language hint ----
+# ---- detect_test_runner takes language hint ----
 
 class TestDetectRunnerLanguageHint:
     def test_jest_monorepo_with_pyproject_picks_jest_when_hinted(self, tmp_path):
@@ -882,9 +882,9 @@ class TestDetectRunnerLanguageHint:
         assert detect_test_runner(tmp_path, language="java") == "gradle"
 
 
-# ---- D7: load_instances tolerates malformed JSON lines ----
+# ---- load_instances tolerates malformed JSON lines ----
 
-# ---- C1: predicted_patch in CSV uses extracted diff, not prose ----
+# ---- predicted_patch in CSV uses extracted diff, not prose ----
 
 class TestPredictedPatchExtraction:
     def test_extract_unified_diff_used_in_row_construction(self):
@@ -901,7 +901,7 @@ class TestPredictedPatchExtraction:
         assert "+new" in diff
 
 
-# ---- B3: coding-mode template enforces 3-phase plan ----
+# ---- coding-mode template enforces 3-phase plan ----
 
 class TestCodingModeTemplate:
     def test_template_mentions_three_phases(self):

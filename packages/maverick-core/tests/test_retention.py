@@ -433,7 +433,7 @@ def test_enforce_includes_usage_ledger(tmp_path: Path, monkeypatch):
     assert res["usage_ledger"]["removed_buckets"] == 1
 
 
-# ---- M13: signed retention marker in the audit chain --------------------------
+# ---- signed retention marker in the audit chain --------------------------
 
 
 def _read_marker_rows(audit_dir: Path) -> list[dict]:

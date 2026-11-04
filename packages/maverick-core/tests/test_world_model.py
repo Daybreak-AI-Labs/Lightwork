@@ -8,7 +8,7 @@ import stat
 
 import pytest
 
-# --- privacy H2: world.db must not be world/group readable ---
+# --- world.db must not be world/group readable ---
 
 def test_world_db_permissions_locked(tmp_path):
     from maverick.world_model import WorldModel

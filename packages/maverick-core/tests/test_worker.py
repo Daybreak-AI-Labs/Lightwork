@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import time
 
-# --- REL-1: the worker must not mark a CRASHED goal as a done job, but must
+# --- the worker must not mark a CRASHED goal as a done job, but must
 # also NOT retry a deliberately-stopped ('blocked') goal (budget cap /
 # killswitch / awaiting-user) -- retrying re-runs the whole swarm, re-spends
 # budget, and defeats the killswitch. run_goal_in_thread returns 'error' for a
