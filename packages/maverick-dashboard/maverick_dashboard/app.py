@@ -3690,7 +3690,7 @@ async def task_limit_config_handler(request: Request, exc: TaskLimitConfigError)
 async def overflow_exception_handler(request: Request, exc: OverflowError):
     """An out-of-range integer path param (e.g. goal_id > 2**63-1) can't be a real
     row -- SQLite raises OverflowError binding it. Treat it as not-found rather
-    than letting it fall through to a 500 (user-testing finding)."""
+    than letting it fall through to a 500."""
     if _wants_html(request):
         return templates.TemplateResponse(
             request,

@@ -279,9 +279,9 @@ RULES: list[Rule] = [
     # Role hijacking
     Rule("dan_jailbreak", "critical",
          # Unambiguous jailbreak markers stand alone. "developer mode" does NOT:
-         # the bare term is a benign IDE/browser/app mode and over-blocked normal
-         # IT/dev text (measured ~13% false-positive on benign inputs,
-         # user-testing finding). The real "Developer Mode" jailbreak always
+         # the bare term is a benign IDE/browser/app mode, and matching it alone
+         # over-blocks normal IT/dev text (measured ~13% false-positive on
+         # benign inputs). The real "Developer Mode" jailbreak always
          # sheds restrictions, so require a restriction-removal cue within a
          # short window (either order). Bounds keep it ReDoS-safe.
          _compile(

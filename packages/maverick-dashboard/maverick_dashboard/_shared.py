@@ -78,12 +78,10 @@ def _any_provider_key_set() -> bool:
     """True iff some LLM provider is configured (env key, base-url env, or
     a ``[providers.<name>]`` config table with api_key/base_url).
 
-    The dashboard used to hard-fail on a missing
-    ANTHROPIC_API_KEY even when the user had OpenAI or Gemini set up.
-    Later it still rejected keyless self-hosted setups
-    (Ollama/vLLM/TGI via config or *_BASE_URL) that the CLI accepted and ran
-    fine — three components, three different predicates. Delegate to the one
-    shared predicate in maverick.config; the name is kept for call sites.
+    OpenAI, Gemini and keyless self-hosted setups (Ollama/vLLM/TGI via config
+    or *_BASE_URL) count, exactly as they do for the CLI: this delegates to
+    the one shared predicate in maverick.config, so every component agrees.
+    The name is kept for call sites.
     """
     try:
         from maverick.config import any_provider_configured

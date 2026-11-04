@@ -49,7 +49,7 @@ except ImportError:
         # (evaluated at class-definition time) don't crash with a confusing
         # "'NoneType' object is not callable" when fastapi/twilio are absent.
         # __init__ raises the real, actionable ImportError before the method --
-        # and these defaults -- is ever used (user-testing finding).
+        # and these defaults -- is ever used.
         return None
 
 

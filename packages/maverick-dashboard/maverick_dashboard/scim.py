@@ -115,7 +115,7 @@ def _authorize(request: Request) -> JSONResponse | None:
     # Compare on bytes: hmac.compare_digest(str, str) raises TypeError on any
     # non-ASCII (>U+007F) codepoint, which would 500 this auth gate (the sole
     # gate for the IdP provisioning surface) on a crafted bearer -- a DoS /
-    # info-leak amplifier. The channel verifiers were fixed the same way.
+    # info-leak amplifier. The channel verifiers compare the same way.
     # Any configured secret may match (rotation grace window); each compare is
     # constant-time.
     if not (token and any(_token_matches(token, s) for s in secrets)):

@@ -14,9 +14,8 @@ HTTP): for a long-running request the server emits
 JSON-RPC response, then closes. Without that Accept header it returns a
 single blocking ``application/json`` response, exactly as before.
 
-Not yet implemented: server-initiated ``sampling`` (the server asking
-the client's LLM to complete) — that needs a bidirectional channel and
-is a separate follow-up.
+Server-initiated ``sampling`` (the server asking the client's LLM to
+complete) is not supported: it needs a bidirectional channel.
 
 Usage::
 
@@ -25,14 +24,13 @@ Usage::
 Security:
   - Bearer-token auth required when MAVERICK_MCP_TOKEN is set.
   - Per the 2025-11-25 spec, server runs as an OAuth resource server;
-    full OAuth flow is a v0.3 follow-up. Bearer is the simpler path
-    that works today.
+    it checks a bearer token and does not implement the full OAuth flow.
   - All requests are routed through the same MCPServer.handle_*
     dispatch as stdio, so the security audit you do on the stdio
     side covers HTTP too.
 
-Spec deprecation note: the older SSE-only transport is EOL mid-2026
-across major clients; we ship Streamable HTTP as the GA transport.
+Spec deprecation note: major clients are retiring the older SSE-only
+transport; Streamable HTTP is the transport this server ships.
 """
 from __future__ import annotations
 
