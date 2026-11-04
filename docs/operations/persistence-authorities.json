@@ -16615,7 +16615,7 @@
       },
       "source_sites": [
         {
-          "line": 1422,
+          "line": 1379,
           "function": "trusted_evidence_registry_path",
           "kind": "data_dir",
           "expression": "data_dir('model_improvement', TRUSTED_EVIDENCE_REGISTRY_BASENAME, tenant=tenant_id)"

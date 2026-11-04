@@ -1349,50 +1349,6 @@ def promotion_readiness(
     }
 
 
-def require_training_readiness(pack: EnvironmentPack) -> dict[str, Any]:
-    """Enforce the effective family/holdout floor at a training handoff.
-
-    ``promotion_readiness`` remains a descriptive API for dashboards and
-    evaluation-only seed packs.  This function is the mutation boundary: it
-    reads the strict, unmerged model-improvement policy and refuses a training
-    export unless the selected pack has enough independent families and sealed
-    holdout answers.
-    """
-    try:
-        from ..config import (
-            ModelImprovementConfigError,
-            get_model_improvement_mutation_policy,
-        )
-
-        policy = get_model_improvement_mutation_policy()
-        minimum_train_families = int(policy["minimum_train_families"])
-        minimum_holdout_families = int(policy["minimum_holdout_families"])
-    except (
-        KeyError,
-        ModelImprovementConfigError,
-        OSError,
-        RuntimeError,
-        TypeError,
-        ValueError,
-    ) as exc:
-        raise EnvironmentError(
-            "training-readiness policy is unavailable or invalid",
-        ) from exc
-    readiness = promotion_readiness(
-        pack,
-        minimum_train_families=minimum_train_families,
-        minimum_holdout_families=minimum_holdout_families,
-    )
-    if readiness["ready"] is not True:
-        reasons = readiness.get("reasons")
-        detail = "; ".join(str(reason) for reason in reasons or ())
-        raise EnvironmentError(
-            "training environment is not promotion-ready"
-            + (f": {detail}" if detail else ""),
-        )
-    return readiness
-
-
 def _validate_trusted_evidence_registry(
     registry: TrustedEvidenceRegistry,
 ) -> TrustedEvidenceRegistry:
@@ -1958,7 +1914,6 @@ __all__ = [
     "list_environment_ids",
     "load_environment",
     "promotion_readiness",
-    "require_training_readiness",
     "score_output",
     "trusted_evidence_registry_path",
     "validate_environment_case",
