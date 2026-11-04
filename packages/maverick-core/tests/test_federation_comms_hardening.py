@@ -155,7 +155,7 @@ def test_correlation_ids_are_strictly_bounded_on_both_halves(monkeypatch):
     refused = service.delegate_goal(_payload(too_long))
     assert refused["accepted"] is False
     assert "too long" in refused["reason"]
-    assert goals.started == 0 and service._correlations == {}
+    assert goals.started == 0
 
     node = FederationNode(
         node="a",

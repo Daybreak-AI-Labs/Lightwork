@@ -200,10 +200,9 @@ _STATE_FILE_GATE = _StateFileGate()
 _DEFAULT_ADDR = "127.0.0.1:50061"  # one port up from the goal API (50051)
 _DEFAULT_RPC_TIMEOUT_S = 10.0
 _MAX_CORRELATION_ID_BYTES = 256
+# Bounds on retained delegation admissions (federation_admission reads them).
 _CORRELATION_CACHE_MAX = 250_000
 _CORRELATION_PER_PEER_MAX = 50_000
-_CORRELATION_TTL_S = 60 * 60.0
-_CORRELATION_WAIT_S = 30.0
 
 # Sentinel: "no grant injected" (build from config) vs an explicit None
 # (capability enforcement off -> delegations run unrestricted).
@@ -216,15 +215,6 @@ class FederationError(ValueError):
 
 class FederationAuthError(FederationError):
     """Missing or invalid shared token (fail-closed)."""
-
-
-@dataclass
-class _CorrelationEntry:
-    digest: str
-    created_at: float
-    event: threading.Event
-    owner_token: str = ""
-    result: dict[str, Any] | None = None
 
 
 def _state_call(method):
@@ -379,53 +369,6 @@ class _FederationState:
             return True
 
     @_state_call
-    def claim_correlation(
-        self, peer: str, corr: str, digest: str, *, now: float,
-    ) -> tuple[str, dict[str, Any] | None, str]:
-        with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            conn.execute(
-                "DELETE FROM correlations "
-                "WHERE status = 'complete' AND created_at < ?",
-                (now - _CORRELATION_TTL_S,),
-            )
-            row = conn.execute(
-                "SELECT digest, status, result_json FROM correlations "
-                "WHERE peer = ? AND correlation_id = ?",
-                (peer, corr),
-            ).fetchone()
-            if row is not None:
-                existing_digest, status, result_json = row
-                if not hmac.compare_digest(str(existing_digest), digest):
-                    return "conflict", None, ""
-                if status == "complete":
-                    result = json.loads(str(result_json or "{}"))
-                    if not isinstance(result, dict):
-                        raise ValueError("invalid federation correlation result")
-                    return "cached", result, ""
-                if status != "in_progress":
-                    raise ValueError("invalid federation correlation status")
-                return "busy", None, ""
-            total_count = int(conn.execute(
-                "SELECT COUNT(*) FROM correlations",
-            ).fetchone()[0])
-            peer_count = int(conn.execute(
-                "SELECT COUNT(*) FROM correlations WHERE peer = ?",
-                (peer,),
-            ).fetchone()[0])
-            peer_limit = min(_CORRELATION_PER_PEER_MAX, _CORRELATION_CACHE_MAX)
-            if total_count >= _CORRELATION_CACHE_MAX or peer_count >= peer_limit:
-                return "capacity", None, ""
-            owner_token = uuid.uuid4().hex
-            conn.execute(
-                "INSERT INTO correlations("
-                "peer, correlation_id, digest, status, owner_token, result_json, created_at"
-                ") VALUES (?, ?, ?, 'in_progress', ?, NULL, ?)",
-                (peer, corr, digest, owner_token, now),
-            )
-            return "owner", None, owner_token
-
-    @_state_call
     def correlation_result(
         self, peer: str, corr: str, digest: str,
     ) -> tuple[str, dict[str, Any] | None]:
@@ -446,44 +389,6 @@ class _FederationState:
         if not isinstance(result, dict):
             raise ValueError("invalid federation correlation result")
         return "cached", result
-
-    @_state_call
-    def finish_correlation(
-        self,
-        peer: str,
-        corr: str,
-        digest: str,
-        owner_token: str,
-        result: dict[str, Any],
-    ) -> None:
-        encoded = json.dumps(
-            result, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
-        )
-        if len(encoded.encode("utf-8")) > 16_384:
-            raise ValueError("federation correlation result is too large")
-        with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            cursor = conn.execute(
-                "UPDATE correlations SET status = 'complete', result_json = ? "
-                "WHERE peer = ? AND correlation_id = ? AND digest = ? "
-                "AND owner_token = ? AND status = 'in_progress'",
-                (encoded, peer, corr, digest, owner_token),
-            )
-            if cursor.rowcount != 1:
-                raise ValueError("federation correlation ownership changed")
-
-    @_state_call
-    def release_correlation(
-        self, peer: str, corr: str, digest: str, owner_token: str,
-    ) -> None:
-        with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            conn.execute(
-                "DELETE FROM correlations WHERE peer = ? AND correlation_id = ? "
-                "AND digest = ? AND owner_token = ? AND status = 'in_progress'",
-                (peer, corr, digest, owner_token),
-            )
-
 
 def _register_cached_connection(connection: sqlite3.Connection) -> int:
     """Track a newly cached connection; return the generation it is valid for.
@@ -1262,13 +1167,6 @@ class FederationService:
         self._record = record or _default_record
         self._acceptance_record = record if record is not None else _acceptance_record
         self._state = _federation_state(state_path)
-        # Per-peer correlation ids are the idempotency namespace for goal
-        # creation. The cache is service-local, bounded, and concurrency-safe;
-        # an identical in-flight retry waits for the original outcome.
-        self._correlations: OrderedDict[
-            tuple[str, str], _CorrelationEntry
-        ] = OrderedDict()
-        self._correlation_lock = threading.Lock()
 
     @staticmethod
     def _delegation_digest(payload: dict[str, Any]) -> str:
@@ -1301,92 +1199,6 @@ class FederationService:
         if not valid:
             return "", "correlation_id is invalid or too long"
         return corr, None
-
-    def _claim_correlation(
-        self, peer: Peer, corr: str, digest: str,
-    ) -> tuple[str, tuple[str, str], dict[str, Any] | None]:
-        """Durably claim one delegation id, wait for its owner, or refuse."""
-        key = (peer.name, corr)
-        now = time.time()
-        try:
-            claim, cached, owner_token = self._state.claim_correlation(
-                peer.name, corr, digest, now=now,
-            )
-        except (OSError, sqlite3.Error, ValueError):
-            log.error("federation: durable correlation ledger unavailable")
-            return "unavailable", key, None
-        if claim == "owner":
-            with self._correlation_lock:
-                self._correlations[key] = _CorrelationEntry(
-                    digest=digest,
-                    created_at=now,
-                    event=threading.Event(),
-                    owner_token=owner_token,
-                )
-            return "owner", key, None
-        if claim in {"cached", "conflict", "capacity"}:
-            return claim, key, dict(cached) if cached is not None else None
-
-        # Another process/thread owns the in-progress claim. Poll the durable
-        # row rather than relying on a process-local Event, so a second worker
-        # returns the exact original result without starting another goal.
-        deadline = time.monotonic() + _CORRELATION_WAIT_S
-        while time.monotonic() < deadline:
-            with self._correlation_lock:
-                local = self._correlations.get(key)
-            if local is not None:
-                local.event.wait(min(0.05, max(0.0, deadline - time.monotonic())))
-            else:
-                time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
-            try:
-                status, completed = self._state.correlation_result(
-                    peer.name, corr, digest,
-                )
-            except (OSError, sqlite3.Error, ValueError):
-                return "unavailable", key, None
-            if status == "cached":
-                assert completed is not None
-                return "cached", key, dict(completed)
-            if status == "conflict":
-                return "conflict", key, None
-            if status == "missing":
-                return "unavailable", key, None
-        return "busy", key, None
-
-    def _finish_correlation(
-        self, key: tuple[str, str], result: dict[str, Any],
-    ) -> None:
-        with self._correlation_lock:
-            entry = self._correlations.get(key)
-            if entry is None:
-                return
-            try:
-                self._state.finish_correlation(
-                    key[0], key[1], entry.digest, entry.owner_token, result,
-                )
-            except (OSError, sqlite3.Error, ValueError):
-                # Leave the durable row in-progress: retries then fail closed
-                # instead of risking duplicate goal creation after a restart.
-                log.error("federation: failed to persist correlation result")
-            entry.result = dict(result)
-            entry.event.set()
-            self._correlations.move_to_end(key)
-
-    def _release_correlation(self, key: tuple[str, str]) -> None:
-        """Release a side-effect-free owner claim (for example, rate refusal)."""
-        with self._correlation_lock:
-            entry = self._correlations.get(key)
-            if entry is None:
-                return
-            try:
-                self._state.release_correlation(
-                    key[0], key[1], entry.digest, entry.owner_token,
-                )
-            except (OSError, sqlite3.Error, ValueError):
-                log.error("federation: failed to release correlation claim")
-                return
-            self._correlations.pop(key, None)
-            entry.event.set()
 
     # Lazy so constructing the service never touches config/world unless used.
     def _local_grant(self) -> Any:
