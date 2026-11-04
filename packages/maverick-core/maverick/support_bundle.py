@@ -243,28 +243,14 @@ def _recent_failures() -> dict:
     return out
 
 
-def _entitlement() -> dict:
-    """The deployment's licensed edition/tier — so a support ticket is keyed to
-    the exact SKU the customer runs (no secrets; the summary is safe to share)."""
-    try:
-        from .entitlements import current
-        ent = current()
-        return {"customer": ent.customer, "tier": ent.tier, "status": ent.status,
-                "suites": list(ent.suites),
-                "expires_at": ent.expires_at.date().isoformat() if ent.expires_at else None}
-    except Exception:  # pragma: no cover - never let this block the bundle
-        return {"status": "unavailable"}
-
-
 def collect() -> dict:
     """Assemble the full redacted diagnostics bundle."""
     import secrets
     bundle: dict[str, Any] = {
-        # A ticket key: correlate the bundle a customer sends to their ticket,
-        # their entitlement, and the exact build — without any customer data.
+        # A ticket key: correlate the bundle a customer sends to their ticket
+        # and the exact build — without any customer data.
         "correlation_id": "sup_" + secrets.token_hex(6),
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "entitlement": _entitlement(),
         "versions": _versions(),
         "runtime": _runtime(),
         "paths": _paths(),
@@ -287,13 +273,12 @@ def collect() -> dict:
 
 def ticket_summary(bundle: dict | None = None) -> dict:
     """A compact, ticket-system-ready view of a bundle — the fields an intake
-    queue routes on, keyed by ``correlation_id``: which SKU (customer/tier/
-    status), which build, which readiness checks are failing, and the recent
-    failure modes. Derived purely from an already-redacted :func:`collect`
-    bundle, so it carries no secrets and is safe to POST to a portal/email→ticket
-    bridge. Pass a bundle to summarise, or omit to collect a fresh one."""
+    queue routes on, keyed by ``correlation_id``: which build, which readiness
+    checks are failing, and the recent failure modes. Derived purely from an
+    already-redacted :func:`collect` bundle, so it carries no secrets and is
+    safe to POST to a portal/email→ticket bridge. Pass a bundle to summarise,
+    or omit to collect a fresh one."""
     b = bundle if bundle is not None else collect()
-    ent = b.get("entitlement", {}) or {}
     readiness = b.get("readiness", {}) or {}
     failing = sorted(k for k, v in readiness.items() if str(v).startswith("fail"))
     recent = b.get("recent_failures", {}) or {}
@@ -301,10 +286,6 @@ def ticket_summary(bundle: dict | None = None) -> dict:
     return {
         "correlation_id": b.get("correlation_id"),
         "generated_at": b.get("generated_at"),
-        "customer": ent.get("customer"),
-        "tier": ent.get("tier"),
-        "entitlement_status": ent.get("status"),
-        "suites": ent.get("suites", []),
         "agent_version": versions.get("maverick-agent"),
         "readiness_failing": failing,
         "healthy": not failing,

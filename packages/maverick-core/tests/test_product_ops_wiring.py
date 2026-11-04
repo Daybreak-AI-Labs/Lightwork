@@ -70,15 +70,6 @@ def test_config_knob_supplies_trust_and_enforce(monkeypatch):
     assert ent.status == E.LICENSED and ent.allows("fleet_governance")
 
 
-def test_support_export_writes_redacted_bundle(tmp_path):
-    from maverick import support_bundle as S
-    out, bundle = S.export(tmp_path / "support.json")
-    assert out.exists()
-    on_disk = json.loads(out.read_text())
-    assert on_disk["correlation_id"].startswith("sup_")
-    assert "entitlement" in on_disk and "status" in on_disk["entitlement"]
-
-
 def test_refresh_no_api_is_a_noop(monkeypatch):
     monkeypatch.delenv("MAVERICK_LICENSE_API", raising=False)
     monkeypatch.setattr(E, "_license_cfg", dict)
@@ -181,36 +172,3 @@ def test_refresh_refuses_a_file_scheme_api_url(monkeypatch, tmp_path):
     res = E.refresh_from_server("file:///etc/passwd", trusted_pubkeys=["aa" * 32])
     assert res.ok is False and "fetch failed" in res.reason
     assert not (tmp_path / "license.json").exists()
-
-
-def test_support_export_emits_a_redacted_audit_event(monkeypatch, tmp_path):
-    import maverick.cli as C
-    from click.testing import CliRunner
-    calls = []
-    monkeypatch.setattr("maverick.audit.record",
-                        lambda kind, **kw: calls.append((kind, kw)) or True)
-    out = tmp_path / "bundle.json"
-    res = CliRunner().invoke(C.main, ["support", "-o", str(out)])
-    assert res.exit_code == 0, res.output
-    assert out.exists()
-    ev = [kw for kind, kw in calls if kind == "support_bundle_exported"]
-    assert len(ev) == 1                                    # exactly one export event
-    assert ev[0].get("correlation_id", "").startswith("sup_")
-    assert ev[0].get("filename") == "bundle.json"          # basename only, no path
-
-
-def test_ticket_summary_is_redacted_and_routable():
-    from maverick import support_bundle as S
-    bundle = {
-        "correlation_id": "sup_abc123", "generated_at": "2026-07-02T00:00:00Z",
-        "entitlement": {"customer": "Cedar Valley Bank", "tier": "gold",
-                        "status": "licensed", "suites": ["fleet"]},
-        "versions": {"maverick-agent": "0.1.7"},
-        "readiness": {"client_binding": "ok", "shield": "fail: required but unavailable"},
-        "recent_failures": {"failure_modes": {"timeout": 3},
-                            "failed_jobs": [{"id": 1}, {"id": 2}]},
-    }
-    s = S.ticket_summary(bundle)
-    assert s["correlation_id"] == "sup_abc123" and s["tier"] == "gold"
-    assert s["readiness_failing"] == ["shield"] and s["healthy"] is False
-    assert s["agent_version"] == "0.1.7" and s["failed_job_count"] == 2

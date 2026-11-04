@@ -429,7 +429,6 @@ def main(ctx: click.Context, db: str | None, model: str | None) -> None:
             "init",
             "installation-maintenance",
             "launch-check",
-            "license",
             "preflight",
             "version",
         }:
@@ -705,146 +704,12 @@ def launch_check() -> None:
 
     Distinct from ``maverick doctor`` (which diagnoses whether the install
     *works*): this asserts the deliberate production switches are ON --
-    cost-cap enforcement, per-user tenant isolation, a license trust anchor,
-    at-rest encryption, and a resolvable provider key. Each row reads real
-    config/env, so ``maverick launch-check`` is safe to gate a deploy on."""
+    cost-cap enforcement, per-user tenant isolation, at-rest encryption, and a
+    resolvable provider key. Each row reads real config/env, so
+    ``maverick launch-check`` is safe to gate a deploy on."""
     from ..health import run_launch_check
     if run_launch_check():
         sys.exit(1)
-
-
-@main.group("license")
-def license_group() -> None:
-    """Issue and inspect the deployment's signed feature license.
-
-    The signed license is the offline floor that unlocks gated tiers/suites when
-    license enforcement is on (off by default; see ``maverick.entitlements``).
-    ``issue``/``set`` sign a new license, ``show`` resolves the installed one,
-    and ``keygen`` mints a publisher keypair. The publisher PRIVATE key is a
-    SECRET: supply it via MAVERICK_LICENSE_PRIVATE_KEY (env or your secret
-    manager); it is never read from config and never printed by ``issue``."""
-
-
-@license_group.command("issue")
-@click.option("--customer", "--tenant", "customer", required=True,
-              help="Customer / tenant the license is issued to (the license subject).")
-@click.option("--tier", type=click.Choice(["basic", "gold", "platinum"]),
-              default="gold", show_default=True, help="Platform tier this license unlocks.")
-@click.option("--edition", default="enterprise", show_default=True,
-              help="Edition label recorded in the license.")
-@click.option("--suite", "suites", multiple=True,
-              help="Add-on suite to enable (repeatable), e.g. --suite fleet.")
-@click.option("--feature", "features", multiple=True,
-              help="Explicit à-la-carte feature grant (repeatable).")
-@click.option("--expires", default=None, help="YYYY-MM-DD (omit = perpetual).")
-@click.option("--grace-days", "grace_days", type=int, default=None,
-              help="Days a just-expired license stays live (default: kernel default).")
-@click.option("--seats", type=int, default=None, help="Optional seat count to record.")
-@click.option("--out", "out", default=None,
-              help="Where to write the signed license (default: the deployment "
-                   "license path, e.g. ~/.maverick/license.json).")
-@click.option("--stdout", "to_stdout", is_flag=True,
-              help="Print the signed license to stdout instead of writing a file.")
-def license_issue(customer: str, tier: str, edition: str, suites: tuple,
-                  features: tuple, expires: str | None, grace_days: int | None,
-                  seats: int | None, out: str | None, to_stdout: bool) -> None:
-    """Sign a license for a licensee, declaring its tier + enabled add-on suites.
-
-    Re-issuing with different --suite/--feature/--tier is how you change what a
-    deployment is entitled to (``set`` is an alias). The signing key comes from
-    MAVERICK_LICENSE_PRIVATE_KEY (never config, never the repo) and is never
-    echoed."""
-    from ..entitlements import (
-        DEFAULT_GRACE_DAYS,
-        build_license_payload,
-        install_license,
-        key_trusted,
-        license_text,
-        publisher_private_key,
-        sign_license,
-    )
-    key = publisher_private_key()
-    if not key:
-        click.echo(
-            "ERROR: no publisher signing key. Set MAVERICK_LICENSE_PRIVATE_KEY "
-            "(env or your secret manager) to the publisher private key hex, or "
-            "run `maverick license keygen` to mint one.", err=True)
-        sys.exit(2)
-    try:
-        payload = build_license_payload(
-            customer=customer, tier=tier, edition=edition,
-            suites=list(suites), features=list(features), seats=seats,
-            expires=expires,
-            grace_days=DEFAULT_GRACE_DAYS if grace_days is None else grace_days,
-        )
-        doc = sign_license(payload, key)
-    except ValueError as e:
-        click.echo(f"ERROR: {e}", err=True)
-        sys.exit(2)
-    except Exception as e:  # bad key hex, etc. -- never surface the key material
-        click.echo(f"ERROR: could not sign license ({type(e).__name__}); check "
-                   f"that MAVERICK_LICENSE_PRIVATE_KEY is valid Ed25519 hex.",
-                   err=True)
-        sys.exit(2)
-    if to_stdout:
-        click.echo(license_text(doc), nl=False)
-    else:
-        path = install_license(doc, out)
-        click.echo(f"wrote signed license -> {path}")
-    click.echo(f"  {customer} · tier={tier} · suites={list(suites) or '—'} · "
-               f"key_id={doc['key_id'][:16]}…")
-    # A license signed by a key the deployment doesn't trust grants nothing, so
-    # warn instead of letting the operator think gated features are now on.
-    if not key_trusted(doc["key_id"]):
-        click.echo(
-            "  NOTE: this signing key is not in the deployment trust anchor "
-            "(MAVERICK_LICENSE_PUBKEYS / [license] publisher_pubkeys); gated "
-            "features stay OFF until you publish its PUBLIC key there.", err=True)
-
-
-# `set` is an alias of `issue`: re-signing with new tier/suites is how features
-# are changed, so the two are the same operation under different verbs.
-license_group.add_command(license_issue, name="set")
-
-
-@license_group.command("show")
-@click.option("--file", "file", default=None,
-              help="License file to inspect (default: the deployment license path).")
-@click.option("--pubkey", default=None,
-              help="Comma-separated trusted pubkey hex (default: config/env trust anchor).")
-def license_show(file: str | None, pubkey: str | None) -> None:
-    """Show the resolved entitlement of the installed (or a given) license."""
-    from ..entitlements import (
-        GATED_FEATURES,
-        GRACE,
-        LICENSED,
-        load_entitlements,
-    )
-    trust = [k.strip() for k in pubkey.split(",")] if pubkey else None
-    ent = load_entitlements(file, trusted_pubkeys=trust)
-    click.echo(ent.summary())
-    click.echo(f"  licensed features active: {ent.paid_active}")
-    click.echo(f"  suites: {list(ent.suites) or '—'}")
-    for feat in sorted(GATED_FEATURES):
-        click.echo(f"    {'✓' if ent.allows(feat) else '·'} {feat}")
-    if ent.status not in (LICENSED, GRACE):
-        sys.exit(1)
-
-
-@license_group.command("keygen")
-def license_keygen() -> None:
-    """Mint an Ed25519 publisher keypair, printed ONCE."""
-    from ..entitlements import new_keypair
-    priv, pub = new_keypair()
-    click.echo("Generated an Ed25519 license keypair — shown ONCE:")
-    click.echo(f"  private key (SECRET):       {priv}")
-    click.echo(f"  public key  (trust anchor): {pub}")
-    click.echo("")
-    click.echo(
-        "Store the PRIVATE key in your secret manager as "
-        "MAVERICK_LICENSE_PRIVATE_KEY (never commit it, never put it in "
-        "config.toml). Publish the PUBLIC key as the deployment trust anchor: "
-        "[license] publisher_pubkeys or MAVERICK_LICENSE_PUBKEYS.")
 
 
 @main.command()
@@ -1102,16 +967,14 @@ def support(output: str | None) -> None:
         _atomic_write_text(path, text + "\n", mode=0o600)
         click.echo(f"support bundle written: {path}")
         # Record the export on the signed audit trail — redacted METADATA only
-        # (correlation_id / tier / customer / basename; never bundle contents),
-        # so a CISO can see every support touch on their own log. Fail-soft: a
-        # stripped-audit build or a write error must never break the export.
+        # (correlation_id / basename; never bundle contents), so a CISO can see
+        # every support touch on their own log. Fail-soft: a stripped-audit
+        # build or a write error must never break the export.
         try:
             from ..audit import record as _audit_record
-            _ent = bundle.get("entitlement", {}) or {}
             _audit_record(
                 "support_bundle_exported", agent="cli",
                 correlation_id=bundle.get("correlation_id"),
-                customer=_ent.get("customer"), tier=_ent.get("tier"),
                 filename=path.name)
         except Exception:  # pragma: no cover - audit must never crash the CLI
             pass

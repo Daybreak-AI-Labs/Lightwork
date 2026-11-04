@@ -1047,24 +1047,6 @@ def _launch_check_per_user_tenancy() -> bool:
                        "set [tenancy] by_user = true (or MAVERICK_TENANT_BY_USER=1)")
 
 
-def _launch_check_license_trust_anchor() -> bool:
-    """A license publisher public key is configured (the trust anchor)."""
-    try:
-        from .entitlements import _trusted_pubkeys
-        keys = _trusted_pubkeys()
-    except Exception as e:  # noqa: BLE001
-        return _launch_row(False, "license trust anchor",
-                           f"trust anchor unreadable: {e}",
-                           "fix [license] publisher_pubkeys / MAVERICK_LICENSE_PUBKEYS")
-    if keys:
-        return _launch_row(True, "license trust anchor",
-                           f"{len(keys)} publisher key(s) trusted")
-    return _launch_row(False, "license trust anchor",
-                       "no publisher public key configured",
-                       "publish the license PUBLIC key: [license] publisher_pubkeys "
-                       "or MAVERICK_LICENSE_PUBKEYS")
-
-
 def _launch_check_at_rest() -> bool:
     """Encryption at rest is on (MAVERICK_ENCRYPT_AT_REST / [encryption] at_rest)."""
     try:
@@ -1102,7 +1084,6 @@ def _launch_check_provider() -> bool:
 _LAUNCH_CHECKS = (
     _launch_check_cost_caps,
     _launch_check_per_user_tenancy,
-    _launch_check_license_trust_anchor,
     _launch_check_at_rest,
     _launch_check_provider,
 )

@@ -22,7 +22,6 @@ def _isolate(monkeypatch, tmp_path):
         "MAVERICK_QUOTA_MAX_DOLLARS_PER_DAY",
         "MAVERICK_QUOTA_MAX_TOKENS_PER_DAY",
         "MAVERICK_TENANT_BY_USER",
-        "MAVERICK_LICENSE_PUBKEYS",
         "MAVERICK_ENCRYPT_AT_REST",
     ):
         monkeypatch.delenv(var, raising=False)
@@ -32,7 +31,6 @@ def _configure_go_live(monkeypatch):
     monkeypatch.setenv("MAVERICK_QUOTA_ENFORCE", "1")
     monkeypatch.setenv("MAVERICK_QUOTA_MAX_DOLLARS_PER_DAY", "50")
     monkeypatch.setenv("MAVERICK_TENANT_BY_USER", "1")
-    monkeypatch.setenv("MAVERICK_LICENSE_PUBKEYS", "aa" * 32)
     monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
     # The provider probe reads config/env; pin it so the test is hermetic.
     monkeypatch.setattr("maverick.config.any_provider_configured", lambda: True)
@@ -47,7 +45,7 @@ def test_passes_when_every_switch_is_on(monkeypatch):
     res = _run()
     assert res.exit_code == 0, res.output
     assert "FAIL" not in res.output
-    assert res.output.count("PASS") == 5
+    assert res.output.count("PASS") == 4
     assert "clear for go-live" in res.output.lower()
 
 
@@ -61,7 +59,6 @@ def test_fails_nonzero_when_switches_are_off(monkeypatch):
     assert "[FAIL]" in res.output or "FAIL" in res.output
     assert "cost caps" in res.output
     assert "per-user tenancy" in res.output
-    assert "license trust anchor" in res.output
     assert "encryption at rest" in res.output
     assert "provider credential" in res.output
 
@@ -75,14 +72,6 @@ def test_enforcement_on_but_no_cap_is_a_fail(monkeypatch):
     assert res.exit_code != 0, res.output
     assert "cost caps" in res.output
     assert "every cap is 0" in res.output
-
-
-def test_missing_trust_anchor_is_a_fail(monkeypatch):
-    _configure_go_live(monkeypatch)
-    monkeypatch.delenv("MAVERICK_LICENSE_PUBKEYS", raising=False)
-    res = _run()
-    assert res.exit_code != 0, res.output
-    assert "license trust anchor" in res.output
 
 
 def test_a_dashboard_spending_limit_satisfies_cost_caps(monkeypatch):
