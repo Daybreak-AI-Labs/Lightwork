@@ -361,3 +361,145 @@ def test_a_response_from_the_main_model_claims_no_fallback(monkeypatch):
     resp = _Healthy(model="a:m1").complete("sys", [{"role": "user", "content": "hi"}])
     assert resp.text == "main"
     assert resp.fallback_from is None
+
+
+# --- failover cannot dispatch a model outside the admin allow-list ---
+
+def _point_overlay(monkeypatch, tmp_path):
+    from maverick import runtime_overrides
+    monkeypatch.setattr(
+        runtime_overrides, "OVERRIDES_PATH", tmp_path / "runtime-overrides.toml")
+    return runtime_overrides
+
+
+# --- failover feeds the cooldown ledger so order_chain can skip ------
+
+@pytest.fixture
+def _policy_window(monkeypatch):
+    from maverick import failover_policy as fp
+    monkeypatch.setattr(fp, "_policy_cfg",
+                        lambda: {"cooldown_s": 100, "cooldown_after": 1})
+    fp.reset_shared_ledger()
+    yield fp
+    fp.reset_shared_ledger()
+
+
+def test_allowlist_filter_drops_disallowed_fallbacks(monkeypatch, tmp_path):
+    from maverick.llm import _allowlist_filter_fallbacks
+    ro = _point_overlay(monkeypatch, tmp_path)
+    ro.set_allowed_models(["anthropic:claude-sonnet-4-6"])
+
+    chain = ["anthropic:claude-opus-4-8", "anthropic:claude-sonnet-4-6"]
+    assert _allowlist_filter_fallbacks(chain) == ["anthropic:claude-sonnet-4-6"]
+
+
+def test_model_for_role_accepts_bare_vs_qualified_allowlist(monkeypatch, tmp_path):
+    # Regression: the resolved model may be bare ("claude-sonnet-4-6") while the
+    # allow-list stores it provider-qualified ("anthropic:claude-sonnet-4-6").
+    # An exact-membership check wrongly rejected it and substituted; canonical
+    # comparison must treat the two spellings as the same allowed model.
+    from maverick import llm
+    ro = _point_overlay(monkeypatch, tmp_path)
+    ro.set_allowed_models(["anthropic:claude-sonnet-4-6"])
+    monkeypatch.setattr(llm, "_resolve_model_for_role", lambda role, **_selection: "claude-sonnet-4-6")
+    assert llm.model_for_role("orchestrator") == "claude-sonnet-4-6"
+
+
+def test_model_for_role_fallback_is_cheapest_not_lexicographic(monkeypatch, tmp_path):
+    # Regression: when neither the resolved model nor DEFAULT_MODEL is allowed,
+    # the fallback must be the CHEAPEST allowed model, not sorted(allow)[0].
+    # Here opus ($25/out) sorts before the far cheaper direct deepseek flash ($0.28),
+    # so lexicographic-first would force the most expensive allowed model.
+    from maverick import llm
+    ro = _point_overlay(monkeypatch, tmp_path)
+    ro.set_allowed_models(["anthropic:claude-opus-4-8", "deepseek:deepseek-v4-flash"])
+    monkeypatch.setattr(llm, "_resolve_model_for_role", lambda role, **_selection: "openai:gpt-5.5")
+    assert llm.model_for_role("bulk") == "deepseek:deepseek-v4-flash"
+
+
+def test_model_for_role_fallback_prefers_zero_cost_local_models(monkeypatch, tmp_path):
+    # Regression: the allow-list fallback must use the same zero-cost semantics
+    # as budget accounting for local/subscription providers. Otherwise a local
+    # allowed model can be skipped in favor of a paid hosted fallback.
+    from maverick import llm
+
+    ro = _point_overlay(monkeypatch, tmp_path)
+    ro.set_allowed_models(["ollama:my-local", "deepseek:deepseek-v4-flash"])
+    monkeypatch.setattr(llm, "_resolve_model_for_role", lambda role, **_selection: "openai:gpt-5.5")
+
+    assert llm.model_for_role("bulk") == "ollama:my-local"
+
+
+def test_cheapest_allowed_prefers_subscription_and_self_hosted_prefixes():
+    # codex_cli is subscription-metered, while unknown vllm/tgi models are
+    # self-hosted. All should rank as zero-cost ahead of a priced remote model.
+    from maverick.llm import _cheapest_allowed
+
+    hosted = "deepseek:deepseek-v4-flash"
+    assert _cheapest_allowed(["codex_cli:gpt-5.5", hosted]) == "codex_cli:gpt-5.5"
+    assert _cheapest_allowed(["vllm:z-local", hosted]) == "vllm:z-local"
+    assert _cheapest_allowed(["tgi:z-local", hosted]) == "tgi:z-local"
+
+
+def test_allowlist_filter_noop_without_allowlist(monkeypatch, tmp_path):
+    from maverick.llm import _allowlist_filter_fallbacks
+    _point_overlay(monkeypatch, tmp_path)  # no allow-list set -> unrestricted
+    chain = ["anthropic:claude-opus-4-8", "openai:gpt-4.1"]
+    assert _allowlist_filter_fallbacks(chain) == chain
+
+
+def test_allowlist_filter_can_empty_the_chain(monkeypatch, tmp_path):
+    # Every fallback disallowed -> empty chain -> the wiring skips failover and
+    # runs only the (unchanged) primary, never a forbidden fallback.
+    from maverick.llm import _allowlist_filter_fallbacks
+    ro = _point_overlay(monkeypatch, tmp_path)
+    ro.set_allowed_models(["anthropic:claude-sonnet-4-6"])
+    assert _allowlist_filter_fallbacks(["openai:gpt-4.1", "gemini:g"]) == []
+
+
+def test_failover_records_failure_into_cooldown_ledger(_policy_window):
+    from maverick.provider_failover import failover
+
+    def bad():
+        raise RuntimeError("provider down")
+
+    def good():
+        return "ok"
+
+    out = failover([("bad-model", bad), ("good-model", good)])
+    assert out == "ok"
+    led = _policy_window.shared_ledger()
+    # The failed model is now cooling (threshold=1); the one that answered isn't.
+    assert led.in_cooldown("bad-model") is True
+    assert led.in_cooldown("good-model") is False
+
+
+def test_failover_control_signal_does_not_cool(_policy_window):
+    from maverick.provider_failover import failover
+
+    def control_denied():
+        raise ValueError("budget exceeded")
+
+    # should_retry=False -> a deliberate control signal, not a provider failure;
+    # the model must NOT be cooled for it.
+    with pytest.raises(ValueError):
+        failover([("m", control_denied)], should_retry=lambda e: False)
+    assert _policy_window.shared_ledger().in_cooldown("m") is False
+
+
+def test_afailover_records_failure_into_cooldown_ledger(_policy_window):
+    import asyncio
+
+    from maverick.provider_failover import afailover
+
+    async def bad():
+        raise RuntimeError("provider down")
+
+    async def good():
+        return "ok"
+
+    out = asyncio.run(afailover([("bad-async", bad), ("good-async", good)]))
+    assert out == "ok"
+    led = _policy_window.shared_ledger()
+    assert led.in_cooldown("bad-async") is True
+    assert led.in_cooldown("good-async") is False

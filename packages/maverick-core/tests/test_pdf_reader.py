@@ -42,3 +42,25 @@ def test_normal_ranges_still_work():
     assert _parse_pages("3", total=5) == [2]
     assert _parse_pages("1-2,4", total=5) == [0, 1, 3]
     assert _parse_pages("", total=3) == [0, 1, 2]
+
+
+# ---------- read_pdf ----------
+
+def test_read_pdf_rejects_empty_source():
+    from maverick.tools.pdf_reader import read_pdf
+    assert "source is required" in read_pdf().fn({"source": ""}).lower()
+
+
+def test_read_pdf_missing_file():
+    from maverick.tools.pdf_reader import read_pdf
+    out = read_pdf().fn({"source": "/definitely/does/not/exist.pdf"})
+    assert "could not read" in out.lower()
+
+
+def test_pdf_parse_pages_ranges():
+    from maverick.tools.pdf_reader import _parse_pages
+    assert _parse_pages("", 10) == list(range(10))
+    assert _parse_pages("1-3", 10) == [0, 1, 2]
+    assert _parse_pages("5", 10) == [4]
+    assert _parse_pages("1,3,5", 10) == [0, 2, 4]
+    assert _parse_pages("8-", 10) == [7, 8, 9]

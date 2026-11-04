@@ -9,6 +9,8 @@ incremental 50 MiB ceiling, mirroring view_image / pdf_reader.
 """
 from __future__ import annotations
 
+import sys
+import types
 from pathlib import Path
 
 from maverick.tools import ocr as ocr_mod
@@ -111,3 +113,141 @@ def test_extract_url_http_error_status(monkeypatch):
     out = ocr_mod._op_extract_url(
         "https://example.com/gone.png", "eng", "tesseract", "", None)
     assert out.startswith("ERROR: image fetch 404")
+
+
+def _sb(tmp_path):
+    """A stand-in sandbox whose workdir is the test's tmp_path, so the
+    spec-path confinement allows the in-workspace spec file."""
+    return types.SimpleNamespace(workdir=str(tmp_path))
+
+
+# ---------- OCR tool ----------
+
+def test_ocr_requires_op():
+    from maverick.tools.ocr import ocr
+    assert "op is required" in ocr().fn({})
+
+
+def test_ocr_extract_validates_path():
+    from maverick.tools.ocr import ocr
+    out = ocr().fn({"op": "extract"})
+    assert "requires path" in out
+
+
+def test_ocr_missing_tesseract(tmp_path, monkeypatch):
+    from test_support.document_jobs import install_backend
+
+    backend, state = install_backend(monkeypatch, tmp_path, mode="missing_engine")
+    img = tmp_path / "x.png"
+    img.write_bytes(b"\x89PNG\r\n\x1a\n")
+    monkeypatch.chdir(tmp_path)
+    from maverick.tools.ocr import ocr
+    out = ocr(backend).fn({"op": "extract", "path": str(img)})
+    assert "engine not installed in selected backend" in out
+    assert state["requests"][0]["operation"] == "image_ocr"
+
+
+def test_ocr_extract_runs_tesseract(tmp_path, monkeypatch):
+    from test_support.document_jobs import install_backend
+
+    backend, state = install_backend(monkeypatch, tmp_path)
+    img = tmp_path / "x.png"
+    img.write_bytes(b"\x89PNG\r\n\x1a\n")
+    monkeypatch.chdir(tmp_path)
+    from maverick.tools.ocr import ocr
+    out = ocr(backend).fn({"op": "extract", "path": str(img), "lang": "eng+deu"})
+    assert out == "OCR text 120000"
+    assert state["requests"][0]["operation"] == "image_ocr"
+    assert state["requests"][0]["language"] == "eng+deu"
+    assert len(state["calls"]) == 1
+
+
+def test_ocr_hf_backend_requires_token(tmp_path, monkeypatch):
+    img = tmp_path / "x.png"
+    img.write_bytes(b"\x89PNG\r\n\x1a\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("HUGGINGFACE_API_TOKEN", raising=False)
+    fake_httpx = types.ModuleType("httpx")
+    monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
+    from maverick.tools.ocr import ocr
+    out = ocr().fn({"op": "extract", "path": str(img), "backend": "hf"})
+    assert "HUGGINGFACE_API_TOKEN" in out
+
+
+def test_ocr_hf_cannot_borrow_operator_token_in_authenticated_enterprise(
+    tmp_path, monkeypatch,
+):
+    import asyncio
+
+    from maverick.tools import ToolRegistry
+    from maverick.tools.ocr import ocr
+
+    img = tmp_path / "x.png"
+    img.write_bytes(b"fake")
+    monkeypatch.setenv("HUGGINGFACE_API_TOKEN", "operator-global-secret")
+    monkeypatch.setattr("maverick.enterprise.enterprise_enabled", lambda: True)
+    called = []
+    monkeypatch.setattr(
+        "maverick.tools._ssrf.safe_client",
+        lambda *_a, **_k: called.append(True),
+    )
+    reg = ToolRegistry(principal="user:alice")
+    reg.register(ocr(_sb(tmp_path)))
+
+    out = asyncio.run(reg.run("ocr", {
+        "op": "extract", "path": str(img), "backend": "hf",
+    }))
+
+    assert out.startswith("REFUSED (credentials)")
+    assert "operator-global-secret" not in out
+    assert called == []
+
+
+def test_ocr_extract_blocks_path_escape():
+    from maverick.tools.ocr import ocr
+    out = ocr().fn({"op": "extract", "path": "/etc/hosts"})
+    assert "path escapes workspace" in out
+
+
+def test_ocr_extract_url_blocks_private():
+    # safe_client resolves 127.0.0.1, sees it's non-public, and refuses (offline).
+    from maverick.tools.ocr import ocr
+    out = ocr().fn({"op": "extract_url", "url": "http://127.0.0.1:8000/a.png"})
+    assert "refusing to fetch" in out and "127.0.0.1" in out
+
+
+def test_ocr_extract_url_uses_workspace_tempfile(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("shutil.which", lambda b: "/usr/bin/tesseract")
+    monkeypatch.setattr("maverick.tools.ocr._run_tesseract", lambda *_a, **_k: "ok")
+
+    class _Resp:
+        status_code = 200
+        headers = {"content-type": "image/png"}
+
+        def iter_bytes(self):
+            yield b"\x89PNG\r\n\x1a\n"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    class _Client:
+        def stream(self, method, url):
+            return _Resp()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    # Patch the SSRF-safe client (pins the connection) rather than httpx.
+    import maverick.tools._ssrf as _ssrf
+    monkeypatch.setattr(_ssrf, "safe_client", lambda url, **kw: _Client())
+
+    from maverick.tools.ocr import ocr
+    out = ocr().fn({"op": "extract_url", "url": "http://example.com/a.png"})
+    assert out == "ok"

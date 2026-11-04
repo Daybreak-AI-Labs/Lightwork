@@ -13,6 +13,7 @@ canned JSON.
 from __future__ import annotations
 
 import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -342,3 +343,51 @@ def test_bluesky_send_shapes_top_level_post(monkeypatch):
     assert body["record"]["text"] == "@owner.bsky: ping"
     assert "reply" not in body["record"]
     assert posts[0]["headers"]["Authorization"] == "Bearer tok"
+
+
+# ---------- Bluesky channel ----------
+
+@pytest.mark.asyncio
+async def test_bluesky_start_requires_credentials():
+    from maverick_channels.bluesky import BlueskyChannel
+
+    async def handler(msg):
+        return ""
+
+    ch = BlueskyChannel(handler=handler, handle="", password="", allowed_user_ids={"did:plc:ok"})
+    with pytest.raises(RuntimeError, match="BLUESKY_HANDLE"):
+        await ch.start()
+
+
+@pytest.mark.asyncio
+async def test_bluesky_session_created_and_cached():
+    from maverick_channels.bluesky import BlueskyChannel
+
+    fake_resp = MagicMock()
+    fake_resp.json = MagicMock(return_value={
+        "accessJwt": "tok-123",
+        "did": "did:plc:abc",
+        "handle": "user.bsky.social",
+    })
+    fake_resp.raise_for_status = MagicMock()
+
+    fake_client = MagicMock()
+    fake_client.__aenter__ = AsyncMock(return_value=fake_client)
+    fake_client.__aexit__ = AsyncMock(return_value=False)
+    fake_client.post = AsyncMock(return_value=fake_resp)
+
+    with patch("httpx.AsyncClient", return_value=fake_client):
+
+        async def handler(msg):
+            return ""
+
+        ch = BlueskyChannel(
+            handler=handler, handle="me.bsky.social", password="app-pass",
+            allowed_user_ids={"did:plc:ok"},
+        )
+        sess = await ch._ensure_session()
+        assert sess["accessJwt"] == "tok-123"
+        # Second call hits the cache, no extra POST.
+        sess2 = await ch._ensure_session()
+        assert sess2["accessJwt"] == "tok-123"
+        assert fake_client.post.call_count == 1

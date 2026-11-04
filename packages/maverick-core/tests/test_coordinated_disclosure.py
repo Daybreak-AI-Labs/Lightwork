@@ -95,3 +95,33 @@ def test_registered():
 
     names = set(getattr(base_registry(world=_W(), sandbox=_S()), "_tools", {}).keys())
     assert "coordinated_disclosure" in names
+
+
+# ---- coordinated_disclosure ----
+
+def test_cvd_status_open_and_expired():
+    t = coordinated_disclosure()
+    open_out = t.fn({"op": "status", "reported": "2027-01-01", "embargo_days": 90, "today": "2027-02-01"})
+    assert "embargo: OPEN" in open_out and "disclose-on: 2027-04-01" in open_out
+    assert "days-remaining: 59" in open_out
+    exp = t.fn({"op": "status", "reported": "2027-01-01", "embargo_days": 90, "today": "2027-05-01"})
+    assert "embargo: EXPIRED" in exp
+
+
+def test_cvd_advisory():
+    t = coordinated_disclosure()
+    out = t.fn({
+        "op": "advisory", "id": "MAV-2027-001", "severity": "high",
+        "summary": "sandbox escape via crafted args", "reported": "2027-03-01",
+        "embargo_days": 30, "today": "2027-03-10", "cve": "CVE-2027-1234",
+    })
+    assert "# Advisory MAV-2027-001  [HIGH]" in out
+    assert "Coordinated-disclosure date: 2027-03-31 (embargo OPEN)" in out
+    assert "CVE: CVE-2027-1234" in out
+
+
+def test_cvd_validation():
+    t = coordinated_disclosure()
+    assert t.fn({"op": "status", "reported": "nope", "embargo_days": 30}).startswith("ERROR")
+    assert t.fn({"op": "status", "reported": "2027-01-01", "embargo_days": -1}).startswith("ERROR")
+    assert t.fn({"op": "advisory", "reported": "2027-01-01", "embargo_days": 1, "severity": "bogus", "id": "x", "summary": "y"}).startswith("ERROR")

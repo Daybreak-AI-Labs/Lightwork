@@ -97,3 +97,42 @@ def test_one_user_full_lane_does_not_block_another(monkeypatch, tmp_path):
         for thread in threads:
             thread.join(timeout=10)
             assert not thread.is_alive()
+
+
+# --- REL-5: run_goal_in_thread must not block forever waiting for a slot ---
+
+def test_runner_refuses_when_no_concurrency_slot(monkeypatch):
+    import threading
+
+    import maverick.runner as runner
+
+    drained = threading.BoundedSemaphore(1)
+    drained.acquire()  # 0 permits left
+    monkeypatch.setattr(runner, "_run_semaphore", drained)
+    monkeypatch.setattr(runner, "_ACQUIRE_TIMEOUT", 0.05)
+    # Returns None promptly instead of wedging the caller forever.
+    assert runner.run_goal_in_thread(999) is None
+
+
+def test_run_goal_in_thread_acquire_timeout_override(monkeypatch):
+    """An explicit acquire_timeout overrides the module default -- the
+    knob the job-queue's run_goal/start_goal handlers use so a busy lane
+    can't block a shared worker thread for the full 5-minute default."""
+    import threading
+    import time
+
+    import maverick.runner as runner
+
+    drained = threading.BoundedSemaphore(1)
+    drained.acquire()  # 0 permits left
+    monkeypatch.setattr(runner, "_principal_semaphore", lambda p: drained)
+    # Leave the module default large so a bug that ignores the override
+    # would make this test visibly hang/timeout rather than pass by luck.
+    monkeypatch.setattr(runner, "_ACQUIRE_TIMEOUT", 30.0)
+
+    t0 = time.monotonic()
+    result = runner.run_goal_in_thread(999, acquire_timeout=0.05)
+    elapsed = time.monotonic() - t0
+
+    assert result is None
+    assert elapsed < 5.0

@@ -306,3 +306,99 @@ def test_restore_rejects_corrupted_token_operation_state():
 
     with pytest.raises(BudgetExceeded, match="stored token charge"):
         restored.__setstate__(state)
+
+
+class TestCacheTtlNormalization:
+    def test_trailing_space_normalized(self):
+        from maverick.budget import _cache_write_mult_from_ttl
+        assert _cache_write_mult_from_ttl("1h ") == 2.0
+        assert _cache_write_mult_from_ttl(" 1h") == 2.0
+
+    def test_uppercase_normalized(self):
+        from maverick.budget import _cache_write_mult_from_ttl
+        assert _cache_write_mult_from_ttl("1H") == 2.0
+
+    def test_duration_parsing_handles_unknown_strings(self):
+        from maverick.budget import _cache_write_mult_from_ttl
+        # 30 minutes > 5m → 1h rate
+        assert _cache_write_mult_from_ttl("30m") == 2.0
+        # 2h > 1h → 1h rate (the upper tier)
+        assert _cache_write_mult_from_ttl("2h") == 2.0
+        # 7200s = 2h → 1h rate
+        assert _cache_write_mult_from_ttl("7200s") == 2.0
+        # 5m or below → 5m rate
+        assert _cache_write_mult_from_ttl("5m") == 1.25
+        assert _cache_write_mult_from_ttl("1m") == 1.25
+
+    def test_unknown_garbage_defaults_to_5m(self):
+        from maverick.budget import _cache_write_mult_from_ttl
+        assert _cache_write_mult_from_ttl("forever") == 1.25
+        assert _cache_write_mult_from_ttl("") == 1.25
+        assert _cache_write_mult_from_ttl(None) == 1.25
+
+
+class TestBudgetPickling:
+    def test_round_trip_preserves_counters(self):
+        from maverick.budget import Budget
+        from maverick.llm import MODEL_SONNET
+
+        b = Budget(max_dollars=100.0)
+        b.record_tokens(10_000, 1000, model=MODEL_SONNET)
+        original_dollars = b.dollars
+
+        # multiprocessing.Pool ships via pickle.
+        data = pickle.dumps(b)
+        b2 = pickle.loads(data)
+        assert b2.input_tokens == 10_000
+        assert b2.output_tokens == 1000
+        assert abs(b2.dollars - original_dollars) < 0.001
+        # The new Budget has its own monotonic clock + lock.
+        assert b2.elapsed() >= 0
+        b2.record_tokens(1000, 100, model=MODEL_SONNET)
+        # Both lock and counter survived.
+        assert b2.input_tokens == 11_000
+
+
+    def test_round_trip_preserves_elapsed_for_wall_cap(self):
+        from maverick.budget import Budget, BudgetExceeded
+
+        b = Budget(max_wall_seconds=0.01)
+        # Exhaust wall-time budget before serialization.
+        while b.elapsed() <= 0.02:
+            pass
+        try:
+            b.check()
+        except BudgetExceeded:
+            pass
+        else:
+            raise AssertionError("pre-pickle budget should already be exceeded")
+
+        b2 = pickle.loads(pickle.dumps(b))
+        # Must remain exceeded after unpickle (no timer reset bypass).
+        try:
+            b2.check()
+        except BudgetExceeded:
+            pass
+        else:
+            raise AssertionError("post-unpickle wall cap bypassed")
+
+
+# ---------- Budget separates cache tokens from input cap ----------
+
+def test_input_cap_not_eaten_by_cache_reads():
+    """A long cached prompt shouldn't prematurely trip max_input_tokens."""
+    from maverick.budget import Budget
+    from maverick.llm import MODEL_SONNET
+
+    b = Budget(max_dollars=100.0, max_input_tokens=200_000)
+    # 5x re-runs against a 100k-token cached system prompt: 500k cached
+    # reads, only 1000 actual billable input each time.
+    for _ in range(5):
+        b.record_tokens(
+            1_000, 1_000, model=MODEL_SONNET,
+            cache_read_tok=100_000,
+        )
+    # Billable input is 5_000; cache reads were 500_000.
+    assert b.input_tokens == 5_000
+    assert b.cache_read_tokens == 500_000
+    # The cap on billable input was NEVER tripped.

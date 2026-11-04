@@ -125,3 +125,31 @@ def test_exec_success_and_failure_paths_unchanged(tmp_path):
     bad = b.exec("echo oops >&2; exit 3")
     assert bad.exit_code == 3
     assert bad.stderr.strip() == "oops"
+
+
+# ---- D5: sandbox.exec accepts a per-call timeout kwarg ----
+
+class TestSandboxExecTimeout:
+    def test_local_backend_accepts_timeout_kwarg(self, tmp_path):
+        from maverick.sandbox import LocalBackend
+        sb = LocalBackend(workdir=tmp_path, timeout=1.0)
+        # A quick command should succeed even when we hand it a long timeout.
+        r = sb.exec("echo hello", timeout=10.0)
+        assert r.exit_code == 0
+        assert "hello" in r.stdout
+
+    def test_local_backend_timeout_kwarg_overrides_self_timeout(self, tmp_path):
+        from maverick.sandbox import LocalBackend
+        # self.timeout would be 0.1s, but the call passes 5s, so a
+        # 0.5s sleep completes successfully (no TIMEOUT).
+        # Use python -c for cross-platform sleep (Unix `sleep`
+        # is not available on Windows).
+        sb = LocalBackend(workdir=tmp_path, timeout=0.1)
+        import sys
+        py = sys.executable.replace("\\", "/")  # quote-friendly on Windows
+        r = sb.exec(
+            f'"{py}" -c "import time; time.sleep(0.5); print(\'done\')"',
+            timeout=5.0,
+        )
+        assert r.exit_code == 0
+        assert "done" in r.stdout

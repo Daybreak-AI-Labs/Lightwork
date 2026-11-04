@@ -1,11 +1,19 @@
 """Verifier role: parsing, verdict shape, integration into the agent loop."""
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
+from maverick.agent import Agent
+from maverick.blackboard import Blackboard
+from maverick.budget import Budget, BudgetExceeded
+from maverick.sandbox import LocalBackend
+from maverick.swarm import SwarmContext
 from maverick.verifier import (
     _parse,
     verify_proposal,
 )
+from maverick.world_model import WorldModel
 
 
 class TestParse:
@@ -338,3 +346,262 @@ async def test_ensemble_reraises_budget_exceeded_not_swallowed():
         )
     # Both members were awaited (the panel ran), not just the failing one.
     assert set(llm.calls) == {"m-ok", "m-budget"}
+
+
+# ---------- verifier: fail CLOSED on LLM error ----------
+
+def test_verifier_fails_closed_on_llm_error():
+    import asyncio
+
+    from maverick.budget import Budget
+    from maverick.verifier import verify_proposal
+
+    class _Boom:
+        async def complete_async(self, **kw):
+            raise RuntimeError("provider down")
+
+    v = asyncio.run(verify_proposal("brief", "some proposal", _Boom(), Budget()))
+    # Contract: any failure -> reject (NOT the old accepts=True fail-open).
+    assert v.accepts is False
+
+
+def test_verifier_propagates_budget_exceeded():
+    import asyncio
+
+    from maverick.budget import Budget, BudgetExceeded
+    from maverick.verifier import verify_proposal
+
+    class _OverBudget:
+        async def complete_async(self, **kw):
+            raise BudgetExceeded("$5 > $5")
+
+    try:
+        asyncio.run(verify_proposal("brief", "p", _OverBudget(), Budget()))
+    except BudgetExceeded:
+        return  # budget is a control signal, must propagate
+    raise AssertionError("expected BudgetExceeded to propagate")
+
+
+@pytest.fixture
+def ctx(tmp_path: Path, fake_llm):
+    world = WorldModel(tmp_path / "w.db")
+    gid = world.create_goal("g", "")
+    return SwarmContext(
+        llm=fake_llm, world=world, budget=Budget(max_dollars=1.0),
+        blackboard=Blackboard(), sandbox=LocalBackend(workdir=tmp_path),
+        goal_id=gid, max_depth=1, use_skills=False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_unverified_on_budget_reports_zero(
+    ctx, fake_llm, make_llm_response, monkeypatch,
+):
+    async def _boom(*a, **k):
+        raise BudgetExceeded("verifier out of budget")
+
+    monkeypatch.setattr("maverick.verifier.verify_final", _boom)
+    fake_llm.scripted = [make_llm_response(text="FINAL: the answer")]
+    orch = Agent(ctx=ctx, role="orchestrator", brief="do it", depth=0)
+    result = await orch.run()
+    assert "the answer" in (result.final or "")
+    # Verifier was attempted but hit budget -> NOT high confidence.
+    assert result.verifier_confidence == 0.0
+    assert result.verifier_confidence < 0.75  # below the donation reward gate
+
+
+@pytest.mark.asyncio
+async def test_non_verifying_role_keeps_default_confidence(
+    ctx, fake_llm, make_llm_response,
+):
+    # A non-orchestrator never verifies; the 1.0 default is unchanged (it isn't
+    # donated as the run's verdict, so this is correct).
+    fake_llm.scripted = [make_llm_response(text="FINAL: child result")]
+    worker = Agent(ctx=ctx, role="researcher", brief="sub", depth=0)
+    result = await worker.run()
+    assert "child result" in (result.final or "")
+    assert result.verifier_confidence == 1.0
+
+
+# --- cross-family verifier contract vs behavior ---
+
+def test_cross_family_fallback_requires_explicit_env(monkeypatch):
+    import maverick.verifier as v
+    monkeypatch.delenv("MAVERICK_CROSS_FAMILY_VERIFIER", raising=False)
+    # No implicit provider swap: returns None unless explicitly configured.
+    assert v._cross_family_fallback("anthropic:claude-x") is None
+    monkeypatch.setenv("MAVERICK_CROSS_FAMILY_VERIFIER", "openai:gpt-x")
+    assert v._cross_family_fallback("anthropic:claude-x") == "openai:gpt-x"
+
+
+def test_same_family_verifier_warns_once(monkeypatch, caplog):
+    import maverick.verifier as v
+    monkeypatch.setattr(v, "_warned_same_family", False)
+    with caplog.at_level("WARNING"):
+        v._warn_same_family_verifier("anthropic:claude-x")
+        v._warn_same_family_verifier("anthropic:claude-x")
+    lockstep = [r for r in caplog.records if "lockstep" in r.getMessage()]
+    assert len(lockstep) == 1  # warned exactly once, not per call
+
+
+# ---------- Cross-family verifier guard ----------
+
+class TestCrossFamilyVerifier:
+    def test_provider_extraction(self):
+        from maverick.verifier import _provider
+        assert _provider("claude-opus-4-7") == "anthropic"
+        assert _provider("anthropic:claude-opus-4-7") == "anthropic"
+        assert _provider("openai:gpt-5.4") == "openai"
+        assert _provider("gpt-5.4") == "openai"
+        assert _provider("o3") == "openai"
+        assert _provider("gemini-3-pro") == "gemini"
+        assert _provider("deepseek-v4-pro") == "deepseek"
+        assert _provider("grok-4.3") == "xai"
+
+    def test_same_family_detection(self):
+        from maverick.verifier import _same_family
+        assert _same_family("claude-opus-4-7", "claude-sonnet-4-6") is True
+        assert _same_family("anthropic:claude-opus-4-7", "claude-sonnet-4-6") is True
+        assert _same_family("claude-opus-4-7", "gpt-5.4") is False
+
+    def test_cross_family_fallback_default_is_none(self):
+        """No implicit cross-provider swap without explicit operator opt-in."""
+        from maverick.verifier import _cross_family_fallback
+        assert _cross_family_fallback("claude-opus-4-7") is None
+        assert _cross_family_fallback("gpt-5.4") is None
+
+    def test_cross_family_env_override(self, monkeypatch):
+        from maverick.verifier import _cross_family_fallback
+        monkeypatch.setenv("MAVERICK_CROSS_FAMILY_VERIFIER", "deepseek:deepseek-v4-pro")
+        assert _cross_family_fallback("claude-opus-4-7") == "deepseek:deepseek-v4-pro"
+
+    @pytest.mark.asyncio
+    async def test_verifier_swaps_family_when_proposer_passed(
+        self, fake_llm, make_llm_response,
+    ):
+        from maverick.budget import Budget
+        from maverick.verifier import verify_proposal
+        fake_llm.scripted = [make_llm_response(
+            text='{"confidence": 0.9, "accepts": true, "critique": "", "issues": []}',
+        )]
+        # Proposer is Anthropic; we should NOT see verifier model in
+        # the Anthropic family. The fake_llm just records the model
+        # passed; we assert that model is non-Anthropic.
+        await verify_proposal(
+            "brief", "proposal text",
+            fake_llm, Budget(),
+            proposer_model="anthropic:claude-opus-4-7",
+        )
+        assert len(fake_llm.calls) == 1
+        # Without explicit opt-in, verifier model should remain unchanged.
+        model_used = fake_llm.calls[0].get("model") or ""
+        assert model_used == "claude-sonnet-4-6"
+
+
+# ---------- MAV ensemble verifier ----------
+
+class TestMAVCombine:
+    def test_three_accept_majority(self):
+        from maverick.verifier import VerifierVerdict, _combine
+        verdicts = [
+            VerifierVerdict(confidence=0.9, accepts=True, critique="ok"),
+            VerifierVerdict(confidence=0.8, accepts=True, critique="ok"),
+            VerifierVerdict(confidence=0.3, accepts=False, critique="wrong"),
+        ]
+        v = _combine(verdicts, weighted=True)
+        assert v.accepts is True
+        # Confidence is mean of the accepting voters (0.9 + 0.8) / 2.
+        assert abs(v.confidence - 0.85) < 1e-6
+
+    def test_weighted_overrides_count(self):
+        """Weighted: 2 accepters at 0.5 + 1 strong rejecter at 0.95 -> reject."""
+        from maverick.verifier import VerifierVerdict, _combine
+        verdicts = [
+            VerifierVerdict(confidence=0.5, accepts=True, critique=""),
+            VerifierVerdict(confidence=0.5, accepts=True, critique=""),
+            VerifierVerdict(confidence=0.95, accepts=False, critique="strong veto"),
+        ]
+        v = _combine(verdicts, weighted=True)
+        # accept_weight = 1.0; reject_weight = 0.95 -> still accepts by 0.05.
+        # The point is the weighted scheme actually considers magnitude.
+        assert v.accepts is True
+
+    def test_unweighted_majority_wins(self):
+        from maverick.verifier import VerifierVerdict, _combine
+        verdicts = [
+            VerifierVerdict(confidence=0.5, accepts=True, critique=""),
+            VerifierVerdict(confidence=0.5, accepts=True, critique=""),
+            VerifierVerdict(confidence=0.95, accepts=False, critique=""),
+        ]
+        v = _combine(verdicts, weighted=False)
+        assert v.accepts is True  # 2-of-3
+
+    def test_issues_deduplicated_across_panel(self):
+        from maverick.verifier import VerifierVerdict, _combine
+        verdicts = [
+            VerifierVerdict(confidence=0.4, accepts=False,
+                            critique="x", issues=["bad math", "missing units"]),
+            VerifierVerdict(confidence=0.5, accepts=False,
+                            critique="y", issues=["bad math", "off by one"]),
+        ]
+        v = _combine(verdicts, weighted=True)
+        assert v.accepts is False
+        # 3 unique issues: bad math, missing units, off by one.
+        assert sorted(v.issues) == ["bad math", "missing units", "off by one"]
+
+    def test_single_verdict_passthrough(self):
+        from maverick.verifier import VerifierVerdict, _combine
+        single = VerifierVerdict(confidence=0.7, accepts=True, critique="")
+        v = _combine([single], weighted=True)
+        assert v is single
+
+    def test_empty_panel_rejects(self):
+        from maverick.verifier import _combine
+        v = _combine([], weighted=True)
+        assert v.accepts is False
+
+
+class TestVerifyEnsemble:
+    @pytest.mark.asyncio
+    async def test_filters_same_family_panel_members(self, fake_llm, make_llm_response):
+        from maverick.budget import Budget
+        from maverick.verifier import verify_proposal_ensemble
+        # Both panel members return accept; we don't care about the
+        # combined result -- we care that the Anthropic panel member is
+        # FILTERED OUT when proposer is Anthropic.
+        fake_llm.scripted = [
+            make_llm_response(
+                text='{"confidence": 0.9, "accepts": true, "critique": "", "issues": []}',
+            ),
+            make_llm_response(
+                text='{"confidence": 0.9, "accepts": true, "critique": "", "issues": []}',
+            ),
+        ]
+        await verify_proposal_ensemble(
+            "brief", "proposal",
+            fake_llm, Budget(),
+            proposer_model="anthropic:claude-opus-4-7",
+        )
+        # Panel was [anthropic, openai, deepseek] -> [openai, deepseek]
+        # after filtering. 2 LLM calls.
+        assert len(fake_llm.calls) == 2
+        models_used = [c.get("model") or "" for c in fake_llm.calls]
+        for m in models_used:
+            assert "claude" not in m.lower()
+
+    @pytest.mark.asyncio
+    async def test_explicit_panel_used(self, fake_llm, make_llm_response):
+        from maverick.budget import Budget
+        from maverick.verifier import verify_proposal_ensemble
+        fake_llm.scripted = [
+            make_llm_response(
+                text='{"confidence": 0.9, "accepts": true, "critique": "", "issues": []}',
+            ),
+        ]
+        await verify_proposal_ensemble(
+            "brief", "proposal",
+            fake_llm, Budget(),
+            panel=["openai:gpt-5.4"],
+        )
+        assert len(fake_llm.calls) == 1
+        assert fake_llm.calls[0].get("model") == "openai:gpt-5.4"

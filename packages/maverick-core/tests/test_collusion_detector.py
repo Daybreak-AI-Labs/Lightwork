@@ -101,3 +101,41 @@ def test_registered():
 
     names = set(getattr(base_registry(world=_W(), sandbox=_S()), "_tools", {}).keys())
     assert "collusion_detector" in names
+
+
+# ---- collusion_detector ----
+
+def test_collusion_echoed_reasoning():
+    t = collusion_detector()
+    out = t.fn({"messages": [
+        {"agent": "proposer", "text": "the migration is safe because the lock is held"},
+        {"agent": "verifier", "text": "the migration is safe because the lock is held"},
+    ]})
+    assert "COLLUSION SIGNALS" in out
+    assert "echoed reasoning" in out
+
+
+def test_collusion_rubber_stamp():
+    t = collusion_detector()
+    out = t.fn({"messages": [
+        {"agent": "verifier", "text": "looks fine a", "verdict": "approve"},
+        {"agent": "verifier", "text": "looks fine b", "verdict": "approved"},
+        {"agent": "verifier", "text": "looks fine c", "verdict": "lgtm"},
+    ]})
+    assert "rubber-stamp" in out and "approved all 3" in out
+
+
+def test_collusion_clean():
+    t = collusion_detector()
+    out = t.fn({"messages": [
+        {"agent": "proposer", "text": "use a hash join here for the big table"},
+        {"agent": "verifier", "text": "I disagree, a nested loop wins on this cardinality", "verdict": "reject"},
+    ]})
+    assert "CLEAN" in out
+
+
+def test_collusion_validation():
+    t = collusion_detector()
+    assert t.fn({"messages": []}).startswith("ERROR")
+    assert t.fn({"messages": [{"agent": "x"}]}).startswith("ERROR")
+    assert t.fn({"messages": [{"agent": "x", "text": "y"}], "threshold": 2}).startswith("ERROR")

@@ -290,3 +290,16 @@ def test_the_navigation_reads_the_current_files_inside_a_render(tmp_path, monkey
         assert seen == [8.25]
     finally:
         config.reset_config_cache()
+
+
+# --- SEC-7: dashboard serves loopback-only when no token is configured ---
+
+def test_dashboard_loopback_helper():
+    app = pytest.importorskip("maverick_dashboard.app")
+    f = app._is_loopback_client
+    assert f("127.0.0.1") is True
+    assert f("::1") is True
+    assert f("testclient") is True
+    assert f("localhost") is True
+    assert f("1.2.3.4") is False
+    assert f("") is False

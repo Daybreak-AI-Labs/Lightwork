@@ -214,3 +214,29 @@ def test_dispatcher_hands_bedrock_the_admitted_snapshot(fake_sdk, monkeypatch):
     client = llm._get_client("bedrock")
     assert client.region == "us-east-2"
     assert client.endpoint == "legacy" and client.auth_mode == "iam"
+
+
+def test_bedrock_requires_region(monkeypatch):
+    monkeypatch.delenv("AWS_REGION", raising=False)
+    monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
+    from maverick.providers.bedrock_provider import BedrockClient
+    try:
+        BedrockClient()
+    except RuntimeError as e:
+        assert "AWS_REGION" in str(e)
+        return
+    raise AssertionError("expected RuntimeError")
+
+
+def test_bedrock_builds_url(monkeypatch):
+    # The native Messages endpoint (Claude in Amazon Bedrock), not the
+    # OpenAI-compatible one; a bearer token selects api_key auth.
+    monkeypatch.setenv("AWS_REGION", "us-east-1")
+    monkeypatch.setenv("BEDROCK_API_KEY", "k")
+    monkeypatch.delenv("BEDROCK_AUTH_MODE", raising=False)
+    monkeypatch.delenv("BEDROCK_ENDPOINT", raising=False)
+    from maverick.providers.bedrock_provider import BedrockClient
+    c = BedrockClient()
+    assert "bedrock-mantle.us-east-1.api.aws" in c.base_url
+    assert "/openai/" not in c.base_url
+    assert c.auth_mode == "api_key" and c.endpoint == "mantle"

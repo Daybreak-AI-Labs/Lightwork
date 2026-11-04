@@ -11,6 +11,7 @@ ordering for gpt-4.1 / o-series with a long stable prefix.
 from __future__ import annotations
 
 import sys
+from unittest.mock import MagicMock
 
 import pytest
 from maverick.providers.openai_provider import OpenAIClient
@@ -181,3 +182,113 @@ class TestMaxCompletionTokensOnTheWire:
         )
         assert kwargs.get("max_tokens") == 256
         assert "max_completion_tokens" not in kwargs
+
+
+# ---------- openai_provider prompt-caching extraction ----------
+
+def test_openai_provider_records_cache_read_tokens():
+    """When usage.prompt_tokens_details.cached_tokens is present, it
+    flows into budget as cache_read_tok and billable input = full - cached.
+    """
+    try:
+        from openai import OpenAI  # noqa: F401
+    except ImportError:
+        pytest.skip("openai SDK not installed")
+    from maverick.budget import Budget
+    from maverick.providers.openai_provider import OpenAIClient
+
+    # Build a fake response shape matching the SDK's pydantic model.
+    fake_choice = MagicMock()
+    fake_choice.message.content = "hi"
+    fake_choice.message.tool_calls = None
+    fake_choice.finish_reason = "stop"
+
+    fake_usage = MagicMock()
+    fake_usage.prompt_tokens = 1000
+    fake_usage.completion_tokens = 50
+    # OpenAI-style cached tokens.
+    fake_usage.prompt_tokens_details.cached_tokens = 400
+    # Make sure the DeepSeek-shaped attr isn't preferred when OpenAI's is set.
+    fake_usage.prompt_cache_hit_tokens = 999
+
+    fake_resp = MagicMock()
+    fake_resp.choices = [fake_choice]
+    fake_resp.usage = fake_usage
+
+    budget = Budget(max_dollars=10.0)
+    OpenAIClient._from_response(fake_resp, budget, model="gpt-5.4")
+
+    # full=1000, cached=400 -> billable=600 to input_tokens; cached -> cache_read_tokens.
+    assert budget.input_tokens == 600
+    assert budget.cache_read_tokens == 400
+    assert budget.output_tokens == 50
+
+
+def test_openai_provider_records_deepseek_cache_hit_tokens():
+    """DeepSeek puts cached count under prompt_cache_hit_tokens."""
+    try:
+        from openai import OpenAI  # noqa: F401
+    except ImportError:
+        pytest.skip("openai SDK not installed")
+    from maverick.budget import Budget
+    from maverick.providers.openai_provider import OpenAIClient
+
+    fake_choice = MagicMock()
+    fake_choice.message.content = "hi"
+    fake_choice.message.tool_calls = None
+    fake_choice.finish_reason = "stop"
+
+    fake_usage = MagicMock()
+    fake_usage.prompt_tokens = 2000
+    fake_usage.completion_tokens = 100
+    # DeepSeek shape: OpenAI-style details absent, fall through to *_hit_tokens.
+    fake_usage.prompt_tokens_details = None
+    fake_usage.prompt_cache_hit_tokens = 800
+
+    fake_resp = MagicMock()
+    fake_resp.choices = [fake_choice]
+    fake_resp.usage = fake_usage
+
+    budget = Budget(max_dollars=10.0)
+    OpenAIClient._from_response(
+        fake_resp,
+        budget,
+        model="deepseek-v4-flash",
+    )
+
+    assert budget.input_tokens == 1200
+    assert budget.cache_read_tokens == 800
+    assert budget.output_tokens == 100
+
+
+def test_openai_provider_no_cache_data_records_full_input():
+    """When no cache fields, full prompt_tokens count as billable."""
+    try:
+        from openai import OpenAI  # noqa: F401
+    except ImportError:
+        pytest.skip("openai SDK not installed")
+    from maverick.budget import Budget
+    from maverick.providers.openai_provider import OpenAIClient
+
+    fake_choice = MagicMock()
+    fake_choice.message.content = "hi"
+    fake_choice.message.tool_calls = None
+    fake_choice.finish_reason = "stop"
+
+    fake_usage = MagicMock()
+    fake_usage.prompt_tokens = 500
+    fake_usage.completion_tokens = 50
+    fake_usage.prompt_tokens_details = None
+    # Explicitly delete the DeepSeek attr so getattr returns the default.
+    del fake_usage.prompt_cache_hit_tokens
+
+    fake_resp = MagicMock()
+    fake_resp.choices = [fake_choice]
+    fake_resp.usage = fake_usage
+
+    budget = Budget(max_dollars=10.0)
+    OpenAIClient._from_response(fake_resp, budget, model="gpt-5.4")
+
+    assert budget.input_tokens == 500
+    assert budget.cache_read_tokens == 0
+    assert budget.output_tokens == 50

@@ -493,3 +493,33 @@ def test_voice_cli_transcribes_operator_selected_file(monkeypatch, tmp_path):
     result = CliRunner().invoke(main, ["voice", "transcribe", str(audio), "--backend", "local"])
     assert result.exit_code == 0, result.output
     assert "RIFFfake" in result.output
+
+
+# ---------- voice tools ----------
+
+def test_voice_transcribe_requires_source():
+    from maverick.tools.voice import transcribe_audio
+    out = transcribe_audio().fn({"source": ""})
+    assert "source is required" in out
+
+
+def test_voice_transcribe_missing_file(tmp_path):
+    from types import SimpleNamespace
+
+    from maverick.tools.voice import transcribe_audio
+    out = transcribe_audio(sandbox=SimpleNamespace(workdir=tmp_path)).fn(
+        {"source": str(tmp_path / "missing.mp3")}
+    )
+    assert "not found" in out
+
+
+def test_voice_speak_requires_text():
+    from maverick.tools.voice import speak
+    out = speak().fn({"text": ""})
+    assert "text is required" in out
+
+
+def test_voice_speak_caps_text_length():
+    from maverick.tools.voice import speak
+    out = speak().fn({"text": "x" * 5000})
+    assert "too long" in out

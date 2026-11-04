@@ -942,3 +942,21 @@ def test_windows_python_autodiscovery_does_not_scan_drive_root():
     assert "'C:\\'" not in parents
     assert "$env:LOCALAPPDATA" in parents and "$env:ProgramFiles" in parents
     assert "$env:MAVERICK_PYTHON" in resolver
+
+
+# ---------- deploy bootstrap MAVERICK_REPO validation ----------
+
+_DEPLOY = Path(__file__).resolve().parents[3] / "deploy" / "desktop"
+
+
+def test_install_sh_validates_repo_slug():
+    body = (_DEPLOY / "install.sh").read_text()
+    # The bash validator + the regex it enforces.
+    assert "validate_repo" in body
+    assert "[A-Za-z0-9._-]+/[A-Za-z0-9._-]+" in body
+
+
+def test_install_ps1_validates_repo_slug():
+    body = (_DEPLOY / "install.ps1").read_text()
+    assert "Ensure-RepoSlug" in body
+    assert "[A-Za-z0-9._-]+/[A-Za-z0-9._-]+" in body

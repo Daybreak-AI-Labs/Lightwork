@@ -36,7 +36,7 @@ def _isolate(monkeypatch, tmp_path):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-dummy")
     # Bust the killswitch's 1s stat-throttle so each test sees ITS home's
     # HALT state, not the previous test's cached answer (established
-    # pattern, see test_q1_2026.py).
+    # pattern, see test_killswitch.py).
     from maverick import killswitch as ks
     ks._last_file_check_ts = 0.0
     ks.clear()

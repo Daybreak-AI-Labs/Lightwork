@@ -156,3 +156,45 @@ def test_the_config_is_still_written_before_the_smoke_test_verdict(
     wizard = _stub(monkeypatch, tmp_path, smoke=False)
     assert wizard.run_fast() == 1
     assert (tmp_path / ".maverick" / "config.toml").is_file()
+
+
+# ---------- wizard --fast flag ----------
+
+def test_wizard_run_accepts_fast_flag(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    from maverick_installer import wizard
+    # Patch CONFIG_DIR / FILES so we write to tmp_path.
+    wizard.CONFIG_DIR = tmp_path / ".maverick"
+    wizard.CONFIG_FILE = wizard.CONFIG_DIR / "config.toml"
+    wizard.ENV_FILE = wizard.CONFIG_DIR / ".env"
+    # Fast setup now picks the sandbox by Docker availability; pin it up so
+    # this test deterministically exercises the full docker-config path.
+    monkeypatch.setattr(wizard, "_docker_available", lambda: True)
+
+    rc = wizard.run(fast=True)
+    assert rc == 0
+    # Config got written.
+    assert wizard.CONFIG_FILE.exists()
+    body = wizard.CONFIG_FILE.read_text()
+    assert "[providers.anthropic]" in body
+    assert "[safety]" in body
+    assert "[sandbox]" in body
+    assert "backend = \"docker\"" in body
+    # ENV stored the key.
+    assert wizard.ENV_FILE.exists()
+    env_body = wizard.ENV_FILE.read_text()
+    assert "ANTHROPIC_API_KEY=sk-ant-test" in env_body
+
+
+def test_wizard_run_default_still_interactive(tmp_path, monkeypatch):
+    """run() without fast=True should NOT short-circuit -- it'd ask."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    # We can't actually drive an interactive session in tests, but
+    # we can verify the function signature accepts the kwarg.
+    import inspect
+
+    from maverick_installer.wizard import run
+    sig = inspect.signature(run)
+    assert "fast" in sig.parameters
+    assert sig.parameters["fast"].default is False

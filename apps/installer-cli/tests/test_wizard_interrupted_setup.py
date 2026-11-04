@@ -116,3 +116,57 @@ def test_changed_key_file_is_preserved_and_recovery_refused(first_install):
     assert wizard.ENV_FILE.read_text(encoding="utf-8") == "ANTHROPIC_API_KEY=changed\n"
     assert not wizard.CONFIG_FILE.exists()
     assert wizard._pending_setup_path().exists()
+
+
+# ---------- wizard --resume ----------
+
+def test_wizard_resume_loads_partial_state(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    from maverick_installer import wizard
+
+    cfg_dir = tmp_path / ".maverick"
+    cfg_dir.mkdir()
+    wizard.CONFIG_DIR = cfg_dir
+    wizard.PARTIAL_STATE_PATH = cfg_dir / "wizard-partial.json"
+
+    # Pre-populate a partial state.
+    pre = {
+        "deployment": "desktop",
+        "providers": ["anthropic"],
+        "role_models": {},
+        "channels": {},
+        "channel_envs": [],
+        "safety": {"profile": "balanced", "block_threshold": "high",
+                   "scan_input": True, "scan_tool_calls": True, "scan_output": True},
+        "budget": {"max_dollars": 5.0, "max_wall_seconds": 3600.0, "max_tool_calls": 500},
+        "sandbox": {"backend": "local", "workdir": "/tmp/ws", "timeout": 60},
+        "capabilities": {"computer_use": False, "browser": False},
+    }
+    wizard.PARTIAL_STATE_PATH.write_text(json.dumps(pre))
+
+    loaded = wizard._load_partial()
+    assert loaded == pre
+
+
+def test_wizard_run_accepts_resume_flag():
+    import inspect
+
+    from maverick_installer.wizard import run
+    sig = inspect.signature(run)
+    assert "resume" in sig.parameters
+    assert sig.parameters["resume"].default is False
+
+
+def test_wizard_partial_state_round_trip(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    from maverick_installer import wizard
+
+    cfg_dir = tmp_path / ".maverick"
+    wizard.CONFIG_DIR = cfg_dir
+    wizard.PARTIAL_STATE_PATH = cfg_dir / "wizard-partial.json"
+
+    wizard._save_partial({"deployment": "docker", "providers": ["anthropic", "openai"]})
+    loaded = wizard._load_partial()
+    assert loaded == {"deployment": "docker", "providers": ["anthropic", "openai"]}
+    wizard._clear_partial()
+    assert wizard._load_partial() is None

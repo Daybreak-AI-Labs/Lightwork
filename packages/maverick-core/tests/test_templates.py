@@ -93,3 +93,16 @@ def test_every_bundled_template_loads_and_parses():
         assert t.body  # non-empty goal body
         assert t.budget_dollars is None or t.budget_dollars >= 0
         assert t.budget_wall_seconds is None or t.budget_wall_seconds >= 0
+
+
+class TestTemplateBudgetParse:
+    def test_malformed_budget_does_not_crash(self):
+        from maverick.templates import _parse_frontmatter
+        meta = _parse_frontmatter("budget_dollars: 1.2.3\n")
+        # The bad value must not raise; it is kept as a string, not float().
+        assert meta.get("budget_dollars") == "1.2.3"
+
+    def test_valid_budget_still_coerced(self):
+        from maverick.templates import _parse_frontmatter
+        meta = _parse_frontmatter("budget_dollars: 2.5\n")
+        assert meta.get("budget_dollars") == 2.5

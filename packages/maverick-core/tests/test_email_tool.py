@@ -11,7 +11,7 @@ Regressions:
 from __future__ import annotations
 
 import imaplib
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 
 def _creds(monkeypatch):
@@ -184,3 +184,78 @@ def test_inbox_reads_verify_the_server_certificate_before_login(monkeypatch):
         _fake_imap(monkeypatch, [("OK", [None])])
         read()
         assert _verifies(imaplib.IMAP4_SSL.call_args.kwargs.get("ssl_context"))
+
+
+def _email_creds(monkeypatch):
+    monkeypatch.setenv("EMAIL_USER", "me@example.com")
+    monkeypatch.setenv("EMAIL_APP_PASSWORD", "pw")
+
+
+def test_email_fetch_requires_numeric_uid(monkeypatch):
+    _email_creds(monkeypatch)
+    from maverick.tools.email_tool import _fetch
+    assert "numeric uid" in _fetch({"uid": "1 2 OR 1=1"})
+    assert "numeric uid" in _fetch({"uid": "../etc"})
+
+
+def test_email_list_rejects_folder_control_chars(monkeypatch):
+    _email_creds(monkeypatch)
+    from maverick.tools.email_tool import _list_inbox
+    assert "invalid folder" in _list_inbox({"folder": "INBOX\r\nA001 DELETE"})
+
+
+# ---------- email tool ----------
+
+def test_email_requires_op():
+    from maverick.tools.email_tool import email_tool
+    assert "op is required" in email_tool().fn({})
+
+
+def test_email_send_requires_recipient(monkeypatch):
+    monkeypatch.delenv("MAVERICK_EMAIL_DISABLE", raising=False)
+    monkeypatch.setenv("EMAIL_USER", "me@example.com")
+    monkeypatch.setenv("EMAIL_APP_PASSWORD", "pw")
+    from maverick.tools.email_tool import email_tool
+    out = email_tool().fn({"op": "send", "to": ""})
+    assert "requires `to`" in out
+
+
+def test_email_send_kill_switch(monkeypatch):
+    monkeypatch.setenv("MAVERICK_EMAIL_DISABLE", "1")
+    from maverick.tools.email_tool import email_tool
+    out = email_tool().fn({"op": "send", "to": "x@y.com", "subject": "s"})
+    assert "disabled" in out
+
+
+def test_email_send_requires_credentials(monkeypatch):
+    monkeypatch.delenv("MAVERICK_EMAIL_DISABLE", raising=False)
+    monkeypatch.delenv("EMAIL_USER", raising=False)
+    monkeypatch.delenv("EMAIL_APP_PASSWORD", raising=False)
+    monkeypatch.setenv("HOME", "/nonexistent-home-for-tests")
+    from maverick.tools.email_tool import email_tool
+    out = email_tool().fn({
+        "op": "send", "to": "x@y.com", "subject": "s", "body": "b",
+    })
+    assert "EMAIL_USER" in out
+
+
+def test_email_send_via_smtp_ssl(monkeypatch):
+    monkeypatch.delenv("MAVERICK_EMAIL_DISABLE", raising=False)
+    monkeypatch.setenv("EMAIL_USER", "me@example.com")
+    monkeypatch.setenv("EMAIL_APP_PASSWORD", "pw")
+    monkeypatch.setenv("EMAIL_SMTP_HOST", "smtp.test")
+    monkeypatch.setenv("EMAIL_SMTP_PORT", "465")
+
+    fake_smtp = MagicMock()
+    fake_smtp.__enter__ = MagicMock(return_value=fake_smtp)
+    fake_smtp.__exit__ = MagicMock(return_value=False)
+
+    with patch("smtplib.SMTP_SSL", return_value=fake_smtp):
+        from maverick.tools.email_tool import email_tool
+        out = email_tool().fn({
+            "op": "send", "to": "you@example.com",
+            "subject": "Hello", "body": "Test",
+        })
+    assert "sent to you@example.com" in out
+    fake_smtp.login.assert_called_once_with("me@example.com", "pw")
+    fake_smtp.send_message.assert_called_once()

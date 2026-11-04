@@ -7,6 +7,7 @@ from unittest.mock import patch
 import pytest
 from maverick.skills import (
     Skill,
+    _relevant_skills_lexical,
     _safe_name,
     build_skill_md,
     create_skill,
@@ -258,3 +259,25 @@ class TestSkillPurposeParse:
                 "---\n\n# What\n\nA body long enough to be a valid skill file.\n")
         s = Skill.parse(text, tmp_path / "p.md")
         assert s.purposes == ("audit", "finance")
+
+
+def _mk(name: str) -> Skill:
+    return Skill(
+        name=name, triggers=["deploy service"], tools_needed=[],
+        body="x", path=Path(f"/tmp/{name}.md"),
+    )
+
+
+def test_lexical_tie_break_is_deterministic_by_name():
+    a, z = _mk("aaa"), _mk("zzz")
+    # Identical triggers -> identical scores -> the tie must break by name,
+    # independent of input order.
+    r1 = _relevant_skills_lexical("deploy service now", [z, a], max_n=2, min_score=1)
+    r2 = _relevant_skills_lexical("deploy service now", [a, z], max_n=2, min_score=1)
+    assert [s.name for s in r1] == ["aaa", "zzz"]
+    assert [s.name for s in r2] == ["aaa", "zzz"]
+    # The max_n cut is therefore stable: top-1 is always "aaa", never order-dependent.
+    top_zfirst = _relevant_skills_lexical("deploy service now", [z, a], max_n=1, min_score=1)
+    top_afirst = _relevant_skills_lexical("deploy service now", [a, z], max_n=1, min_score=1)
+    assert [s.name for s in top_zfirst] == ["aaa"]
+    assert [s.name for s in top_afirst] == ["aaa"]

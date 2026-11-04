@@ -4,11 +4,10 @@ Uses a stub entry_points iterator monkey-patched into
 `maverick.plugins._entry_points` so we don't need to actually install a
 sibling plugin package in CI.
 
-v0.2: plugin discovery now requires an explicit
-allowlist. These tests set MAVERICK_PLUGINS_ALLOW=* to preserve the
-pre-0.2 "everything loads" behavior so they keep testing the
-discovery / contract semantics specifically. The allowlist itself is
-tested in test_tier0_security.py.
+Plugin discovery requires an explicit allowlist. The discovery tests set
+MAVERICK_PLUGINS_ALLOW=* so they test the discovery / contract semantics
+specifically; the allowlist and hook entry-point gating tests at the end of
+this file cover the allowlist itself.
 """
 from __future__ import annotations
 
@@ -155,3 +154,85 @@ def test_base_registry_loads_plugin_tools(monkeypatch, tmp_path):
     wm = WorldModel(path=tmp_path / "w.db")
     reg = base_registry(wm, LocalBackend(workdir=tmp_path))
     assert "weather" in {t.name for t in reg.all()}
+
+
+def test_plugin_allowlist_empty_by_default(monkeypatch, tmp_path):
+    """No env var + no [plugins] config => no plugins load.
+
+    This is the security default: an attacker who pip-installs a
+    package declaring `entry_points."maverick.tools"` does NOT get
+    automatic code execution on the next maverick run.
+    """
+    monkeypatch.delenv("MAVERICK_PLUGINS_ALLOW", raising=False)
+    # Point at a non-existent config so load_config sees no [plugins].
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "nonexistent.toml"))
+
+    executed = []
+
+    def factory():
+        executed.append("ran")
+        return "should-not-execute"
+
+    _set_eps(monkeypatch, {"maverick.tools": [_FakeEP("attacker", factory)]})
+    out = plugins.discover_tools()
+    assert out == []
+    # And the factory was never called -- this is the real safety
+    # property: the attacker's code did not execute.
+    assert executed == []
+
+
+def test_plugin_allowlist_explicit_names(monkeypatch):
+    """Only names in the allowlist load."""
+    monkeypatch.setenv("MAVERICK_PLUGINS_ALLOW", "weather,calendar")
+
+    _set_eps(monkeypatch, {
+        "maverick.tools": [
+            _FakeEP("weather", lambda: "ok-weather"),
+            _FakeEP("attacker", lambda: "DANGER"),
+            _FakeEP("calendar", lambda: "ok-calendar"),
+        ],
+    })
+    names = [name for name, _ in plugins.discover_tools()]
+    assert names == ["weather", "calendar"]
+
+
+def test_plugin_allowlist_wildcard(monkeypatch):
+    """`*` reverts to pre-v0.2 behavior (load everything)."""
+    monkeypatch.setenv("MAVERICK_PLUGINS_ALLOW", "*")
+    _set_eps(monkeypatch, {
+        "maverick.tools": [
+            _FakeEP("a", lambda: "a"),
+            _FakeEP("b", lambda: "b"),
+        ],
+    })
+    assert {n for n, _ in plugins.discover_tools()} == {"a", "b"}
+
+
+def test_hook_entry_points_require_plugin_allowlist(monkeypatch, tmp_path):
+    """Hook entry points use the same explicit plugin allowlist as tools.
+
+    With plugins disabled by default, merely installing a package that
+    declares `entry_points."maverick.hooks"` must not import or execute it.
+    """
+    from maverick.hooks import clear, load_from_entry_points
+
+    monkeypatch.delenv("MAVERICK_PLUGINS_ALLOW", raising=False)
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "nonexistent.toml"))
+    clear()
+
+    executed = []
+
+    class _HookEP:
+        name = "attacker"
+
+        def load(self):
+            executed.append("imported")
+            return list
+
+    monkeypatch.setattr(
+        "importlib.metadata.entry_points",
+        lambda group=None: [_HookEP()] if group == "maverick.hooks" else [],
+    )
+
+    assert load_from_entry_points() == 0
+    assert executed == []

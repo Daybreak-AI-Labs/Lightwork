@@ -87,3 +87,16 @@ def test_unknown_style_warns_once(monkeypatch, caplog):
         assert caplog.text.count("not recognized") == 1
     finally:
         path.unlink()
+
+
+class TestPersonaStyleCasing:
+    def test_style_case_insensitive(self, monkeypatch):
+        from maverick import persona
+        # Pick a real style key, upper-cased, and confirm it still applies.
+        key = next(iter(persona.STYLES))
+        monkeypatch.setattr(
+            persona, "load_persona",
+            lambda: {"name": "", "style": key.upper(), "addendum": ""},
+        )
+        rendered = persona.render_persona_prompt()
+        assert persona.STYLES[key] in rendered

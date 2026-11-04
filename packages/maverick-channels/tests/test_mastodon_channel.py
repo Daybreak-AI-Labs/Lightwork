@@ -13,6 +13,7 @@ canned JSON.
 from __future__ import annotations
 
 import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -256,3 +257,74 @@ def test_mastodon_cursor_uses_numeric_not_lexicographic_max(monkeypatch):
     asyncio.run(chan._poll_once())
     # Numeric max is 10000001; a lexicographic max would wrongly pick 9999999.
     assert chan._last_seen_id == "10000001"
+
+
+# ---------- Mastodon channel ----------
+
+@pytest.mark.asyncio
+async def test_mastodon_requires_token():
+    from maverick_channels.mastodon import MastodonChannel
+
+    async def handler(msg):
+        return ""
+
+    ch = MastodonChannel(handler=handler, access_token="", allowed_user_ids={"ok@example"})
+    with pytest.raises(RuntimeError, match="MASTODON_ACCESS_TOKEN"):
+        await ch._poll_once()
+
+
+def test_mastodon_strip_html():
+    from maverick_channels.mastodon import _strip_html
+    html = "<p>Hello <a href='x'>world</a>!</p>"
+    assert _strip_html(html) == "Hello world!"
+
+
+@pytest.mark.asyncio
+async def test_mastodon_poll_uses_since_id():
+    from maverick_channels.mastodon import MastodonChannel
+
+    fake_resp = MagicMock()
+    fake_resp.status_code = 200
+    fake_resp.raise_for_status = MagicMock()
+    fake_resp.json = MagicMock(return_value=[
+        {"id": "100", "status": {"content": "<p>hi</p>", "id": "200"},
+         "account": {"acct": "user@example"}},
+    ])
+    captured = {}
+
+    async def fake_get(url, headers=None, params=None):
+        captured["params"] = params
+        return fake_resp
+
+    fake_client = MagicMock()
+    fake_client.__aenter__ = AsyncMock(return_value=fake_client)
+    fake_client.__aexit__ = AsyncMock(return_value=False)
+    fake_client.get = AsyncMock(side_effect=fake_get)
+
+    with patch("httpx.AsyncClient", return_value=fake_client):
+        async def handler(msg):
+            return ""
+
+        ch = MastodonChannel(
+            handler=handler, access_token="tok",
+            instance="mastodon.test",
+            allowed_user_ids={"user@example"},
+        )
+        # Start from an explicitly admitted empty checkpoint. A fresh account
+        # seeds from the newest historical notification to avoid replaying it.
+        ch._last_seen_id = "0"
+        first = await ch._poll_once()
+        assert len(first) == 1
+        assert captured["params"]["since_id"] == "0"
+
+        second_resp = MagicMock()
+        second_resp.status_code = 200
+        second_resp.raise_for_status = MagicMock()
+        second_resp.json = MagicMock(return_value=[])
+        async def fake_get2(url, headers=None, params=None):
+            captured["params"] = params
+            return second_resp
+        fake_client.get = AsyncMock(side_effect=fake_get2)
+        await ch._poll_once()
+        # Second call: since_id = "100".
+        assert captured["params"].get("since_id") == "100"

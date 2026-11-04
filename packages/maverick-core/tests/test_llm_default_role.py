@@ -70,3 +70,22 @@ def test_a_named_model_still_wins(home, monkeypatch):
 
     monkeypatch.setenv("MAVERICK_MODEL_OVERRIDE", CONFIGURED)
     assert LLM("anthropic:claude-named").model == "anthropic:claude-named"
+
+
+class TestModelOverride:
+    def test_env_override_wins_over_defaults(self, monkeypatch):
+        from maverick.llm import model_for_role
+        monkeypatch.setenv("MAVERICK_MODEL_OVERRIDE_CODER", "claude-opus-4-7")
+        assert model_for_role("coder") == "claude-opus-4-7"
+
+    def test_env_override_is_role_specific(self, monkeypatch):
+        from maverick.llm import model_for_role
+        # Setting coder override does NOT affect orchestrator.
+        monkeypatch.setenv("MAVERICK_MODEL_OVERRIDE_CODER", "deepseek-v4-pro")
+        monkeypatch.delenv("MAVERICK_MODEL_OVERRIDE_ORCHESTRATOR", raising=False)
+        assert model_for_role("orchestrator") != "deepseek-v4-pro"
+
+    def test_no_override_falls_back_to_defaults(self, monkeypatch):
+        from maverick.llm import ROLE_MODELS, model_for_role
+        monkeypatch.delenv("MAVERICK_MODEL_OVERRIDE_CODER", raising=False)
+        assert model_for_role("coder") == ROLE_MODELS["coder"]

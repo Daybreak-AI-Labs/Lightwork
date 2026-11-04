@@ -351,3 +351,34 @@ def test_anonymous_audit_subject_lookup_uses_selected_tenant(monkeypatch):
     bundle = export_subject_data("alice", channel="telegram", tenant="acme")
     assert bundle["counts"]["audit_events"] == 1
     assert bundle["audit"][0]["channel"].startswith("channel#")
+
+
+def test_dsar_exports_user_scoped_facts_and_excludes_others():
+    wm = WorldModel(_world_db())
+    # A conversation anchors the channel resolution for the bare-id export.
+    wm.get_or_create_conversation("telegram", "alice")
+    wm.upsert_fact("user:telegram:alice:preference", "alice likes blue")
+    wm.upsert_fact("user:telegram:bob:preference", "bob likes red")
+    wm.upsert_fact("global:telegram:alice", "not deliberately scoped")
+    wm.close()
+
+    bundle = export_subject_data("alice", channel="telegram")
+    facts = bundle["world"]["facts"]
+    assert facts == {"user:telegram:alice:preference": "alice likes blue"}
+    assert bundle["counts"]["facts"] == 1
+    # No cross-subject / unscoped leakage.
+    import json
+    blob = json.dumps(bundle)
+    assert "bob likes red" not in blob
+    assert "not deliberately scoped" not in blob
+
+
+def test_dsar_export_includes_fact_history_key():
+    # Shape guarantee: the bundle always carries fact_history (empty when
+    # temporal memory is off), so downstream consumers can rely on it.
+    wm = WorldModel(_world_db())
+    wm.get_or_create_conversation("telegram", "alice")
+    wm.close()
+    bundle = export_subject_data("alice", channel="telegram")
+    assert "fact_history" in bundle["world"]
+    assert isinstance(bundle["world"]["fact_history"], dict)

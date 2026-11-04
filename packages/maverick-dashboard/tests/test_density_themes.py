@@ -1,6 +1,9 @@
 """Adaptive UI density (?density= / mvk_density) + pluggable operator themes."""
 from __future__ import annotations
 
+import re
+
+import pytest
 from fastapi.testclient import TestClient
 from maverick_dashboard import themes as themes_mod
 from maverick_dashboard.app import app, resolve_density
@@ -112,3 +115,69 @@ def test_no_config_themes_is_default_off(monkeypatch):
     fresh = TestClient(app, base_url="http://127.0.0.1")
     r = fresh.get("/")
     assert "body.theme-midnight" not in r.text
+
+
+@pytest.fixture
+def dashboard_client(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    from maverick.world_model import WorldModel
+    w = WorldModel(tmp_path / "world.db")
+    w.create_goal("hello", "")
+    from maverick_dashboard import app as app_mod
+    monkeypatch.setattr(app_mod, "_world", lambda: w)
+    yield TestClient(app_mod.app, base_url="http://127.0.0.1")
+    w.close()
+
+
+def _body_classes(html):
+    body = re.search(r'<body\b[^>]*\bclass="([^"]*)"', html)
+    assert body is not None
+    return body.group(1).split()
+
+
+def test_dashboard_default_theme_is_dark(dashboard_client):
+    resp = dashboard_client.get("/")
+    assert resp.status_code == 200
+    assert "theme-dark" in _body_classes(resp.text)
+
+
+@pytest.mark.parametrize("theme", ["dark", "light", "solarized", "hicontrast"])
+def test_dashboard_theme_query_param(dashboard_client, theme):
+    resp = dashboard_client.get(f"/?theme={theme}")
+    assert resp.status_code == 200
+    assert f"theme-{theme}" in _body_classes(resp.text)
+
+
+def test_dashboard_invalid_theme_falls_back(dashboard_client):
+    resp = dashboard_client.get("/?theme=garbage-not-a-theme")
+    assert resp.status_code == 200
+    # Falls back to dark (the default).
+    assert "theme-dark" in _body_classes(resp.text)
+
+
+def test_dashboard_theme_cookie_persists(dashboard_client):
+    # Use a non-redirecting page so the response being inspected is the one
+    # that persists the preference. ``/`` may first redirect to onboarding.
+    resp = dashboard_client.get("/overview?theme=light")
+    assert resp.status_code == 200
+    cookies = resp.cookies
+    assert cookies.get("mvk_theme") == "light"
+    # The client cookie jar should carry the server-set value into the next
+    # request; passing per-request cookies is deprecated and bypasses that
+    # persistence behavior.
+    resp2 = dashboard_client.get("/overview")
+    assert "theme-light" in _body_classes(resp2.text)
+
+
+def test_dashboard_theme_switcher_options_in_header(dashboard_client):
+    """The 4-coloured-dots switcher was replaced with a single
+    ``<select>`` element (accessibility + cleaner UI). All four themes
+    must still be present as options."""
+    resp = dashboard_client.get("/")
+    body = resp.text
+    for theme in ("dark", "light", "solarized", "hicontrast"):
+        # Either as the new <option value="X"> or, transitionally, as
+        # a hand-coded link still in the header.
+        assert (f'value="{theme}"' in body) or (f"?theme={theme}" in body), (
+            f"theme {theme} not exposed via the theme switcher"
+        )

@@ -521,3 +521,33 @@ def test_retention_marker_is_signed_and_verifies(tmp_path: Path, monkeypatch):
     ]
     assert len(marker_files) == 1
     assert verify_chain(marker_files[0]) == []
+
+
+# ---------- retention: only the known tables are purgeable ----------
+
+def test_retention_rejects_unknown_table(tmp_path):
+    import sqlite3
+
+    from maverick.audit.retention import _purge_table_by_time
+    db = tmp_path / "w.db"
+    sqlite3.connect(str(db)).close()
+    try:
+        _purge_table_by_time(db, "goals; DROP TABLE goals", "x", 0.0, dry_run=True)
+    except ValueError as e:
+        assert "unknown table/column" in str(e)
+        return
+    raise AssertionError("expected ValueError on non-whitelisted table")
+
+
+def test_retention_allows_known_table(tmp_path):
+    import sqlite3
+
+    from maverick.audit.retention import _purge_table_by_time
+    db = tmp_path / "w.db"
+    c = sqlite3.connect(str(db))
+    c.execute("CREATE TABLE episodes (id INTEGER, ended_at REAL)")
+    c.execute("INSERT INTO episodes VALUES (1, 100.0)")
+    c.commit()
+    c.close()
+    removed = _purge_table_by_time(db, "episodes", "ended_at", 200.0, dry_run=True)
+    assert removed == 1  # dry run counts the old row, doesn't delete

@@ -1,6 +1,7 @@
 """Tests for the config validator (maverick.config_lint)."""
 from __future__ import annotations
 
+import pytest
 from maverick.config_lint import Finding, format_findings, lint_config
 
 
@@ -26,8 +27,8 @@ def test_clean_config_no_findings():
 
 def test_dashboard_keys_the_app_reads_are_known():
     # The dashboard reads theme/density/allow_extension and a [dashboard.themes]
-    # subtable; the schema listing only "token" warned "unknown key" on those
-    # documented operator settings (user-testing finding).
+    # subtable; a schema listing only "token" would warn "unknown key" on
+    # those documented operator settings.
     findings = lint_config({"dashboard": {
         "token": "x", "theme": "dark", "density": "compact",
         "allow_extension": True, "themes": {"mine": {"bg": "#000"}},
@@ -266,3 +267,21 @@ def test_every_feature_switch_the_runtime_reads_is_known(tmp_path, monkeypatch):
         "dashboard": {"employee_activation_jobs": [], "extension_form_values": False,
                       "extension_page_structure": True, "local_owner_setup": True},
     }) == []
+
+
+# ---- config-lint: negative / non-finite numeric caps -----------------------
+
+@pytest.mark.parametrize("bad", [-1.5, float("inf"), float("nan")])
+def test_config_lint_flags_invalid_numeric_cap(bad):
+    from maverick.config_lint import lint_config
+    findings = lint_config({"budget": {"max_dollars": bad}})
+    assert any(f.severity == "error" and "finite" in f.message for f in findings), bad
+
+
+def test_config_lint_accepts_huge_integer_cap_without_crashing():
+    from maverick.config_lint import lint_config
+
+    huge_cap = int("9" * 4000)
+    findings = lint_config({"budget": {"max_dollars": huge_cap}})
+
+    assert not findings

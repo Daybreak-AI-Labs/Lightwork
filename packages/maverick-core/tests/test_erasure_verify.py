@@ -361,3 +361,23 @@ def test_cli_erase_verify_json_residual_exit_one():
         main, ["erase-verify", "--channel", "telegram", "--user", "alice", "--json"])
     assert res.exit_code == 1
     assert '"clean": false' in res.output
+
+
+# --- erasure verify never certifies clean on an unresolved channel ---
+
+def test_verify_erasure_indeterminate_without_channel():
+    # No channel passed and no rows to disambiguate -> the export can't scope to
+    # a subject, so the verdict must be indeterminate, not a false "clean".
+    rep = erasure_verify.verify_erasure("ghost")
+    assert rep.get("indeterminate") is True
+    assert rep["clean"] is False
+
+
+def test_verify_erasure_needs_pre_delete_receipt_even_with_concrete_channel():
+    # A channel resolves direct subject stores, but cannot reconstruct goal IDs
+    # after their attributing turns are gone. A bare scan therefore cannot
+    # certify the complete goal graph.
+    rep = erasure_verify.verify_erasure("nobody", channel="telegram")
+    assert rep.get("indeterminate") is True
+    assert rep["clean"] is False
+    assert "erasure_receipt" in rep["errors"]

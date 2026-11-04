@@ -256,3 +256,25 @@ def test_allow_listed_custom_provider_pointed_off_box_is_blocked(monkeypatch):
         },
     )
     assert not is_local_provider("myvllm")           # vouched, but aimed off-box
+
+
+# --- enterprise: env truthy-word must not silently disable -------------------
+
+def test_enterprise_recognizes_affirmatives_and_negatives(monkeypatch):
+    from maverick import enterprise
+    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
+    for v in ("1", "true", "on", "yes", "enable", "enabled", "y", "t"):
+        monkeypatch.setenv("MAVERICK_ENTERPRISE", v)
+        assert enterprise.enterprise_enabled() is True, v
+    for v in ("0", "false", "off", "no", "disable", "disabled"):
+        monkeypatch.setenv("MAVERICK_ENTERPRISE", v)
+        assert enterprise.enterprise_enabled() is False, v
+
+
+def test_enterprise_ambiguous_env_falls_through_to_config(monkeypatch):
+    from maverick import enterprise
+    # An unrecognized env value must NOT silently disable the control: config decides.
+    monkeypatch.setattr("maverick.config.load_config",
+                        lambda *a, **k: {"enterprise": {"mode": True}})
+    monkeypatch.setenv("MAVERICK_ENTERPRISE", "enabled-for-prod")
+    assert enterprise.enterprise_enabled() is True

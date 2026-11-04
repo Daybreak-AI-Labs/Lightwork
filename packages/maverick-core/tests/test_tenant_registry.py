@@ -4,6 +4,8 @@ from __future__ import annotations
 import sqlite3
 
 import pytest
+from click.testing import CliRunner
+from maverick.cli import main
 from maverick.tenant import registry as tr
 
 
@@ -11,6 +13,7 @@ from maverick.tenant import registry as tr
 def _isolate(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
+    monkeypatch.delenv("MAVERICK_CONFIG", raising=False)
 
 
 def test_create_lists_and_makes_workspace(tmp_path):
@@ -457,3 +460,33 @@ def test_removed_workspace_with_an_active_legal_matter_is_not_erased_until_relea
     result = tr.erase_removed_tenant("former", revision=review["revision"], operation="3" * 32,
                                      actor="user:owner", context="test", previous_attempt=review["previous_attempt"])
     assert result["result"] == "confirmed" and not root.exists()
+
+
+# ---- tenant quota: non-finite caps -----------------------------------------
+
+@pytest.mark.parametrize("bad", ["nan", "inf", "-inf"])
+def test_tenant_quota_rejects_non_finite(bad):
+    from maverick.tenant import registry as tr
+    tr.create_tenant("acme", max_daily_dollars=5.0)
+    res = CliRunner().invoke(main, ["tenant", "quota", "acme", "--", bad])
+    assert res.exit_code == 2, res.output
+    assert "finite" in res.output
+    assert tr.get_tenant("acme").max_daily_dollars == 5.0  # existing cap unchanged
+
+
+# ---- CLI start refuses a suspended tenant ----------------------------------
+
+def test_cli_start_refuses_suspended_tenant(monkeypatch):
+    # The server path enforces assert_tenant_active, and so must the CLI start
+    # path, or a suspended tenant runs goals freely. The guard
+    # fires before goal creation / the kernel, so no provider key is needed.
+    from maverick.tenant import registry as tr
+    tr.create_tenant("acme")
+    tr.suspend_tenant("acme")
+    monkeypatch.setenv("MAVERICK_TENANT", "acme")
+    # A present (not necessarily valid) key gets past start's provider preflight
+    # so execution reaches the tenant-active guard.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-dummy")
+    res = CliRunner().invoke(main, ["start", "do something", "--sandbox", "local"])
+    assert res.exit_code == 3, res.output
+    assert "suspended" in res.output.lower()

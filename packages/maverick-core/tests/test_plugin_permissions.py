@@ -1,7 +1,7 @@
 """Plugin load-time enforcement: name-squat defense + manifest permissions.
 
-Complements test_plugins.py (discovery semantics) and test_tier0_security.py
-(the allowlist). Here we pin the two controls layered on the allowlist:
+Complements test_plugins.py (discovery semantics and the allowlist). Here we
+pin the two controls layered on the allowlist:
 
   - a name published by 2+ distributions is refused unless pinned `name@dist`,
   - a plugin whose maverick-plugin.toml requests an ungranted permission is

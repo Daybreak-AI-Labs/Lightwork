@@ -168,3 +168,11 @@ def test_a_typed_vertex_model_is_refused_with_the_google_billing_remedy():
 
     with pytest.raises(UnpricedModelError, match="Google Cloud invoices"):
         _lookup_price("vertex:claude-haiku-4-5@20251001", estimate_only=False)
+
+
+# ---------- Wizard catalog ----------
+
+def test_wizard_catalog_includes_tgi():
+    from maverick_installer import models
+    assert "tgi" in models.PROVIDERS
+    assert models.PROVIDERS["tgi"]["status"] == "ready"

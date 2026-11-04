@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+from unittest.mock import MagicMock
 
 import pytest
 import pytest as _workspace_guard_pytest
@@ -189,3 +191,169 @@ def _separate_container_test_home(tmp_path, monkeypatch, _isolate_dynamic_maveri
     monkeypatch.setenv("HOME", str(operator_home))
     monkeypatch.setenv("USERPROFILE", str(operator_home))
     monkeypatch.setenv("MAVERICK_HOME", str(operator_home / ".maverick"))
+
+
+# ---------- devcontainer sandbox ----------
+
+def _stub_subprocess_ok(monkeypatch):
+    monkeypatch.setattr(
+        "subprocess.run",
+        lambda args, *a, **k: MagicMock(returncode=0, stdout=b"", stderr=b""),
+    )
+
+
+def test_devcontainer_strip_jsonc():
+    from maverick.sandbox.devcontainer import _strip_jsonc
+    text = """
+{
+  // a line comment
+  "image": "python:3.12", /* block comment */
+  "runArgs": ["--cap-add=NET_ADMIN",],
+}
+"""
+    cleaned = _strip_jsonc(text)
+    data = json.loads(cleaned)
+    assert data["image"] == "python:3.12"
+    assert data["runArgs"] == ["--cap-add=NET_ADMIN"]
+
+
+def test_devcontainer_requires_spec(tmp_path, monkeypatch):
+    _stub_subprocess_ok(monkeypatch)
+    from maverick.sandbox.devcontainer import DevcontainerBackend
+    try:
+        DevcontainerBackend(project_dir=tmp_path)
+    except RuntimeError as e:
+        assert "devcontainer.json" in str(e)
+        return
+    raise AssertionError("expected RuntimeError")
+
+
+def test_devcontainer_rejects_build_only_spec(tmp_path, monkeypatch):
+    _stub_subprocess_ok(monkeypatch)
+    (tmp_path / ".devcontainer").mkdir()
+    (tmp_path / ".devcontainer" / "devcontainer.json").write_text(
+        json.dumps({"dockerFile": "Dockerfile"}),
+    )
+    from maverick.sandbox.devcontainer import DevcontainerBackend
+    try:
+        DevcontainerBackend(project_dir=tmp_path)
+    except RuntimeError as e:
+        assert "image" in str(e) and "dockerFile" in str(e)
+        return
+    raise AssertionError("expected RuntimeError")
+
+
+def test_devcontainer_parses_image(tmp_path, monkeypatch):
+    _stub_subprocess_ok(monkeypatch)
+    (tmp_path / ".devcontainer").mkdir()
+    (tmp_path / ".devcontainer" / "devcontainer.json").write_text(
+        json.dumps({
+            "image": "mcr.microsoft.com/devcontainers/python:3.12",
+            "remoteUser": "vscode",
+            "workspaceFolder": "/workspaces/myrepo",
+            "containerEnv": {"FOO": "bar"},
+        }),
+    )
+    from maverick.sandbox.devcontainer import DevcontainerBackend
+    backend = DevcontainerBackend(project_dir=tmp_path)
+    assert backend.spec.image.endswith(":3.12")
+    assert backend.spec.remote_user == "vscode"
+    assert backend.spec.workspace_folder == "/workspaces/myrepo"
+    assert backend.spec.container_env == {"FOO": "bar"}
+
+
+def test_devcontainer_rejects_run_args(tmp_path, monkeypatch):
+    _stub_subprocess_ok(monkeypatch)
+    (tmp_path / ".devcontainer").mkdir()
+    (tmp_path / ".devcontainer" / "devcontainer.json").write_text(
+        json.dumps({"image": "alpine", "runArgs": ["--privileged"]}),
+    )
+    from maverick.sandbox.devcontainer import DevcontainerBackend
+    try:
+        DevcontainerBackend(project_dir=tmp_path)
+    except RuntimeError as e:
+        assert "runArgs" in str(e)
+        return
+    raise AssertionError("expected RuntimeError")
+
+
+def test_devcontainer_exec_builds_docker_run(tmp_path, monkeypatch):
+    monkeypatch.delenv("MAVERICK_SANDBOX_ALLOW_ROOT", raising=False)
+    monkeypatch.setattr("maverick.sandbox.devcontainer.container_user_args", lambda _allow_root: ["--user", "1000:1000"])
+    (tmp_path / ".devcontainer").mkdir()
+    (tmp_path / ".devcontainer" / "devcontainer.json").write_text(
+        json.dumps({
+            "image": "alpine", "remoteUser": "node",
+            "containerEnv": {"NODE_ENV": "test"},
+        }),
+    )
+
+    captured = {"args": None}
+
+    def _fake_run(args, *a, **k):
+        if args[:2] == ["docker", "version"]:
+            return MagicMock(returncode=0, stdout=b"", stderr=b"")
+        captured["args"] = args
+        return MagicMock(returncode=0, stdout="ran\n", stderr="")
+
+    monkeypatch.setattr("subprocess.run", _fake_run)
+    from maverick.sandbox.devcontainer import DevcontainerBackend
+    backend = DevcontainerBackend(project_dir=tmp_path)
+    result = backend.exec("echo hi")
+    assert result.ok
+    args = captured["args"]
+    assert args[args.index("--user"):args.index("--user") + 2] == ["--user", "1000:1000"]
+    assert "node" not in args
+    assert "-e" in args and any("NODE_ENV=test" in s for s in args)
+    assert "alpine" in args
+    # DoS parity with DockerBackend: RAM is capped and swap pinned to it so the
+    # cap can't be sidestepped via swap.
+    assert "--memory" in args and "--memory-swap" in args
+
+
+def test_build_sandbox_constructs_devcontainer(monkeypatch, tmp_path):
+    _stub_subprocess_ok(monkeypatch)
+    (tmp_path / ".devcontainer").mkdir()
+    (tmp_path / ".devcontainer" / "devcontainer.json").write_text(
+        json.dumps({"image": "alpine"}),
+    )
+    import maverick.config as cfg
+
+    def _fake_cfg():
+        return {"sandbox": {
+            "backend": "devcontainer",
+            "project_dir": str(tmp_path),
+            "timeout": 30,
+        }}
+
+    monkeypatch.setattr(cfg, "load_config", _fake_cfg)
+    monkeypatch.setattr(cfg, "get_sandbox", lambda: _fake_cfg()["sandbox"])
+    from maverick.sandbox import build_sandbox
+    sb = build_sandbox()
+    assert sb.__class__.__name__ == "DevcontainerBackend"
+
+
+def _docker_ok(args, **kwargs):
+    if args[:2] == ["docker", "version"]:
+        return subprocess.CompletedProcess(args, 0, stdout="ok", stderr="")
+    return subprocess.CompletedProcess(args, 0, stdout="done", stderr="")
+
+
+class TestSandboxHardening:
+    def test_devcontainer_drops_caps_and_privilege_escalation(self, monkeypatch, tmp_path):
+        from maverick.sandbox.devcontainer import DevcontainerBackend, DevcontainerSpec
+        captured = []
+
+        def fake_run(args, **kwargs):
+            captured.append(args)
+            return _docker_ok(args, **kwargs)
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        backend = DevcontainerBackend(
+            project_dir=tmp_path,
+            spec_override=DevcontainerSpec(image="python:3.12-slim"),
+        )
+        backend.exec("echo hi")
+        run_args = next(a for a in captured if a[:2] == ["docker", "run"])
+        assert "--cap-drop" in run_args and "ALL" in run_args
+        assert "no-new-privileges" in run_args

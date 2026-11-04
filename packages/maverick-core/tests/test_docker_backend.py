@@ -1,5 +1,6 @@
 
 import os
+import pathlib
 import subprocess
 
 import pytest
@@ -348,3 +349,29 @@ def _separate_container_test_home(tmp_path, monkeypatch, _isolate_dynamic_maveri
     monkeypatch.setenv("HOME", str(operator_home))
     monkeypatch.setenv("USERPROFILE", str(operator_home))
     monkeypatch.setenv("MAVERICK_HOME", str(operator_home / ".maverick"))
+
+
+# --- REL-6: docker timeout cleanup must not mask the TIMEOUT result ---
+
+def test_docker_timeout_cleanup_is_guarded(monkeypatch):
+    from maverick.sandbox.docker import DockerBackend
+
+    b = DockerBackend.__new__(DockerBackend)
+    b.workdir = pathlib.Path(".")
+    b.image = "python:3.12-slim"
+    b.timeout = 1.0
+    b.allow_network = False
+
+    calls = {"n": 0}
+
+    def fake_run(args, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise subprocess.TimeoutExpired(cmd=args, timeout=1.0)
+        # The cleanup `docker rm -f` also hangs (wedged daemon).
+        raise subprocess.TimeoutExpired(cmd=args, timeout=10)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    res = b.exec("sleep 100")
+    assert res.exit_code == 124
+    assert "TIMEOUT" in res.stderr

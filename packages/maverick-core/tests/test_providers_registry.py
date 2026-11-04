@@ -182,3 +182,53 @@ class TestThirdPartyProvidersDoNotFallbackToOpenAIKey:
         from maverick.providers.xai_provider import XaiClient
         with pytest.raises(RuntimeError, match="requires a non-empty API key"):
             XaiClient()
+
+
+def _clear_azure_auth(monkeypatch):
+    for name in (
+        "AZURE_OPENAI_API_KEY",
+        "AZURE_OPENAI_AD_TOKEN",
+        "AZURE_OPENAI_AUTH",
+        "AZURE_OPENAI_TOKEN_SCOPE",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
+# ---------- Providers ----------
+
+def test_providers_registered():
+    from maverick.providers import KNOWN_PROVIDERS
+    assert "azure" in KNOWN_PROVIDERS
+    assert "bedrock" in KNOWN_PROVIDERS
+
+
+def test_azure_identity_dependency_is_preflighted(monkeypatch):
+    import importlib.util
+
+    from maverick import providers
+
+    _clear_azure_auth(monkeypatch)
+    monkeypatch.setenv("AZURE_OPENAI_AUTH", "entra_id")
+
+    def _find_spec(name):
+        return None if name == "azure.identity" else object()
+
+    monkeypatch.setattr(importlib.util, "find_spec", _find_spec)
+    messages = providers.missing_sdks(["azure:gpt5"])
+
+    assert any("maverick-core[azure]" in message for message in messages)
+
+
+def test_static_azure_ad_token_does_not_require_identity_sdk(monkeypatch):
+    import importlib.util
+
+    from maverick import providers
+
+    _clear_azure_auth(monkeypatch)
+    monkeypatch.setenv("AZURE_OPENAI_AD_TOKEN", "static-token")
+
+    def _find_spec(name):
+        return None if name == "azure.identity" else object()
+
+    monkeypatch.setattr(importlib.util, "find_spec", _find_spec)
+    assert providers.missing_sdks(["azure:gpt5"]) == []

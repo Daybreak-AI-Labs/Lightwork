@@ -15,9 +15,8 @@ from maverick.llm import MODEL_HAIKU, MODEL_OPUS, MODEL_SONNET
 
 def test_opus_priced_at_opus_rate():
     b = Budget(max_dollars=100.0, max_input_tokens=10_000_000, max_output_tokens=10_000_000)
-    # Opus 4.7 May 2026 list = $5 in + $25 out per Mtok.
-    # An earlier commit incorrectly raised this to $15/$75 (legacy
-    # Opus 4.0/4.1 rates). Verified against
+    # Opus 4.7 May 2026 list = $5 in + $25 out per Mtok, not the legacy
+    # Opus 4.0/4.1 rates of $15/$75. Verified against
     # https://platform.claude.com/docs/en/about-claude/pricing and against
     # vals.ai's measured $2.42/test for Opus 4.7 on SWE-bench Verified.
     # 1M input + 1M output = $5 + $25 = $30.
@@ -327,3 +326,26 @@ def test_older_opus_tiers_priced_at_opus_not_sonnet():
     b = Budget(max_dollars=1e9, max_output_tokens=10_000_000)
     b.record_tokens(0, 1_000_000, model="claude-sonnet-4-6")
     assert abs(b.dollars - 15.0) < 1e-6
+
+
+class TestOpusPricing:
+    """Opus 4.7 is $5/$25 per Mtok — NOT $15/$75 (those were legacy
+    Opus 4.0/4.1 rates). Cross-check: vals.ai measures Opus 4.7 at $2.42/test on SWE-bench
+    Verified, which reconciles ONLY with $5/$25 pricing.
+    """
+
+    def test_opus_input_priced_at_5_per_mtok(self):
+        b = Budget(max_dollars=100.0, max_input_tokens=10_000_000)
+        b.record_tokens(1_000_000, 0, model=MODEL_OPUS)
+        assert abs(b.dollars - 5.0) < 0.001
+
+    def test_opus_output_priced_at_25_per_mtok(self):
+        b = Budget(max_dollars=100.0, max_input_tokens=10_000_000, max_output_tokens=10_000_000)
+        b.record_tokens(0, 1_000_000, model=MODEL_OPUS)
+        assert abs(b.dollars - 25.0) < 0.001
+
+    def test_opus_cache_read_at_one_tenth_5(self):
+        b = Budget(max_dollars=100.0, max_input_tokens=10_000_000)
+        b.record_tokens(0, 0, model=MODEL_OPUS, cache_read_tok=1_000_000)
+        # $5 input × 0.1 = $0.50
+        assert abs(b.dollars - 0.5) < 0.001

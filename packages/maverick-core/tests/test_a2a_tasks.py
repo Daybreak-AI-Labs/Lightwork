@@ -545,3 +545,16 @@ def test_max_concurrency_zero_disables_cap(monkeypatch):
     # The default executor on this box has >=4 workers; with the cap disabled
     # all 4 short goals overlap.
     assert state["peak"] >= 2
+
+
+def test_a2a_task_failure_scrubs_exception_text():
+    from maverick import a2a_tasks
+    from maverick.secrets import scrub
+    task = a2a_tasks._Task(
+        "ctx", {"role": "user", "parts": [], "messageId": "m", "kind": "message"})
+    # Mirror the fixed failure path: a connection error carrying a DSN secret.
+    e = RuntimeError("connect failed: postgres://user:supersecretpw@db/app")
+    detail = scrub(f"{type(e).__name__}: {e}")
+    task.add_artifact(f"task failed: {detail}", "error")
+    # The task dict is what reaches the caller and the push webhook.
+    assert "supersecretpw" not in str(task.to_dict())

@@ -27,3 +27,26 @@ def test_infinite_max_does_not_crash():
     out = _fn()({"op": "mutants", "source": "x = a + b\n", "max": float("inf")})
     assert isinstance(out, str)
     assert not out.startswith("Traceback")
+
+
+# ---- mutation_test ----
+
+def test_mutants_cover_operators():
+    t = mutation_test()
+    src = "def f(a, b):\n    return a + b > 0 and b\n"
+    out = t.fn({"op": "mutants", "source": src})
+    assert "arithmetic: '+' -> '-'" in out
+    assert "comparison: '>' -> '>='" in out
+    assert "boolean: 'and' -> 'or'" in out
+    assert "number: 0 -> 1" in out
+
+
+def test_mutants_cap_and_empty():
+    t = mutation_test()
+    assert t.fn({"op": "mutants", "source": "x = 1 + 2 + 3 + 4", "max": 2}).startswith("2 mutant")
+    assert "no mutants" in t.fn({"op": "mutants", "source": "x = 'hello'"})
+
+
+def test_mutants_syntax_error():
+    t = mutation_test()
+    assert t.fn({"op": "mutants", "source": "def ("}).startswith("ERROR")

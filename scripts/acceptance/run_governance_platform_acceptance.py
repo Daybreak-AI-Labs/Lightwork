@@ -89,7 +89,7 @@ SUITES: tuple[AcceptanceSuite, ...] = (
             "packages/maverick-core/tests/test_tenant_concurrency.py",
             "packages/maverick-core/tests/test_world_model_concurrency.py",
             "packages/maverick-core/tests/test_world_model_concurrent_open.py",
-            "packages/maverick-core/tests/test_audit_concurrency_fixes.py",
+            "packages/maverick-core/tests/test_job_queue.py",
             "packages/maverick-core/tests/test_runner_fair_concurrency.py",
             "packages/maverick-core/tests/test_bounded_growth.py",
         ),

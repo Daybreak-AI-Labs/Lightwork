@@ -156,3 +156,20 @@ def test_verify_script_requires_exact_release_tag():
     assert "@refs/tags/${ESCAPED_TAG}$" in body
     assert "refs/tags/v.*" not in body
     assert 'IDENTITY_REGEXP="${IDENTITY_REGEXP:-' not in body
+
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+# ---------- cosign workflow ----------
+
+def test_cosign_signing_in_publish_workflow():
+    p = REPO_ROOT / ".github" / "workflows" / "publish.yml"
+    body = p.read_text()
+    assert "sigstore/cosign-installer" in body
+    assert "cosign sign-blob" in body
+    assert "id-token: write" in body
+    # The sign job is gated on the successful upstream Release tag run.
+    assert 'workflows: ["Release"]' in body
+    assert "github.event.workflow_run.conclusion == 'success'" in body
+    assert "startsWith(github.event.workflow_run.head_branch, 'v')" in body

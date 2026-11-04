@@ -1,9 +1,8 @@
 """Tests for the agent/goal lifecycle hook events.
 
-The hook *machinery* (registry, dispatch, config/entry-point loading) was
-already covered by test_q1_2026_batch5.py, but only PreToolUse/PostToolUse
-were ever dispatched and nothing loaded configured hooks at startup. These
-tests cover the now-wired seams: ensure_loaded(), SessionStart, SessionEnd,
+The hook *machinery* (registry, dispatch, config/entry-point loading) is
+covered by test_hooks.py. These tests cover the lifecycle seams beyond
+PreToolUse/PostToolUse: ensure_loaded(), SessionStart, SessionEnd,
 UserPromptSubmit (blocking), Stop, and SubagentStop.
 """
 from __future__ import annotations

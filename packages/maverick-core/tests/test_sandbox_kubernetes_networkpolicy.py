@@ -15,7 +15,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from .test_kubernetes_workspace_transfer import _capture_using_fake_run
-from .test_q3_2026_batch4 import _calls_with, _subcommand
+from .test_sandbox_kubernetes import _calls_with, _subcommand
 
 
 @pytest.fixture(autouse=True)

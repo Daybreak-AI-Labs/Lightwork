@@ -529,3 +529,26 @@ def test_voice_refuses_missing_or_noncanonical_number_even_with_valid_bearer(mon
     assert resp.status_code == 403
     assert resp.json()["detail"] == "This caller number is not permitted to start work."
     assert seen == []
+
+
+# --- agent-safety H3: channel allowlist helpers ---
+
+def test_channel_allowlist_helpers():
+    base = pytest.importorskip("maverick_channels.base")
+    al = base.normalize_allowlist(["a", "b ", " "], "X_UNUSED")
+    assert al == {"a", "b"}
+    assert base.is_allowed("a", al) is True
+    assert base.is_allowed("z", al) is False
+    assert base.is_allowed("", al) is False
+    # "anonymous" must never satisfy an allowlist.
+    assert base.is_allowed("anonymous", {"anonymous"}) is False
+
+
+def test_email_channel_requires_allowlist(monkeypatch):
+    mod = pytest.importorskip("maverick_channels.email")
+    monkeypatch.delenv("EMAIL_ALLOWED_USER_IDS", raising=False)
+    with pytest.raises(ValueError):
+        mod.EmailChannel(
+            handler=lambda m: "", imap_host="h", imap_user="u",
+            imap_password="p", smtp_host="s", smtp_user="u", smtp_password="p",
+        )

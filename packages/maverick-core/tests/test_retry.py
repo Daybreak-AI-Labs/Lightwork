@@ -125,3 +125,31 @@ def test_is_retryable_status_error():
     assert retry._is_retryable_status_error(E(400)) is False
     assert retry._is_retryable_status_error(E(401)) is False
     assert retry._is_retryable_status_error(E(404)) is False
+
+
+# ---------- Retry-After clamp ----------
+
+def test_retry_after_negative_is_clamped(monkeypatch):
+    from maverick import retry
+
+    class _Resp:
+        headers = {"Retry-After": "-1"}
+
+    e = ConnectionError("rate limited")
+    e.response = _Resp()  # type: ignore[attr-defined]
+    delay = retry._compute_delay(0, e)
+    assert delay >= 0.0  # not -1 → no ValueError downstream
+
+
+def test_retry_after_huge_is_clamped(monkeypatch):
+    """Server returning Retry-After: 99999 must not block for a day."""
+    from maverick import retry
+    monkeypatch.setattr(retry, "MAX_DELAY", 30.0)
+
+    class _Resp:
+        headers = {"Retry-After": "99999"}
+
+    e = ConnectionError("rate limited")
+    e.response = _Resp()  # type: ignore[attr-defined]
+    delay = retry._compute_delay(0, e)
+    assert delay <= 30.0
