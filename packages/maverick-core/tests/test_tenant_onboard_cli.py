@@ -18,7 +18,7 @@ pytest.importorskip("maverick_dashboard")
 def _isolate(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     for var in ("MAVERICK_TENANT", "MAVERICK_PUBLIC_URL",
-                "MAVERICK_DASHBOARD_INVITES", "MAVERICK_LICENSE_ENFORCE"):
+                "MAVERICK_DASHBOARD_INVITES"):
         monkeypatch.delenv(var, raising=False)
 
 

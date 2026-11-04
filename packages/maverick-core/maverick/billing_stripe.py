@@ -28,7 +28,7 @@ Three moving parts, all per-tenant:
     restores it. :func:`verify_webhook` checks the signature with stdlib HMAC —
     no SDK, no network — so the whole webhook path unit-tests offline.
 
-Design (mirrors :mod:`maverick.entitlements` and kernel rule 5):
+Design (kernel rule 5):
 
   - **Default off + optional dependency.** The ``stripe`` SDK is an optional
     extra (``maverick-core[stripe]``), imported lazily inside the functions that

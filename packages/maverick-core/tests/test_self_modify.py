@@ -394,7 +394,7 @@ class TestBypassRegression:
         assert sm.is_protected("packages/maverick-core/maverick/AUDIT/writer.py") is True
 
     @pytest.mark.parametrize("mod", [
-        "entitlements.py", "budget.py", "promotion_effect.py", "llm.py",
+        "budget.py", "promotion_effect.py", "llm.py",
         "evaluator_evolution.py", "migration_governance.py", "approval_delegation.py",
         "release_manifest_signing.py",
     ])

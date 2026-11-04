@@ -3,7 +3,7 @@
   "counts": {
     "CI_ONLY": 14,
     "CLI_ONLY": 33,
-    "PRODUCTION": 2252,
+    "PRODUCTION": 2251,
     "TEST_ONLY": 21,
     "UNREACHED": 2
   },
@@ -371,7 +371,6 @@
     "maverick.energy_accounting": "PRODUCTION",
     "maverick.energy_aware_router": "PRODUCTION",
     "maverick.enterprise": "PRODUCTION",
-    "maverick.entitlements": "PRODUCTION",
     "maverick.entity_graph": "PRODUCTION",
     "maverick.env_hunt": "PRODUCTION",
     "maverick.env_hunt.connectors": "PRODUCTION",

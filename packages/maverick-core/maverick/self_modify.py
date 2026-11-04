@@ -62,7 +62,6 @@ _PROTECTED_FILES = frozenset({
     "capability.py",             # the capability algebra (non-escalation proof)
     "capability_boot.py",
     "budget.py",                 # cost caps (kernel rule 3)
-    "entitlements.py",           # the license gate on the promotion engine
     "promotion_effect.py",       # the evidence gate's causal input
     "evaluator_evolution.py",    # anchor-gated judge promotion
     "migration_governance.py",   # released-migration immutability gate
