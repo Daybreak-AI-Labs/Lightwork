@@ -35,7 +35,7 @@ def test_trace_validation():
     assert t.fn({"a": "x", "b": []}).startswith("ERROR")
 
 
-def test_batch_registered():
+def test_trace_compare_registers():
     from maverick.tools import base_registry
 
     class _W:
