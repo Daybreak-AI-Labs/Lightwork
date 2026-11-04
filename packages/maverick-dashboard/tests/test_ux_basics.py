@@ -62,7 +62,7 @@ def test_shell_has_quick_links_docs_link_and_halt_banner():
         assert f'<li><a href="{href}"' in body
     # One aria-current landmark for the active page, not two.
     assert body.count('aria-current="page"') == 1
-    assert 'href="https://daybreak-ai-labs.github.io/Lightwork/starter-goals/"' in body
+    assert 'href="https://daybreak-ai-labs.github.io/LightworkOS/starter-goals/"' in body
     assert "Learn more about tasks in the documentation" in body
     assert 'id="halt-banner"' in body and "Work is stopped." in body
     assert "Work is not stopped" not in body

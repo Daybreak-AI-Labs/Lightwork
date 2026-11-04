@@ -108,7 +108,7 @@ def test_both_shells_render_one_sidebar(monkeypatch, tmp_path, role):
     assert product.brand == chat.brand == "/"
     for href in ("/help", "/account", "/workspace/tenant"):
         assert href in chat.hrefs and href in product.hrefs, href
-    docs = "https://daybreak-ai-labs.github.io/Lightwork/"
+    docs = "https://daybreak-ai-labs.github.io/LightworkOS/"
     assert any(h.startswith(docs) for h in chat.hrefs) and any(h.startswith(docs) for h in product.hrefs)
 
 

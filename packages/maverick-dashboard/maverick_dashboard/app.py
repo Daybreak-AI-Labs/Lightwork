@@ -715,7 +715,7 @@ def _docs_context(request: Request) -> dict:
 
 
 templates.context_processors.append(_docs_context)
-templates.env.globals.setdefault("docs_home", "https://daybreak-ai-labs.github.io/Lightwork/")
+templates.env.globals.setdefault("docs_home", "https://daybreak-ai-labs.github.io/LightworkOS/")
 templates.env.globals.setdefault("docs_learn_more", None)
 # A page's tab bar (templates/_tabs.html) and a hosted page's header: absent
 # unless the page's handler passes them.

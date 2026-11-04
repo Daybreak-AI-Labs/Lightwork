@@ -8,7 +8,7 @@ linked from the product.
 """
 from __future__ import annotations
 
-DOCS_HOME = "https://daybreak-ai-labs.github.io/Lightwork/"
+DOCS_HOME = "https://daybreak-ai-labs.github.io/LightworkOS/"
 
 # path prefix -> (label shown in "Learn more about <label>", docs page slug)
 PAGE_DOCS: dict[str, tuple[str, str]] = {

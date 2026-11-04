@@ -30,7 +30,7 @@ def render(name, **values):
     context.update(lang="en", page_lang="en", dir="ltr", asset=lambda asset: "/static/" + asset,
                    t=lambda key: i18n.t(key, "en"), threads=[], nav_groups=[], finder_pages=[],
                    can_halt=False, can_create_goal=False, custom_theme_names=[], path="/goals",
-                   docs_home="https://daybreak-ai-labs.github.io/Lightwork/")
+                   docs_home="https://daybreak-ai-labs.github.io/LightworkOS/")
     context.update(values)
     return env.get_template(name).render(**context)
 
