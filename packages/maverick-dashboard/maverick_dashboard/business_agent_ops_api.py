@@ -7,11 +7,10 @@ role ``writer`` when chosen and connected, else the deterministic draft, like
 ``--no-llm``); :func:`maverick.provision.analyze_profile` lists capability
 gaps; on approval :func:`maverick.intake.onboarding_knowledge_base` and
 :func:`maverick.intake.attach_docs_to_profile` load the documents,
-:func:`maverick.intake.save_profile` saves it (its approval and license gates
-stay) and :func:`maverick.provision.apply_approved_plan` equips it. Building
-missing tools calls AI on the ``writer`` model under a capped budget admitted
-like any AI request; if that budget is refused, only ready-made skills are
-added.
+:func:`maverick.intake.save_profile` saves it (its approval gate stays) and
+:func:`maverick.provision.apply_approved_plan` equips it. Building missing
+tools calls AI on the ``writer`` model under a capped budget admitted like any
+AI request; if that budget is refused, only ready-made skills are added.
 
 Specialists are saved for the whole workspace, so both steps need the same
 permission as the specialist editor (``pack_editing``), the same-origin guard

@@ -110,17 +110,7 @@ def enabled() -> bool:
                 else bool(get_self_improvement().get("enable", True)))
     except Exception:  # pragma: no cover -- config never blocks a run
         return False
-    if not base:
-        return False
-    # The governed promotion ladder is the tier-gated "advanced_evolve" (Platinum)
-    # capability. Fail-open: the gate only bites when a deployment has turned
-    # license enforcement on AND the license doesn't grant it — a no-op on a
-    # default install (require() returns True when not enforcing).
-    try:
-        from .entitlements import require
-        return require("advanced_evolve")
-    except Exception:  # pragma: no cover -- entitlements missing => keep base
-        return base
+    return base
 
 
 def _config() -> dict:

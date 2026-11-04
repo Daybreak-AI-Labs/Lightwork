@@ -469,10 +469,6 @@ def tenant_by_user_enabled() -> bool:
         raise
     except Exception as exc:
         raise TenantPolicyError(f"tenant isolation policy unavailable: {exc}") from exc
-    # This is an operator-selected isolation control, not a paid-feature gate.
-    # If an operator enables per-user tenancy, never silently degrade to the
-    # shared world because a license is missing/expired/under-tiered. Named
-    # tenant provisioning remains entitlement-gated in maverick.tenant.registry.
     return base
 
 

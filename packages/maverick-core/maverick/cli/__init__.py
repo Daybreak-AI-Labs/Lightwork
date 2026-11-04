@@ -2468,17 +2468,13 @@ def fleet_run(ctx, fleet_name: str, agent_name: str, prompt: str,
     control plane governs the work automatically.
     """
     from ..capability import UnknownRoleError, capability_for_role
-    from ..fleet import governance_enabled, load_fleet, record_run
+    from ..fleet import load_fleet, record_run
     from ..runner import run_goal_in_thread
 
     f = load_fleet(fleet_name)
     if f is None:
         click.echo(f"no such fleet: {fleet_name}", err=True)
         sys.exit(1)
-    if not governance_enabled():
-        click.echo("license enforcement is on and this deployment's license "
-                   "does not grant the fleet_governance entitlement", err=True)
-        sys.exit(2)
     agent = next((a for a in f.agents if a.name == agent_name), None)
     if agent is None:
         click.echo(f"no such agent {agent_name!r} in fleet {fleet_name!r}", err=True)

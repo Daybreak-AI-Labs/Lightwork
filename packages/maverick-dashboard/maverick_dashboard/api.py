@@ -11932,11 +11932,6 @@ async def external_agent_enroll(request: Request, payload: ExternalAgentIn) -> d
     require_permission(request, "admin")
     from maverick import external_agents as xa
 
-    if not xa.entitled():
-        raise HTTPException(
-            status_code=403,
-            detail="license enforcement is on and this license does not grant the external_agents entitlement",
-        )
     try:
         out = xa.enroll(
             payload.id,
@@ -12889,7 +12884,7 @@ def run_fleet_agent(
         capability_for_role,
         capability_from_config,
     )
-    from maverick.fleet import governance_enabled, load_fleet, record_run
+    from maverick.fleet import load_fleet, record_run
     from maverick.runner import run_goal_in_background_async
 
     fleet = load_fleet(fleet_name)
@@ -12920,15 +12915,6 @@ def run_fleet_agent(
     # cannot mask their 404/403 responses or disclose configuration state to a
     # caller who is not allowed to dispatch this agent.
     require_provider_or_400()
-    # Running an agent under the oversight control plane is the tier-gated (Gold)
-    # "fleet governance" capability. Fail-open: a no-op unless license enforcement
-    # is on and the license lacks it. Checked after existence (404) so a missing
-    # fleet never reveals licensing state.
-    if not governance_enabled():
-        raise HTTPException(
-            status_code=403,
-            detail="license enforcement is on and this license does not grant the fleet_governance entitlement",
-        )
     prompt = (payload.prompt or "").strip()
     if not prompt:
         raise HTTPException(status_code=400, detail="prompt is required")

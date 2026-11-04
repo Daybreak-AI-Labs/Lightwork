@@ -11,9 +11,6 @@
                  detail='Lets AI agents from other products (Salesforce, AWS, Microsoft and others) work under your rules and budgets.',
                  can_activate=external_agents_can_activate) }}
   {% endif %}
-  {% if enabled and not external_agents_entitled %}
-  <div class="boundary" role="status"><strong>Adding outside agents isn’t available on your plan.</strong> Contact your account manager to add it. Agents already here, and their past work, stay visible.</div>
-  {% endif %}
 
   <div class="panel">
     <p style="margin: 0;">

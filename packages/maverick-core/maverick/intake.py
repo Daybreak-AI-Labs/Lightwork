@@ -406,19 +406,6 @@ def save_profile(profile: DomainProfile, *, approved: bool,
                  dest_dir: str | Path | None = None) -> str:
     """Persist an APPROVED pack so ``available_domains()`` picks it up. Refuses
     to write a pack that hasn't been human-approved -- the safety gate is here."""
-    # Persisting a NEW custom specialist pack is the tier-gated "custom_pack_factory"
-    # (Platinum) feature. Fail-open: a no-op unless license enforcement is on AND
-    # the deployment isn't entitled. Drafting/previewing (generate_profile /
-    # run_intake) is never gated — only persistence gates.
-    try:
-        from .entitlements import require
-        allowed = require("custom_pack_factory")
-    except Exception:  # pragma: no cover - entitlements missing => don't block
-        allowed = True
-    if not allowed:
-        raise PermissionError(
-            "custom pack factory requires a Platinum license "
-            "(license enforcement is on and this deployment is not entitled)")
     if not approved:
         raise PermissionError("refusing to save an unapproved generated pack")
     if not _DOMAIN_ID_RE.fullmatch(profile.name):

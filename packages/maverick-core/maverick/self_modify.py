@@ -733,10 +733,7 @@ def improvement_enabled() -> bool:
             base = override
         else:
             base = raw
-        if not base:
-            return False
-        from .entitlements import require
-        return require("advanced_evolve")
+        return bool(base)
     except Exception:  # pragma: no cover -- uncertainty cannot arm DGM
         return False
 
@@ -766,7 +763,7 @@ def production_status() -> dict:
     if not improvement_on:
         blockers.append({
             "code": "self_improvement_disabled",
-            "message": "Governed self-improvement is disabled or not entitled.",
+            "message": "Governed self-improvement is disabled.",
         })
 
     paths = section.get("editable_paths")

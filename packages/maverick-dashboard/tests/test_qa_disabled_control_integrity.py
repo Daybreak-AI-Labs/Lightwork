@@ -268,7 +268,6 @@ def test_continuous_evidence_and_external_enrollment_fail_closed() -> None:
     external = _render(
         "external_agents.html",
         enabled=False,
-        external_agents_entitled=True,
         external_agents_can_manage=False,
         external_agents_can_activate=True,
         status={
@@ -308,26 +307,6 @@ def test_continuous_evidence_and_external_enrollment_fail_closed() -> None:
         assert "disabled" in button
         assert button.get("aria-disabled") == "true"
     _assert_activation_outside_disabled_controls(external)
-
-    unentitled = _render(
-        "external_agents.html",
-        enabled=True,
-        external_agents_entitled=False,
-        external_agents_can_manage=False,
-        external_agents_can_activate=True,
-        status={
-            "enrolled": 0,
-            "runs": 0,
-            "reported_dollars": 0,
-            "memory_contributions": 0,
-            "over_budget": 0,
-            "contained": 0,
-        },
-        agents=[],
-        platforms={},
-        surfaces=(),
-    )
-    _assert_disabled(unentitled, "xa-add-controls")
 
 
 def test_readiness_clients_only_unlock_after_positive_runtime_proof() -> None:

@@ -178,15 +178,7 @@ def enabled() -> bool:
             base = bool((load_config().get("fleet_memory") or {}).get("enable", False))
         except Exception:  # pragma: no cover
             return False
-    if not base:
-        return False
-    # Fleet memory is a tier-gated (Gold) feature. Fail-open: the gate only bites when
-    # a deployment has turned enforcement on and the license doesn't grant it.
-    try:
-        from .entitlements import require
-        return require("fleet_memory")
-    except Exception:  # pragma: no cover - entitlements missing => keep base
-        return base
+    return base
 
 
 def _sanitize(text: str, *, shield: Any | None) -> str | None:

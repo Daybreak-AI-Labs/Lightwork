@@ -7799,17 +7799,13 @@ async def external_agents_page(request: Request, tab: str = "") -> HTMLResponse:
             "lede": "Choose which outside AI agents may work with Lightwork, and what each one may do, see and spend."}
         return templates.TemplateResponse(request, "trust.html", context)
     enabled = xa.enabled()
-    entitled = xa.entitled()
 
     return templates.TemplateResponse(
         request,
         "external_agents.html",
         {
             "enabled": enabled,
-            "external_agents_entitled": entitled,
-            "external_agents_can_manage": (
-                enabled and entitled and has_permission(request, "admin")
-            ),
+            "external_agents_can_manage": enabled and has_permission(request, "admin"),
             "external_agents_can_activate": has_global_permission(request, "admin"),
             "status": xa.status(),
             "agents": xa.roster(),
@@ -7830,7 +7826,7 @@ async def external_agent_scorecard(request: Request, agent_id: str) -> HTMLRespo
     from .external_agent_detail_service import detail_for
 
     detail = await run_in_threadpool(detail_for, request, agent_id)
-    can_manage = xa.enabled() and xa.entitled() and has_permission(request, "admin")
+    can_manage = xa.enabled() and has_permission(request, "admin")
     access = None
     try:
         from .effective_access import outside_agent

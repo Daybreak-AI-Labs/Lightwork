@@ -263,16 +263,10 @@ class ExternalVendorPortalSubmissionIn(BaseModel):
 
 def _gate() -> None:
     """Self-gate: 404 while the plane is off (the route doesn't exist for
-    this deployment), 403 when license enforcement is on and the license does
-    not grant the ``external_agents`` entitlement."""
+    this deployment)."""
     from maverick import external_agents as xa
     if not xa.enabled():
         raise HTTPException(status_code=404, detail="not found")
-    if not xa.entitled():
-        raise HTTPException(
-            status_code=403,
-            detail="license enforcement is on and this license does not grant "
-                   "the external_agents entitlement")
 
 
 def _looks_like_jwt(token: str) -> bool:

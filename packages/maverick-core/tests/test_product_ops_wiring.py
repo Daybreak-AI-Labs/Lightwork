@@ -70,15 +70,6 @@ def test_config_knob_supplies_trust_and_enforce(monkeypatch):
     assert ent.status == E.LICENSED and ent.allows("fleet_governance")
 
 
-def test_fleet_memory_respects_entitlement(monkeypatch):
-    from maverick import fleet_memory as FM
-    monkeypatch.setenv("MAVERICK_FLEET_MEMORY", "1")   # base-enabled
-    monkeypatch.setattr("maverick.entitlements.require", lambda f: False)
-    assert FM.enabled() is False                        # gated off
-    monkeypatch.setattr("maverick.entitlements.require", lambda f: True)
-    assert FM.enabled() is True                         # granted
-
-
 def test_support_export_writes_redacted_bundle(tmp_path):
     from maverick import support_bundle as S
     out, bundle = S.export(tmp_path / "support.json")
@@ -126,24 +117,6 @@ def test_refresh_persists_a_verified_license(monkeypatch, tmp_path):
     assert res.ok and res.changed
     saved = json.loads((tmp_path / "license.json").read_text())
     assert saved["customer"] == "Cedar Valley Bank" and saved["tier"] == "gold"
-
-
-def test_siem_forward_gated_off_under_enforcement(monkeypatch):
-    from maverick.audit import forwarder as F
-    monkeypatch.setattr("maverick.entitlements.require",
-                        lambda f: f != "siem_export")
-    with pytest.raises(PermissionError, match="siem_export"):
-        F.forward(["evt"], "https://siem.example/collector")
-
-
-def test_siem_forward_open_when_licensed(monkeypatch):
-    from maverick.audit import forwarder as F
-    monkeypatch.setattr("maverick.entitlements.require", lambda f: True)
-    sent = {}
-    monkeypatch.setattr(F, "_send_http", lambda url, lines, timeout: sent.setdefault(
-        "n", len(list(lines))))
-    n = F.forward(["a", "b"], "https://siem.example/collector")
-    assert n == 2 and sent["n"] == 2         # passed the gate, reached transport
 
 
 def test_verify_license_rejects_non_dict_without_crashing():
@@ -208,49 +181,6 @@ def test_refresh_refuses_a_file_scheme_api_url(monkeypatch, tmp_path):
     res = E.refresh_from_server("file:///etc/passwd", trusted_pubkeys=["aa" * 32])
     assert res.ok is False and "fetch failed" in res.reason
     assert not (tmp_path / "license.json").exists()
-
-
-def test_fleet_governance_respects_entitlement(monkeypatch):
-    from maverick import fleet as F
-    monkeypatch.setattr("maverick.entitlements.require", lambda f: f != "fleet_governance")
-    assert F.governance_enabled() is False       # gated off (Gold feature)
-    monkeypatch.setattr("maverick.entitlements.require", lambda f: True)
-    assert F.governance_enabled() is True         # granted
-
-
-def test_advanced_evolve_respects_entitlement(monkeypatch):
-    from maverick import self_improvement as SI
-    monkeypatch.setenv("MAVERICK_SELF_IMPROVEMENT", "1")   # base-enabled
-    monkeypatch.setattr("maverick.entitlements.require", lambda f: False)
-    assert SI.enabled() is False                            # gated off (Platinum)
-    monkeypatch.setattr("maverick.entitlements.require", lambda f: True)
-    assert SI.enabled() is True                             # granted
-
-
-def test_custom_pack_factory_respects_entitlement(monkeypatch, tmp_path):
-    from maverick import intake
-    # gate is BEFORE the approved/write logic, so an un-entitled deployment can't
-    # persist a custom pack; drafting/previewing is unaffected (not tested here).
-    monkeypatch.setattr("maverick.entitlements.require",
-                        lambda f: f != "custom_pack_factory")
-    with pytest.raises(PermissionError, match="Platinum"):
-        intake.save_profile(object(), approved=True, dest_dir=tmp_path)
-
-
-def test_multi_tenant_gates_named_tenant_provisioning_only(monkeypatch):
-    from maverick import paths
-    from maverick.tenant import registry
-    # Per-user tenancy is a security isolation control. Once an operator enables
-    # it, license state must not silently downgrade channel users into the shared
-    # world/memory/audit scope.
-    monkeypatch.setenv("MAVERICK_TENANT_BY_USER", "1")
-    monkeypatch.setattr("maverick.entitlements.require", lambda f: False)
-    assert paths.tenant_by_user_enabled() is True
-    # Provisioning a named tenant is still refused under enforcement w/o Platinum.
-    monkeypatch.setattr("maverick.entitlements.require",
-                        lambda f: f != "multi_tenant")
-    with pytest.raises(PermissionError, match="Platinum"):
-        registry.create_tenant("acme")
 
 
 def test_support_export_emits_a_redacted_audit_event(monkeypatch, tmp_path):

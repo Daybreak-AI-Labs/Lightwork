@@ -532,19 +532,6 @@ def create_tenant(
     tid = _validate_id(tenant_id)
     quota = _quota_value(max_daily_dollars)
     display_name = display_name.strip()
-    # Provisioning a named tenant IS multi-tenant mode — a tier-gated (Platinum)
-    # capability. Fail-open: a no-op unless license enforcement is on and the
-    # deployment isn't entitled (a genuine single-tenant box never calls this —
-    # it uses the default tenant).
-    try:
-        from ..entitlements import require
-        allowed = require("multi_tenant")
-    except Exception:  # pragma: no cover - entitlements missing => don't block
-        allowed = True
-    if not allowed:
-        raise PermissionError(
-            "multi-tenant provisioning requires a Platinum license "
-            "(license enforcement is on and this deployment is not entitled)")
     _warn_if_unknown_plan(plan)
     with _locked(strict=True):
         records = _load()

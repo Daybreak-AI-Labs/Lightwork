@@ -141,21 +141,6 @@ class MintApprovalPending(ExternalAgentsError):
         self.approval_id = approval_id
 
 
-def entitled() -> bool:
-    """Bring-your-own-agent governance is gated by the ``external_agents``
-    entitlement (Gold tier) when license enforcement is on.
-
-    Fail-open like fleet governance: it only bites when a deployment has
-    turned license enforcement on and the license lacks the feature. Roster
-    reads are never gated — only the governed traffic (enroll / ingest /
-    screen)."""
-    try:
-        from .entitlements import require
-        return require("external_agents")
-    except Exception:  # pragma: no cover - entitlements missing => don't block
-        return True
-
-
 def enabled() -> bool:
     """``[external_agents] enable`` or ``MAVERICK_EXTERNAL_AGENTS=1``."""
     import os

@@ -249,23 +249,6 @@ def record_run(
         atomic_write_text(path, json.dumps(runs, indent=2))
 
 
-def governance_enabled() -> bool:
-    """Fleet governance — running an agent *under the oversight control plane*
-    (its own audit principal + RBAC capability) — is a tier-gated (Gold)
-    capability.
-
-    Fail-open: only bites when a deployment has turned license enforcement on and
-    the license doesn't grant it. Base is ``True`` (fleets are a core capability
-    that already works; the license gates the governed *run*, not the registry),
-    so this is a no-op on a default install. Registry reads
-    (list/show/status) and CRUD are intentionally NOT gated — only the run is."""
-    try:
-        from .entitlements import require
-        return require("fleet_governance")
-    except Exception:  # pragma: no cover - entitlements missing => don't block
-        return True
-
-
 __all__ = [
     "FleetAgent",
     "Fleet",
@@ -278,5 +261,4 @@ __all__ = [
     "runs_path",
     "load_runs",
     "record_run",
-    "governance_enabled",
 ]
