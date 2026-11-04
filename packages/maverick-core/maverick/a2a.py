@@ -127,7 +127,7 @@ def build_agent_card(base_url: str | None = None) -> dict[str, Any]:
         "version": _version(),
         "provider": {
             "organization": "Daybreak Labs",
-            "url": "https://github.com/Daybreak-AI-Labs/Lightwork",
+            "url": "https://github.com/Daybreak-AI-Labs/LightworkOS",
         },
         "capabilities": {
             # Backed by the task endpoint (a2a_tasks): message/stream over

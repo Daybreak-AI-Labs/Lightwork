@@ -5,13 +5,13 @@
   "version": "0.1.0",
   "publisher": "cdayAI",
   "license": "Apache-2.0",
-  "homepage": "https://github.com/Daybreak-AI-Labs/Lightwork",
+  "homepage": "https://github.com/Daybreak-AI-Labs/LightworkOS",
   "bugs": {
-    "url": "https://github.com/Daybreak-AI-Labs/Lightwork/issues"
+    "url": "https://github.com/Daybreak-AI-Labs/LightworkOS/issues"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/Daybreak-AI-Labs/Lightwork.git",
+    "url": "https://github.com/Daybreak-AI-Labs/LightworkOS.git",
     "directory": "apps/vscode-extension"
   },
   "categories": [

@@ -70,7 +70,7 @@
   function failureAdvice(): string {
     const text = lines.join('\n') + '\n' + errorMsg;
     if (/Authentication failed|Repository not found|could not read Username|Permission denied \(publickey\)/i.test(text)) {
-      return 'Lightwork could not be downloaded because GitHub refused the request. Check that this computer can open github.com/Daybreak-AI-Labs/Lightwork in a browser, then select Try again.';
+      return 'Lightwork could not be downloaded because GitHub refused the request. Check that this computer can open github.com/Daybreak-AI-Labs/LightworkOS in a browser, then select Try again.';
     }
     if (/Could not resolve host|Failed to connect|unable to access|timed out|network is unreachable/i.test(text)) {
       return 'Lightwork could not be downloaded. Check that this computer is connected to the internet, then select Try again.';

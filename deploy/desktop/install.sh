@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-REPO="${MAVERICK_REPO:-Daybreak-AI-Labs/Lightwork}"
+REPO="${MAVERICK_REPO:-Daybreak-AI-Labs/LightworkOS}"
 REF="${MAVERICK_REF:-}"
 SRC_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/maverick/src"
 STAGED_SRC=""

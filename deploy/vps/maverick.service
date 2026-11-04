@@ -2,7 +2,7 @@
 # user's saved workspace. Run install.sh; do not copy this template directly.
 [Unit]
 Description=Lightwork agent (long-horizon multi-agent swarm)
-Documentation=https://github.com/Daybreak-AI-Labs/Lightwork
+Documentation=https://github.com/Daybreak-AI-Labs/LightworkOS
 After=network-online.target
 Wants=network-online.target
 

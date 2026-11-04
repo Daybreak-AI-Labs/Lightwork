@@ -5,7 +5,7 @@ edition = "2021"
 description = "Tauri GUI installer for Lightwork"
 authors = ["The Lightwork Authors"]
 license = "Apache-2.0"
-repository = "https://github.com/Daybreak-AI-Labs/Lightwork"
+repository = "https://github.com/Daybreak-AI-Labs/LightworkOS"
 
 [lib]
 name = "maverick_installer_desktop_lib"

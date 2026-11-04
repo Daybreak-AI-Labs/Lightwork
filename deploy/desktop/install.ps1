@@ -16,7 +16,7 @@
 
 $ErrorActionPreference = 'Stop'
 
-$Repo   = if ($env:MAVERICK_REPO) { $env:MAVERICK_REPO } else { 'Daybreak-AI-Labs/Lightwork' }
+$Repo   = if ($env:MAVERICK_REPO) { $env:MAVERICK_REPO } else { 'Daybreak-AI-Labs/LightworkOS' }
 $Ref    = if ($env:MAVERICK_REF)  { $env:MAVERICK_REF }  else { '' }
 $SrcDir = Join-Path $env:LOCALAPPDATA 'Lightwork\src'
 

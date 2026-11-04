@@ -1,4 +1,4 @@
-module github.com/Daybreak-AI-Labs/Lightwork/examples/clients/go
+module github.com/Daybreak-AI-Labs/LightworkOS/examples/clients/go
 
 go 1.26.10
 

@@ -9,12 +9,12 @@ type: application
 version: 0.1.0
 # Tracks the maverick package cohort.
 appVersion: "0.1.7"
-home: https://github.com/Daybreak-AI-Labs/Lightwork
+home: https://github.com/Daybreak-AI-Labs/LightworkOS
 sources:
-  - https://github.com/Daybreak-AI-Labs/Lightwork
+  - https://github.com/Daybreak-AI-Labs/LightworkOS
 maintainers:
   - name: The Lightwork Authors
-    url: https://github.com/Daybreak-AI-Labs/Lightwork
+    url: https://github.com/Daybreak-AI-Labs/LightworkOS
 keywords:
   - ai-agent
   - dashboard

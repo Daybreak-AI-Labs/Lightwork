@@ -4,14 +4,14 @@
   "description": "Author Lightwork agent tools in TypeScript (NDJSON stdio plugins).",
   "license": "Apache-2.0",
   "author": "The Lightwork Authors",
-  "homepage": "https://github.com/Daybreak-AI-Labs/Lightwork/tree/main/sdks/plugin-ts",
+  "homepage": "https://github.com/Daybreak-AI-Labs/LightworkOS/tree/main/sdks/plugin-ts",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Daybreak-AI-Labs/Lightwork.git",
+    "url": "https://github.com/Daybreak-AI-Labs/LightworkOS.git",
     "directory": "sdks/plugin-ts"
   },
   "bugs": {
-    "url": "https://github.com/Daybreak-AI-Labs/Lightwork/issues"
+    "url": "https://github.com/Daybreak-AI-Labs/LightworkOS/issues"
   },
   "type": "module",
   "main": "dist/index.js",

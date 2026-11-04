@@ -4,7 +4,7 @@
 # Usage (the script URL and checkout must use the same reviewed commit):
 #   LIGHTWORK_REF=<lowercase-full-40-character-commit-sha>
 #   curl -fsSLo /tmp/lightwork-install.sh \
-#     "https://raw.githubusercontent.com/Daybreak-AI-Labs/Lightwork/${LIGHTWORK_REF}/deploy/vps/install.sh"
+#     "https://raw.githubusercontent.com/Daybreak-AI-Labs/LightworkOS/${LIGHTWORK_REF}/deploy/vps/install.sh"
 #   sudo MAVERICK_REF="$LIGHTWORK_REF" bash /tmp/lightwork-install.sh
 #
 # What it does:
@@ -116,7 +116,7 @@ install_maverick() {
   install -d -m 0755 /opt
   STAGED_SOURCE="$(mktemp -d /opt/maverick.stage.XXXXXX)"
   git clone --no-checkout --filter=blob:none \
-    https://github.com/Daybreak-AI-Labs/Lightwork "$STAGED_SOURCE"
+    https://github.com/Daybreak-AI-Labs/LightworkOS "$STAGED_SOURCE"
   git -C "$STAGED_SOURCE" fetch --depth 1 origin "$MAVERICK_REF"
   git -C "$STAGED_SOURCE" -c advice.detachedHead=false checkout --detach FETCH_HEAD
   actual_ref="$(git -C "$STAGED_SOURCE" rev-parse HEAD)"

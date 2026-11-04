@@ -5,7 +5,7 @@ edition = "2021"
 description = "Tauri shell that embeds the local Lightwork dashboard"
 authors = ["The Lightwork Authors"]
 license = "Apache-2.0"
-repository = "https://github.com/Daybreak-AI-Labs/Lightwork"
+repository = "https://github.com/Daybreak-AI-Labs/LightworkOS"
 
 [lib]
 name = "maverick_desktop_lib"
