@@ -390,8 +390,8 @@ class TestConcurrentEditsCannotBeSilentlyOverwritten:
 
     def test_undo_refuses_when_our_own_writes_effect_was_never_observed(self):
         # The write went through but neither its echo nor the follow-up read
-        # showed us the resulting token. We now have no honest reference point,
-        # so the undo refuses rather than restoring over an unknown state.
+        # showed us the resulting token. With no honest reference point, the
+        # undo refuses rather than restoring over an unknown state.
         reads = _script(_sf_record(Amount=100000), _sf_record(Amount=100000),
                         "ERROR: rest (503): gateway")
         conn = FakeConnector(read=reads, writes=["{}"])

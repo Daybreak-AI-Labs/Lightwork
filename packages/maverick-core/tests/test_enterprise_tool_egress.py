@@ -149,9 +149,9 @@ def test_web_search_allows_an_allow_listed_backend(monkeypatch):
 
 # ---------- browser tool ----------
 #
-# The browser tool (Playwright) previously had no enterprise/tenant egress
-# check at all -- a prompt-injected page could navigate anywhere even with
-# enterprise mode on, unlike every sibling outbound-request tool.
+# The browser tool (Playwright) gets the same enterprise/tenant egress check
+# as every sibling outbound-request tool, so a prompt-injected page cannot
+# navigate anywhere with enterprise mode on.
 
 
 class _FakeBrowserPage:

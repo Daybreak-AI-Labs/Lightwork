@@ -7,9 +7,9 @@ signed bytes -- even in environments
 where the ed25519 path isn't exercised. The end-to-end sign/verify policy
 lives in test_skill_signing.py.
 
-Regression: the canonical form used to be only ``name + "\\n" + body``, so a
-signed skill's ``triggers``/``tools_needed``/``purposes`` could be tampered
-while the signature still verified.
+A canonical form of only ``name + "\\n" + body`` would let a signed skill's
+``triggers``/``tools_needed``/``purposes`` be tampered with while the
+signature still verified.
 """
 from __future__ import annotations
 

@@ -1,19 +1,16 @@
 """The enterprise boundary, tested at the layer where requests leave.
 
-``enterprise.py`` sells one property -- *"Sensitive data physically cannot
-reach a third-party API"* -- and documented the mechanism as
-``enterprise_egress_denial`` applied *"at each tool's request"*. A census found
-**94 production modules making direct outbound HTTP and 87 with no egress gate
-at all**, including ``gmail_tool``, ``salesforce_tool``, ``slack_bot``,
-``replicate_tool``, and ``maverick_knowledge/embed.py``.
+``enterprise.py`` promises one property -- *"Sensitive data physically cannot
+reach a third-party API"*. The guard wraps the HTTP client libraries, so
+connectors that make direct outbound HTTP, such as ``gmail_tool``,
+``salesforce_tool``, ``slack_bot``, ``replicate_tool`` and
+``maverick_knowledge/embed.py``, are covered without calling a check
+themselves.
 
-The reason it drifted that far unnoticed is visible in the old tests, and it is
-the thing this file is written against. Every existing egress test is one of
-two shapes: a pure-policy test asserting ``egress_permitted(...)`` returns
-False, or a per-tool test that calls one tool's ``_run`` and greps its returned
-error string. Neither can detect a bypass, because neither ever issues a
-request. Sixty connectors under ``tools/`` were added over time with raw
-``httpx`` calls and every check stayed green.
+A pure-policy test asserting ``egress_permitted(...)`` returns False, or a
+per-tool test that calls one tool's ``_run`` and greps its returned error
+string, cannot detect a bypass, because neither ever issues a request. A
+connector added with raw ``httpx`` calls would keep both green.
 
 So these tests make real calls through real client libraries and assert on what
 the network layer does. The blocked cases never reach a socket -- the guard
@@ -41,9 +38,7 @@ def _leave_the_guard_installed():
     """Restore the process-wide guard after every test in this file.
 
     Several tests here uninstall it deliberately. Leaving it off would silently
-    disarm the boundary for every later test in the session -- the same
-    order-dependent pollution this suite already suffers from, introduced by
-    the file that tests the fix.
+    disarm the boundary for every later test in the session.
     """
     yield
     egress_guard.uninstall()

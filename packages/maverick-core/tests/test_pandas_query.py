@@ -46,7 +46,7 @@ def test_parquet_load_is_row_capped(tmp_path, monkeypatch, pd, pq):
 
     cap = pqmod._MAX_LOAD_ROWS + 1
     assert len(df) == cap
-    # The fix must route through the streaming batch reader (a full
+    # The load must route through the streaming batch reader (a full
     # ``read_parquet().head()`` would never touch iter_batches, leaving this 0)
     # and stop early — nowhere near the full 10_000 rows.
     assert 0 < streamed["rows"] < 10_000

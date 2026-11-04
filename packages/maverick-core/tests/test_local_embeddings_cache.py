@@ -28,7 +28,7 @@ def test_key_namespaced_by_model():
 
 
 def test_key_no_boundary_collision_with_nul_in_model():
-    # An in-band NUL separator used to let two distinct (model, text) pairs
+    # An in-band NUL separator would let two distinct (model, text) pairs
     # collide onto the same slot; the JSON-encoded payload prevents that.
     a = _run(op="key", text="b", model="a\x00")
     b = _run(op="key", text="\x00b", model="a")

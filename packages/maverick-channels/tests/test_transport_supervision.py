@@ -392,8 +392,8 @@ def test_definite_delivery_retry_preserves_conversation_order(monkeypatch):
 
 def test_a_reply_the_source_check_holds_back_does_not_block_the_next_message(monkeypatch):
     # A reply whose task or sources the person can no longer use is refused
-    # before sending and stays retryable (the check may pass again). It used to
-    # block the conversation too, so none of the person's later messages ran.
+    # before sending and stays retryable (the check may pass again). It must
+    # not block the conversation, or none of the person's later messages run.
     from maverick_channels import delivery
 
     monkeypatch.setattr(transport_worker, "RETRY_DELAY", 0.05)

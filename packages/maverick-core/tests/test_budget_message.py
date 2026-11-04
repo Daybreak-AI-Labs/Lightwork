@@ -93,8 +93,9 @@ async def test_unpriced_model_gives_pricing_message_not_a_cap_message(
     still aborts), but it is NOT a spending/time cap -- it's Lightwork
     refusing to bill a model with no verified price. Reporting it like a
     real cap trip ('hit your spending or time limit ... resume with a higher
-    cap') would send the user round raising the cap and failing forever; the real fix (price the model,
-    or set [budget] strict_pricing=false) was visible only in the debug log.
+    cap') would send the user round raising the cap and failing forever, with
+    the real remedy (price the model, or set [budget] strict_pricing=false)
+    visible only in the debug log.
     """
     world = WorldModel(tmp_path / "world.db")
     gid = world.create_goal("goal on an unpriced model", "")

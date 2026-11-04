@@ -30,8 +30,8 @@ def test_wildcard_floor_binds_lower_than_exact_action():
     # tighten it, never loosen it. release_payment is gated at
     # min(10000, 1000)=1000, NOT its own higher 10000.
     pol = Policy(require_human_above={"*": 1000, "release_payment": 10000})
-    # $5k release_payment trips the $1k catch-all floor (used to ALLOW under the
-    # higher per-action threshold -- the money-movement bypass this closes).
+    # $5k release_payment trips the $1k catch-all floor; the higher per-action
+    # threshold must not ALLOW it (that would be a money-movement bypass).
     assert evaluate("release_payment", amount=5000, policy=pol).decision is Decision.REQUIRE_HUMAN
     # Below the floor: still allowed.
     assert evaluate("release_payment", amount=500, policy=pol).decision is Decision.ALLOW

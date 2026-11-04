@@ -1,8 +1,7 @@
 """In-app sandbox backend switching (/api/v1/sandbox/*).
 
-The sandbox backend used to be config-file-only, and the /permissions page
-could only WARN about the un-isolated local backend. Now an admin switches
-local/docker/podman from that page: a container backend must have a live,
+An admin switches the sandbox backend (local/docker/podman) from the
+/permissions page, not only in the config file: a container backend must have a live,
 reachable daemon before the switch lands (a selected-but-dead runtime would
 strand every later goal), and switching to local demands an explicit risk
 acknowledgement.

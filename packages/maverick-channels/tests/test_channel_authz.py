@@ -213,8 +213,8 @@ def test_whatsapp_webhook_rejects_unauthorized_sender():
 # The budget-spending handler runs the full swarm. If we only marked the
 # MessageSid processed AFTER the outbound send, a transient send failure would
 # 500, Twilio would retry, and the whole goal would re-run -- double budget
-# spend. The fix marks the MessageSid processed immediately after the handler
-# succeeds, BEFORE the send, and never 500s on a send failure.
+# spend. So the MessageSid is marked processed immediately after the handler
+# succeeds, BEFORE the send, and a send failure never returns 500.
 
 
 class _FakeWorldModel:

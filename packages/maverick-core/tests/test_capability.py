@@ -1,4 +1,4 @@
-"""P0 identity layer: signed, attenuating capabilities + enforcement.
+"""Identity layer: signed, attenuating capabilities + enforcement.
 
 Capabilities gate the tool surface per-agent. Children inherit an
 *attenuated* (never broadened) grant, so a sub-agent cannot escalate past

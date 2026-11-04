@@ -1,4 +1,4 @@
-"""P0 capability layer: path resource-scope enforcement at the tool chokepoint.
+"""Capability layer: path resource-scope enforcement at the tool chokepoint.
 
 A capability whose ``allow_paths`` is non-empty restricts which filesystem
 paths the known file tools (read_file/write_file/list_dir/str_replace_editor/

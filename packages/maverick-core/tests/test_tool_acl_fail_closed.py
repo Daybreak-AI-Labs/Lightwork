@@ -98,8 +98,8 @@ def test_disjoint_allow_lists_deny_all_not_allow_all(monkeypatch):
 
 
 def test_overlapping_allow_lists_keep_intersection(monkeypatch):
-    # Sanity: when the allow-lists DO overlap, the intersection is kept (the fix
-    # only changes the empty-intersection case).
+    # Sanity: when the allow-lists DO overlap, the intersection is kept (only
+    # the empty-intersection case fails closed).
     monkeypatch.setattr(tool_acl, "_load_lists",
                         lambda: ({"read_file", "shell"}, set()))
     monkeypatch.setattr(tool_acl, "_load_lists_for_channel",

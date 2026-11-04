@@ -531,7 +531,7 @@ def test_self_harness_fuzz(monkeypatch, tmp_path):
             ck(n, after == before, "disabled changed store")
             continue
 
-        # MOAT INVARIANT: nothing hostile ever reaches a recalled addendum.
+        # INVARIANT: nothing hostile ever reaches a recalled addendum.
         for _m, block in after.items():
             ck(n, isinstance(block, str), "non-string block in store")
             ck(n, len(block) <= sh._MAX_ADDENDUM_CHARS, "block over char bound")

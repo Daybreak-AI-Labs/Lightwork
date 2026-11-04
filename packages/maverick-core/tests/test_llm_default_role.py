@@ -1,11 +1,11 @@
 """An LLM built without a model resolves the "default" role (kernel rule 2).
 
 Background runs (the dashboard runner, MCP, the GitHub app, A2A tasks) build
-``LLM()`` with no model. That fallback used to be the hard-coded
-``DEFAULT_MODEL``, so the dashboard's default-model choice, ``[models]
-default``, the ``--model`` flag and the admin allow-list never reached calls
-that did not name a role. It now goes through ``model_for_role("default")``;
-with nothing configured the answer is still ``DEFAULT_MODEL``.
+``LLM()`` with no model. That fallback goes through
+``model_for_role("default")``, so the dashboard's default-model choice,
+``[models] default``, the ``--model`` flag and the admin allow-list reach calls
+that do not name a role; with nothing configured the answer is
+``DEFAULT_MODEL``.
 """
 from __future__ import annotations
 

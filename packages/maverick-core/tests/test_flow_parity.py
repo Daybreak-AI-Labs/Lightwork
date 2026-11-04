@@ -1,4 +1,4 @@
-"""G2 feature-parity node kinds: setvar, subflow output, foreach runaway guard.
+"""Flow node kinds: setvar, subflow output, foreach runaway guard.
 (switch / while / scope / foreach-concurrent are covered in test_flow_kinds.py.)"""
 from __future__ import annotations
 

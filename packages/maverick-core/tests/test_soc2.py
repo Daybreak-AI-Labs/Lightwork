@@ -135,7 +135,7 @@ def test_absent_optional_module_is_absent_not_crash():
     """A genuinely-missing optional module -> ``absent`` (and never raises).
 
     Exercised directly on ``_probe_toggle`` with a module name guaranteed not to
-    exist, so the test stays true even as OIDC (which now ships) toggles on/off.
+    exist, so the test stays true even as OIDC (which ships) toggles on/off.
     This is the path a future-only optional control would take.
     """
     probe = soc2._probe_toggle("maverick._definitely_not_a_real_module", "anything")

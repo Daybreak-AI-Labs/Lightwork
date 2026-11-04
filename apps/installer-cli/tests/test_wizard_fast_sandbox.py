@@ -1,9 +1,9 @@
 """`maverick init --fast` must not write a docker config it can't run.
 
-run_fast() used to hardcode the docker sandbox even on a host with no Docker
-daemon, so the very next `maverick start` blew up with "Docker not available"
-on a backend the user never chose. It now mirrors write_consumer_config:
-docker when the daemon is up, else local.
+Hardcoding the docker sandbox on a host with no Docker daemon would make the
+very next `maverick start` fail with "Docker not available" on a backend the
+user never chose. run_fast() mirrors write_consumer_config: docker when the
+daemon is up, else local.
 """
 from __future__ import annotations
 

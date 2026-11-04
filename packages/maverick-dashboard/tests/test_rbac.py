@@ -340,8 +340,8 @@ def test_viewer_cannot_mutate_owned_goal(monkeypatch, tmp_path):
 
 
 def test_redact_preview_requires_operate(monkeypatch, tmp_path):
-    # /redact/preview ran the detector pipeline on caller text unauthenticated;
-    # it now requires "operate" (a viewer is 403'd).
+    # /redact/preview runs the detector pipeline on caller text, so it
+    # requires "operate" (a viewer is 403'd).
     c = _client(monkeypatch, tmp_path)
     from maverick_dashboard import rbac
     rbac.set_role("user:vp", "viewer")
@@ -350,8 +350,8 @@ def test_redact_preview_requires_operate(monkeypatch, tmp_path):
 
 
 def test_validate_agent_override_requires_pack_admin(monkeypatch, tmp_path):
-    # /agents/{name}/validate (pack-edit lint) was unauthenticated; it now uses
-    # the same pack-admin gate as save/delete override.
+    # /agents/{name}/validate (pack-edit lint) uses the same pack-admin gate
+    # as save/delete override.
     c = _client(monkeypatch, tmp_path)
     from maverick_dashboard import api
     monkeypatch.setattr(api, "caller_principal", lambda request: "user:alice")

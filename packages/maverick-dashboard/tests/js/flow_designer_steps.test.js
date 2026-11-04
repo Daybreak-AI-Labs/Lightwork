@@ -318,7 +318,7 @@ test("a step added after a Decision goes on the chosen Yes or No path instead of
     assert.equal(branch.if_true, approval.id);
     assert.equal(byId[approval.id].next, flow.nodes.filter((n) => n.kind === "agent")[1].id);
     assert.equal(byId[branch.if_false].kind, "setvar");
-    // The point of the fix: every step is reachable from the first step.
+    // Every step is reachable from the first step.
     assert.deepEqual([...seen].sort(), flow.nodes.map((n) => n.id).sort());
     // Once both paths lead somewhere, only the end of each path is still open.
     assert.ok(Array.from(steps.where().options).every((o) => !/Decision/.test(o.textContent)));

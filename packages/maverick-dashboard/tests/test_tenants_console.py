@@ -50,8 +50,8 @@ def test_lists_provisioned_tenants(monkeypatch, tmp_path):
 
 
 def test_roster_lets_an_admin_change_each_daily_limit_in_place(monkeypatch, tmp_path):
-    """The limit used to be set only at creation and shown read-only after;
-    now every row is an editor bound to the existing quota API (0 = unlimited)."""
+    """The limit is editable after creation: every row is an editor bound to
+    the existing quota API (0 = unlimited)."""
     _isolate(monkeypatch, tmp_path)
     from maverick.tenant import registry as tr
     tr.create_tenant("acme", display_name="Acme Inc", max_daily_dollars=100)

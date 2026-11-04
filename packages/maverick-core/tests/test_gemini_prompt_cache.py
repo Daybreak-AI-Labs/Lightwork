@@ -13,7 +13,7 @@ def test_gemini_models_opt_into_auto_prompt_cache():
 
 def test_base_openai_client_unchanged():
     # ...while the base client still only enables it for OpenAI auto-cache
-    # models (gemini-* would have fallen through here -- the bug we fixed).
+    # models (gemini-* must not fall through here).
     assert OpenAIClient._has_auto_prompt_cache("gemini-3.5-pro") is False
     assert OpenAIClient._has_auto_prompt_cache("gpt-4.1") is True
     assert OpenAIClient._has_auto_prompt_cache("o3") is True

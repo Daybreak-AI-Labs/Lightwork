@@ -1,9 +1,9 @@
 """A goal parked on a question is 'blocked' but not finished.
 
-The REST API used to report every blocked goal the same way -- ``terminal: true``
-with nothing saying whether the task is waiting for a person's answer or has
-stopped for good -- so an integration that trusts ``terminal`` stopped polling a
-task that only needed an answer. Waiting-for-input is now stated from the
+Reporting every blocked goal the same way -- ``terminal: true`` with nothing
+saying whether the task is waiting for a person's answer or has stopped for
+good -- would make an integration that trusts ``terminal`` stop polling a task
+that only needs an answer. The REST API states waiting-for-input from the
 question queue itself, and the timestamps a client needs are on the goal.
 """
 from __future__ import annotations

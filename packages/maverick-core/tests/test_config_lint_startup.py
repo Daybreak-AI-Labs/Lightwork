@@ -1,4 +1,4 @@
-"""warn_config_at_startup: surface typo'd config at server start (audit M5).
+"""warn_config_at_startup: surface typo'd config at server start.
 
 The full linter already exists; this wires it into startup so a mis-typed
 security/cost key (which silently falls back to a default) is caught when a

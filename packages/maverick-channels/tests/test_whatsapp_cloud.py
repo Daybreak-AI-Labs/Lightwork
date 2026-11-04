@@ -85,7 +85,7 @@ def test_signed_message_drives_handler_and_replies(monkeypatch):
 def test_handler_exception_reply_is_redacted(monkeypatch):
     # On a handler error the user must get a generic message, NOT the raw
     # exception text -- it can carry a credential / internal path. Every other
-    # channel redacts; whatsapp_cloud used to forward f"error: {e}".
+    # channel redacts, and whatsapp_cloud must not forward f"error: {e}".
     secret = "boom token=sk-SECRET path=/etc/passwd"  # pragma: allowlist secret
     ch = _channel(handler=AsyncMock(side_effect=RuntimeError(secret)))
     ch.send = AsyncMock()

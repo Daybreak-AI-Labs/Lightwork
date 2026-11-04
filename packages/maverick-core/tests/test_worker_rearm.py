@@ -2,11 +2,11 @@
 
 A recurring CLI schedule (``maverick schedule goal``) carries its cron
 expression in ``payload['__cron__']``; the worker enqueues the next occurrence
-when it runs the current one. The old re-arm armed exactly once (on
-``attempts == 1``) and swallowed any enqueue error, so a single transient
+when it runs the current one. A re-arm that armed exactly once (on
+``attempts == 1``) and swallowed any enqueue error would let a single transient
 ``database is locked`` -- or a crash between claim-commit and re-arm -- silently
-and permanently killed the schedule (it ended as a ``done`` row with no
-successor and no signal). These tests pin the fix: re-arm is retryable across
+and permanently kill the schedule (a ``done`` row with no successor and no
+signal). These tests pin the contract: re-arm is retryable across
 attempts, idempotent (never a duplicate successor), and surfaces a persistent
 failure as a visible ``failed`` row instead of a dropped schedule.
 """

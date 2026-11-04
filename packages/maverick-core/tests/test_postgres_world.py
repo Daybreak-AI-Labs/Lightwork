@@ -1490,7 +1490,7 @@ def test_goal_origins(world):
 )
 def test_at_rest_encryption_seals_columns_and_round_trips(world, monkeypatch, tmp_path):
     """With encryption on, sensitive columns are AES-256-GCM ciphertext on disk
-    yet read back as plaintext (audit C4: Postgres at-rest sealing)."""
+    yet read back as plaintext (Postgres at-rest sealing)."""
     import psycopg
     from maverick import crypto_at_rest as car
 

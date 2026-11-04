@@ -1,8 +1,7 @@
 """Kernel-level department (suite) grant enforcement.
 
-The grant store moved from the dashboard into the kernel so the
-deploy/dispatch chokepoints gate EVERY caller (dashboard, CLI, future
-surfaces). Safety invariants under test:
+The grant store lives in the kernel so the deploy/dispatch chokepoints gate
+EVERY caller (dashboard, CLI, any other surface). Safety invariants under test:
   * empty acting principal (host operator / auth off) -> unrestricted;
   * configured dashboard admins -> unrestricted;
   * ``deploy_department`` raises DepartmentAccessError outside the grant;

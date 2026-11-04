@@ -1,7 +1,7 @@
 "use strict";
 // The Overview "Where goals stand" chart must count each status on its
-// own. "Queued" used to be total - done - active - blocked, which folded failed,
-// cancelled and draft goals into it while clicking it listed only pending ones.
+// own. Deriving "Queued" as total - done - active - blocked would fold failed,
+// cancelled and draft goals into it while clicking it lists only pending ones.
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -44,7 +44,7 @@ const base = {
   daily: [], domains: [], recent: [],
 };
 
-test("failed, cancelled and draft goals are no longer counted as queued", () => {
+test("failed, cancelled and draft goals are not counted as queued", () => {
   const donut = run({
     ...base,
     totals: { total: 33, active: 0, done: 30, blocked: 2 },

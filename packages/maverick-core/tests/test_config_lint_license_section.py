@@ -2,10 +2,10 @@
 
 ``maverick.entitlements`` reads ``[license]`` (enforce / publisher_pubkeys /
 license_file / api_url / api_token / refresh_interval_seconds) and the installer
-wizard writes it (pick_license). It was missing from migrate.KNOWN_SECTIONS, so
-a go-live operator pinning the license trust anchor got a false "unknown
-section" warning from config-lint — exactly the stale-registry class the parity
-tests exist to prevent. This pins the fix.
+wizard writes it (pick_license). It must be in migrate.KNOWN_SECTIONS, or a
+go-live operator pinning the license trust anchor gets a false "unknown
+section" warning from config-lint — the stale-registry class the parity tests
+exist to prevent.
 """
 from __future__ import annotations
 

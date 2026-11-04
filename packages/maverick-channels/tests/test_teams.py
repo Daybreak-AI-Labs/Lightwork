@@ -647,7 +647,7 @@ def test_token_failures_are_explained_plainly():
     assert "server error" in explain_token_failure(503, {})
 
 
-# --------------------------------------------------------------- review round
+# ----------------------------------------- reply delivery, sign-in and cards
 
 def test_a_throttled_reply_was_not_sent_and_can_be_retried_but_a_server_error_is_unknown(rsa_key):
     import asyncio

@@ -1,9 +1,8 @@
 """In-app governance-module switches (/api/v1/features/modules).
 
-Every tenant-facing module used to fail closed behind a config-file-only
-[section] enable flag, with workbench banners telling the user to edit
-config.toml. These endpoints make the gates switchable from the module's own
-page: admin-gated, allowlisted, persisted through the settings overlay.
+Every tenant-facing module fails closed behind a [section] enable flag. These
+endpoints make the gates switchable from the module's own page instead of
+config.toml: admin-gated, allowlisted, persisted through the settings overlay.
 Turning a module ON applies its full requirement chain in one atomic write
 (one click must open a WORKING workbench, never a child under a dead
 parent); turning it OFF disables only the module itself.
@@ -353,8 +352,8 @@ def test_previously_switchless_workbenches_carry_turn_on_banners(monkeypatch):
     assert 'data-module-gate="governed_document_vault"' in client.get("/administration/document-vault").text
 
 
-# The governance modules the terminal installer used to be the only way to
-# turn on. Each flips a boolean ``enable`` gate, and turning it on must make
+# Governance modules the terminal installer can also turn on. Each flips a
+# boolean ``enable`` gate, and turning it on must make
 # the kernel module's OWN enabled() check pass (its parent chain included).
 _KERNEL_GATES = {
     "control_plane": lambda: __import__("maverick.config", fromlist=["x"]).get_control_plane()["enable"],

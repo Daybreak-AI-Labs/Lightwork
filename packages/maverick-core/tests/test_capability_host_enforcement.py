@@ -1,4 +1,4 @@
-"""P0 capability layer: host resource-scope enforcement at the tool chokepoint.
+"""Capability layer: host resource-scope enforcement at the tool chokepoint.
 
 A capability whose ``allow_hosts`` is non-empty restricts which network hosts
 the known network tools (http_fetch/browser/oidc/oauth_helper) may reach: the host is parsed from

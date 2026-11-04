@@ -773,7 +773,7 @@ class TestRepoMapTool:
 
 class TestRepoMapInRegistry:
     def test_repo_map_registered(self, tmp_path):
-        """The base registry now ships repo_map as a default tool."""
+        """The base registry ships repo_map as a default tool."""
         from maverick.sandbox import LocalBackend
         from maverick.tools import base_registry
         from maverick.world_model import WorldModel
@@ -809,7 +809,7 @@ class TestExtractUnifiedDiffGitFormat:
         )
         out = extract_unified_diff(text)
         # Rename-only diffs have no @@ hunks; they are accepted
-        # because we now anchor on `diff --git` as an alternative start.
+        # because `diff --git` is an alternative start anchor.
         assert out is not None
         assert "rename from old.py" in out
 

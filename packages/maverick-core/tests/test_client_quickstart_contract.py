@@ -308,7 +308,7 @@ def test_typescript_client_dependency_and_ci_security_gates():
     assert package["devDependencies"]["@types/node"] == "22.20.1"
     assert "environment.test.ts" in package["scripts"]["test:environment"]
     assert "tsc --noEmit --strict" in package["scripts"]["typecheck"]
-    # Reviewed patched versions from the November 2026 cross-ecosystem audit.
+    # Reviewed patched versions of vulnerable transitive dependencies.
     assert package["overrides"] == {
         "@hono/node-server": "2.1.3",
         "body-parser": "2.4.0",

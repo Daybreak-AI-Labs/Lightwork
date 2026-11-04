@@ -1706,11 +1706,11 @@ class TestToolDispatchWallClockGuard:
     @pytest.mark.asyncio
     async def test_hung_tool_is_aborted_at_the_wall_cap(self, tmp_path, monkeypatch):
         # A tool with no timeout of its own (a plugin, an MCP server,
-        # a browser/file-watcher wait) previously had no equivalent to
-        # _complete_guarded's wall-clock/killswitch polling -- it could hold
-        # the goal 'active' and ignore `maverick halt` indefinitely. A never-
-        # returning tool under a short wall cap must now abort promptly
-        # instead of hanging past it.
+        # a browser/file-watcher wait) gets the same wall-clock/killswitch
+        # polling as _complete_guarded, so it cannot hold the goal 'active'
+        # and ignore `maverick halt` indefinitely. A never-returning tool
+        # under a short wall cap must abort promptly instead of hanging
+        # past it.
         import asyncio
         import time
 

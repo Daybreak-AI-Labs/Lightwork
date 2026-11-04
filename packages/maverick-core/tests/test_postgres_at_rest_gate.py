@@ -1,7 +1,7 @@
 """open_world + Postgres encryption-at-rest.
 
-The Postgres backend now seals the same sensitive content columns as SQLite
-(audit C4), so selecting it with encryption-at-rest on OPENS the backend (and
+The Postgres backend seals the same sensitive content columns as SQLite,
+so selecting it with encryption-at-rest on OPENS the backend (and
 seals on write) rather than failing closed. The full sealing round-trip +
 ciphertext-on-disk proof lives in test_postgres_world.py (skipped without a DSN);
 these cover the open_world dispatch without a live Postgres.

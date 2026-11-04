@@ -43,8 +43,8 @@ def test_new_metric_is_informational_not_regression():
 
 def test_zero_baseline_negative_candidate_signs_the_sentinel():
     # Zero baseline with a negative candidate is a downward move; for a
-    # lower-is-better metric that's an improvement, not a regression (the
-    # unsigned +inf sentinel used to flag it 'regressed').
+    # lower-is-better metric that's an improvement, not a regression (an
+    # unsigned +inf sentinel would flag it 'regressed').
     res = rc.compare({"net_margin": 0.0}, {"net_margin": -5.0}, tolerance=0.1)
     assert res.verdicts[0].verdict == "improved"
     # Symmetrically, a higher-is-better metric moving 0 -> negative regresses.

@@ -325,7 +325,7 @@ def test_a_request_marked_answered_then_closed_still_shows_its_answer():
 
     request = privacy_ops.open_dsar("ola@example.com", "opt_out", opened_by="ops")
     # An opt-out is answered by recording what was stopped, when, and the proof;
-    # a bare "mark answered" click no longer counts as an answer.
+    # a bare "mark answered" click does not count as an answer.
     with pytest.raises(ValueError, match="Record what was changed or stopped"):
         privacy_ops.fulfill_dsar(request["id"], fulfilled_by="ops")
     today = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")

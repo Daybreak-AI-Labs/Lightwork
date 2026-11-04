@@ -95,9 +95,8 @@ class TestMigrationToV7:
             k: v for k, v in world_model.MIGRATIONS.items() if k <= 6
         }
         monkeypatch.setattr(world_model, "MIGRATIONS", v6_migrations)
-        # The SCHEMA constant ALSO has the new index because we added
-        # it inline. To simulate true v6 we have to drop those indexes
-        # after init.
+        # The SCHEMA constant ALSO has the new index inline. To simulate
+        # true v6 we have to drop those indexes after init.
         wm_v6 = world_model.WorldModel(path=db_path)
         wm_v6.conn.execute("DROP INDEX IF EXISTS idx_episodes_ended_at")
         wm_v6.conn.execute("DROP INDEX IF EXISTS idx_goal_events_ts")

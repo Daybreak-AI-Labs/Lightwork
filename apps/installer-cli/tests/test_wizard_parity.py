@@ -734,8 +734,8 @@ def test_write_config_emits_full_tool_exposure_only_when_chosen(tmp_path: Path, 
 
 
 def test_write_config_emits_consequence_when_enabled(tmp_path: Path, monkeypatch):
-    # The Consequence Engine had a config knob + kernel reader but no wizard step,
-    # so it was unreachable through the installer. Pin that it now emits.
+    # The Consequence Engine has a config knob + kernel reader, so the wizard
+    # must reach it too. Pin that the wizard emits it.
     parsed = _write_full_config(
         tmp_path, monkeypatch, advanced={"consequence": True},
     )

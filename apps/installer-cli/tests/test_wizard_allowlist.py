@@ -45,8 +45,8 @@ def test_pick_channels_voice_collects_provider_specific_api_key(monkeypatch):
     channels, envs = wizard.pick_channels("vps")
 
     assert channels["voice"]["api_key"] == "${RETELL_API_KEY}"
-    # the chosen provider's key is collected for the secret prompt; the stale
-    # always-VAPI catalog entry no longer leaks in for non-vapi providers.
+    # the chosen provider's key is collected for the secret prompt; the
+    # VAPI-only catalog entry does not leak in for non-vapi providers.
     assert "RETELL_API_KEY" in envs
     assert "VAPI_API_KEY" not in envs
     assert "VAPI_WEBHOOK_TOKEN" in envs

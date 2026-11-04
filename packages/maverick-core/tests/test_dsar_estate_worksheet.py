@@ -130,7 +130,8 @@ def test_worksheet_counts_the_conversations_and_goals_the_platform_holds():
 
 def test_worksheet_uses_the_request_channel_when_the_id_is_on_two_channels():
     """The same id on two channels is ambiguous without the request's channel;
-    the export fails closed and the worksheet used to report an empty estate."""
+    the export fails closed, so the worksheet must use the request's channel
+    rather than report an empty estate."""
     world = _seed_platform_world()
     world.get_or_create_conversation("telegram", "alice@example.com")
     request = privacy_ops.open_dsar(

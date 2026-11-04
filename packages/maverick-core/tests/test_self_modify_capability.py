@@ -148,7 +148,7 @@ class TestDynamicCodePrecision:
     def _dyn(self, line: str) -> bool:
         return "dynamic_code" in classes_in([line])
 
-    # --- false positives that must NOT flag (the fix) ------------------------
+    # --- false positives that must NOT flag --------------------------------
     def test_method_named_compile_is_not_builtin_compile(self):
         # django__django-15930's gold fix: an ORM query-compiler method call.
         assert not self._dyn("sql, params = compiler.compile(Value(True))")

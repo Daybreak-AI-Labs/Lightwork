@@ -3,10 +3,10 @@ points, not only to ``run_goal(resume=False)`` from the terminal.
 
 Every dashboard chat, REST, schedule, flow and queue-worker start goes through
 ``runner.run_goal_in_thread``, which always asks the orchestrator to ``resume``
-(so a crashed run can pick its checkpoint back up). The gate used to read that
-flag as "a person already let this task through", so it never ran for any of
-them. It now trusts durable evidence instead: a task is "resumed" only when a
-run of it is already on record.
+(so a crashed run can pick its checkpoint back up). Reading that flag as "a
+person already let this task through" would skip the gate for all of them, so
+the gate trusts durable evidence instead: a task is "resumed" only when a run
+of it is already on record.
 """
 from __future__ import annotations
 

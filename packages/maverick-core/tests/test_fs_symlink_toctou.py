@@ -2,7 +2,7 @@
 
 ``_safe_resolve`` resolves + range-checks a path, but the tool then opens it a
 moment later — a window in which a symlink swapped into the path can redirect
-the open outside the workspace. The fix verifies, THROUGH the opened descriptor
+the open outside the workspace. The tool verifies, THROUGH the opened descriptor
 (``/proc/self/fd``), that the inode actually opened is still inside the
 workspace. These tests prove (a) legitimate in-workspace symlinks still work and
 (b) an escape detected only after the open is refused with no data leak / no

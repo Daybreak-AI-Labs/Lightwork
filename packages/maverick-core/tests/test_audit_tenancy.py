@@ -1,4 +1,4 @@
-"""P1 data-plane: the audit log is tenant-isolated via ``maverick.paths``.
+"""Data plane: the audit log is tenant-isolated via ``maverick.paths``.
 
 Completes the cross-session-memory increment by routing the audit dir AND the
 signing-key dir through the tenant-aware ``data_dir`` helper. With no tenant the

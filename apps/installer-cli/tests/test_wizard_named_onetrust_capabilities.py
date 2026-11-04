@@ -1,4 +1,4 @@
-"""Installer coverage for named OneTrust capability increments."""
+"""Installer coverage for the named governance capability prompts."""
 
 from __future__ import annotations
 

@@ -477,7 +477,7 @@ def test_user_preferences_defaults_validation_and_send_marker():
     assert "UTC" in prefs.time_zone_choices()
 
 
-# ---------------------------------------------------------- review round
+# ----------------------------------------- malformed input and undo limits
 
 def test_an_action_label_with_a_non_ascii_character_can_still_be_approved(tmp_path, recorded):
     from maverick.channel_approvals import decide_from_channel

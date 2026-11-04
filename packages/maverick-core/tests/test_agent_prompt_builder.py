@@ -1,9 +1,8 @@
-"""Characterization tests for the first extracted PromptBuilder seam.
+"""Characterization tests for the PromptBuilder seam.
 
-``agent.select_base_template`` was lifted out of ``Agent._build_system`` as the
-first side-effect-free collaborator in the god-module decomposition. These pin
-its branch behavior so the extraction is provably byte-identical to the inline
-code it replaced (the orchestrator/worker/coding-mode selection).
+``agent.select_base_template`` is the side-effect-free collaborator that
+``Agent._build_system`` uses to pick its base template. These pin its branch
+behavior (the orchestrator/worker/coding-mode selection).
 """
 from __future__ import annotations
 

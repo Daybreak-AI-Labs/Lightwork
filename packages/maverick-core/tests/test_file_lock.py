@@ -1020,8 +1020,8 @@ def test_nested_cross_path_locks_cannot_abba_deadlock(tmp_path):
 
 
 def test_same_path_contenders_still_serialize(tmp_path):
-    """The fix must not loosen same-path exclusion: two threads bumping a
-    counter under the same lock lose no update."""
+    """Same-path exclusion holds: two threads bumping a counter under the
+    same lock lose no update."""
     import json
     import threading
 

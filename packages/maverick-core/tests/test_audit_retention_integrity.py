@@ -518,16 +518,13 @@ def test_a_delete_destroys_no_concurrently_committed_row(audit_dir) -> None:
 def test_an_unsigned_writer_also_survives_a_concurrent_erase(
     audit_dir, monkeypatch,
 ) -> None:
-    """The half of the erase race that the first fix missed.
+    """The unsigned half of the erase race.
 
-    ``AuditSigner.write`` was given the sidecar lock; ``AuditLog.record``'s
-    UNSIGNED branch was not, and it appends under an flock on its own handle --
-    which cannot exclude a rewriter that publishes a new inode via os.replace.
-    So with ``[audit] sign = false`` (a documented, supported posture) an erase
-    still destroyed committed rows while ``record()`` returned True.
-
-    Found by adversarial review of the fix, not by the fix's own tests, which
-    all exercised the signed path. Both paths now take the same lock.
+    ``AuditLog.record``'s UNSIGNED branch must take the same sidecar lock as
+    ``AuditSigner.write``. An flock on its own handle cannot exclude a rewriter
+    that publishes a new inode via os.replace, so with ``[audit] sign = false``
+    (a documented, supported posture) an erase would destroy committed rows
+    while ``record()`` returned True. The signed-path tests cannot catch that.
     """
     import json as _json
     import threading

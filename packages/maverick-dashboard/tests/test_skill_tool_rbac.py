@@ -3,8 +3,8 @@
 Installing, authoring, or removing a skill -- and removing a generated tool --
 changes the code the agent loads on its next run. That is a control-plane
 mutation and must require ``admin`` (like ``/plugins/install`` and
-``/plugins/toggle``), not merely an authenticated session. These five routes
-previously had NO RBAC gate, so with ``[dashboard] default_role = "viewer"`` an
+``/plugins/toggle``), not merely an authenticated session. Without an RBAC
+gate on these five routes, with ``[dashboard] default_role = "viewer"`` an
 authenticated read-only principal could delete/install agent code. The
 process-wide ``MAVERICK_ALLOW_SKILL_INSTALL`` opt-in is not a role check.
 

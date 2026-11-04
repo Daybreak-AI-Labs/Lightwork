@@ -283,8 +283,8 @@ def test_the_platform_mailers_own_transport_login_connect_and_data_failures(monk
 # ---- ntfy titles, receipts and batching ------------------------------------------------
 
 def test_a_non_ascii_ntfy_title_is_sent_as_an_rfc2047_word_not_a_local_encoding_error(monkeypatch):
-    """httpx writes header text as ASCII, so "Zürich" used to fail before any
-    request existed and was then recorded as an unknown outcome."""
+    """httpx writes header text as ASCII, so a raw "Zürich" title would fail
+    before any request existed and be recorded as an unknown outcome."""
     from email.header import decode_header, make_header
 
     import httpx

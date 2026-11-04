@@ -75,7 +75,7 @@ def test_full_governed_config_lints_clean():
 
 
 def test_a_real_typo_is_still_caught():
-    # The fix must not blunt the lint: a genuine unknown key still warns.
+    # Known governance keys must not blunt the lint: a genuine unknown key still warns.
     findings = lint_config({"capabilities": {"enforcee": True}})
     assert any("enforcee" in (f.key or "") for f in findings), findings
 

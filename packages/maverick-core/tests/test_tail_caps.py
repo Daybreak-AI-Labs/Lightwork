@@ -32,7 +32,7 @@ def test_llm_retry_attempts_default_3(monkeypatch):
 def test_verdict_ceilings_not_trimmed():
     # Deliberately NOT lowered: a verdict truncated mid-JSON fails closed to
     # REJECT (verifier._parse is conservative), which re-runs the proposer —
-    # costing far more than the trimmed tokens saved. Reviewed July 2026.
+    # costing far more than the trimmed tokens saved.
     from maverick.reviewer import review_diff
     from maverick.verifier import verify_proposal, verify_proposal_structured
     assert inspect.signature(verify_proposal).parameters["max_tokens"].default == 1024

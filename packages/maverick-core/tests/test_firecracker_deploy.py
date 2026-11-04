@@ -1,9 +1,8 @@
 """Firecracker backend: the kernel/rootfs guidance points at real build scripts.
 
 The backend tells operators to build the microVM kernel + rootfs with the
-scripts under ``deploy/firecracker/``. Those scripts used to be referenced but
-absent (a dangling pointer); these tests lock that they exist and that the
-backend's missing-artifact error sends operators to them.
+scripts under ``deploy/firecracker/``. These tests lock that those scripts
+exist and that the backend's missing-artifact error sends operators to them.
 """
 from __future__ import annotations
 

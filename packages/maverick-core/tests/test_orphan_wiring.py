@@ -244,7 +244,7 @@ def test_distillation_local_enabled_reuses_passed_config_for_the_section_read(
     instead of loading it again. ``governed_learning_env_flag`` makes its
     own unrelated, unavoidable ``load_config()`` call first (see the
     docstring on the sibling test above) -- that's the ONE call this test
-    expects; a second one would mean the fix regressed."""
+    expects; a second one would mean the section read stopped reusing it."""
     import maverick.config as config
     import maverick.skill.distillation_local as distillation_local
 

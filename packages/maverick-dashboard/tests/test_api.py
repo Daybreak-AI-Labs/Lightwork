@@ -335,7 +335,7 @@ class TestGoals:
 
 
 class TestAnswer:
-    """POST /api/v1/goals/{id}/answer now takes a JSON body (v0.1.6)."""
+    """POST /api/v1/goals/{id}/answer takes a JSON body."""
 
     def test_answer_unknown_question_404(self, tmp_path, monkeypatch):
         from maverick import world_model

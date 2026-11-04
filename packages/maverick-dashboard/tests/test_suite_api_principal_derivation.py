@@ -106,8 +106,8 @@ def test_suite_status_route_accepts_genuine_local_auth_off(
 def test_suite_status_route_still_401s_with_no_authentication_at_all(
     module: str, route: str, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Negative control: the fix widens who counts as authenticated -- it
-    must not become allow-all. A caller that is genuinely neither a named
+    """Negative control: principal derivation widens who counts as
+    authenticated -- it must not become allow-all. A caller that is genuinely neither a named
     principal, nor a valid static bearer, nor in real auth-off mode is still
     refused."""
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)

@@ -36,8 +36,8 @@ def test_doctor_passes_valid_config(tmp_path: Path, capsys):
 
 def test_doctor_anthropic_yellow_when_other_provider_configured(tmp_path, monkeypatch, capsys):
     """A keyless self-hosted setup (Ollama/vLLM via config) is healthy without
-    an Anthropic key: doctor used to hard-RED `anthropic` regardless of every
-    other configured provider (predicate split-brain)."""
+    an Anthropic key: doctor must not hard-RED `anthropic` regardless of every
+    other configured provider."""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     cfg = tmp_path / "config.toml"
     cfg.write_text('[providers.vllm]\nbase_url = "http://127.0.0.1:9911/v1"\n',

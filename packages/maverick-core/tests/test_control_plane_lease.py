@@ -42,7 +42,7 @@ def _child(root: Path, *, hold_seconds: float = 0.0) -> subprocess.CompletedProc
 
     Threads share a file-descriptor table and POSIX ``flock`` is per-open-file,
     so a same-process attempt could pass while genuine cross-process exclusion
-    was broken. The bug being prevented is two OS processes.
+    is broken. The case that matters is two OS processes.
     """
     code = textwrap.dedent(f"""
         import json, os, sys, time

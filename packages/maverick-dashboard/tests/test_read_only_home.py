@@ -2,7 +2,7 @@
 
 Viewers and auditors open "/" on the chat home but cannot chat. A plain visit
 must not try to save a recovery copy (that API needs the operate permission and
-used to show "Could not save the recovery copy. You do not have permission..."),
+would show "Could not save the recovery copy. You do not have permission..."),
 and the page must not offer chat controls that would only be refused.
 """
 from __future__ import annotations

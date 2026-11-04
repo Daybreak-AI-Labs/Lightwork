@@ -1,10 +1,10 @@
 """websocket_tool must pin the connection to a validated IP (no DNS rebind).
 
-Security finding: _check_url resolved the host once to validate, then
-websockets.connect(url) re-resolved the same name independently -- a
-DNS-rebinding TOCTOU letting a short-TTL/hostile resolver pass validation
-with a public IP and then connect to 169.254.169.254 / 127.0.0.1. The fix
-pins via _ssrf.resolve_pinned_ip and connects to that exact IP. websockets
+If _check_url resolved the host once to validate and websockets.connect(url)
+re-resolved the same name independently, a DNS-rebinding TOCTOU would let a
+short-TTL/hostile resolver pass validation with a public IP and then connect
+to 169.254.169.254 / 127.0.0.1. The tool pins via _ssrf.resolve_pinned_ip and
+connects to that exact IP. websockets
 isn't a default dependency, so a fake module captures the connect kwargs to
 assert the SSRF-critical contract.
 """

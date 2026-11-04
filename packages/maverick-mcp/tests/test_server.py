@@ -1,6 +1,6 @@
 """MCP server smoke + protocol tests.
 
-v0.1.6: handle_tools_call now RAISES `_ProtocolError` for unknown tool /
+handle_tools_call RAISES `_ProtocolError` for unknown tool /
 missing required args (per MCP spec -- protocol errors must come back as
 JSON-RPC `-32602`, not `isError`). Tests assert the exception is raised
 and carries the right code. The `isError` envelope is only for tool

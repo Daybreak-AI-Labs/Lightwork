@@ -16,7 +16,7 @@ def test_standalone_injection_is_rejected():
 
 def test_boundary_split_injection_is_rejected():
     # Small chunks with no overlap so the marker straddles a chunk edge and no
-    # single chunk matches _INJECTION_RE -- the evasion the fix closes.
+    # single chunk matches _INJECTION_RE -- the evasion ingest must catch.
     kb = KnowledgeBase(chunk_size=40, chunk_overlap=0)
     doc = ("A" * 25) + INJ + ("A" * 25)
     assert kb.ingest_text("c", doc) == 0

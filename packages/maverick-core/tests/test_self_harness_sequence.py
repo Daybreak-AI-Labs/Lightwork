@@ -8,17 +8,17 @@ models, and intersperse rejected (no-op) passes -- and asserts the persisted
 store stays in exact lockstep with an INDEPENDENT reference model of the
 documented semantics after every single op.
 
-State accumulation is where this loop's hardest bugs have lived (the 100k-soak
-re-promotion eviction, the metamorphic ordering). This battery generalises
-those single-shot checks to arbitrary histories, against a reference that is a
-fresh reimplementation (not a call into the code under test), so any divergence
-is a real discrepancy -- not a tautology.
+State accumulation (re-promotion eviction, ordering) is where this loop's
+hardest bugs live. This battery generalises the single-shot checks to arbitrary
+histories, against a reference that is a fresh reimplementation (not a call
+into the code under test), so any divergence is a real discrepancy -- not a
+tautology.
 
-It found the char-budget bug: the old ``block[:_MAX_ADDENDUM_CHARS]`` truncation
-dropped the NEWEST bullets (inverting the newest-wins cap) and could sever a
-bullet mid-line, corrupting the last stored line so a later re-promote of it no
-longer deduped. The fix drops whole OLDEST bullets to fit; this reference
-encodes that and the sequences confirm lockstep.
+The char budget drops whole OLDEST bullets to fit. A plain
+``block[:_MAX_ADDENDUM_CHARS]`` truncation would drop the NEWEST bullets
+(inverting the newest-wins cap) and could sever a bullet mid-line, corrupting
+the last stored line so a later re-promote of it would not dedupe. The
+reference encodes the whole-bullet rule and the sequences confirm lockstep.
 """
 from __future__ import annotations
 

@@ -47,9 +47,9 @@ def test_overview_board_payload(monkeypatch, tmp_path):
 
 
 def test_overview_board_reports_every_status_not_just_the_headline_four(monkeypatch, tmp_path):
-    """"Queued" used to be total - done - active - blocked, so failed,
-    cancelled and draft goals were counted as queued. The payload now carries
-    the real count per status so the page can show each one on its own."""
+    """Deriving "Queued" as total - done - active - blocked would count failed,
+    cancelled and draft goals as queued. The payload carries the real count
+    per status so the page can show each one on its own."""
     _isolate(monkeypatch, tmp_path)
     w = _seed_world()
     for title, status in (("Waiting", "pending"), ("Broke", "failed"),

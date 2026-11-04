@@ -1,4 +1,4 @@
-"""run_goal wiring for per-principal usage quotas (P2 cost governance).
+"""run_goal wiring for per-principal usage quotas (cost governance).
 
 Proves the two integration points added to ``orchestrator.run_goal``:
 

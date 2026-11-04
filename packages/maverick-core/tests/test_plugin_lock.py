@@ -130,7 +130,7 @@ def test_cli_lock_and_verify(tmp_path, monkeypatch):
     assert r3.exit_code == 1 and "DRIFT acme-tools" in r3.output
 
 
-# ---- content-integrity hashing (audit C9) ----
+# ---- content-integrity hashing ----
 
 def test_write_lock_records_content_hashes(tmp_path, monkeypatch):
     _fake_eps(monkeypatch, [("t1", "acme-tools", "1.0.0")])

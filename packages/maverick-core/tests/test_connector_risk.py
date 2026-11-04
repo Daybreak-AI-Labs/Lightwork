@@ -2,9 +2,9 @@
 
 Enterprise connectors mutate external business state (CRM/ERP records,
 payments, payroll), provision infrastructure, manage secrets/identity, or run
-remote code/SQL -- but anything unclassified used to default to ``medium``, so
-a ``max_risk="medium"`` ceiling (and governance gates keyed on risk) silently
-admitted them. Now:
+remote code/SQL. If anything unclassified defaulted to ``medium``, a
+``max_risk="medium"`` ceiling (and governance gates keyed on risk) would
+silently admit them. Instead:
 
 * the long-tail REST/GraphQL connectors (``enterprise_connectors.py``) are
   resolved by name from the spec list -> high, so new connectors are covered

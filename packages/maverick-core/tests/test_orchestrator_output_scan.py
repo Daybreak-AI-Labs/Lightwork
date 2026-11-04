@@ -1,10 +1,10 @@
 """run_goal must scan the FINAL answer before returning it.
 
-Regression: the shield's output chokepoint only existed on the channel
-server path (server._handle_message). Direct callers -- `maverick start`
-/ `chat` / `resume` and the dashboard REST API -- got run_goal's raw
-answer with no scan_output, contradicting docs/safety.md. The fix scans
-the prose summary inside run_goal so every caller is covered.
+The shield's output chokepoint must not exist only on the channel server
+path (server._handle_message): direct callers -- `maverick start` / `chat` /
+`resume` and the dashboard REST API -- would then get run_goal's raw answer
+with no scan_output, contradicting docs/safety.md. run_goal scans the prose
+summary itself so every caller is covered.
 
 We monkeypatch _build_shield with a sentinel shield that blocks only an
 output containing "BLOCKME" (so intermediate tool-output / input scans

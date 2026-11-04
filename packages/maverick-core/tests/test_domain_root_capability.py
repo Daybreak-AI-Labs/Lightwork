@@ -1,10 +1,10 @@
 """A domain-routed goal root runs under the REQUESTER's grant too.
 
 ``run_goal(domain=...)`` builds its root with ``agent_from_profile`` and no
-parent, so the pack's own tool envelope used to be the only grant the agent
-ran under: the requesting user's RBAC role, [security] risk ceiling and any
-regulatory attenuation were dropped. An explicit grant may only ever NARROW the
-run's ambient grant.
+parent, so without the requester's grant the pack's own tool envelope would
+be the only grant the agent ran under, dropping the requesting user's RBAC
+role, [security] risk ceiling and any regulatory attenuation. An explicit grant
+may only ever NARROW the run's ambient grant.
 """
 from __future__ import annotations
 

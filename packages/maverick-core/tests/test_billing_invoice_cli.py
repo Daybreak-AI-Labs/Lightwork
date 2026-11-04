@@ -1,8 +1,8 @@
 """`maverick billing invoice` must not mint a misleading $0 invoice for a typo.
 
-UX finding: invoicing a tenant id that does not exist read an absent ledger and
-rated to an empty ``TOTAL: $0.00`` invoice at exit 0 -- indistinguishable from a
-real "this customer owes nothing" statement, so a typo'd tenant id passed
+Invoicing a tenant id that does not exist would read an absent ledger and rate
+to an empty ``TOTAL: $0.00`` invoice at exit 0 -- indistinguishable from a real
+"this customer owes nothing" statement, so a typo'd tenant id would pass
 silently. The guard errors (exit 2) only in the genuinely suspect case -- an
 empty invoice for a tenant a provisioned roster has never heard of -- while
 leaving every legitimate flow unchanged:

@@ -1,4 +1,4 @@
-"""P1 multi-tenancy: per-tenant ``world.db`` isolation.
+"""Multi-tenancy: per-tenant ``world.db`` isolation.
 
 Completes the world-model leg of per-user tenancy. Cross-session memory and the
 audit log already resolve their dirs via :func:`maverick.paths.data_dir`; this
@@ -265,9 +265,9 @@ def test_world_for_tenant_rejects_overlong_tenant(monkeypatch):
 
 
 def test_world_for_tenant_caps_cached_tenant_worlds(monkeypatch):
-    # The cache is now an LRU: reaching MAX_TENANT_WORLDS evicts the
+    # The cache is an LRU: reaching MAX_TENANT_WORLDS evicts the
     # least-recently-used tenant instead of raising, so a busy fleet of many
-    # tenants keeps working (audit M7).
+    # tenants keeps working.
     import maverick.world_model as wm
 
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)

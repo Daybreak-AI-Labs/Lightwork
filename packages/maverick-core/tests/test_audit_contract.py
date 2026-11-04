@@ -1,11 +1,9 @@
 """The audit refusal contract, and the gate that keeps it.
 
 Two things are pinned here. First, that both refusals share a base a caller can
-catch in one handler -- they were previously unrelated ``RuntimeError``
-subclasses, so the single hardened call site in the whole tree was hardened
-against the wrong half of the pair. Second, that the gate itself can actually
-fail: a gate that cannot fail is the defect class this repo has shipped five
-times, so every assertion below has a negative control.
+catch in one handler, so a call site hardened against one refusal is not blind
+to the other. Second, that the gate itself can actually fail: a gate that
+cannot fail proves nothing, so every assertion below has a negative control.
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""P2 cost-governance layer: a per-principal usage ledger + daily quota check.
+"""Cost-governance layer: a per-principal usage ledger + daily quota check.
 
 Budget caps one run; quotas cap a principal across runs over a rolling day, so
 an operator can chargeback / rate-limit spend per user. Default-off and opt-in

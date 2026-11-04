@@ -1,11 +1,11 @@
 """Circuit breaker must only trip on genuine provider-transport failures.
 
-Every exception escaping ``client.complete``
-used to count as a provider failure, including ``BudgetExceeded`` raised
-*after* a successful API call, ``UnpricedModelError``, and ordinary 4xx client
-errors. A single fan-out goal that hits its dollar cap (N parallel sub-agents
-each raising BudgetExceeded) could trip the breaker and take the provider
-offline for every concurrent goal and tenant sharing the process.
+Not every exception escaping ``client.complete`` is a provider failure:
+``BudgetExceeded`` raised *after* a successful API call, ``UnpricedModelError``
+and ordinary 4xx client errors are not. Counting them would let a single
+fan-out goal that hits its dollar cap (N parallel sub-agents each raising
+BudgetExceeded) trip the breaker and take the provider offline for every
+concurrent goal and tenant sharing the process.
 """
 from __future__ import annotations
 

@@ -62,10 +62,9 @@ def _have_twilio() -> bool:
 def test_webhook_claims_sid_before_running_handler(
     tmp_path, monkeypatch, channel, module, path, frm, sid,
 ):
-    """The fix: the SID is claimed BEFORE the handler runs, so a Twilio retry
-    that races a still-running handler is deduped. This discriminates from the
-    old check-then-mark, where the SID stayed unmarked until after the handler
-    (the double-spend window)."""
+    """The SID is claimed BEFORE the handler runs, so a Twilio retry that
+    races a still-running handler is deduped. A check-then-mark order would
+    leave the SID unmarked until after the handler (a double-spend window)."""
     import importlib
 
     import maverick.world_model as wm_mod

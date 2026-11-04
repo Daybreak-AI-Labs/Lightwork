@@ -1,10 +1,9 @@
 """A running agent sees what other agents posted since its last turn.
 
-The orchestrator used to read the blackboard only once (its first-turn
-brief), so everything posted afterwards -- fan-out cap notices, quarantine
-seals, sibling findings -- never reached it unless it flowed back through a
-tool result. Each tool-running turn now appends a bounded delta of other
-agents' posts to the tool_results message.
+Everything posted after the first-turn brief -- fan-out cap notices,
+quarantine seals, sibling findings -- must reach a running agent, not only
+what flows back through a tool result. Each tool-running turn appends a
+bounded delta of other agents' posts to the tool_results message.
 """
 from __future__ import annotations
 

@@ -1,9 +1,9 @@
 const {test, expect} = require('@playwright/test');
 
-// Settings used to write #settings-general into the address while the page
-// was still loading. Chrome then scrolled to that section when loading
-// finished (scrollY 739) and started keyboard focus there, so the first Tab
-// landed on the theme menu instead of the top of the page.
+// Settings must not write #settings-general into the address while the page
+// is still loading: Chrome would then scroll to that section when loading
+// finished (scrollY 739) and start keyboard focus there, so the first Tab
+// would land on the theme menu instead of the top of the page.
 test('Settings opens at the top and the first Tab starts at the top of the page', async ({page, context, baseURL}) => {
   await context.route('**/*', route => new URL(route.request().url()).origin === new URL(baseURL).origin ? route.continue() : route.abort('blockedbyclient'));
   const errors = []; page.on('pageerror', error => errors.push(error.message));

@@ -114,7 +114,7 @@ def test_existing_source_exclusion_stops_prompt_recall(personal_store, monkeypat
 
 
 def test_a_deleted_fact_is_used_in_none_of_ten_recalls_and_pausing_stops_all_recall(personal_store, monkeypatch):
-    """AI-9 controls audit at the recall layer every answer draws from: after a
+    """Personal-data controls checked at the recall layer every answer draws from: after a
     person deletes one remembered fact it is offered in 0 of 10 recalls while
     their other facts still are; pausing recall offers nothing until resumed."""
     from maverick import user_notes

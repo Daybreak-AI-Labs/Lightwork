@@ -33,7 +33,7 @@ def test_does_not_touch_process_env(monkeypatch):
     monkeypatch.delenv("MAVERICK_TEMPERATURE", raising=False)
     tok = set_sampling_temperature(0.95)
     try:
-        # The whole point of the fix: no process-global mutation.
+        # The point of the contextvar: no process-global mutation.
         assert "MAVERICK_TEMPERATURE" not in os.environ
     finally:
         reset_sampling_temperature(tok)

@@ -27,7 +27,7 @@ from maverick_shield import builtin_rules, cascade
 
 _BIG = 200_000
 # Worst observed single scan is ~110ms locally on 200KB; CI runners are slower.
-# 2s separates a healthy scan from the ReDoS class (the bugs we fixed ran
+# 2s separates a healthy scan from the ReDoS class (catastrophic patterns run
 # 13-70s) without flaking. The subprocess hang guard below is the hard backstop.
 _CEILING_S = 2.0
 _HANG_TIMEOUT_S = 20

@@ -416,8 +416,9 @@ def test_range_day_traversal_neutralized(monkeypatch, tmp_path):
 
 
 def test_active_now_panel_diff_renders_and_respects_focus(monkeypatch, tmp_path):
-    """The live table used to be rebuilt via innerHTML every 5 s,
-    dropping keyboard focus from the 'why?' buttons and polling hidden tabs."""
+    """The live table is updated in place, not rebuilt via innerHTML every
+    5 s, so it keeps keyboard focus on the 'why?' buttons and does not poll
+    hidden tabs."""
     _isolate(monkeypatch, tmp_path)
     text = _client().get("/oversight").text
     script = text[text.index('id="active-now"'):]

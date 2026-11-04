@@ -1,4 +1,4 @@
-"""Graceful-shutdown drain: in-flight goal accounting + bounded drain (audit H12)."""
+"""Graceful-shutdown drain: in-flight goal accounting + bounded drain."""
 from __future__ import annotations
 
 import time

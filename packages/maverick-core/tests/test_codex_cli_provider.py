@@ -128,8 +128,8 @@ class TestPricing:
 
 
 class TestLaunchPrefix:
-    """Binary resolution + Windows .cmd-shim routing (the fix for
-    'Codex CLI binary codex disappeared from PATH' on Windows npm installs)."""
+    """Binary resolution + Windows .cmd-shim routing (so Windows npm installs
+    do not fail with 'Codex CLI binary codex disappeared from PATH')."""
 
     def _client(self, monkeypatch, tmp_path, which_result):
         monkeypatch.setenv("CODEX_ACCESS_TOKEN", FAKE_TOKEN)
@@ -294,7 +294,7 @@ class TestExec:
         call = fake.calls[-1]
         cmd = call["cmd"]
         # cmd[0] is the RESOLVED absolute path (shutil.which result), not the
-        # bare name -- the fix that stops Windows shims failing mid-run.
+        # bare name, so Windows shims do not fail mid-run.
         assert cmd[0] == client._binary_path
         assert cmd[0].endswith("codex") and cmd[1] == "exec"
         assert "--json" in cmd and "--skip-git-repo-check" in cmd

@@ -7,10 +7,9 @@ ContextVar that ``resource_update_scope`` activates; outside a scope (stdio:
 one server : one client) the property falls back to a shared instance attr.
 
 This pins that isolation under real thread concurrency — the structured-override
-ContextVar path is the hazard called out in the god-module decomposition
-roadmap (``mcp/server.py`` TOOLS). It is a characterization test: it must pass
-today (the design is correct) and would fail loudly if a future refactor
-reintroduced the shared-attribute leak.
+ContextVar path is the hazard in splitting ``mcp/server.py`` TOOLS. It is a
+characterization test: it passes on the current design and fails loudly if a
+refactor reintroduces the shared-attribute leak.
 """
 from __future__ import annotations
 

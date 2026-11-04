@@ -309,7 +309,7 @@ def test_llm_provider_client_cache_is_tenant_aware(tmp_path, monkeypatch):
 
 
 def test_tenant_world_cache_evicts_lru_not_raises(monkeypatch, tmp_path):
-    # M7: reaching MAX_TENANT_WORLDS evicts the least-recently-used tenant
+    # Reaching MAX_TENANT_WORLDS evicts the least-recently-used tenant
     # instead of hard-failing the next one. Shrink the cap for the test.
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))

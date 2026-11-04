@@ -2668,7 +2668,7 @@ def test_config_mine_bucket_by_allows_tool(monkeypatch):
     assert config.get_self_harness()["mine_bucket_by"] == ("domain", "tool")
 
 
-# ---------- holdout rotation (#C7): cross-validate across K folds ----------
+# ---------- holdout rotation: cross-validate across K folds ----------
 
 def _scorers_with_bad_goal(bad):
     """A live A/B where the line helps every goal EXCEPT ``bad`` (which it hurts):

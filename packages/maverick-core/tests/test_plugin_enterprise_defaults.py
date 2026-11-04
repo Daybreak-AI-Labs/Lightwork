@@ -1,4 +1,4 @@
-"""Plugin security defaults follow the deployment profile (C9).
+"""Plugin security defaults follow the deployment profile.
 
 Under enterprise mode third-party plugins should not run in-process by default,
 and the version/content lockfile should be enforced. Explicit config/env always

@@ -61,8 +61,8 @@ def test_install_from_catalog_accepts_non_utf8_clean_pinned_bytes(monkeypatch, t
     monkeypatch.setattr(
         skills, "_fetch_skill_source_bytes", lambda source: _NON_UTF8_BODY_BYTES)
     monkeypatch.setattr(skills, "_verify_skill_signature", lambda parsed, **kw: kw["require_signature"])
-    # Without the fix this raised "content hash mismatch" because the pin was
-    # checked against the UTF-8-replaced str rather than the raw wire bytes.
+    # The pin is checked against the raw wire bytes; checking the
+    # UTF-8-replaced str would raise "content hash mismatch".
     s = skills.install_from_catalog("summarize-url", skills_dir=tmp_path)
     assert s.name == "summarize-url"
     assert (tmp_path / "summarize-url.md").exists()

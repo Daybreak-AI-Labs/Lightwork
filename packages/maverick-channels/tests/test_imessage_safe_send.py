@@ -85,9 +85,9 @@ def test_start_survives_send_failure():
     """A transient send() failure (e.g. osascript TimeoutExpired / OSError)
     must NOT propagate out of start() and kill the poll loop.
 
-    Regression: line 97 `await self.send(...)` was previously unguarded, so a
-    subprocess.TimeoutExpired (which check=False does not suppress) terminated
-    the whole receive loop permanently.
+    An unguarded `await self.send(...)` would let a subprocess.TimeoutExpired
+    (which check=False does not suppress) terminate the whole receive loop
+    permanently.
     """
     import asyncio
     import subprocess
@@ -117,8 +117,8 @@ def test_start_survives_send_failure():
     chan.handler = _dispatch
     chan.send = _send
 
-    # Without the fix this raises TimeoutExpired out of start(); with the fix
-    # the send failure is logged and the loop continues to a clean stop.
+    # The send failure is logged and the loop continues to a clean stop
+    # instead of raising TimeoutExpired out of start().
     asyncio.run(asyncio.wait_for(chan.start(), timeout=5))
 
     assert sent["attempts"] == 1  # the send was attempted (and failed) once

@@ -221,7 +221,8 @@ def test_host_param_in_query_string_is_denied(monkeypatch):
     monkeypatch.delenv("DATABASE_URL", raising=False)
     from maverick.tools.database_tool import database_tool
 
-    # libpq honors ?host=; the netloc host is empty so the old check failed open.
+    # libpq honors ?host=; the netloc host is empty, so a netloc-only check
+    # would fail open.
     for url in (
         "postgresql:///db?host=evil.com",
         "postgresql+psycopg://u@/db?host=evil.com",

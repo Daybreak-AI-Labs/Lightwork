@@ -590,7 +590,7 @@ def test_the_retry_store_prunes_old_entries_and_stays_bounded(world, tmp_path, m
     assert len(json.loads(path.read_text(encoding="utf-8"))) == 2
 
 
-# ---- review round: the cycle survives one bad record, one bad write, one bad lock -------------
+# ---- the cycle survives one bad record, one bad write, one bad lock -------------
 
 def test_one_malformed_record_does_not_hide_the_rest_of_its_source(monkeypatch):
     from maverick import privacy_ops

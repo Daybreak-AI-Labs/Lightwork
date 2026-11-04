@@ -1,9 +1,9 @@
 """A consumer should never see a Python traceback for an expected failure.
 
-`maverick start/chat/resume/watch` used to let operational errors (no Docker
+`maverick start/chat/resume/watch` must not let operational errors (no Docker
 daemon, a rejected API key, a dropped connection) escape as a raw traceback
-and -- worse -- exit 0. These tests pin the friendly-message + non-zero-exit
-behavior and the MAVERICK_DEBUG escape hatch.
+or exit 0. These tests pin the friendly-message + non-zero-exit behavior and
+the MAVERICK_DEBUG escape hatch.
 """
 from __future__ import annotations
 

@@ -28,7 +28,7 @@ async def test_sealed_mid_run_child_final_not_leaked_into_subagent_stop_hook(mon
     # The leak path is a child sealed DURING run: the spawn-time check passes
     # (not yet sealed), the child runs and is compromised, then the post-run
     # check withholds it -- but the SUBAGENT_STOP hook fired in between with the
-    # raw final. The fix moves the withhold check above the emit.
+    # raw final. So the withhold check runs before the emit.
     dom = sorted(enabled_domains())[0]
     quarantine = QuarantineRegistry()
     parent = _fake_parent()

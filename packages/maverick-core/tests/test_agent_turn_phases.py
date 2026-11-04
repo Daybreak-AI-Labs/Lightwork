@@ -1,18 +1,17 @@
 """Characterisation tests for the phases of the agent turn loop.
 
-These pin behaviour that ``Agent._run_inner`` carried in its body before the
-loop was decomposed into phase methods, so the decomposition can be checked
-against them. Each test drives a real ``Agent`` with a scripted LLM through
+These pin the behaviour of the phase methods behind ``Agent._run_inner``.
+Each test drives a real ``Agent`` with a scripted LLM through
 ``Agent.run``; the private helpers it monkeypatches (``_extract_and_apply_patch``,
 ``_git_apply``, ``_reset_workdir``) are the git seams the coding-mode branch
 already exposes, and the module paths it patches are imported lazily by the
 loop, exactly as the rest of the suite relies on.
 
-History the loop used to narrate inline, kept here instead:
+Behaviour the loop must keep:
 
 * A FINAL whose SEARCH/REPLACE edits were applied through the secondary edit
-  tool but never announced used to be reported as "no diff"; the loop now
-  salvages the workdir's uncommitted diff when ``max_steps`` runs out.
+  tool but never announced is not reported as "no diff"; the loop salvages
+  the workdir's uncommitted diff when ``max_steps`` runs out.
 * Ground-truth tests (``MAVERICK_FAIL_TO_PASS``) replace the LLM judge in
   coding mode; a failed apply skips the test run instead of reporting every
   test as failing for the wrong reason; the revision loop is bounded by the

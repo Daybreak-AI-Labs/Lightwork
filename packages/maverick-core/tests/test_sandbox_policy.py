@@ -68,7 +68,7 @@ def test_unknown_backend_refused_when_require_container(monkeypatch):
 
 def test_unknown_backend_still_degrades_to_local_without_policy():
     # With no policy active, an unrecognized backend keeps the documented
-    # warn-and-degrade behavior (so the fix is scoped to require-container).
+    # warn-and-degrade behavior (the refusal applies only to require-container).
     sb = build_sandbox(backend="dcoker")
     assert sb is not None
 

@@ -34,9 +34,8 @@ class TestModelWindow:
 class TestScaledBounds:
     def test_200k_window_scales_up_from_legacy(self, monkeypatch):
         _clear_env(monkeypatch)
-        # Claude-opus-4-8 used to be (wrongly) the 200k case here, but
-        # it's actually a 1M-context model -- claude-opus-4-5 genuinely has
-        # the 200k window this test is scaling from.
+        # claude-opus-4-5 has the 200k window this test scales from
+        # (claude-opus-4-8 is a 1M-context model).
         model = "claude-opus-4-5"
         assert cs.history_turns(model) == 50           # 200k // 4000
         assert cs.history_turn_chars(model) == 800     # 200k // 250

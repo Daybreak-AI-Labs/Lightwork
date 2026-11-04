@@ -109,7 +109,7 @@ def test_many_distinct_text_b64_decoys_do_not_starve_trailing_payload():
 
 
 def test_decode_budget_bounds_total_work_under_decoy_flood():
-    # The fix must stay linear/bounded: a max-length input that is nothing but
+    # Decoding must stay linear/bounded: a max-length input that is nothing but
     # short text-yielding base64 decoys must not blow up the candidate set.
     # Each short blob yields at most a small constant of windows (one per phase
     # alignment), so total decoded windows stay proportional to the (bounded)
