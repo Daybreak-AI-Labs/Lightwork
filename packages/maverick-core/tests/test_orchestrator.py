@@ -425,3 +425,57 @@ async def test_breaks_when_budget_exhausted(tmp_path, monkeypatch):
         f"runaway budget should short-circuit; ran {attempts_run} attempts"
     )
 
+
+async def _ladder_attempts(tmp_path, monkeypatch, n):
+    """Run best-of-N with a stubbed run_goal; return each attempt's model and
+    sampling temperature as the orchestrator dispatched them."""
+    from maverick.providers.base import sampling_temperature
+
+    monkeypatch.setenv("MAVERICK_CODING_MODE", "1")
+    monkeypatch.setenv("MAVERICK_BON_EARLY_EXIT", "0")
+    seen: list[tuple[str | None, float | None]] = []
+
+    async def fake_run_goal(llm, world, budget, goal_id, **kwargs):
+        seen.append((kwargs.get("orchestrator_model_override"), sampling_temperature()))
+        return "no patch here"
+
+    monkeypatch.setattr("maverick.orchestrator.run_goal", fake_run_goal)
+    world = WorldModel(path=tmp_path / "w.db")
+    gid = world.create_goal("test", "test")
+    await run_goal_best_of_n(
+        llm=None, world=world, budget=Budget(max_dollars=3.0, max_wall_seconds=120.0),
+        goal_id=gid, sandbox=LocalBackend(workdir=tmp_path), n=n,
+    )
+    return seen
+
+
+@pytest.mark.asyncio
+async def test_default_ladder_rerolls_the_configured_orchestrator_model(tmp_path, monkeypatch):
+    """Without MAVERICK_BON_LADDER, every attempt uses the configured
+    orchestrator model at temperatures 0.3, 0.7 and 0.95."""
+    monkeypatch.delenv("MAVERICK_BON_LADDER", raising=False)
+    monkeypatch.setattr("maverick.orchestrator.model_for_role", lambda role: "configured-orchestrator")
+
+    seen = await _ladder_attempts(tmp_path, monkeypatch, n=3)
+
+    assert seen == [
+        ("configured-orchestrator", 0.3),
+        ("configured-orchestrator", 0.7),
+        ("configured-orchestrator", 0.95),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_env_ladder_sets_each_attempts_model_and_temperature(tmp_path, monkeypatch):
+    monkeypatch.setenv(
+        "MAVERICK_BON_LADDER",
+        "claude-sonnet-4-6:0.2,deepseek-v4-pro:0.5,claude-opus-4-7:0.3",
+    )
+
+    seen = await _ladder_attempts(tmp_path, monkeypatch, n=3)
+
+    assert seen == [
+        ("claude-sonnet-4-6", 0.2),
+        ("deepseek-v4-pro", 0.5),
+        ("claude-opus-4-7", 0.3),
+    ]
