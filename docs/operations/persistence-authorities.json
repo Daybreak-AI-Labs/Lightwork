@@ -181,7 +181,7 @@
     "preferences": 7,
     "learning": 60,
     "sqlite_domain": 81,
-    "configuration": 71,
+    "configuration": 70,
     "read_projection": 24,
     "audit": 24,
     "transient": 25,
@@ -14667,12 +14667,6 @@
           "function": "halt",
           "kind": "write_text",
           "expression": "p.write_text(reason + '\\n')"
-        },
-        {
-          "line": 763,
-          "function": "license_issue",
-          "kind": "write_text",
-          "expression": "path.write_text(text, encoding='utf-8')"
         },
         {
           "line": 3367,

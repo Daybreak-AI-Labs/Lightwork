@@ -36,6 +36,14 @@ def test_inventory_is_closed_and_preserves_single_owner_deployment_boundary():
         assert all(site["line"] > 0 and site["function"] for site in entry["source_sites"])
 
 
+def test_contract_counts_match_the_entries():
+    data = _inventory()
+    tally: dict[str, int] = {}
+    for entry in data["entries"]:
+        tally[entry["contract"]] = tally.get(entry["contract"], 0) + 1
+    assert data["counts"] == tally
+
+
 def test_all_governed_store_declarations_have_semantic_owner_and_recovery_disposition():
     data = _inventory()
     entries = {entry["path"]: entry for entry in data["entries"]}
