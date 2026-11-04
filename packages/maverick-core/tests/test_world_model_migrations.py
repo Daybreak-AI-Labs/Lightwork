@@ -21,7 +21,7 @@ import time
 
 import pytest
 from maverick.file_lock import private_path_is_restricted
-from maverick.world_model import SCHEMA_VERSION, WorldModel
+from maverick.world_model import SCHEMA, SCHEMA_VERSION, WorldModel, _bootstrap_schema
 
 V1_SCHEMA = """
 CREATE TABLE schema_version (version INTEGER PRIMARY KEY);
@@ -234,6 +234,39 @@ def test_fresh_db_lands_on_current(tmp_path):
     assert spend["dollars"] == 0.42
     assert spend["runs"] == 1
     assert len(wm.goal_events(gid)) == 1
+
+
+def _object_names(conn: sqlite3.Connection) -> set[str]:
+    return {r[0] for r in conn.execute("SELECT name FROM sqlite_master").fetchall()}
+
+
+def test_bootstrap_from_v49_omits_only_the_retired_message_search_block():
+    """v49 dropped the message-search table and its triggers. The base schema
+    still creates them, so a v49+ database is bootstrapped without exactly that
+    block and keeps every other base object, including the v8 indexes after it."""
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE schema_version (version INTEGER PRIMARY KEY)")
+    conn.execute("INSERT INTO schema_version(version) VALUES(49)")
+    trimmed = sqlite3.connect(":memory:")
+    trimmed.executescript(_bootstrap_schema(conn))
+    full = sqlite3.connect(":memory:")
+    full.executescript(SCHEMA)
+
+    kept, everything = _object_names(trimmed), _object_names(full)
+    omitted = everything - kept
+    search_triggers = {"messages_ai", "messages_ad", "messages_au"}
+    assert kept <= everything
+    assert {"messages_fts"} | search_triggers <= omitted
+    assert all(name.startswith("messages_fts") or name in search_triggers for name in omitted)
+    assert {"idx_episodes_goal_started", "idx_goals_parent", "harness_corpus"} <= kept
+
+
+def test_bootstrap_before_v49_applies_the_whole_base_schema():
+    conn = sqlite3.connect(":memory:")
+    assert _bootstrap_schema(conn) == SCHEMA
+    conn.execute("CREATE TABLE schema_version (version INTEGER PRIMARY KEY)")
+    conn.execute("INSERT INTO schema_version(version) VALUES(48)")
+    assert _bootstrap_schema(conn) == SCHEMA
 
 
 def test_prune_goal_events(tmp_path):

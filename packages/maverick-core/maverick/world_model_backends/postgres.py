@@ -528,7 +528,7 @@ _HARNESS_STORE_MIGRATION: list[str] = [
     " line_id TEXT PRIMARY KEY, ts DOUBLE PRECISION NOT NULL);",
 ]
 
-# v26 fleet learning store phase 2: the eval-corpus family as shared rows
+# v26 fleet learning store eval corpus: the eval-corpus family as shared rows
 # (live/pending/rejected + "extra" preserving non-list top-level entries).
 # Additive CREATE IF NOT EXISTS -- passes the additive-only gate.
 _HARNESS_CORPUS_MIGRATION: list[str] = [

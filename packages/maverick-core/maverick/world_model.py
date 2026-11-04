@@ -299,8 +299,8 @@ CREATE TABLE IF NOT EXISTS goal_events (
 CREATE INDEX IF NOT EXISTS idx_goal_events_goal_id_id ON goal_events(goal_id, id);
 CREATE INDEX IF NOT EXISTS idx_goal_events_ts          ON goal_events(ts);
 
--- v0.2 multi-turn: per-channel-user conversation threads.
--- (channel, user_id) is the natural key so the same iMessage user
+-- v4 multi-turn conversations: one thread per channel user.
+-- (channel, user_id) is the natural key, so the same iMessage user
 -- across separate Lightwork goals lands in a single conversation.
 CREATE TABLE IF NOT EXISTS conversations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -324,7 +324,7 @@ CREATE TABLE IF NOT EXISTS turns (
 
 CREATE INDEX IF NOT EXISTS idx_turns_conv_id ON turns(conversation_id, id);
 
--- v0.2 attachments: files/images uploaded with a goal.
+-- v5 attachments: files/images uploaded with a goal.
 -- The actual bytes live on disk under ~/.maverick/attachments/<goal>/<sha>;
 -- this row records the metadata and lets the agent enumerate them.
 CREATE TABLE IF NOT EXISTS attachments (
@@ -340,7 +340,7 @@ CREATE TABLE IF NOT EXISTS attachments (
 
 CREATE INDEX IF NOT EXISTS idx_attachments_goal_id ON attachments(goal_id);
 
--- v0.2 channel idempotency: Twilio / iMessage / other channels retry
+-- v6 channel idempotency: Twilio / iMessage / other channels retry
 -- webhooks on non-2xx (or slow handlers). Without a dedup key the same
 -- inbound message triggers N goal runs and N API spends.
 CREATE TABLE IF NOT EXISTS processed_messages (
@@ -399,9 +399,9 @@ CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
     INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content);
 END;
 
--- Q1 2026 index audit (schema v8): cover the hot queries identified
--- in docs/performance/world-model-indexes.md. These are duplicated in
--- MIGRATIONS[8] so existing databases pick them up on next open.
+-- v8 hot-query indexes: cover the read paths listed in
+-- docs/performance/world-model-indexes.md. MIGRATIONS[8] repeats them so
+-- existing databases pick them up on next open.
 CREATE INDEX IF NOT EXISTS idx_episodes_goal_started
     ON episodes(goal_id, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_episodes_started
@@ -411,10 +411,9 @@ CREATE INDEX IF NOT EXISTS idx_goals_status_updated
 CREATE INDEX IF NOT EXISTS idx_goals_parent
     ON goals(parent_id, created_at);
 
--- v25 fleet learning store (docs/proposals/fleet-learning-state.md, phase 1):
--- the self-harness addenda / provenance / transfer tried-memory as shared
--- tables, so a multi-host fleet learns as one. Written only when
--- [self_harness] store = "world"; empty tables otherwise.
+-- v25 fleet learning store: the self-harness addenda / provenance / transfer
+-- tried-memory as shared tables, so a multi-host fleet learns as one. Written
+-- only when [self_harness] store = "world"; empty tables otherwise.
 CREATE TABLE IF NOT EXISTS harness_addenda (
     key        TEXT PRIMARY KEY,
     block      TEXT NOT NULL,
@@ -430,10 +429,10 @@ CREATE TABLE IF NOT EXISTS harness_transfer_tried (
     ts      REAL NOT NULL
 );
 
--- v26 fleet learning store, phase 2: the eval-corpus family (live cases,
--- harvest pending, reject memory, plus "extra" rows preserving a live file's
--- non-list top-level entries). seq preserves row order (review indexes are
--- positional). Written only when [self_harness] store = "world".
+-- v26 fleet learning store, eval corpus: live cases, harvest pending and
+-- reject memory, plus "extra" rows preserving a live file's non-list top-level
+-- entries. seq preserves row order (review indexes are positional). Written
+-- only when [self_harness] store = "world".
 CREATE TABLE IF NOT EXISTS harness_corpus (
     kind TEXT NOT NULL,
     key  TEXT NOT NULL,
@@ -445,14 +444,18 @@ CREATE TABLE IF NOT EXISTS harness_corpus (
 
 
 def _bootstrap_schema(conn: sqlite3.Connection) -> str:
-    """Do not recreate v49's retired derived index from the immutable v1 seed."""
+    """Do not recreate v49's retired derived index from the immutable v1 seed.
+
+    From v49 on, the seed is applied without its message-search block: from the
+    ``messages_fts`` virtual table up to the first v8 index that follows it.
+    """
     if conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_version'"
     ).fetchone():
         row = conn.execute("SELECT version FROM schema_version LIMIT 1").fetchone()
         if row and row[0] >= 49:
             start = SCHEMA.index("CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts")
-            end = SCHEMA.index("-- Q1 2026 index audit", start)
+            end = SCHEMA.index("CREATE INDEX IF NOT EXISTS idx_episodes_goal_started", start)
             return SCHEMA[:start] + SCHEMA[end:]
     return SCHEMA
 
@@ -621,7 +624,7 @@ MIGRATIONS: dict[int, list[str]] = {
     # CREATE, applied on every open); listed here so existing DBs bump the
     # version, matching the v9/v15/v22 pattern and the Postgres ladder.
     25: [],
-    # v26 fleet learning store phase 2: harness_corpus is in SCHEMA (idempotent
+    # v26 fleet learning store eval corpus: harness_corpus is in SCHEMA (idempotent
     # CREATE); listed here so existing DBs bump the version.
     26: [],
     # v27 cache-token spend columns: Budget breaks out cache_read/cache_write
