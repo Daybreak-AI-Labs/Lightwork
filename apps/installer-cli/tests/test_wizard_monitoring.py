@@ -710,7 +710,6 @@ def test_run_keeps_credentials_out_of_partial_state(tmp_path, monkeypatch):
     monkeypatch.setattr(wizard, "collect_api_keys", lambda providers, envs: {})
     monkeypatch.setattr(wizard, "pick_connectors", dict)
     monkeypatch.setattr(wizard, "pick_suites", dict)
-    monkeypatch.setattr(wizard, "pick_license", dict)
     monkeypatch.setattr(wizard, "_q_confirm",
                         lambda message, *a, **k: message.startswith("Write config"))
 

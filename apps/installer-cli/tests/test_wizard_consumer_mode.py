@@ -77,8 +77,7 @@ def test_pick_mode_express_selectable(monkeypatch):
 
 def test_run_express_enables_all_safe_features(monkeypatch, tmp_path: Path):
     """Express writes a single valid config that turns the safe single-user
-    features ON, keeps host-dangerous ones OFF, and never enables license
-    enforcement (which would gate paid features off)."""
+    features ON and keeps host-dangerous ones OFF."""
     wizard = _stub_wizard_io(monkeypatch, tmp_path)
     rc = wizard.run_express()
     assert rc == 0
@@ -116,8 +115,6 @@ def test_run_express_enables_all_safe_features(monkeypatch, tmp_path: Path):
     # DGM is a separate, explicit production decision even in express mode.
     assert "self_modify" not in config
 
-    # License enforcement must NOT be on -- fail-open keeps everything unlocked.
-    assert "license" not in config or not config["license"].get("enforce")
 
     # The smoke-test canary: sandbox survives the round-trip (no [flows] dup).
     assert config["sandbox"]["backend"] == "local"

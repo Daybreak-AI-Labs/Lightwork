@@ -4130,63 +4130,6 @@ def pick_suites() -> dict[str, bool]:
     return out
 
 
-def pick_license() -> dict[str, Any]:
-    """The ``[license]`` section — optional license-tier enforcement.
-
-    Default **OFF** (a default install runs everything, matching the
-    fail-open kernel). A deployment that uses signed licenses turns enforcement
-    on and points at its signed license file; tier-gated features then follow
-    the license.
-    Returns a config map for ``[license]`` (empty when the operator keeps the
-    fail-open default, so nothing is emitted and nothing gates)."""
-    console.print()
-    console.print(
-        "[bold]Licensing[/bold] (optional) — restrict gated tier features and "
-        "add-on suites such as fleet to what a signed license grants."
-    )
-    console.print(
-        "[dim]License checks are off by default, and every feature works. Turn "
-        "them on only if you use signed licenses. A missing or expired license "
-        "then blocks the gated features; "
-        "core functions remain available. Later, review or install a license "
-        "in Settings > License and change enforcement in Settings > All settings.[/dim]"
-    )
-    if not _q_confirm("  Turn on license enforcement for this deployment?", default=False):
-        return {}
-    out: dict[str, Any] = {"enforce": True}
-    path = _q_text("    Signed license file path (blank = ~/.maverick/license.json)", default="")
-    if path.strip():
-        out["license_file"] = path.strip()
-    pub = _q_text(
-        "    Trusted publisher pubkey(s), comma-separated hex (blank = none; licenses cannot be verified)",
-        default="",
-    )
-    keys = _csv_list(pub, lower=True)
-    if keys:
-        out["publisher_pubkeys"] = keys
-    api = _q_text(
-        "    Entitlement API URL for connected refresh (blank = offline license file only)",
-        default="",
-    )
-    if api.strip():
-        out["api_url"] = api.strip()
-        # The API token is a secret: reference an env var, never inline it
-        # (config.toml interpolates ${VAR}; the value lives in ~/.maverick/.env).
-        out["api_token"] = "${MAVERICK_LICENSE_API_TOKEN}"
-        # Near-instant propagation: the dashboard polls the API on this
-        # interval so a re-issued license takes effect without a redeploy.
-        # 0 disables; the kernel floors it at 30s.
-        interval = _q_text(
-            "    Auto-refresh interval in seconds (blank = 60, 0 = manual refresh only)", default=""
-        )
-        if interval.strip():
-            try:
-                out["refresh_interval_seconds"] = int(interval.strip())
-            except ValueError:
-                pass  # keep the 60s default rather than fail the wizard
-    return out
-
-
 def _cfg_deployment(deployment: str | None) -> list[str]:
     if not deployment:
         return []
@@ -4742,16 +4685,6 @@ def _cfg_suites(suites: dict[str, bool] | None) -> list[str]:
     return lines
 
 
-def _cfg_license(license_cfg: dict[str, Any] | None) -> list[str]:
-    if not license_cfg:
-        return []
-    # Entitlement enforcement; maverick.entitlements reads this [license] table.
-    lines = ["", "[license]"]
-    for k, v in license_cfg.items():
-        _emit_kv(lines, k, v)
-    return lines
-
-
 # ``allow_*`` wizard key, the answer that writes a lock, and the ``[features]``
 # line it writes. Order is the order the lines appear in the table.
 
@@ -5066,7 +4999,6 @@ def write_config(
     monitoring: dict[str, Any] | None = None,
     deployment: str | None = None,
     suites: dict[str, bool] | None = None,
-    license_cfg: dict[str, Any] | None = None,
     governance_profile: str | None = None,
     per_tenant_keys: bool = False,
     first_outcome: dict[str, Any] | None = None,
@@ -5246,7 +5178,6 @@ def write_config(
     lines += _cfg_agent_tests(agent_tests)
     lines += _cfg_practice(practice_mode, practice_cap)
     lines += _cfg_suites(suites)
-    lines += _cfg_license(license_cfg)
     lines += _cfg_advanced(advanced, providers, siem_dest=_siem_destination(monitoring))
     lines += _cfg_mcp_servers(mcp_servers)
     lines += _cfg_registries("mcp_registries", mcp_registries)
@@ -5814,9 +5745,9 @@ def run_consumer() -> int:
 # features with sane defaults -- everything that makes Lightwork "fully lit up"
 # WITHOUT the host-dangerous or infra-shaped toggles that must stay explicit
 # opt-in (computer/browser control, code execution, autonomous self-
-# modification, at-rest encryption + multi-tenancy, channel tokens, license
-# enforcement). Kept as data so a test can assert exactly what express enables
-# without driving the prompts. Every key here is one `_cfg_advanced` recognises.
+# modification, at-rest encryption + multi-tenancy, channel tokens). Kept as
+# data so a test can assert exactly what express enables without driving the
+# prompts. Every key here is one `_cfg_advanced` recognises.
 _EXPRESS_ADVANCED: dict[str, Any] = {
     # cheaper + faster + stronger reasoning
     "cost_aware": True,
@@ -6027,8 +5958,7 @@ def run_express() -> int:
             "governed memory, web search, durable execution, and all 53 suites.\n\n"
             "[dim]Left off pending administrator review: computer/\n"
             "browser control, code execution, autonomous self-modification, at-rest\n"
-            "encryption + multi-tenancy, messaging channels, and license enforcement\n"
-            "(with enforcement off, every feature works).[/dim]",
+            "encryption + multi-tenancy, and messaging channels.[/dim]",
             border_style="cyan",
         )
     )
@@ -6710,12 +6640,6 @@ def run(fast: bool = False, resume: bool = False) -> int:
 
     suites = pick_suites()
 
-    license_cfg = state.get("license")
-    if license_cfg is None:
-        license_cfg = pick_license()
-        state["license"] = license_cfg
-        _save_partial(state)
-
     console.print()
     if not _q_confirm("Write config and finish?", default=True):
         # Be honest about where the state lives and what restore does.
@@ -6789,7 +6713,6 @@ def run(fast: bool = False, resume: bool = False) -> int:
         monitoring=monitoring,
         approval=approval,
         suites=suites,
-        license_cfg=license_cfg or None,
         # The advanced flow applies no preset -- the operator hand-picked
         # every knob -- so record "custom" rather than omitting the label
         # (dashboards keyed on [governance].profile would otherwise read

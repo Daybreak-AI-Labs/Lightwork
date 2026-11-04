@@ -222,18 +222,6 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "max_snapshots",
     },
     "durable": {"enabled", "keep_last"},
-    # Signed-license entitlement enforcement (maverick.entitlements). The wizard
-    # writes this table (pick_license) and the kernel reads exactly these keys;
-    # without an entry here a go-live operator pinning the license trust anchor
-    # (`[license] publisher_pubkeys`) got a false "unknown section" warning.
-    "license": {
-        "enforce",
-        "publisher_pubkeys",
-        "license_file",
-        "api_url",
-        "api_token",
-        "refresh_interval_seconds",
-    },
     # The publisher keys whose signed update bundles release_update accepts
     # (maverick.release_manifest_signing).
     "release": {"publisher_pubkeys"},
