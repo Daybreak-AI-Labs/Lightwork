@@ -71,7 +71,8 @@ def allow_private_hosts(hosts: Iterable[str]) -> Iterator[None]:
     This is narrower than the process-global on-prem escape hatch: it propagates
     through ``asyncio.to_thread`` but not into concurrent request contexts, and
     cannot authorize a hostname that DNS could rebind or a private network range.
-    It exists for isolated in-process simulators such as the PIA demo.
+    It exists for exact loopback endpoints an operator approved, such as a
+    local model server or a partner test estate.
     """
     normalized: set[str] = set()
     for raw in hosts:

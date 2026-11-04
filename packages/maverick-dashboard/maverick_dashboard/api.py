@@ -13240,7 +13240,7 @@ async def redact_preview(request: Request, payload: RedactIn) -> dict:
 
 @router.get("/glance")
 def watch_glance(request: Request) -> dict:
-    """The Apple Watch glance payload (tiny fixed shape; see maverick.glance)."""
+    """The small-screen glance payload (tiny fixed shape; see maverick.glance)."""
     from maverick.glance import build_glance
     from maverick.world_model import close_world_if_owned, open_world
 

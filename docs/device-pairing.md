@@ -10,7 +10,7 @@ is saved with the address in secure storage. No broad bearer is copied through
 chat or a URL. Advanced administrator token setup remains available.
 
 The credential admits only the enumerated own-task list/search/detail/events,
-questions, active-work summary, personal costs, watch glance, goal tree and
+questions, active-work summary, personal costs, glance summary, goal tree and
 offline bundle routes. Even an administrator's device has the own-task ceiling.
 General dashboard pages, attachment downloads, streams, approvals, settings and
 ordinary mutation endpoints are denied. A device cannot choose another tenant.

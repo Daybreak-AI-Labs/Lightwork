@@ -32,8 +32,8 @@ dashboard endpoint (`maverick_dashboard/api.py`, `APIRouter` mounted at
   that ever changes.
 
 > The widget derives its counts from the goals list. It does not use the
-> dashboard's `/api/v1/glance` endpoint, which serves the fixed-shape payload
-> for the watchOS glance (`maverick.glance`).
+> dashboard's `/api/v1/glance` endpoint, which serves a fixed-shape status
+> payload for small-screen clients (`maverick.glance`).
 
 ## Deployment: must be same-origin with the dashboard
 
