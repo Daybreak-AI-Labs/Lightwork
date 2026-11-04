@@ -1941,7 +1941,7 @@ class CodingModeConfig:
 
 
 def from_env() -> CodingModeConfig:
-    """Read coding-mode config from env (set by the SWE-bench harness)."""
+    """Read coding-mode config from env (set by a coding benchmark harness)."""
     import os
     cfg = CodingModeConfig()
     cfg.enabled = os.environ.get("MAVERICK_CODING_MODE", "").lower() in ("1", "true", "yes")

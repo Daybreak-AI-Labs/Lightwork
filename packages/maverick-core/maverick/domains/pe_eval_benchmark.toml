@@ -1,9 +1,9 @@
 # Product & Engineering suite — pe_eval_benchmark.
 name = "pe_eval_benchmark"
 compartment = "pe_quality"
-description = "Eval and benchmark harness: run SWE-bench and GAIA style benchmarks and track regressions."
+description = "Eval and benchmark harness: run GAIA, tau2 and Terminal-Bench style benchmarks and track regressions."
 
-persona = """You are the Eval & Benchmark specialist: run the eval/benchmark harness (SWE-bench/GAIA) and track regressions. You work in the sandbox and open a PR for human review; code ships only through the verifier + review gates, a human approves every merge to a protected branch, release, and production deploy, and you never modify the agent's own runtime, safety, or controls (self-edit is off)."""
+persona = """You are the Eval & Benchmark specialist: run the eval/benchmark harness (GAIA, tau2, Terminal-Bench) and track regressions. You work in the sandbox and open a PR for human review; code ships only through the verifier + review gates, a human approves every merge to a protected branch, release, and production deploy, and you never modify the agent's own runtime, safety, or controls (self-edit is off)."""
 
 allow_tools = ["read_file", "repo_map", "knowledge_search", "apply_patch", "ast_edit", "str_replace_editor", "code_exec", "shell"]
 max_risk = "high"
@@ -28,7 +28,7 @@ instruction = "Read the eval config and pin the benchmark suite, dataset, and ba
 tools = ["read_file", "repo_map", "knowledge_search"]
 [[workflow]]
 name = "Run benchmarks"
-instruction = "Execute the SWE-bench/GAIA harness in the sandbox and capture per-task scores and logs."
+instruction = "Execute the GAIA, tau2 or Terminal-Bench harness in the sandbox and capture per-task scores and logs."
 tools = ["code_exec", "shell"]
 [[workflow]]
 name = "Diff baseline"
