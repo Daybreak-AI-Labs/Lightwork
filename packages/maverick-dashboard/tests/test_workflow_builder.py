@@ -884,8 +884,8 @@ def test_workflow_builder_page_renders(monkeypatch, tmp_path):
     assert 'id="wf-brief"' in r.text and 'id="wf-draft-btn"' in r.text
 
 
-def test_p1_builder_refinements(monkeypatch, tmp_path):
-    # P1 design refinements: advanced cron, signed-curl, governance gate color.
+def test_builder_schedule_words_copyable_address_and_governance_badge(monkeypatch, tmp_path):
+    # Schedules, trigger addresses and the governance gate colour on the builder.
     _isolate(monkeypatch, tmp_path)
     t = _client().get("/workflow-builder").text
     # No raw timetable box or shell snippet: days, a day of the month and a

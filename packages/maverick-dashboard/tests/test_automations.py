@@ -159,9 +159,9 @@ def test_automations_page_uses_danger_token_run_history_error_and_shared_title(m
     assert 'id="i-clock"' in t and "#i-clock" in t     # Automations has its own nav icon
 
 
-def test_p2_shared_primitives_and_scrim(monkeypatch, tmp_path):
-    # P2 hygiene: one --scrim token (defined + used), mvCopy shipped, and the
-    # killswitch dogfoods mvConfirm rather than native confirm().
+def test_scrim_token_copy_helper_and_stop_confirm_are_shared(monkeypatch, tmp_path):
+    # One --scrim token (defined + used), mvCopy shipped, and the killswitch
+    # uses mvConfirm rather than native confirm().
     _isolate(monkeypatch, tmp_path)
     css = _client().get("/static/lightwork.css").text
     assert "--scrim:" in css and "var(--scrim)" in css
@@ -171,7 +171,7 @@ def test_p2_shared_primitives_and_scrim(monkeypatch, tmp_path):
     assert "mvConfirm(consequence, { productCopy: true, okText: 'Stop work' })" in ui
 
 
-def test_p2_native_confirm_alert_migrated_to_primitives():
+def test_templates_use_shared_dialogs_not_native_confirm_or_alert():
     # Guard against native confirm()/alert() creeping back into these pages.
     import pathlib
     base = pathlib.Path(__file__).resolve().parents[1] / "maverick_dashboard" / "templates"
