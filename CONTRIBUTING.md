@@ -47,13 +47,6 @@ it, follow the
 [source installation guide](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/source-install.md)
 instead.
 
-Standalone demos carry local copies of their shared support code so each Docker
-build context remains independent. This includes the DSAR mail helper, and the
-request boundary and store lock used by the GRC, platform threat, environment
-threat, and model risk demos. Edit the canonical files in `demo/shared/`, then
-run `python scripts/sync_standalone_support.py`. Include any new support files
-in the applicable Dockerfiles. CI checks that the copies match.
-
 You need git, bash and Python 3.11 or 3.12 (the versions CI tests).
 Docker or Podman is optional; the container sandbox backends use it. Node.js
 and npm are needed for the TypeScript SDK and for the dashboard, desktop and
@@ -115,10 +108,22 @@ deploy/                Docker, VPS, Helm and other deployment recipes
 docs/                  User and operator documentation
 benchmarks/            Evaluation suites and example skills
 sdks/                  Client and plugin SDKs
+extensions/            Browser extension and embeddable widgets
+demo/                  Runnable example agents and their shared support code
 ```
 
 [ARCHITECTURE.md](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/ARCHITECTURE.md)
 describes how the pieces fit together. The [dashboard service boundaries](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/operations/dashboard-architecture.md) describe shared policies, configuration contracts, and where request authorization belongs.
+
+### Demos
+
+Each example agent in `demo/` runs on its own from its directory, so it
+carries local copies of its shared support code: the DSAR demo copies the mail
+helper, and the GRC, platform threat, environment threat and model risk demos
+copy the request boundary and store lock. Edit the canonical files in
+`demo/shared/`, then run `python scripts/sync_standalone_support.py`; a new
+support file also goes into `demo/dsar-concierge/Dockerfile.standalone` when
+the DSAR demo uses it. CI checks that the copies match.
 
 ## Running the tests
 
@@ -338,7 +343,7 @@ Further rules:
 2. Wire it in `packages/maverick-core/maverick/server.py`: add a
    `_wire_<name>` function and an entry in `_WIRES`.
 3. Add it to the wizard's `CHANNELS` list in
-   `apps/installer-cli/maverick_installer/wizard.py`.
+   `apps/installer-cli/maverick_installer/wizard/__init__.py`.
 4. If it needs a third-party SDK, add an optional extra in
    `packages/maverick-channels/pyproject.toml`.
 5. Document the setup steps in `docs/deployment.md`.

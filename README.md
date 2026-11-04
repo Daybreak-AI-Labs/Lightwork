@@ -214,8 +214,8 @@ go/              Out-of-process model proxy that keeps provider keys out of the 
 deploy/          Docker, Helm, VPS and cloud recipes; GitHub Actions and GitLab CI integrations
 docs/            User, operator and contributor documentation
 benchmarks/      Long-horizon, governance and evaluation benchmarks with their harness
-proof/           Scripts that reproduce the governance and learning results
-demo/            Example applications built on Lightwork
+proof/           Platform-guarantee checks against the shipped pack roster (run_proof.py)
+demo/            Runnable example agents (DSAR, GRC, threat hunting, model risk) and their shared support code
 examples/        Client and external-agent examples
 scripts/         Install, release and CI helper scripts
 requirements/    Pinned constraint files used by the install and CI
@@ -236,8 +236,8 @@ test_support/    Shared test helpers
 | Threat model | [docs/security/threat-model.md](docs/security/threat-model.md) |
 | REST API | [docs/api.md](docs/api.md) |
 | Connectors and plugins | [docs/connectors.md](docs/connectors.md), [docs/plugins.md](docs/plugins.md) |
-| Features and roadmap | [docs/FEATURES.md](docs/FEATURES.md), [docs/ROADMAP.md](docs/ROADMAP.md) |
-| Design proposals | [docs/rfcs/README.md](docs/rfcs/README.md) |
+| Feature catalogue | [docs/FEATURES.md](docs/FEATURES.md) |
+| Interface contracts and the RFC process | [docs/contracts/README.md](docs/contracts/README.md), [docs/rfcs/README.md](docs/rfcs/README.md) |
 | Benchmarks | [benchmarks/README.md](benchmarks/README.md) |
 | Changes | [CHANGELOG.md](CHANGELOG.md) |
 
