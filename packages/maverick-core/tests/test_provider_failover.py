@@ -215,7 +215,7 @@ def test_llm_failover_does_not_retry_budget_exceeded_async(monkeypatch):
     assert calls == ["anthropic"]
 
 
-# ---- circuit-breaker enforcement (finding #9) -------------------------------
+# ---- circuit-breaker enforcement -------------------------------------------
 
 def test_open_breaker_short_circuits_dispatch_and_fails_over(monkeypatch):
     """An OPEN provider breaker must fast-fail BEFORE the client is called and

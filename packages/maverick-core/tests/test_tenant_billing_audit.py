@@ -1,6 +1,6 @@
 """A change to a tenant's billing terms (plan / daily cap) must leave a
 tamper-evident audit row, so an upgrade or cap change is provable rather than a
-silent control-plane edit (purchase-blocker audit #80)."""
+silent control-plane edit."""
 from __future__ import annotations
 
 import maverick.audit.writer as _writer

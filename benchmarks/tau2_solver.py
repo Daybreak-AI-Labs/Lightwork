@@ -3,8 +3,8 @@
 ``eval_tau2.py`` is a stateful tool domain (a retail DB) graded on the final
 state AND the required tool actions. Unlike a one-shot task, tau2-bench is
 DUAL-CONTROL: the agent must converse with a (simulated) customer who holds the
-scenario and reveals details on request. The harness shipped only a no-op stub;
-this is the missing live seam -- a real agent driving the domain tools in a
+scenario and reveals details on request. This is the live seam beside the
+harness's no-op stub -- a real agent driving the domain tools in a
 tool-calling loop while talking to a real user-simulator LLM, until the
 customer's goal is resolved.
 

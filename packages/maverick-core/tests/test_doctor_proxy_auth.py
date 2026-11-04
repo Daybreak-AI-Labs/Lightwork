@@ -1,5 +1,5 @@
 """`maverick doctor` flags an insecure reverse-proxy-SSO config: proxy auth on
-with no trusted_proxies pin and the loopback fallback still active (#59).
+with no trusted_proxies pin and the loopback fallback still active.
 Advisory -- a warning, never a failure; off-by-default/pinned configs are silent."""
 from __future__ import annotations
 

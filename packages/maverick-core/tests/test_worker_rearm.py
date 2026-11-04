@@ -1,4 +1,4 @@
-"""Durable, idempotent cron re-arm for the job worker (finding #14).
+"""Durable, idempotent cron re-arm for the job worker.
 
 A recurring CLI schedule (``maverick schedule goal``) carries its cron
 expression in ``payload['__cron__']``; the worker enqueues the next occurrence

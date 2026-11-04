@@ -652,7 +652,7 @@ def _warn_same_family_verifier(model: str) -> None:
     log.warning(
         "verifier %s shares the proposer's family; set "
         "MAVERICK_CROSS_FAMILY_VERIFIER to a different-provider model to "
-        "defend against lockstep jailbreaks (running same-family for now).",
+        "defend against lockstep jailbreaks (running same-family).",
         model,
     )
 

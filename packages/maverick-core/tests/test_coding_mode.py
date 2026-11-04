@@ -976,8 +976,7 @@ class TestTokenOverlapNoisePrefixBypass:
     def test_exact_50_percent_caught_on_substantive_gold(self):
         """Boundary `>= 0.50` (not `> 0.50`).
 
-        May 26 smoke fix: the detector now skips gold patches with
-        fewer than 30 tokens to avoid false-positives on obvious
+        The detector skips gold patches with fewer than 30 tokens to avoid false-positives on obvious
         one-line fixes. The boundary test uses a 30+-token gold so
         the detector engages, and constructs ours with ~50% longest
         contiguous match to verify the boundary behavior."""

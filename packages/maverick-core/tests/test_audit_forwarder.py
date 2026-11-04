@@ -1,4 +1,4 @@
-"""SIEM forwarder (#56): push rendered audit lines to tcp/udp/http collectors."""
+"""SIEM forwarder: push rendered audit lines to tcp/udp/http collectors."""
 from __future__ import annotations
 
 import email.message

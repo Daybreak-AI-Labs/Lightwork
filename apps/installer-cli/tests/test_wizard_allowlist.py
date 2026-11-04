@@ -1,9 +1,9 @@
 """The wizard must collect the per-sender allowlist that channels require.
 
-Regression for the launch-audit HIGH: discord/telegram/slack/signal/matrix/
-email/bluesky/mastodon raise ValueError without an allowlist, but the wizard
-never prompted for one, so a wizard-only setup produced channels that silently
-failed to start (server.py logs + continues). pick_channels now collects it.
+discord/telegram/slack/signal/matrix/email/bluesky/mastodon raise ValueError
+without an allowlist, so a wizard that never prompted for one would produce
+channels that silently fail to start (server.py logs + continues).
+pick_channels collects it.
 """
 from __future__ import annotations
 

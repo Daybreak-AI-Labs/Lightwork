@@ -6,9 +6,9 @@
 // zoom passes stay manual release checks; the rules axe could not decide
 // ("needs review") are attached for that review and do not fail the run.
 //
-// Pages: the 18 fixed pages the October 2026 speed and accessibility
-// measurement used as the most-visited set, plus four it found failing (it also timed one task and one
-// privacy request, which need records this server does not seed). Reduced motion is emulated so a fade
+// Pages: 18 fixed pages that make up the most-visited set, plus four pages a
+// full-site scan has found failing (tasks and privacy requests need records
+// this server does not seed, so they are not scanned here). Reduced motion is emulated so a fade
 // caught half way cannot be mistaken for low contrast; colours are unchanged.
 const fs=require('node:fs');
 const {test,expect}=require('@playwright/test');
@@ -18,8 +18,8 @@ const WCAG_TAGS=['wcag2a','wcag2aa','wcag21a','wcag21aa','wcag22aa'];
 const ROUTES=['/chat','/start','/goals','/approvals','/deliverables','/me','/settings','/settings/all',
   '/providers','/spending-limits','/users','/tenants','/audit','/privacy','/security','/agents',
   '/workflows','/overview',
-  // Pages where the full 74-page scan of 6 October 2026 found violations
-  // that this list did not cover (pinned links, disclosures, scroll boxes).
+  // Pages where a full-site scan found violations the list above does not
+  // cover (pinned links, disclosures, scroll boxes).
   '/today','/automations','/skills','/ai-evidence-analysis'];
 const THEMES=['light','dark','hicontrast'];
 

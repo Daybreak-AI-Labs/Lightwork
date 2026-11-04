@@ -19,9 +19,8 @@ turn. The compaction policy:
   installed. ``compact_messages`` behavior is unchanged when no
   embedder/index is supplied.
 
-The "drop vs keep" boundary is hardcoded for now: start hardcoded, then
-learn the what-to-keep gate from outcome reward. That second half lands when we have outcome reward
-signal end-to-end.
+The "drop vs keep" boundary is hardcoded; it is not learned from outcome
+reward.
 
 This module is pure-function: input is the current ``messages`` list
 (Anthropic content-block format) plus a turn counter; output is the

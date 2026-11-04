@@ -152,8 +152,8 @@ class TestCheatingDetector:
         """Substantive gold patch (>=30 tokens) — verbatim copy is the
         actual cheating signal and must be rejected.
 
-        May 26 smoke fix: detector now skips tiny gold patches because
-        those flag legitimate independent solutions as cheating. Use a
+        The detector skips tiny gold patches because those would flag
+        legitimate independent solutions as cheating. Use a
         gold patch with enough substance (multiple lines + identifiers)
         to make a verbatim match meaningful.
         """
@@ -207,11 +207,9 @@ class TestWhitespaceOnly:
 
 
 class TestCheatingDetectorMinSize:
-    """May 26 smoke fix: cheating detector skips small gold patches
-    where any agent would produce the same code independently.
-    pallets/flask-5014 fired this: gold patch was 5 lines, agent's
-    independent correct fix matched 100% of gold tokens and got
-    falsely rejected as cheating."""
+    """The cheating detector skips small gold patches where any agent
+    would produce the same code independently (e.g. a 5-line gold patch
+    whose independent correct fix matches 100% of gold tokens)."""
 
     def test_tiny_obvious_gold_does_not_trigger_false_positive(self):
         from maverick.coding_mode import defensive_validate

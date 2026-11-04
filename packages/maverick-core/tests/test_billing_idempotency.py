@@ -1,6 +1,5 @@
 """Invoice idempotency key: re-running billing for a tenant-period must yield a
-stable id so a downstream payment/AR step can dedup and never double-charge
-(purchase-blocker audit #83)."""
+stable id so a downstream payment/AR step can dedup and never double-charge."""
 from __future__ import annotations
 
 from maverick.billing import RateCard, generate_invoice, rate_ledger

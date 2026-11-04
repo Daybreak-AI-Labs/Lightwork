@@ -282,10 +282,9 @@ def test_an_in_process_asgi_request_is_not_blocked(guarded) -> None:
     """A request that never opens a socket cannot leak, so it must not be
     refused.
 
-    Found the hard way: the guard blocked every TestClient request in the suite
-    (host "testserver") under enterprise mode, taking down five unrelated
-    security tests. That is not a test artifact -- it would refuse any
-    in-process ASGI call a deployment makes.
+    Otherwise the guard would block every TestClient request (host
+    "testserver") under enterprise mode. That is not a test artifact -- it
+    would refuse any in-process ASGI call a deployment makes.
     """
     starlette = pytest.importorskip("starlette.testclient")
 

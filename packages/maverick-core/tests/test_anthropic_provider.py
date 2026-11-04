@@ -337,7 +337,7 @@ class TestNullsafeUsage:
 
 
 class TestInterleavedThinkingOrder:
-    """May 28 fix: _parse_response must keep the model's ORIGINAL block
+    """_parse_response must keep the model's ORIGINAL block
     order (thinking interleaved with tool_use) and echo redacted_thinking
     back. Anthropic rejects a rearranged thinking sequence on the next
     request: "thinking blocks in the latest assistant message cannot be

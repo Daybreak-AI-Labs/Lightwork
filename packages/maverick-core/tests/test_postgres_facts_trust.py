@@ -1,4 +1,4 @@
-"""Postgres facts.trust_tier — memory-guard finding #6 (schema v24).
+"""Postgres facts.trust_tier memory guard (schema v24).
 
 Runs only when MAVERICK_PG_DSN is set (the dedicated CI ``postgres`` job).
 

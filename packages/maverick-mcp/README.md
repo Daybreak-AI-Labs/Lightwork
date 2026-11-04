@@ -84,5 +84,5 @@ Failed HTTP bearer attempts are limited per network peer. Callers behind the
 same proxy share that failure budget; configure an upstream limiter when they
 need independent quotas. Lightwork's launcher preserves the socket peer; an
 external ASGI server must also disable proxy-header rewriting for this limit.
-The full `mcp` Python SDK is an option for a future hardening pass;
-this hand-rolled version keeps the dependency footprint tiny.
+The server is hand-rolled rather than built on the full `mcp` Python SDK,
+which keeps the dependency footprint tiny.

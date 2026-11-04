@@ -187,7 +187,7 @@ def test_enforce_env_can_disable(monkeypatch, caplog):
     assert [n for n, _ in out] == ["wp"]  # loaded (enforcement disabled via env)
 
 
-# ---------- advisory: permissions unenforced under isolation 'none' (#15) ----
+# ---------- advisory: permissions unenforced under isolation 'none' ---------
 
 def test_advisory_warning_when_granted_but_isolation_none(monkeypatch, caplog):
     # A plugin DECLARES network, the operator GRANTS it, so it loads -- but

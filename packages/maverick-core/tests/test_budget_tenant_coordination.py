@@ -90,7 +90,7 @@ def test_clamp_never_raises_an_unset_cap_above_the_default(monkeypatch):
     assert b.max_dollars is default is None
 
 
-# ---- Finding #2: per-tenant daily cap under concurrency ---------------------
+# ---- per-tenant daily cap under concurrency ---------------------------------
 
 def test_two_task_starts_do_not_preallocate_organization_funds(monkeypatch):
     monkeypatch.setenv("MAVERICK_TENANT", "acme")

@@ -1,6 +1,6 @@
 """Audit signing must FAIL CLOSED under a compliance floor when the `cryptography`
 extra is missing -- it must never silently write unsigned rows while an operator
-believes HIPAA-mode tamper-evidence is active (purchase-blocker audit #55). With
+believes HIPAA-mode tamper-evidence is active. With
 no floor it still degrades, but loudly (error, not a swallowed warning)."""
 from __future__ import annotations
 

@@ -49,7 +49,7 @@ resource "aws_iam_role_policy" "task_execution_secrets" {
   policy = data.aws_iam_policy_document.task_secrets.json
 }
 
-# ---- ECS task role (the app's own runtime identity; minimal for now) ----
+# ---- ECS task role (the app's own runtime identity; minimal) ----
 
 resource "aws_iam_role" "task" {
   name               = "${local.name}-task"

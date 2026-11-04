@@ -1,4 +1,4 @@
-"""Fleet-scale per-tenant KMS (#20): per-tenant BYOK provider selection, a
+"""Fleet-scale per-tenant KMS: per-tenant BYOK provider selection, a
 DEK-cache TTL so a revoked key takes effect, and fleet-wide KEK rotation."""
 from __future__ import annotations
 

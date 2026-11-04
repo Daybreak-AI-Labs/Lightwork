@@ -1,4 +1,4 @@
-"""Round-1 provider hardening regressions.
+"""Provider hardening regressions.
 
 - A missing ``usage`` block aborts the turn for PAID providers (fail-closed) but
   NOT for self-hosted ollama/vllm/tgi (USAGE_REQUIRED=False): those price at $0,

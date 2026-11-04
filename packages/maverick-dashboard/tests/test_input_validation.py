@@ -78,7 +78,7 @@ def test_goal_events_endpoint_caps_limit(monkeypatch, tmp_path):
 def test_wrong_content_type_returns_422_not_500(monkeypatch, tmp_path):
     # A client POSTing a non-JSON body with a wrong Content-Type triggered a
     # RequestValidationError whose 'input' was raw bytes; json.dumps couldn't
-    # serialize it, turning the 422 into an opaque 500 (user-testing finding).
+    # serialize it, turning the 422 into an opaque 500.
     _env(monkeypatch, tmp_path)
     from maverick_dashboard.app import app
     c = TestClient(app, base_url="http://127.0.0.1", headers={"Origin": "http://127.0.0.1"},

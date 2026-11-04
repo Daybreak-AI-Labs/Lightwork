@@ -123,13 +123,13 @@ def test_default_config_is_noop():
     assert require is False and root is None and revoked == set()
 
 
-# ---- non-.py files are inside the signature now (finding #7) ----------------
+# ---- non-.py files are inside the signature ----------------------------------
 #
-# The manifest used to hash only `.py`, so a signed plugin's native extensions
-# (`.so`/`.pyd`/`.dylib`), `.pth` startup hooks, and data files were OUTSIDE
-# the signature and could be swapped without breaking verification -- native
+# A manifest that hashed only `.py` would leave a signed plugin's native
+# extensions (`.so`/`.pyd`/`.dylib`), `.pth` startup hooks, and data files
+# OUTSIDE the signature, swappable without breaking verification -- native
 # code execution under a "verified" plugin. These pin that non-.py files are
-# now hashed (added/changed -> refuse) and that an un-signed native/.pth file
+# hashed (added/changed -> refuse) and that an un-signed native/.pth file
 # on disk (absent from RECORD) also fails closed.
 
 

@@ -448,10 +448,9 @@ class TestAgentLoop:
     async def test_interleaved_thinking_order_preserved_in_history(
         self, ctx, fake_llm,
     ):
-        """May 28 fix: the echoed assistant turn must preserve the
-        model's ORIGINAL block order. The old bucket-by-type rebuild
-        hoisted all thinking before all tool_use, which Anthropic
-        rejects on interleaved Opus 4.7 turns ("thinking blocks in the
+        """The echoed assistant turn must preserve the model's ORIGINAL
+        block order. A bucket-by-type rebuild would hoist all thinking
+        before all tool_use, which Anthropic rejects on interleaved Opus 4.7 turns ("thinking blocks in the
         latest assistant message cannot be modified")."""
         interleaved = [
             {"type": "thinking", "thinking": "plan A", "signature": "sigA"},
@@ -498,7 +497,7 @@ class TestAgentLoop:
     async def test_final_with_interleaved_tools_does_not_merge_thinking(
         self, ctx,
     ):
-        """May 28 fix #2: a turn that emits a FINAL: marker ALONGSIDE
+        """A turn that emits a FINAL: marker ALONGSIDE
         interleaved tool_use must not corrupt the thinking sequence when
         it is re-sent on a revision pass.
 

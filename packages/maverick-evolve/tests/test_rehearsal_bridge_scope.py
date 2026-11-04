@@ -1,4 +1,4 @@
-"""Round-2 regression: the evolve rehearsal bridge must only replay LOCAL-scope
+"""The evolve rehearsal bridge must only replay LOCAL-scope
 prompts, mirroring the kernel's dreaming.load_rehearsals trust filter."""
 from __future__ import annotations
 

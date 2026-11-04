@@ -1,32 +1,44 @@
 # maverick-dashboard
 
-Local web dashboard for Lightwork. Reads `~/.maverick/world.db` and
-`~/.maverick/skills/` and surfaces:
+The web dashboard and REST API for Lightwork. It is the in-product home for
+running and governing agent work: everything a person does after installation
+has a journey here, and the same actions are available through the REST API at
+`/api/v1`.
 
-- Goals: status, plan tree, trajectory replay, cancel, answer pending
-  questions inline.
-- Skills: installed list plus an install form (gated behind
-  `MAVERICK_ALLOW_SKILL_INSTALL=1`).
-- Facts: persistent key/value memory.
-- Spend: per-episode breakdown with CSV export.
-- Providers / tools / channels / plugins / MCP servers: read-only views
-  of what the kernel currently has wired.
-- Audit log: tail and grep over `~/.maverick/audit/`.
-- Halt button: arms `~/.maverick/HALT` from the header on any page.
+What it covers:
+
+- Chat and tasks: start a goal, follow its steps, answer an agent's question,
+  stop or resume it, and review the result and the work behind it.
+- Approvals: connector changes and other high-risk actions wait here for a
+  person's decision, with the exact request shown.
+- Agents and specialists: the built-in domain packs, the agent factory, flows
+  and schedules.
+- Governance, privacy and compliance workbenches, each behind its own setting.
+- Settings: providers and models, task limits, permissions and where work
+  runs, plus every setting under Settings > All settings.
+- Activity: the signed audit log, spend, and the platform's own health.
+- The Copilot panel, which acts under the same permissions as the page it is
+  opened on.
 
 ## Design
 
-- FastAPI + Jinja2. No React, no build step.
-- Server binds to `127.0.0.1` by default.
-- To bind publicly (`--host 0.0.0.0`), set `MAVERICK_DASHBOARD_TOKEN`
-  and send `Authorization: Bearer <token>`. Query-string tokens are
-  not accepted because they leak through the Referer header and access
-  logs.
+- FastAPI with server-rendered Jinja2 templates and plain JavaScript; no build
+  step. The shared design system is `maverick_dashboard/static/lightwork.css`.
+- Binds to `127.0.0.1` by default. A non-loopback host requires
+  `MAVERICK_DASHBOARD_TOKEN` (sent as `Authorization: Bearer <token>`) or a
+  configured sign-in method. Query-string tokens are not accepted because they
+  leak through the Referer header and access logs.
+- Mutating `/api/v1` requests must pass a same-origin check.
 - Baseline browser security headers (X-Frame-Options DENY,
   X-Content-Type-Options nosniff, Referrer-Policy same-origin,
   Cross-Origin-Opener-Policy same-origin) are applied to every response.
-- WorldModel is held as a singleton per DB path so each request
-  doesn't reopen SQLite + reapply migrations.
+- `/healthz`, `/livez` and `/readyz` are served without authentication for
+  load-balancer probes; their payload is redacted when a token is set.
+- State lives in the world model: `~/.maverick/world.db` (SQLite) by default,
+  or Postgres when `[world_model] backend = "postgres"`.
+
+The REST API is documented in `docs/api.md` and browsable at `/docs` on a
+running dashboard.
 
 ## Run
 

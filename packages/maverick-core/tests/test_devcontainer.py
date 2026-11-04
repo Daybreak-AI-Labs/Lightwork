@@ -61,14 +61,14 @@ def test_parse_accepts_normal_image(tmp_path, good):
     assert spec.image == good
 
 
-# ---- isolation parity with DockerBackend (finding #5) ----------------------
+# ---- isolation parity with DockerBackend -----------------------------------
 #
-# The devcontainer backend claims parity with DockerBackend but used to ship
+# The devcontainer backend claims parity with DockerBackend, so it must not ship
 # WEAKER defaults: network ON (every other container backend defaults
-# --network none) and, with the spec-default remoteUser="root", the agent ran
-# as root against the writable {project_dir}:{workspace} host bind-mount. These
-# pin the corrected defaults: network off, and the container user pinned to the
-# invoking uid:gid unless there is an explicit allow_root opt-in.
+# --network none), or, with the spec-default remoteUser="root", an agent
+# running as root against the writable {project_dir}:{workspace} host
+# bind-mount. These pin the defaults: network off, and the container user
+# pinned to the invoking uid:gid unless there is an explicit allow_root opt-in.
 
 
 @pytest.fixture(autouse=True)

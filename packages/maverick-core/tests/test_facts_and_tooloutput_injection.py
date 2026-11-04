@@ -25,7 +25,7 @@ _FAKE_STRIPE = "sk_live_" + ("0123456789abcdefABCD" + "EFGH")
 _FAKE_BEARER_TOK = "abcdef0123456789ABCDEF"
 
 
-# ---- extended secret patterns (finding #14) ----
+# ---- extended secret patterns ----
 def test_detects_gitlab_pat():
     red, m = redact(f"token={_FAKE_GITLAB}")
     assert m and _FAKE_GITLAB not in red

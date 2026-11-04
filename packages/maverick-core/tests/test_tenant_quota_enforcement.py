@@ -1,5 +1,5 @@
-"""Per-tenant daily-spend cap on the CORE run path (#74), plan-cap fallback
-(#81), and fail-closed spend reads (#77).
+"""Per-tenant daily-spend cap on the CORE run path, plan-cap fallback, and
+fail-closed spend reads.
 
 The channel door already enforced the per-tenant cap; dashboard/CLI/gRPC runs
 bypass that door, so run_goal must enforce it too. All opt-in: a tenant cap only

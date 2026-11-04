@@ -1,4 +1,4 @@
-"""Round-3 regressions: relay destination hijack + webhook-URL log leak."""
+"""Regressions: relay destination hijack + webhook-URL log leak."""
 from __future__ import annotations
 
 import logging

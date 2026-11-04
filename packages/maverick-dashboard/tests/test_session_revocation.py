@@ -1,4 +1,4 @@
-"""Per-principal session/bearer revocation (#58): revoke_principal bumps a
+"""Per-principal session/bearer revocation: revoke_principal bumps a
 monotonic epoch; any credential whose iat predates it is rejected."""
 from __future__ import annotations
 

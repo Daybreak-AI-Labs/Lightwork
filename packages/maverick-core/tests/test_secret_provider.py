@@ -1,4 +1,4 @@
-"""Pluggable secret resolution (#54): default env backend is unchanged; the
+"""Pluggable secret resolution: the default env backend reads the environment; the
 file backend reads mounted vault/Docker/k8s secret files with env fallback."""
 from __future__ import annotations
 

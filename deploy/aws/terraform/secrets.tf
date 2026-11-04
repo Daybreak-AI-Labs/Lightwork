@@ -101,8 +101,8 @@ resource "aws_secretsmanager_secret_version" "oidc_client_secret" {
 # Full Postgres DSN, assembled from the RDS endpoint. Alphanumeric password
 # means no URL-encoding is required.
 # sslmode=require encrypts the connection to RDS without a CA bundle in the
-# image; deploy/postgres/README.md asks for verify-full, which needs the RDS CA
-# bundle shipped and pinned in the image first, which is not done yet.
+# image. deploy/postgres/README.md asks for verify-full, which needs the RDS CA
+# bundle shipped and pinned in the image; this stack does not ship it.
 resource "aws_secretsmanager_secret" "pg_dsn" {
   name                    = "${local.name}/pg-dsn"
   recovery_window_in_days = 7

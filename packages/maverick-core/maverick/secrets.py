@@ -1,9 +1,8 @@
 """Secret scrubber for logs + error messages.
 
-Privacy reviewer flagged that LLM exceptions, MCP stderr drains, and
-`subprocess.run` stdout were being logged verbatim — any of which could
-contain API keys / bearer tokens / .env values. This module gives a
-single ``scrub(text)`` that pattern-matches the common shapes and
+LLM exceptions, MCP stderr drains, and `subprocess.run` stdout can contain
+API keys / bearer tokens / .env values, so they must not be logged verbatim.
+This module gives a single ``scrub(text)`` that pattern-matches the common shapes and
 redacts them to ``[REDACTED:<kind>]``.
 
 The patterns aren't exhaustive (a determined exfiltrator can wrap

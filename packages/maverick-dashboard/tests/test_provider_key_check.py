@@ -1,8 +1,7 @@
 """Dashboard model-route readiness uses the provider the operation will run.
 
-Round-1 hard-failed `/chat/send` and `POST /api/v1/goals` if
-`ANTHROPIC_API_KEY` wasn't set, even when the user had OpenAI or
-Gemini selected. A credential for an unrelated provider must not admit a route
+`/chat/send` and `POST /api/v1/goals` must not hard-fail when
+`ANTHROPIC_API_KEY` isn't set but the user has OpenAI or Gemini selected. A credential for an unrelated provider must not admit a route
 that will still fail, while selected keyless self-hosted routes remain valid.
 """
 from __future__ import annotations

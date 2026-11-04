@@ -818,7 +818,7 @@ class MCPServer:
                 # credential shapes, cap amplification, and run the same required
                 # Shield output gate as a successful tool result before returning.
                 return self._tool_exception_result(e)
-            # Phase 2 elicitation: if the run parked questions and the (stdio)
+            # Form elicitation: if the run parked questions and the (stdio)
             # client advertised elicitation, surface them as protocol forms now,
             # record the answers, and resume -- so the caller gets the finished
             # answer in one round trip instead of the start -> answer -> resume
@@ -1020,7 +1020,7 @@ class MCPServer:
         })
 
     def _elicit_url(self, message: str, url: str) -> dict | None:
-        """URL-mode elicitation (Phase 3): point the user at ``url`` to provide a
+        """URL-mode elicitation: point the user at ``url`` to provide a
         sensitive value (OAuth / API key / payment) **directly to the service**,
         so the secret never transits the model context. The response carries only
         an action (accept / decline / cancel) — never the credential.

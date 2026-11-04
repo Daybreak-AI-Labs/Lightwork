@@ -3,7 +3,7 @@
 ``billing.entitlements_for`` resolves an unknown plan to the ``free``
 entitlements, so an operator who typos ``--plan pro`` would believe a tenant is
 paid when it is not. ``known_plan_names`` + the registry/CLI warnings make that
-mistake visible (purchase-blocker audit #79)."""
+mistake visible."""
 from __future__ import annotations
 
 import logging

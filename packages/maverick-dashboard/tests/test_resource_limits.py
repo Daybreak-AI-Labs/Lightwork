@@ -324,7 +324,7 @@ def test_healthz_redacts_payload_without_token(monkeypatch, tmp_path):
     assert body == {"status": "ok"}
 
 
-# ---------- finding #8: redaction gates on ANY auth mechanism, not just token -
+# ---------- redaction gates on ANY auth mechanism, not just token -----------
 
 def test_healthz_redacts_under_oidc_without_token(monkeypatch, tmp_path):
     # An OIDC-only deployment runs with MAVERICK_DASHBOARD_TOKEN UNSET. The

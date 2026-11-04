@@ -1,4 +1,4 @@
-"""Data residency / region pinning (#41): off by default; strict mode pins a
+"""Data residency / region pinning: off by default; strict mode pins a
 declared region against an allowed set and refuses boot when incoherent."""
 from __future__ import annotations
 

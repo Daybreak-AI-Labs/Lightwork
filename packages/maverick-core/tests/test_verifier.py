@@ -132,9 +132,9 @@ class TestAgentVerifierIntegration:
         #   1. orchestrator FINAL: "first answer"
         #   2. verifier rejects (low confidence)
         #   3. orchestrator (revision) FINAL: "second answer"
-        #   4. verifier accepts (May 26 fix: revised FINALs DO get
-        #      re-verified now; the old "skip re-verify" behavior
-        #      let bogus revisions through with verifier_confidence=1.0)
+        #   4. verifier accepts (revised FINALs are re-verified; skipping
+        #      that would let bogus revisions through with
+        #      verifier_confidence=1.0)
         fake_llm.scripted = [
             make_llm_response(text="FINAL: first answer"),
             make_llm_response(
@@ -160,9 +160,9 @@ class TestAgentVerifierIntegration:
         agent = Agent(ctx=ctx, role="orchestrator", brief="test", depth=0)
         result = await agent.run()
         assert result.final == "second answer"
-        # 4 LLM calls (May 26 fix): propose -> verify -> revise -> re-verify.
-        # Earlier behavior skipped the re-verify, letting bogus revisions
-        # through with verifier_confidence=1.0 fallback.
+        # 4 LLM calls: propose -> verify -> revise -> re-verify. Skipping the
+        # re-verify would let bogus revisions through with the
+        # verifier_confidence=1.0 fallback.
         assert len(fake_llm.calls) == 4
 
 

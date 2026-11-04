@@ -1,4 +1,4 @@
-"""P1 multi-tenancy increment 1: tenant-aware paths + per-tenant memory.
+"""Multi-tenancy: tenant-aware paths + per-tenant memory.
 
 A tenant namespaces on-disk state. With no tenant active, paths resolve to the
 legacy ~/.maverick locations (single-tenant unchanged). With a tenant, the

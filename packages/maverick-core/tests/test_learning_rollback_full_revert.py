@@ -1,4 +1,4 @@
-"""Round-2 regression: learning rollback must be a FULL revert.
+"""Learning rollback must be a FULL revert.
 
 A store that did not exist at snapshot time but was created during the cycle
 (e.g. the first-ever insights file / learned-skills dir on a fresh tenant) must

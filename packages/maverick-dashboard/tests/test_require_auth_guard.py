@@ -1,4 +1,4 @@
-"""Guarded require-auth (#52): with [dashboard] require_auth set, the dashboard
+"""Guarded require-auth: with [dashboard] require_auth set, the dashboard
 refuses to boot when NO auth mechanism (token / OIDC / reverse-proxy) is
 configured -- so an operator who asked for auth can't accidentally serve the
 loopback control surface unauthenticated. No-op unless explicitly enabled, so a

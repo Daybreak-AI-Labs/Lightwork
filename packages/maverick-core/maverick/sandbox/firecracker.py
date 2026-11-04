@@ -157,8 +157,9 @@ class FirecrackerBackend:
         impl in `deploy/firecracker/` ships the kernel + rootfs build
         scripts; this module is the agent-side interface only.
 
-        For now (scaffold): if `firectl` is installed, use it; else
-        fall back to plain `docker run --read-only` and log the gap.
+        Scaffold: if `firectl` is installed, use it; otherwise refuse, or
+        (with MAVERICK_FIRECRACKER_STRICT=0) fall back to plain
+        `docker run --read-only` and log the gap.
         """
         if shutil.which("firectl"):
             return self._firectl(cmd)

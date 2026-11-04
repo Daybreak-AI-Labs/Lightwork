@@ -1,18 +1,15 @@
 """config-lint and migrate must agree on which sections the runtime reads.
 
-A client configured the documented
-provider-failover resilience feature --
+A configuration that uses the documented provider-failover resilience
+feature --
 
     [provider_failover.chains]
     "gpt-5.4" = ["vllm:stub-1"]
 
--- and `maverick config-lint` flagged [provider_failover] as an unknown
-section ("did you mean providers?"), the same stale-registry bug as the
-round-5 [audit]/[capabilities] fix. migrate.py's KNOWN_SECTIONS (curated from
-the real load_config() call sites) listed it; config_lint's KNOWN_SCHEMA did
-not -- the two registries had drifted by ~59 sections ([enterprise], [egress],
-[governance], [finance], [encryption], [telemetry], ...). config_lint now
-sources migrate's set so they can't drift again.
+-- must not make `maverick config-lint` flag [provider_failover] as an unknown
+section ("did you mean providers?"). migrate.py's KNOWN_SECTIONS is curated
+from the real load_config() call sites, and config_lint sources that set so
+the two registries cannot drift apart.
 """
 from __future__ import annotations
 
