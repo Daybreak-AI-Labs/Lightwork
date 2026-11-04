@@ -64,7 +64,7 @@
         if (busy || !consent.checked || current !== generation) return;
         try { sessionStorage.setItem(key, JSON.stringify({context: context, operation: checked.operation})); } catch (_) { status.textContent = 'This browser could not retain the original request. Allow site storage before removing; nothing was submitted.'; return; }
         selected(checked.operation, 'Original removal just reviewed'); lock(true); apply.disabled = true;
-        // One action with a way back (CTL-1), like other deletes: the card
+        // One action with a way back, like other deletes: the card
         // leaves at once and the reviewed removal is sent when the Undo time
         // is up (or the page is left). An undone removal sends nothing.
         var card = Array.prototype.find.call(document.querySelectorAll('.skill-card[data-skill]'), function (item) { return item.dataset.skill === name; });

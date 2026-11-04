@@ -100,8 +100,8 @@ def select_base_template(
     and must speak unified diffs, not prose, or the patch validator and
     test-driven verifier operate on prose and reject every output. With
     coding mode off it is the orchestrator template for the planner and the
-    worker template for every other role. First side-effect-free seam extracted
-    from ``Agent._build_system`` (god-module decomposition: PromptBuilder).
+    worker template for every other role. A side-effect-free PromptBuilder seam
+    of ``Agent._build_system``.
 
     ``is_root``: a domain-routed goal's depth-0 agent has
     ``role=profile.name`` (e.g. ``"finance_controller"``), not
@@ -125,9 +125,8 @@ def apply_global_overlays(base: str) -> str:
 
     Persona, output style, and the learned-habits prior are global (config /
     data-engine state, not agent-specific), each optional and fail-open. Order
-    is preserved from the original inline assembly. Second PromptBuilder
-    collaborator extracted from ``Agent._build_system``; self-independent, so it
-    is a free function rather than a method.
+    is fixed. A PromptBuilder collaborator of ``Agent._build_system``;
+    self-independent, so it is a free function rather than a method.
     """
     # Persona (optional, additive).
     try:
@@ -168,10 +167,9 @@ def apply_role_overlays(base: str, *, role: str, domain_persona: str | None) -> 
 
     The tenant's per-role client addendum (dashboard roles editor; empty unless
     customized, fail-open) and the domain-pack persona (factory spawn-from-
-    profile). Both are additive and blank-line separated, matching the original
-    inline assembly. Third PromptBuilder collaborator extracted from
-    ``Agent._build_system``; depends only on the role name and the resolved
-    domain persona, so it is a free function.
+    profile). Both are additive and blank-line separated. A PromptBuilder
+    collaborator of ``Agent._build_system``; depends only on the role name and
+    the resolved domain persona, so it is a free function.
     """
     # Per-role client addendum (optional, additive): a tenant's custom
     # instructions for this role, edited via the dashboard roles editor.
@@ -768,9 +766,9 @@ def _normalize_file_tool_args(
 ) -> dict[str, Any]:
     """Normalize paths and freeze defaults for policy, audit and dispatch.
 
-    ``speak`` historically searched for the next free ``speech-N.mp3`` both in
-    the path gate and again inside the tool. A file appearing between those two
-    searches could shift the actual destination onto a protected next name.
+    If ``speak`` searched for the next free ``speech-N.mp3`` both in the path
+    gate and again inside the tool, a file appearing between those two searches
+    could shift the actual destination onto a protected next name.
     Supplying the admitted name explicitly makes the checked and written path
     identical. Media tools strip surrounding whitespace before opening paths;
     the authorization gate must inspect those same strings.

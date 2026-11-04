@@ -1,4 +1,4 @@
-"""One-tap feedback on a flow run's result (AI-10 follow-up).
+"""One-tap feedback on a flow run's result.
 
 The run's owner rates a finished run up or down. The store keeps one rating
 per run in the active workspace's own data folder, holds no written text and

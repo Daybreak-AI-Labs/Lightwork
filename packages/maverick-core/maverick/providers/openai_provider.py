@@ -7,7 +7,7 @@ into OpenAI's chat format and converting the response back.
 Used directly for OpenAI; subclassed by OpenRouter and Ollama, which
 are OpenAI-compatible at different base_urls.
 
-v0.1.1 fixes:
+Translation rules:
   - tool_result.content may be a list of blocks; extract `text` from each
   - max_completion_tokens for gpt-4o / o1 / o3 (max_tokens deprecated)
   - finish_reason mapped to Anthropic stop_reason vocabulary
@@ -155,10 +155,10 @@ def _translate_user_blocks(content: list) -> tuple[list[dict], dict | None]:
     messages plus a single trailing ``user`` message (or ``None`` if the
     turn carried no text/image content at all).
 
-    An Anthropic image/document block used to fall into the
-    ``else`` branch below and get ``str()``-stringified into plain text --
-    the model saw a Python dict repr containing the raw base64 payload as
-    prompt text, not an actual image. content_parts holds OpenAI
+    An Anthropic image/document block must not fall into the ``else``
+    branch below and get ``str()``-stringified into plain text -- the model
+    would see a Python dict repr containing the raw base64 payload as prompt
+    text, not an actual image. content_parts holds OpenAI
     content-part dicts (text and image_url) so a real image reaches the
     model as an image; collapsed back to a plain string when the turn has
     no image (the common case), to keep that path's output byte-for-byte

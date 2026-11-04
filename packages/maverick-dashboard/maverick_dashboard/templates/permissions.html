@@ -460,7 +460,7 @@
         return {usable: usable};
       }
       // What blocking would have stopped in the last 30 days, from the
-      // activity record (ADM-3). Report only; "" when it can't be worked out.
+      // activity record. Report only; "" when it can't be worked out.
       async function blockPreview(names) {
         try {
           const data = await window.mvFetchJSON('/api/v1/policy-preview/tools?tools=' + encodeURIComponent(names.join(',')),
@@ -507,7 +507,7 @@
           }
         });
       });
-      // Block or allow many tools at once (ADM-7): the filter above picks the
+      // Block or allow many tools at once: the filter above picks the
       // matching tools, the bar selects them all, one confirmation states the
       // count, and the report can undo every change.
       // This page's script runs before the shared helpers (lightwork-ui.js at

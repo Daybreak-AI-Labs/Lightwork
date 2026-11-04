@@ -10,8 +10,8 @@ the same two-stage trust pipeline before persisting:
   2. a *Shield content scan* (:func:`shield_scan`) of the prompt surface, which
      fails open (with a warning) when the Shield is absent or errors.
 
-These used to be copy-pasted in each module and had already drifted (the
-canonical-bytes binding diverged once as a near-miss). The signing *policy*
+Keeping them in one place stops the copies drifting apart (a diverging
+canonical-bytes binding would break verification). The signing *policy*
 genuinely differs between the two callers -- skills allow trust-on-first-use
 for free-text installs, templates treat any configured trust anchor as
 requiring a signature -- so the shared verifier takes the resolved policy

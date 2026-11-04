@@ -141,9 +141,9 @@ def _validate_expr_safety(expr: str) -> None:
                 raise ValueError(f"name not allowed: {node.id}")
         elif isinstance(node, ast.Attribute):
             raise ValueError("attribute access is not allowed")
-        # The SymPy path previously had NO exponent bound, so
-        # `9**9**9**9` reached sympy.N() and OOM'd the worker. Apply the
-        # same Pow guard the fallback uses.
+        # Without an exponent bound on the SymPy path, `9**9**9**9` would
+        # reach sympy.N() and OOM the worker. Apply the same Pow guard the
+        # fallback uses.
         _reject_unsafe_pow(node)
 
 

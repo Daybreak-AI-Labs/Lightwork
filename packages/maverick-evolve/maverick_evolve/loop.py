@@ -1,4 +1,4 @@
-"""Stage 2 wired: a continuous evolution loop with a persistent diverse archive.
+"""A continuous evolution loop with a persistent diverse archive.
 
 Single-shot ``evolve`` improves within one call; real self-improvement is
 *continuous* -- it accumulates across rounds (and process restarts) in a

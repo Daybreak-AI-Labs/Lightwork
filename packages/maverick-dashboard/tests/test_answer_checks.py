@@ -162,7 +162,7 @@ def _finish(world, title, result, domain="proc_po_chaser"):
 
 
 def test_the_first_answer_after_a_change_tells_the_person_what_changed(world):
-    """AI-12: an in-context notice on the next answer from a changed agent, once,
+    """An in-context notice on the next answer from a changed agent, once,
     with a way to hide it; answers before the change, or with no earlier use,
     carry no notice."""
     from maverick_dashboard import agent_changelog

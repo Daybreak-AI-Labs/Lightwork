@@ -379,9 +379,8 @@ def shell(sandbox) -> Tool:
                 "review it again"
             )
 
-        # The shell tool used to always fall back to
-        # `sandbox.timeout` (60 s on LocalBackend) which kills pytest runs
-        # on real SWE-bench repos. Detect long-running commands and pass
+        # Always falling back to `sandbox.timeout` (60 s on LocalBackend)
+        # would kill pytest runs on real SWE-bench repos. Detect long-running commands and pass
         # a higher per-call timeout. Falls back gracefully when sandbox
         # backends don't accept the kwarg.
         try:

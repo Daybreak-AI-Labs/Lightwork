@@ -1,4 +1,4 @@
-"""Empty screens say why they are empty and what to do next (ONB-2).
+"""Empty screens say why they are empty and what to do next.
 
 The shared empty state (the ``empty_state`` macro, ``window.mvEmpty``) carries
 a reason and a next step. This ratchet counts the empty-list messages still
@@ -55,7 +55,7 @@ VALUES = {
     ("flow_designer_presentation.js", "No question yet"): "flow-step chip",
 }
 # The most this may be. Lower it when you fix one; never raise it.
-MAX_WITHOUT_NEXT_STEP = 0  # 6 October 2026: 134 before the ONB-2 pass
+MAX_WITHOUT_NEXT_STEP = 0
 
 
 def _messages():

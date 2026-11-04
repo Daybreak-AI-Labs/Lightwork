@@ -1,4 +1,4 @@
-"""Every page says where it is (NAV-2): a page kept out of the sidebar
+"""Every page says where it is: a page kept out of the sidebar
 highlights the sidebar page it sits under and shows a breadcrumb, in the
 classic sidebar too."""
 from __future__ import annotations

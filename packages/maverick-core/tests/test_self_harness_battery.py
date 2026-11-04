@@ -1,6 +1,6 @@
 """100-test adversarial battery for the self-learning (self-harness) loop.
 
-This is the moat suite: it hammers the loop with malformed/extreme inputs,
+This suite hammers the loop with malformed/extreme inputs,
 trace-poisoning attempts, the full invariant matrix, store corruption,
 concurrency, scale, and end-to-end recall -- proving the loop is safe, bounded,
 and unbreakable under hostile conditions. Pairs with the 50-round randomized
@@ -394,7 +394,7 @@ def test_runner_pass_end_to_end(monkeypatch, tmp_path):
 
 
 # ==========================================================================
-# G. 1000-ROUND GENERATIVE FUZZ — the moat campaign
+# G. 1000-ROUND GENERATIVE FUZZ
 # ==========================================================================
 
 _SECRET = "sk-ant-" + "abcdefghij1234567890XYZ"  # pragma: allowlist secret
@@ -435,7 +435,7 @@ _NO_PROMOTE = {"noop", "regress", "nan", "inf", "raise"}
 def test_self_harness_fuzz(monkeypatch, tmp_path):
     """Deterministic generated scenarios through the real loop. Each mixes
     adversarial inputs and asserts the full invariant set -- a reproducible
-    fuzz campaign, not a flake. The moat invariant: attacker/scoped text,
+    fuzz campaign, not a flake. The core invariant: attacker/scoped text,
     secrets, and control chars NEVER reach a recalled (prompt-bound) addendum.
 
     Defaults to 1000 rounds so CI stays fast; a soak run can crank it with

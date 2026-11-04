@@ -1,9 +1,8 @@
-"""Generalization + false-positive guard for the round-9 fallback rules.
+"""Generalization + false-positive guard for the ASR-benchmark fallback rules.
 
-The end-to-end ASR benchmark exposed detection gaps; round-9 widened/added
-rules and lifted held-out TPR 48%->87% with benign FP flat. But those rules
-were authored with the benchmark's held-out misses visible, so that number is
-partly in-sample. These are FRESH paraphrases (different verbs/structure than
+The end-to-end ASR benchmark exposed detection gaps, and the builtin rules
+cover those families. The rules were authored with the benchmark's held-out
+misses visible, so the benchmark number is partly in-sample. These are FRESH paraphrases (different verbs/structure than
 the corpus) that test whether the rules generalize to the *family*, not the
 exact sentence -- and fresh benign decoys that name-drop the same vocabulary,
 which must NOT block (the FP-anchoring is the safety-critical half).

@@ -1,6 +1,6 @@
 // Run with: node --test packages/maverick-dashboard/tests/js/linkable_views.test.js
 "use strict";
-// NAV-4: every view has a link that reproduces it. The board time ranges and
+// Every view has a link that reproduces it. The board time ranges and
 // the privacy record tabs keep the chosen tab in the address, an address
 // naming a range loads that range, and a finder search has its own ?find=.
 const { test } = require("node:test");

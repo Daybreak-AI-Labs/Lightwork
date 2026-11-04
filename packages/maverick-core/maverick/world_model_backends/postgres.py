@@ -3409,10 +3409,8 @@ class PostgresWorldModel:
         """Aggregate spend. ``owner`` scopes to one principal's runs (join to
         the owning goal), matching the SQLite backend's signature; ``None``
         is the deployment-wide admin / auth-off view; ``since`` keeps only runs
-        that started at or after that time, as on SQLite. (This backend
-        previously took no ``owner`` argument at all, so any owner-scoped
-        caller -- ``/api/v1/spend``, external-agent spend records -- raised
-        TypeError on Postgres.)
+        that started at or after that time, as on SQLite. Owner-scoped callers
+        (``/api/v1/spend``, external-agent spend records) rely on ``owner``.
         """
         frag, params = _tenant_scope("g.tenant_id")
         table = "episodes e"

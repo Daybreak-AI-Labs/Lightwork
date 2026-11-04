@@ -526,7 +526,7 @@ class DiscoverySensorSpool:
             connection.row_factory = sqlite3.Row
             # Arm the busy handler before any connection-local pragma. Journal
             # mode is a database-wide setting and must not be rewritten by
-            # every hot-path connection: concurrent workers used to race that
+            # every hot-path connection: concurrent workers would race that
             # pragma and then starve at BEGIN IMMEDIATE.
             connection.execute("PRAGMA busy_timeout=30000")
             connection.execute("PRAGMA synchronous=FULL")

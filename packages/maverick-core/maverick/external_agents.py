@@ -1027,7 +1027,7 @@ def start_run(agent_id: str, run: dict, *, shield: Any | None = None) -> dict:
     from .world_model import reclaim_window_seconds
     window = reclaim_window_seconds()
     # The reclaim window is a deadline, not a heartbeat cadence. Returning
-    # that same duration used to race a normal network delay against the
+    # that same duration would race a normal network delay against the
     # recurring sweep. Leave several beat opportunities inside the window.
     heartbeat_seconds = (
         1.0 if not math.isfinite(window) or window < 4.0

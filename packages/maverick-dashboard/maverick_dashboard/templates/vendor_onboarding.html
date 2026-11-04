@@ -76,7 +76,7 @@
     <details><summary>Backups</summary><p>Lightwork's <a href="/workspace/recovery">workspace recovery</a> restores these requests, but not changes already made in Drive or Jira.</p></details>
     <p id="vs-owner"></p>
     <form id="vs-form" data-mv-validate>
-      {# CTL-3: the shared form-field pattern -- each problem next to its field and in a summary that takes focus. #}
+      {# The shared form-field pattern -- each problem next to its field and in a summary that takes focus. #}
       {{ error_summary('vs-form-errors') }}
       <label for="vs-resource-owner">Vendor review owner</label><select id="vs-resource-owner" class="select" required disabled aria-describedby="vs-owner-help"
         data-error-required="Choose who owns vendor reviews in this workspace."></select>

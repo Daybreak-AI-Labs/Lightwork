@@ -1,4 +1,4 @@
-"""Outbound webhooks honor the enterprise egress lock (audit H27)."""
+"""Outbound webhooks honor the enterprise egress lock."""
 from __future__ import annotations
 
 import maverick.enterprise as ent

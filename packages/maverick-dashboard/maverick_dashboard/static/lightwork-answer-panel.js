@@ -31,7 +31,7 @@
   }
   function bind(panel) {
     if (panel.dataset.bound === '1') return; panel.dataset.bound = '1';
-    // AI-12: a hidden "changed since you last used it" notice stays hidden in
+    // A hidden "changed since you last used it" notice stays hidden in
     // this browser. Bound here rather than by a script inside the panel:
     // refresh() refuses any fetched panel that carries a script.
     var notice = panel.querySelector('#answer-agent-notice');
@@ -267,7 +267,7 @@
           if (value.follow_up && value.follow_up.question) {
             say(msg, msg.textContent + ' ' + value.follow_up.question + ' You can select Needs improvement again to add an optional reason or note.');
           }
-          // Answers keep missing: a person is one step away, with this task attached (HLP-3).
+          // Answers keep missing: a person is one step away, with this task attached.
           var handOff = panel.querySelector('#feedback-hand-off');
           if (handOff) handOff.hidden = !(value.hand_off && value.hand_off.href);
           if (handOff && value.hand_off && /^\/help\?[^#]*#get-help$/.test(value.hand_off.href)) {
@@ -391,10 +391,10 @@
         body.classList.add('muted');
         const url = '/api/v1/goals/' + encodeURIComponent(d.dataset.goal) +
                     '/artifacts/history?title=' + encodeURIComponent(d.dataset.title);
-        // A non-2xx (auth lapsed, goal gone, server error) used to
-        // render as "No history." or leave "Loading…" forever, and the loaded
-        // flag meant re-opening never retried. Check the status, and on any
-        // failure show why and clear the flag so the next toggle retries.
+        // A non-2xx (auth lapsed, goal gone, server error) must not render as
+        // "No history." or leave "Loading…" forever with the loaded flag set.
+        // Check the status, and on any failure show why and clear the flag so
+        // the next toggle retries.
         fetch(url).then(function (r) {
           if (!r.ok) {
             return r.json().catch(function () { return {}; }).then(function (j) {

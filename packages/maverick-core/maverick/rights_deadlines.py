@@ -1,7 +1,6 @@
 """Per-jurisdiction clocks for people's privacy-rights requests, verified at source.
 
-The DSAR tracker used to run one constant (30 days) for every request. This
-table replaces it: each regime carries the period the law actually fixes, the
+Rather than one constant (30 days) for every request, each regime carries the period the law actually fixes, the
 extension it allows, whether it counts calendar or business days, and the
 statute section or regulator page the numbers were read from on
 ``verified_at`` -- the same discipline :mod:`maverick.breach_notification`

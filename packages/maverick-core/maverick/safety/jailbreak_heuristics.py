@@ -43,8 +43,8 @@ _PATTERNS: list[_Pat] = [
         re.IGNORECASE), 2.0),
     _Pat("ignore_prior",
          re.compile(
-             # The object group is now REQUIRED: every group used to be optional,
-             # so this fired on benign text like "ignore the spam folder" /
+             # The object group is REQUIRED: with every group optional this
+             # would fire on benign text like "ignore the spam folder" /
              # "forget about it" (weight 2.0 -> score above the 0.6 threshold),
              # blocking legitimate input.
              r"\b(?:ignore|disregard|forget)\s+(?:all|everything|all\s+of)?\s*"

@@ -1,4 +1,4 @@
-"""Torch-free CPU training for the judgment rung (Phase 1), end to end.
+"""Torch-free CPU training for the judgment rung, end to end.
 
 The self-improvement architecture is "an empty gym" until a real reward model
 trains on real trajectories. This is the cheapest possible

@@ -575,8 +575,8 @@ def graduation_candidates(history, names: list[str]) -> list[GraduationVerdict]:
     first -- the advisory list a CLI / dashboard surfaces to the client."""
     rows = _coerce_approvals(history)
     # One pass over the history: each verdict reads only its own agent's
-    # records. Every agent used to re-read all of them and the canary ledger
-    # (2,031 agents by 500 decisions took 1.1 s).
+    # records, instead of every agent re-reading all of them and the canary
+    # ledger (about 1 s for 2,031 agents by 500 decisions).
     by_agent: dict[str, list[dict]] = {}
     for rec in rows:
         by_agent.setdefault(_principal_name(_agent_of(rec)), []).append(rec)

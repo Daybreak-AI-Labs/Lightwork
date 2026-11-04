@@ -2059,11 +2059,11 @@ def _ensure_default_policy(policy_id: str, *, actor: str) -> None:
     """Provision the tenant's ``default`` policy from the module defaults.
 
     The orchestrator delivers every human-facing goal output under the
-    ``default`` policy.  A tenant that has not published one yet used to have
-    every goal withheld with "policy 'default' does not exist" until an
-    operator created it by hand through the assurance API, which a per-user
-    isolation tenant or a session-selected workspace cannot reach with the
-    static dashboard token.  The gateway now creates revision 1 itself, from
+    ``default`` policy.  Without one, every goal of a tenant would be withheld
+    with "policy 'default' does not exist" until an operator created it by hand
+    through the assurance API, which a per-user isolation tenant or a
+    session-selected workspace cannot reach with the static dashboard token.
+    So the gateway creates revision 1 itself, from
     the same defaults the API applies (disclosure text, machine marker,
     text-only), so the first delivery is receipted and disclosed rather than
     blocked.  The creation is an ordinary audited ``policy_created`` mutation;
@@ -2360,8 +2360,8 @@ def _deliver_text_locked(  # noqa: C901 - linear release transaction is auditabl
         # Render/sign/receipt-commit can fail after the reservation
         # above (signer refusal, segment/capacity error, disk full) --
         # _complete_conversation below is the only thing that ever clears
-        # it, so an exception here used to poison every later delivery in
-        # this conversation forever (a fresh idempotency key hits
+        # it, so an unhandled exception here would poison every later delivery
+        # in this conversation forever (a fresh idempotency key hits
         # ConversationOrderError permanently; only resending the exact same
         # key recovers). Abandon this receipt_id's reservation on any
         # failure so the conversation is not permanently stuck; the

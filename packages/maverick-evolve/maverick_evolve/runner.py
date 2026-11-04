@@ -1,4 +1,4 @@
-"""Stage 1 wiring: evolve a config against the eval harness, gated by calibration.
+"""Evolve a config against the eval harness, gated by calibration.
 
 Ties the three foundations together into a runnable loop:
 

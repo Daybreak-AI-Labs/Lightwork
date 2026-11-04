@@ -1,4 +1,4 @@
-"""Five long tasks pause for input; each one alerts its owner (SPD-6).
+"""Five long tasks pause for input; each one alerts its owner.
 
 A task the agent parks with a question is "blocked" with the question open.
 Every such pause must reach the owner's bell and inbox as "needs-decision",

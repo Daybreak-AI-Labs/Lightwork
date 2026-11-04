@@ -1,4 +1,4 @@
-"""Stage 1: config-only evolutionary search.
+"""Config-only evolutionary search.
 
 Propose a mutated config, score it on a development split, keep it only if it
 genuinely beats the incumbent. Mutations are bounded to **configuration**

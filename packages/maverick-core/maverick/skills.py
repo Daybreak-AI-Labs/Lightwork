@@ -783,11 +783,10 @@ def _canonical_signed_bytes(parsed: Skill) -> bytes:
 
     Binds ``name``, ``triggers``, ``tools_needed``, ``purposes``, and the
     canonical body.
-    Previously only name+body were signed, so a signed skill's *activation
-    triggers* and *requested tools* could be altered without breaking the
-    signature -- e.g. re-pointing a trusted skill's triggers, or adding
-    ``shell`` to ``tools_needed`` -- while the sig still verified. Binding all
-    four closes that. ``purposes`` is also security-relevant PBAC metadata,
+    Signing only name+body would let a signed skill's *activation triggers*
+    and *requested tools* be altered without breaking the signature -- e.g.
+    re-pointing a trusted skill's triggers, or adding ``shell`` to
+    ``tools_needed``. Binding all four closes that. ``purposes`` is also security-relevant PBAC metadata,
     so it must be signed too; otherwise purpose-scope tampering could change
     recall authorization without breaking the signature. Serialized as
     canonical JSON (sorted keys, compact

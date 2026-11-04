@@ -250,7 +250,7 @@ def resource_fingerprint(resource: str) -> str:
 
 
 def ai_action_fields(event: dict) -> dict:
-    """Who acted and what it reached, for an AI action's row (ADM-5): the agent
+    """Who acted and what it reached, for an AI action's row: the agent
     or specialist and model (identifiers, not content), and how many
     resources it reached with their fingerprints."""
     safe = {}

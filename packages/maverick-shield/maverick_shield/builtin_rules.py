@@ -70,12 +70,11 @@ def _compile(p: str) -> re.Pattern:
     return re.compile(p, re.IGNORECASE)
 
 
-# Split-flag hardening: `rm_rf_root` and
-# `recursive_chmod_chown_root` below used to require their two dangerous
-# flags (recursive + force, or recursive alone) in ONE contiguous token
-# (`-rf`, `-...R...`). Splitting the flags across separate tokens -- `rm -r
-# -f /`, `chmod -c -R 777 /` -- is functionally identical but bypassed both
-# rules entirely, since neither single token then matched. `_FLAG_TOKEN`
+# Split-flag hardening: `rm_rf_root` and `recursive_chmod_chown_root` below
+# must not require their two dangerous flags (recursive + force, or recursive
+# alone) in ONE contiguous token (`-rf`, `-...R...`). Splitting the flags
+# across separate tokens -- `rm -r -f /`, `chmod -c -R 777 /` -- is
+# functionally identical, and a single-token match would miss it. `_FLAG_TOKEN`
 # matches one short-option cluster (`-rf`, `-c`) or one GNU long option
 # (`--recursive`); the rules below use it, bounded to a handful of
 # repetitions (never unbounded, so this can't blow up on adversarial input),
@@ -459,7 +458,7 @@ RULES: list[Rule] = [
          _compile(r"[\u200b-\u200f\u2028-\u202f\u2060-\u206f]"),
          "Zero-width / bidi characters"),
 
-    # --- round-9 additions: families the end-to-end ASR benchmark exposed ----
+    # --- families from the end-to-end ASR benchmark ----------------------------
     # Each needs an attack verb/marker AND a target, so benign vocab name-drops
     # don't trip them; bounded gaps keep them linear (no ReDoS).
     Rule("prompt_leak_query", "medium",

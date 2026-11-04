@@ -1,4 +1,4 @@
-"""The plan a person checks before a task's first outside action (AI-3).
+"""The plan a person checks before a task's first outside action.
 
 With ``[autonomy] confirm_plan`` on, :meth:`maverick.agent.Agent._plan_denial`
 asks once per task run. This module writes what the person reads, in plain

@@ -199,7 +199,7 @@ class DevcontainerBackend:
 
         For a devcontainer that IS the project dir (mounted as the
         workspace); tools that confine model-supplied paths to
-        ``sandbox.workdir`` previously crashed on this backend.
+        ``sandbox.workdir`` need it on this backend.
         """
         return self.project_dir
 

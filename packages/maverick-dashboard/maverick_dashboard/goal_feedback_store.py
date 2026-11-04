@@ -134,7 +134,7 @@ def should_follow_up(by: str, agent: str, *, previous: dict | None, rating: str,
     return rejections(by, agent, since=since, world=world) == FOLLOW_UP_AFTER
 
 
-#: After this many of one agent's answers rated down, offer a person (HLP-3).
+#: After this many of one agent's answers rated down, offer a person.
 HAND_OFF_AFTER = 2
 
 

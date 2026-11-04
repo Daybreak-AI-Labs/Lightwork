@@ -1,9 +1,9 @@
 """Cryptographic human approval for high-blast-radius self-changes.
 
 The governed promotion ladder (:mod:`maverick.self_improvement`) requires a
-human at the ``code`` and ``weights`` rungs. Until now that consent was a
-*self-settable boolean* (``Candidate.approved``): fine for a dev box, but it is
-exactly the control a self-modifying agent could flip on its own. If the agent
+human at the ``code`` and ``weights`` rungs. A *self-settable boolean*
+(``Candidate.approved``) is fine for a dev box, but it is exactly the control a
+self-modifying agent could flip on its own. If the agent
 can propose the code that runs the gate, a boolean it can also set is not a
 control -- it's a suggestion.
 

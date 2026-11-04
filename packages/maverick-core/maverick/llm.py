@@ -1762,9 +1762,9 @@ def _response_call_cost(model_id, resp, cache_read_mult: float | None = None,
     """Per-call $ derived from THIS response's own token usage, or ``None`` when
     the response carries no usage to price from.
 
-    provider-health spend used to be diffed off the shared ``budget.dollars``
-    counter (``dollars - _d0``), which races other concurrent sub-agents on the
-    same budget: their spend lands inside the window and inflates this call's
+    Diffing provider-health spend off the shared ``budget.dollars`` counter
+    (``dollars - _d0``) would race other concurrent sub-agents on the same
+    budget: their spend lands inside the window and inflates this call's
     recorded dollars. Pricing the response's own usage is call-local, so a wide
     parallel fan-out records each call's real cost. Returns ``None`` when no
     usage is exposed so the caller can fall back to the (sequentially-correct)

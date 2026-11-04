@@ -130,7 +130,7 @@ def _submit_reviewed(request, goal_id, payload):
     return {"context": context_for(request), "feedback": feedback, "saved": True, "training_completed": False,
             "acknowledgement": _acknowledgement(value),
             "follow_up": {"question": "What would make this better?"} if follow_up else None,
-            # A person is one step away once the AI's answers keep missing (HLP-3).
+            # A person is one step away once the AI's answers keep missing.
             "hand_off": {"label": "Get help from a person",
                          "href": f"/help?from=/chat/goal/{goal_id}&task={goal_id}#get-help"} if hand_off else None}
 

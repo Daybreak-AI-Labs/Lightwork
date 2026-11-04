@@ -41,7 +41,7 @@
           {% if result_labels.get(g.domain) %}<span class="muted">{{ result_labels[g.domain] }}</span>{% endif %}
           <span class="muted" data-when="{{ g.updated_at }}"></span>
           <a class="dlv-finished__open" href="/chat/goal/{{ g.id }}">{{ ui('Open result →') }}</a>
-          {# AI-written, and rated in one tap where the viewer owns the task (AI-2, AI-10). #}
+          {# AI-written, and rated in one tap where the viewer owns the task. #}
           <div class="dlv-feedback" data-result-feedback data-goal="{{ g.id }}" role="group" aria-label="{{ ut('Rate this result') }}" lang="{{ ul('Rate this result') }}">
             <span class="muted">{{ ui('Written by an agent.') }}{% if can_rate and (g.owner or '') == feedback_owner %} {{ ui('Was it useful?') }}{% endif %}</span>
             {% if can_rate and (g.owner or '') == feedback_owner %}

@@ -1,8 +1,8 @@
 """Adopt an evolution archive's best config into a domain pack.
 
 Closes the loop from offline search to live behavior: ``evolve_continuous``
-finds winning configs, but until now they never flowed back into the packs
-the agent factory actually spawns from. ``adopt_best`` takes the archive's
+finds winning configs, and this flows them back into the packs the agent
+factory actually spawns from. ``adopt_best`` takes the archive's
 best candidate, overlays the chosen keys onto a pack, and writes the result
 as an OPERATOR pack (user domains dir overrides built-ins) — never editing
 the source pack in place, always leaving a ``.bak`` of any pack it replaces.

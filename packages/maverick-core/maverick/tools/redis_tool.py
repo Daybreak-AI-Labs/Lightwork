@@ -59,8 +59,8 @@ _REDIS_SCHEMA: dict[str, Any] = {
 
 
 # One client (connection pool) is built per _run() and closed in its finally.
-# The old code built a fresh redis.Redis on every _op_* and never closed it,
-# leaking a pool/socket per tool call toward the fd / maxclients limit. The
+# Building a fresh redis.Redis on every _op_* would leak a pool/socket per
+# tool call toward the fd / maxclients limit. The
 # active client is stashed thread-locally so the _op_* helpers reuse it.
 _TL = threading.local()
 

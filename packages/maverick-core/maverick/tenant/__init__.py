@@ -1,1 +1,1 @@
-"""The tenant module family (grouped from flat maverick/tenant_*.py)."""
+"""Tenant modules: the registry, concurrency, egress, KMS and provider admission."""

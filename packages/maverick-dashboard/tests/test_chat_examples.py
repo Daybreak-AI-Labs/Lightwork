@@ -104,7 +104,7 @@ def test_people_who_cannot_start_work_see_no_examples(ready, monkeypatch):
 
 
 def test_every_ai_entry_point_says_it_is_ai_what_it_does_and_two_limits(ready, monkeypatch):
-    """AI-1: the empty chat and Copilot each carry an AI disclosure, a capability
+    """The empty chat and Copilot each carry an AI disclosure, a capability
     statement, a reliability statement and at least two limitations."""
     assert chat_examples.CAPABILITY.startswith("Lightwork is an AI assistant.")
     assert "never runs a command without a person's approval" in chat_examples.LIMITS

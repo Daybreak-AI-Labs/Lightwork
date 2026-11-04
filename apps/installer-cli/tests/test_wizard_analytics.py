@@ -162,7 +162,7 @@ def test_web_vitals_sample_rate_default_is_written_when_kept(monkeypatch):
 
 
 def test_usage_measures_question_defaults_to_no_and_yes_writes_the_knob(tmp_path, monkeypatch):
-    """Rule-6 loop for [analytics] usage_measures (ONB-1 / AI-13 research measures)."""
+    """Rule-6 loop for [analytics] usage_measures (the usage research measures)."""
     from maverick_installer import wizard
     captured = {}
 

@@ -1,5 +1,5 @@
 "use strict";
-// ONB-4 practice mode: the banner's Back to live and "What practice held back",
+// Practice mode: the banner's Back to live and "What practice held back",
 // and the Get started switch, through the shared shell helpers.
 const { test } = require("node:test");
 const assert = require("node:assert/strict");

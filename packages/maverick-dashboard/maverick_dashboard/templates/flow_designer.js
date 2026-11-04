@@ -2160,7 +2160,7 @@
           var rm = document.createElement('button'); rm.className = 'btn btn--ghost btn--danger'; rm.type = 'button'; rm.textContent = 'Remove';
           rm.setAttribute('aria-label', 'Remove the start “' + t.name + '”');
           rm.addEventListener('click', function () {
-            // One action with a way back (CTL-1): removed when Undo ends.
+            // One action with a way back: removed when Undo ends.
             row.hidden = true;
             window.mvUndo('“{name}” removed. The other app can no longer start this flow.', { values: {name: t.name},
               action: 'remove it',

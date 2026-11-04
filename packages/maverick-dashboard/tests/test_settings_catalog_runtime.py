@@ -363,7 +363,7 @@ def test_consent_mode_saved_here_gates_actions(monkeypatch, audit_rows):
 
 
 def test_autonomy_changes_are_logged_and_apply_to_the_next_decision(audit_rows):
-    """AI-11: a change to how agents may act is written to the activity record,
+    """A change to how agents may act is written to the activity record,
     with its before and after values, and the very next decision uses it: no
     restart and no wait."""
     from maverick.audit import EventKind

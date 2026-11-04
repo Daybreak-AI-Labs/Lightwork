@@ -468,7 +468,7 @@
       queryChanged("input");
     });
 
-    // NAV-4: a search has an address (?find=…) that reproduces it, without
+    // A search has an address (?find=…) that reproduces it, without
     // adding a Back step; closing the finder removes it again.
     function rememberQuery(reason) {
       var history = global.history, loc = global.location;

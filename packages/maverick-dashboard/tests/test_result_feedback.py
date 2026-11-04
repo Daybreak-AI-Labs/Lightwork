@@ -1,5 +1,5 @@
 """Finished results outside the task page are marked as AI-written and take
-one-tap feedback through the task's own saved-answer feedback (AI-2, AI-10)."""
+one-tap feedback through the task's own saved-answer feedback."""
 from __future__ import annotations
 
 import re

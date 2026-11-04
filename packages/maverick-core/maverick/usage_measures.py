@@ -1,13 +1,13 @@
-"""Optional, name-free usage measures for the research kit (ONB-1, AI-13).
+"""Optional, name-free usage measures for the research kit.
 
 Off unless ``[analytics] usage_measures = true``. When on, this installation
 counts two things and nothing else:
 
-* **First result in the first session** (ONB-1): when a signed-in person is
+* **First result in the first session**: when a signed-in person is
   first seen, and when they first see a finished result of their own task.
   A first result within :data:`FIRST_SESSION_SECONDS` of first being seen
   counts as "in the first session". Reported by access role.
-* **AI suggestions** (AI-13): how often each kind of suggestion is shown,
+* **AI suggestions**: how often each kind of suggestion is shown,
   used or dismissed, how often one is shown again to the same person after
   they dismissed it, and how often it appeared while they were typing.
 

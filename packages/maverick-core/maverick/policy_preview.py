@@ -1,4 +1,4 @@
-"""What a policy change would do, before it is saved (ADM-3).
+"""What a policy change would do, before it is saved.
 
 Report only: every function here reads the record and returns counts; none
 of them changes anything or enforces anything. Each preview names where its

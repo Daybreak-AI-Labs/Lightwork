@@ -1192,7 +1192,7 @@
     refreshBulk();
   }
 
-  // Pause or resume many agents and people at once (ADM-7): filter the list,
+  // Pause or resume many agents and people at once: filter the list,
   // select all matching, one confirmation states the count, and the report
   // undoes each change (resume undoes a pause and pause undoes a resume).
   var bulk = null;

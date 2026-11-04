@@ -170,7 +170,7 @@ def test_indexed_heading_is_the_heading_the_page_shows(monkeypatch, tmp_path):
         assert shown in {page["label"].casefold(), ui_visibility.HEADINGS.get(path, "").casefold()}, path
 
 
-# NAV-2: the name a person picks in the menu or the finder is the name the
+# The name a person picks in the menu or the finder is the name the
 # page shows. A heading that must differ is recorded in HEADINGS so the finder
 # still finds the page by it. Gated pages (turned off, no permission) are
 # skipped: they show the gate, not the page.

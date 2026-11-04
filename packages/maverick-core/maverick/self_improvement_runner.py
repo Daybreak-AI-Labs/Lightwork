@@ -1,9 +1,9 @@
 """Glue that completes the *model-agnostic* self-improvement rungs.
 
 These are the rungs that compound on a customer's data WITHOUT owning or
-fine-tuning a generative model -- which is the whole strategy: the default brain
-stays a frontier model (kernel rule 2, never compete on the model), and the moat
-is governance + per-customer compounding on top of it. This module ties capture
+fine-tuning a generative model: the default brain stays the user's chosen model
+(kernel rule 2), and improvement comes from governance + per-customer
+compounding on top of it. This module ties capture
 -> evidence -> the governed controller for:
 
 * **judgment** -- ``build_prm_examples`` turns captured trajectories into
@@ -76,7 +76,7 @@ def collect_calibration(confidence: float, correct: bool, *, source: str = "auto
         return False
 
 
-# -- tools: promote what helps, retire what doesn't (Phase 3) ----------------
+# -- tools: promote what helps, retire what doesn't ------------------------
 
 def should_retire(name: str, tracker: ToolOutcomeTracker, *,
                   floor: float = 0.2, min_samples: int = 5) -> bool:
@@ -108,7 +108,7 @@ def review_generated_tools(names, tracker: ToolOutcomeTracker, *, baseline_succe
     return out
 
 
-# -- judgment: a training set for the small reward head (Phase 1) ------------
+# -- judgment: a training set for the small reward head --------------------
 
 def build_prm_examples(  # noqa: C901 - trust validation stays at the corpus boundary
     store, *, limit: int = 10_000,
@@ -272,7 +272,7 @@ def build_prm_examples(  # noqa: C901 - trust validation stays at the corpus bou
     return rows
 
 
-# -- prompts / skills / policies (Phase 4) -----------------------------------
+# -- prompts / skills / policies -------------------------------------------
 
 def emit_strategy_candidate(kind: str, summary: str, baseline: float, candidate: float,
                             samples: int, *, rollback, controller=None):
@@ -286,7 +286,7 @@ def emit_strategy_candidate(kind: str, summary: str, baseline: float, candidate:
                           rollback=rollback, capability_widens=False, controller=controller)
 
 
-# -- self-harness: learn a model-specific harness addendum (Phase 4 sibling) --
+# -- self-harness: learn a model-specific harness addendum -----------------
 
 def _risk_calibration_boundary(
     settings: Mapping[str, object], *, scoring: bool,

@@ -20,7 +20,7 @@ Key management:
   - ``verify_chain()`` walks a file and confirms every signature +
     chain link. Returns a list of any breaks for human review.
 
-Externally-managed key (enterprise / H29): set
+Externally-managed key (enterprise key custody): set
 ``MAVERICK_AUDIT_SIGNING_KEY`` to a raw 32-byte Ed25519 private key (hex or
 base64). It then becomes the active signer and is held IN MEMORY ONLY -- the
 private key is never written to the local key dir, so the chain's trust anchor
@@ -136,7 +136,7 @@ def _key_paths_for_id(key_id: str) -> tuple[Path, Path] | tuple[None, None]:
 # is held in memory only -- never written to the local key dir -- so the audit
 # chain's trust anchor can live in a KMS / HSM / secrets manager and be injected
 # at deploy time rather than generated-and-left on local disk. See
-# ``_injected_keypair`` and the module docstring (H29 / enterprise key custody).
+# ``_injected_keypair`` and the module docstring (enterprise key custody).
 _SIGNING_KEY_ENV = "MAVERICK_AUDIT_SIGNING_KEY"
 _INJECTED_KEYPAIR_UNREAD = object()
 _INJECTED_KEYPAIR_INVALID = object()

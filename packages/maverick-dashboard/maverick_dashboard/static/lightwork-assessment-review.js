@@ -220,7 +220,7 @@
       const memoryContext = document.querySelector?.('meta[name="lightwork-search-context"]')?.content || '';
       const memoryHeaders = memoryContext ? {'X-Lightwork-Search-Context': memoryContext} : {};
       const memory = el('div'), memoryButton = el('button', 'btn', 'Find precedent answers'), restore = el('div');
-      // AI-7: an answer the AI suggested and a person later changed can go
+      // An answer the AI suggested and a person later changed can go
       // back to the AI's original value, in the draft only, until saved.
       function aiOriginal(choice) {
         if (!choice || choice.followup || (choice.saved && choice.saved.ai_metadata)) return null;

@@ -1,4 +1,4 @@
-"""Focused governance tests for PX-16 administration document access."""
+"""Focused governance tests for administration document access."""
 
 from __future__ import annotations
 

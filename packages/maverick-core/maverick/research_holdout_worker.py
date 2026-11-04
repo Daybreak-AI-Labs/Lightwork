@@ -1,4 +1,4 @@
-"""Evaluator-custody process for F09 held-out generator families.
+"""Evaluator-custody process for held-out generator families.
 
 The parent receives only an opaque process handle and bounded equality oracle.
 Private generator parameters and reference answers stay in this process after

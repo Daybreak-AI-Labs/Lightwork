@@ -1081,7 +1081,7 @@ def shadow_execute(preview: ConsequencePreview,
                    engine: EarnedAutonomyEngine | None = None) -> ShadowResult:
     """Preview an irreversible action, gate it, then execute under the saga.
 
-    The Bet-5 centerpiece, composed from the pieces the engine already owns:
+    The centerpiece of earned autonomy, composed from the pieces the engine already owns:
 
     1. **Gate.** ``approve(card_view)`` must return truthy for this operation.
        Action-level evidence does not authorize a particular target or effect.

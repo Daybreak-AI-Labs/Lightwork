@@ -3,7 +3,7 @@
 Same transport pattern as WhatsApp: Twilio webhook -> FastAPI receiver.
 Difference is the message format (no `whatsapp:` prefix on numbers).
 
-v0.1.1 fix: now validates X-Twilio-Signature on incoming webhooks.
+Incoming webhooks must carry a valid X-Twilio-Signature.
 
 Config::
 

@@ -509,8 +509,7 @@ def _atomic_write_lines(
 ) -> None:
     """Write pre-rendered lines (each incl. its trailing newline) to ``path``
     atomically through a uniquely-named, privately-created sibling. The
-    tmp/replace/chmod scaffold used to be copy-pasted across the NDJSON writers.
-    Raises OSError on failure; callers decide how to report it."""
+    tmp/replace/chmod scaffold is shared by the NDJSON writers. Raises OSError on failure; callers decide how to report it."""
     if private_parent:
         ensure_private_directory(path.parent)
     atomic_write_text_chunks(path, lines)

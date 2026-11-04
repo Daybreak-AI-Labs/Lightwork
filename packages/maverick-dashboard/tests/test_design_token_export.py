@@ -1,4 +1,4 @@
-"""SYS-1: the design tokens are the single source of visual truth.
+"""The design tokens are the single source of visual truth.
 
 Every colour in a built-in theme's palette is defined in every theme, the
 tokens are exported in the DTCG format (docs/design-tokens.json) and the

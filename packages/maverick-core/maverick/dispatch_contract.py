@@ -1,10 +1,10 @@
 """CI gate: tool dispatch must go through an authorization gate.
 
-``Agent._run_tool`` runs eleven ordered gates before a tool executes. It is not
-the only way into the tool registry: a census found four dispatch sites and one
-gated. The live ungated one (``flow/execution.py``, bound at
-``automation_queue``) reached every registered connector -- stripe, gmail, s3,
-salesforce, sap, workday -- with a partial check and no audit row.
+``Agent._run_tool`` runs eleven ordered gates before a tool executes, and it
+must be the only way into the tool registry: an ungated dispatch site (for
+example a flow step bound at ``automation_queue``) would reach every registered
+connector -- stripe, gmail, s3, salesforce, sap, workday -- with a partial
+check and no audit row.
 
 The missing audit row is the structural problem, not just the missing checks.
 The attestation bundle asserts that *no recorded action violated the policy

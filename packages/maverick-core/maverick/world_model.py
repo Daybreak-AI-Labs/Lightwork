@@ -980,7 +980,7 @@ def _goal_from_row(row, *, at_rest: bool | None = None) -> Goal:
 
 def _goals_from_rows(rows) -> list[Goal]:
     """Build Goals from a result set with one at-rest policy and key lookup
-    per query (each sealed field used to load the key again)."""
+    per query (rather than loading the key again for each sealed field)."""
     records = [dict(row) for row in rows]
     texts: list[str | None] = []
     for d in records:
@@ -2091,9 +2091,9 @@ class WorldModel:
 
     # -- backend-portable raw reads ------------------------------------------
     # The dashboard's boards and exports need a handful of aggregate queries
-    # that have no accessor here. They used to reach into ``.conn`` directly,
-    # which only works on SQLite (``?`` paramstyle, ``sqlite3.Row``,
-    # ``date(x, 'unixepoch')``) and crashed on the Postgres backend. These two
+    # that have no accessor here. Reaching into ``.conn`` directly only works
+    # on SQLite (``?`` paramstyle, ``sqlite3.Row``, ``date(x, 'unixepoch')``)
+    # and fails on the Postgres backend. These two
     # methods are the contract both backends implement: write the SQL in
     # SQLite paramstyle and access rows by index or by column name.
 

@@ -769,7 +769,7 @@
       return {scope: {asset_ids: ticked(form, "scope_asset"), field_ids: ticked(form, "scope_field"), project_ids: ticked(form, "scope_project"), actions: ticked(form, "scope_action")}, conditions: conditions, controls: readControls()};
     }
     // What a rule would have covered in the last 30 days, from the recorded
-    // requests to use data (ADM-3). Report only; "" when it can't be worked out.
+    // requests to use data. Report only; "" when it can't be worked out.
     async function rulePreviewText(doc) {
       try {
         var data = await call("/policies/preview", {method: "POST", json: {document: doc}});

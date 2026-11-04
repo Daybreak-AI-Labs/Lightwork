@@ -1,4 +1,4 @@
-"""Help sits in the same place in both shells (HLP-1, WCAG 3.2.6).
+"""Help sits in the same place in both shells (WCAG 3.2.6).
 
 Both shells put Help in the top bar, in one shared cluster: Docs, Help,
 Display, Account, Sign out. The chat shell used to put it at the bottom of its

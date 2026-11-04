@@ -177,7 +177,7 @@ def test_oidc_opaque_subject_is_bound_exactly_without_path_interpolation(monkeyp
 
 
 def _answer(reply):
-    """The goal's answer, without the agent-written label channels append (AI-2)."""
+    """The goal's answer, without the agent-written label channels append."""
     answer, label = reply.rsplit("\n\n", 1)
     assert label.startswith("-- Written by an agent in Lightwork.")
     return answer

@@ -1,4 +1,4 @@
-"""Bulk work on the admin lists (ADM-7).
+"""Bulk work on the admin lists.
 
 The six admin lists (people, agents, tool policies, approvals, privacy
 requests and saved test questions) each offer filter, select all matching,

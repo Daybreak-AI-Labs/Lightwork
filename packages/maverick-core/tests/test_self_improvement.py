@@ -807,7 +807,7 @@ def test_consider_promotes_when_enabled(tmp_path, monkeypatch):
     assert v.ok
 
 
-# -- capability evidence on the receipt (Bet 1 claim 2 made checkable) ------
+# -- capability evidence on the receipt (bounded self-improvement, checkable) --
 #
 # The capability gate always refused a widening change, but the durable receipt
 # did not record WHAT the gate concluded -- so a third party reading the ledger

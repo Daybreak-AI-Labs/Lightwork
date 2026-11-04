@@ -1,4 +1,4 @@
-"""When each compliance protection was last checked, and its history (ADM-6).
+"""When each compliance protection was last checked, and its history.
 
 The control-coverage report (:func:`maverick.compliance.compliance_report`)
 is worked out from the live configuration every time it is read. This keeps

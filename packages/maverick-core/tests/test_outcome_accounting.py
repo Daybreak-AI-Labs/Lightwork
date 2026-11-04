@@ -1,4 +1,4 @@
-"""F05 acceptance for append-only outcome, evidence, and cost accounting."""
+"""Acceptance tests for append-only outcome, evidence, and cost accounting."""
 from __future__ import annotations
 
 import pickle

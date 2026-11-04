@@ -141,8 +141,8 @@ class CircuitBreaker:
                 )
             if self._state is CircuitState.HALF_OPEN:
                 # Let exactly ONE caller probe the dependency; everyone else
-                # fast-fails (the old code admitted ALL concurrent callers in
-                # HALF_OPEN, re-storming the dead service on cooldown expiry).
+                # fast-fails (admitting ALL concurrent callers in HALF_OPEN
+                # would re-storm the dead service on cooldown expiry).
                 if self._probe_in_flight:
                     raise CircuitOpen(
                         f"circuit {self.key!r} HALF_OPEN: a probe is already in flight"

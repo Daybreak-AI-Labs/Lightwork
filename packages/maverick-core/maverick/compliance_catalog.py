@@ -101,11 +101,11 @@ _SUITES: tuple[Suite, ...] = (
             "agent, with governed agents doing the work."
         ),
         modules=(
-            # PX-15 Implemented: packaged governance agents over common context.
+            # Packaged governance agents over common context.
             Module("Governance Agents", "/governance-agents", STATUS_SHIPPED),
-            # AG-27 Implemented: review/remediation tasks tied to AI entities.
+            # Review/remediation tasks tied to AI entities.
             Module("AI Entity Tasks", "/ai-entity-tasks", STATUS_SHIPPED),
-            # TRC-24 Partial: parser sandbox unproven on the shipped host.
+            # Preview: the parser sandbox is unproven on the shipped host.
             Module("AI Evidence Analysis", "/ai-evidence-analysis", STATUS_PREVIEW),
         ),
     ),
@@ -117,15 +117,15 @@ _SUITES: tuple[Suite, ...] = (
             "orchestration, notices and California DROP."
         ),
         modules=(
-            # PA-03 / PA-07 Implemented: privacy program and assessments.
+            # Privacy program and assessments.
             Module("Privacy Workspace", "/privacy", STATUS_SHIPPED),
-            # PA-14 Implemented: automated retrieval/deletion/verification.
+            # Automated retrieval/deletion/verification.
             Module("Rights Orchestration", "/privacy/rights-orchestration", STATUS_SHIPPED),
-            # PA-04 / PA-05 Partial: no continuously operated live estate.
+            # Preview: no continuously operated live estate.
             Module("Data Discovery", "/privacy/data-discovery", STATUS_PREVIEW),
-            # PA-11 Implemented: notice-to-active-configuration publishing.
+            # Notice-to-active-configuration publishing.
             Module("Notice Governance", "/privacy/notice-governance", STATUS_SHIPPED),
-            # PA-21 Implemented: California DROP control plane.
+            # California DROP control plane.
             Module("DROP Requests", "/privacy/drop", STATUS_SHIPPED),
             # Public rights-request form with email verification and
             # verified per-jurisdiction clocks.
@@ -140,13 +140,13 @@ _SUITES: tuple[Suite, ...] = (
             "immutable receipts and a governed preference center."
         ),
         modules=(
-            # CP-10 / CP-14 Implemented: receipts and preference collection.
+            # Receipts and preference collection.
             Module("Consent & Preferences", "/consent", STATUS_SHIPPED),
-            # CP-06 Partial: native/deployed CMP breadth unproven.
+            # Preview: native/deployed CMP breadth unproven.
             Module("Consent Publishing", "/consent/publishing", STATUS_PREVIEW),
-            # CP-25 Implemented: Global Opt-Out DSAR application workflow.
+            # Global Opt-Out DSAR application workflow.
             Module("Global Opt-Out", "/consent/global-opt-out", STATUS_SHIPPED),
-            # CP-07 / CP-11 Partial: no consenting live estate scanned.
+            # Preview: no consenting live estate scanned.
             Module("Scan Inventory", "/consent/scan-inventory", STATUS_PREVIEW),
         ),
     ),
@@ -158,13 +158,13 @@ _SUITES: tuple[Suite, ...] = (
             "compliance across the estate."
         ),
         modules=(
-            # TRC-01 / TRC-03 Implemented: scoping and control library.
+            # Scoping and control library.
             Module("Compliance Workspace", "/compliance", STATUS_SHIPPED),
-            # TRC-06 / TRC-19 Partial: no live provider tenant contacted.
+            # Preview: no live provider tenant contacted.
             Module("Continuous Evidence", "/compliance/continuous-evidence", STATUS_PREVIEW),
-            # AG-19 Partial: readiness code without regulator acceptance.
+            # Preview: readiness code without regulator acceptance.
             Module("AI Governance (EU AI Act)", "/security/governance", STATUS_PREVIEW),
-            # PA-08 / TPM-06 Implemented: evidence-to-assessment proposals.
+            # Evidence-to-assessment proposals.
             Module("Assessment Evidence", "/assess/evidence-autopopulation", STATUS_SHIPPED),
         ),
     ),
@@ -176,11 +176,11 @@ _SUITES: tuple[Suite, ...] = (
             "lifecycle, with contracts and engagements of record."
         ),
         modules=(
-            # TPM-04 / TPM-12 Partial: reference contracts, no live feeds.
+            # Preview: reference contracts, no live feeds.
             Module("Third-Party Intelligence", "/third-party/intelligence", STATUS_PREVIEW),
-            # TPM-01 Implemented: provider-neutral lifecycle path.
+            # Provider-neutral lifecycle path.
             Module("Third-Party Lifecycle", "/third-party/lifecycle", STATUS_SHIPPED),
-            # TPM-22 Implemented: Contract and Engagement entity lifecycle.
+            # Contract and Engagement entity lifecycle.
             Module("Contracts & Engagements", "/third-party/contracts", STATUS_SHIPPED),
         ),
     ),
@@ -192,9 +192,9 @@ _SUITES: tuple[Suite, ...] = (
             "data-use controls native to modern data platforms."
         ),
         modules=(
-            # DUG-01/03/04/05 Implemented: authority and policy compiler.
+            # Authority and policy compiler.
             Module("Data Use Governance", "/data-use", STATUS_SHIPPED),
-            # DUG-10 Partial: no live Snowflake/Databricks tenant accepted.
+            # Preview: no live Snowflake/Databricks tenant accepted.
             Module("Native Data Controls", "/data-use/providers", STATUS_PREVIEW),
         ),
     ),

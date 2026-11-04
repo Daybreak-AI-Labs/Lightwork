@@ -1,12 +1,11 @@
 """One tolerant alias-headed CSV reader for every governed importer.
 
 Four importers (OneTrust RoPA, OneTrust vendors, OneTrust consents, the
-warehouse ``information_schema`` export) previously each re-implemented
-the same loop — lowercase the headers, resolve per-field aliases, bound
-the rows — and each inherited the same two crashes: overflow cells land
-under ``csv.DictReader``'s ``None`` key as a LIST (so ``.strip()``
-raised), and ``csv.Error`` (NUL bytes, oversized fields) escaped as a
-500. This module is the one home for that loop, with both failure modes
+warehouse ``information_schema`` export) share the same loop — lowercase
+the headers, resolve per-field aliases, bound the rows — and the same two
+failure modes: overflow cells land under ``csv.DictReader``'s ``None`` key
+as a LIST (so ``.strip()`` would raise), and ``csv.Error`` (NUL bytes,
+oversized fields) would escape as a 500. This module is the one home for that loop, with both failure modes
 handled: malformed cells are ignored, and unparseable CSV raises a clean
 ``ValueError`` the API layer maps to 422.
 """

@@ -30,7 +30,7 @@ DEFAULT_DISCLOSURE = (
 _UNSET = object()
 
 # The mark under every agent-written answer Lightwork sends to a chat app or by
-# email (AI-2). Unlike the first-turn disclosure it is on every answer and
+# email. Unlike the first-turn disclosure it is on every answer and
 # cannot be turned off; it says where to see how the answer was made.
 AI_ANSWER_LABEL = "Written by an agent in Lightwork. AI can make mistakes, so check important facts."
 

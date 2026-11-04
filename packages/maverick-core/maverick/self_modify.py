@@ -1,6 +1,6 @@
 """Governed code self-modification: the editable-surface boundary + code rung.
 
-This is Phase 1 of a governed Darwin-Gödel-Machine-style capability (DGM,
+This is the boundary of a governed Darwin-Gödel-Machine-style capability (DGM,
 arXiv:2505.22954): a system that proposes changes to *its own code* and validates
 them empirically. The DGM insight is empirical validation instead of proof; we
 run it **under a reference monitor**. The current operable posture is research:

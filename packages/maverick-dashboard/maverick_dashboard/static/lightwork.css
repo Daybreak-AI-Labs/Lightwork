@@ -1,4 +1,4 @@
-/* Lightwork dashboard stylesheet. Extracted from templates/base.html so the
+/* Lightwork dashboard stylesheet. Kept apart from templates/base.html so the
    shell template stays markup; served by GET /static/lightwork.css. Custom
    operator themes ([dashboard] themes) remain inlined by base.html because
    they are rendered per-request from config.
@@ -766,7 +766,7 @@
     .halt-banner__text { flex: 1 1 16rem; min-width: 0; }
     .halt-banner .btn.halt-banner__resume { background: var(--danger-fg); color: var(--danger); border-color: var(--danger-fg); }
     .chat-shell .halt-banner { border-radius: 0; }
-    /* ONB-4: the practice marker. The banner says what practice means; the
+    /* The practice marker. The banner says what practice means; the
        stripe along the top of the window stays visible while scrolling. */
     .practice-banner {
       display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap;
@@ -2099,7 +2099,7 @@ body.glass-on:not(.theme-hicontrast) .settings-index { backdrop-filter: blur(22p
 .settings-all-link { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
 @media (max-width: 720px) { .settings-index { grid-template-columns: 1fr; } }
 @media (prefers-reduced-transparency: reduce) { .settings-index { backdrop-filter: none; -webkit-backdrop-filter: none; background: var(--panel); } }
-/* Touch screens and phones (MOB-2). Primary controls get a hit area of at
+/* Touch screens and phones. Primary controls get a hit area of at
    least 44 x 44 px, and text fields use 16 px text so phone browsers do not
    zoom the page when a field is focused. `body` raises the specificity above
    the page stylesheets that size these controls after this file loads; the

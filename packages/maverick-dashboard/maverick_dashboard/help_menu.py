@@ -42,7 +42,7 @@ def context(request) -> dict:
 
 
 def service_notices(request) -> list[dict]:
-    """CTL-5 banners beside the AI one: connections this person's work can't
+    """Service banners beside the AI one: connections this person's work can't
     use right now, and a read-only database. Never breaks a page."""
     from maverick.service_status import connector_notice, database_notice
 

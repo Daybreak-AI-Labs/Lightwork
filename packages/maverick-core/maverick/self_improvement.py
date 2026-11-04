@@ -1,11 +1,9 @@
 """Governed self-improvement: the promotion ladder that makes learning *safe*.
 
-Lightwork already *learns* in several places (skills, reflexions, dreams,
-config evolution). What it lacks is a single governed gate that decides whether
-a proposed self-change is allowed to take effect -- and that is the whole moat.
-A frontier lab can train a better policy; what it will not ship into a bank is a
-system that rewrites *itself* in production. The defensible asset is not the
-learning, it is the **interlocks that make self-modification deployable**: a
+Lightwork *learns* in several places (skills, reflexions, dreams, config
+evolution). This module is the single governed gate that decides whether a
+proposed self-change is allowed to take effect. A system that rewrites
+*itself* in production is deployable only with **interlocks**: a
 change may take effect only if it (a) measurably beats its own baseline, (b)
 never widens the capability envelope, (c) is approved by a human at the rungs
 that touch tools/code/weights, (d) is reversible, and (e) is refused outright
@@ -245,7 +243,7 @@ class PromotionRecord:
     approver_id: str | None = None
     payload_sha256: str | None = None
     approval_signature: str | None = None
-    # Exact actual-payload binding used to re-read Model Risk authority at the
+    # Exact actual-payload binding, used to re-read Model Risk authority at the
     # artifact-application, COMMIT, and crash-recovery boundaries.  This is
     # separate from ``payload_sha256`` because that legacy field exists only
     # when an Ed25519 human-approval signature is present.
@@ -650,7 +648,7 @@ class SelfImprovementController:
         if valid_scores and valid_samples and valid_effect and valid_margin:
             gates.append(GateResult("evidence", ev_ok, ev_reason))
 
-        # 3. Capability non-escalation -- the core safety property of the moat.
+        # 3. Capability non-escalation -- the core safety property of the gate.
         widens, cap_method, cap_probes = _capability_assessment(cand)
         cap_evidence = _capability_evidence_label(widens, cap_method)
         needs_cap = bool(policy["require_capability_evidence"])
@@ -1290,7 +1288,7 @@ class SelfImprovementController:
         # signature from the ledger alone. ``verdict.approver_id`` is the key-id
         # that actually satisfied the human-approval gate (reused, not
         # recomputed). No signature (dev/community boolean path) => all None, so
-        # the record is byte-for-byte what it was before this change.
+        # the record carries no signature fields.
         try:
             halt_reason = self._halt_reason("promotion")
             if halt_reason is not None:

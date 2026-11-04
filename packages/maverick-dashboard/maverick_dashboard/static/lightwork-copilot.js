@@ -204,7 +204,7 @@
     rememberRecent(question, reply, token);
   }
 
-  // AI-13: suggestions shown, used and left unused (only while usage measures are on).
+  // Suggestions shown, used and left unused (only while usage measures are on).
   var shownSuggestions = [];
   function measure(item, event) { if (typeof window.mvSuggestion === "function") window.mvSuggestion("copilot-question", item, event); }
 

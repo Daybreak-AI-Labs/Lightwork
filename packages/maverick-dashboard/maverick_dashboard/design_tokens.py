@@ -1,5 +1,5 @@
 """The design tokens in lightwork.css, exported in the Design Tokens
-Community Group format (DTCG, https://www.designtokens.org/) (SYS-1).
+Community Group format (DTCG, https://www.designtokens.org/).
 
 lightwork.css is the single source of truth. This reads it and writes
 ``docs/design-tokens.json`` so design tools and other surfaces (email,

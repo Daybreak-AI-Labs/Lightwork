@@ -1,7 +1,7 @@
 """Single source of truth for reading the tamper-evident audit NDJSON log.
 
-Three read-side consumers used to each re-implement the same three steps with
-ad-hoc globs and filename literals:
+Three read-side consumers share the same three steps here instead of each
+re-implementing them with ad-hoc globs and filename literals:
 
   - :mod:`maverick.audit.export` (SIEM export / ``maverick audit export``),
   - :mod:`maverick.dsar` (GDPR Art. 15/20 subject-access export),

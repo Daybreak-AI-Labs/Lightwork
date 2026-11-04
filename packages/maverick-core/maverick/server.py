@@ -190,8 +190,8 @@ def _reclaim_tenant_orphans() -> int:
 
 
 def _completed_reply(completed, goal_id: int, channel: str = "") -> str:
-    """A finished task's reply: an agent-written answer carries the AI mark
-    (AI-2); a stop or failure message is the product's own words."""
+    """A finished task's reply: an agent-written answer carries the AI mark;
+    a stop or failure message is the product's own words."""
     if completed.status != "done":
         return completed.result
     from .compliance import label_ai_answer

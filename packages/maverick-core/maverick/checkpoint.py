@@ -1,13 +1,13 @@
-"""Durable execution — Phase 1: linear single-agent crash-resume.
+"""Durable execution: linear single-agent crash-resume.
 
-Design: ``docs/specs/durable-execution.md``. This is the smallest shippable
-slice of that spec — checkpoint a single (non-spawning) agent's loop state at
-the turn boundary and resume it from the last committed step after a crash,
-instead of re-running from step 0 (today's warm-restart behavior).
+Checkpoints a single (non-spawning) agent's loop state at the turn boundary
+and resumes it from the last committed step after a crash, instead of
+re-running from step 0 (the warm-restart behavior).
 
-Scope of Phase 1 (intentionally narrow):
+Scope (intentionally narrow):
   - One agent (the orchestrator / a depth-0 agent that doesn't fan out). The
-    swarm-tree case (spawn_swarm concurrency, per-child records) is Phase 2.
+    swarm-tree case (spawn_swarm concurrency, per-child records) is not
+    checkpointed.
   - Checkpoints the resumable loop state: step index, the LLM ``messages``
     history, and a Budget snapshot (spent counters).
   - Append-only ``checkpoints`` table keyed by (goal_id, episode_id, agent_id, step_seq),
@@ -297,13 +297,13 @@ class Checkpointer:
                 (json.dumps(snapshot, allow_nan=False), goal_id, episode_id),
             )
 
-    # ----- rewind / fork support (spec §4, G2) -----
+    # ----- rewind / fork support -----
 
     def orchestrator_for(self, goal_id: int, *, episode_id: int | None = None,
                          required: bool = False) -> tuple[str, int] | None:
         """``(agent_id, episode_id)`` of the goal's newest checkpoint.
 
-        Phase 1 only checkpoints the depth-0 root, so the newest checkpoint's
+        Only the depth-0 root is checkpointed, so the newest checkpoint's
         agent is the orchestrator — the node ``rewind`` operates on."""
         if goal_id is None or not self._ensure():
             if required:
@@ -417,7 +417,7 @@ class RewindResult:
 
 
 def rewind(world: Any, goal_id: int, to_step: int, *, fork: bool = False) -> RewindResult:
-    """Restart a goal from an earlier checkpoint (spec §4, G2).
+    """Restart a goal from an earlier checkpoint.
 
     Without ``fork``: drop the checkpoints after ``to_step`` and re-block the
     goal so ``maverick resume`` continues from there. With ``fork``: copy the
@@ -425,7 +425,7 @@ def rewind(world: Any, goal_id: int, to_step: int, *, fork: bool = False) -> Rew
     role keys the same ``checkpoint_id``), leaving the original intact — "go back
     to step N and try a different branch."
 
-    Builds only on the shipped Phase-1 per-step checkpoints (no swarm-tree
+    Builds only on the per-step root checkpoints (no swarm-tree
     concurrency). Never raises; returns a structured result.
     """
     ck = Checkpointer(world)

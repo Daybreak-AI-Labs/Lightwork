@@ -1,4 +1,4 @@
-"""DGM lineage archive for governed code self-modification (Phase 3).
+"""DGM lineage archive for governed code self-modification.
 
 The Darwin-Gödel-Machine insight (arXiv:2505.22954) that beats naive hill-climbing
 is an **archive of diverse ancestors** — including *worse* ones — so the search
@@ -18,7 +18,7 @@ partitioned; dedicated development harnesses may use an isolated archive.
 
 Posture: this module is a passive datastore with no side effects beyond the file
 it is told to persist to. It does not read config, does not gate, and is a no-op
-unless the Phase-4 loop (which IS off by default) constructs and feeds it. The
+unless the research loop (which IS off by default) constructs and feeds it. The
 store lives under the maverick data dir with owner-only permissions.
 """
 from __future__ import annotations

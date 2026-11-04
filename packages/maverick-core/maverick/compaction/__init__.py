@@ -39,8 +39,8 @@ from typing import Protocol, runtime_checkable
 
 # Tunables.
 def _env_int(name: str, default: int, key: str = "") -> int:
-    # A non-numeric env value used to raise ValueError at import, killing the
-    # compaction path with an opaque traceback instead of using the default.
+    # A non-numeric env value falls back to the default instead of raising
+    # ValueError at import and killing the compaction path.
     # With ``key`` the value may also come from ``[compaction] <key>`` (read
     # once at startup); the environment still wins.
     if key:

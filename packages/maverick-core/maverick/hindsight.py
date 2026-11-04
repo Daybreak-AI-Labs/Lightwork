@@ -3,9 +3,9 @@
 The learning loops add AND remove knowledge -- dreaming distills skills,
 promotes insights, but also retires skills, expires insights, and prunes
 reflexions. Removal is where a learning system silently regresses: a lesson
-that used to be recalled for a class of goal quietly stops being recalled,
-and nothing tells you. This module answers the question no agent platform
-answers today -- "did our own learning make us worse anywhere, and where?"
+that was recalled for a class of goal quietly stops being recalled, and
+nothing tells you. This module answers "did our own learning make us worse
+anywhere, and where?"
 
 It does NOT re-run agents (that needs an LLM and isn't reproducible).
 Instead it measures *coverage*: for a historical goal, does a learned-state

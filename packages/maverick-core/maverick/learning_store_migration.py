@@ -106,7 +106,7 @@ def migrate_learning_files() -> dict[str, int] | None:
 
 
 def migrate_corpus() -> dict[str, int] | None:
-    """Phase 2: the eval corpus family rides the same move when configured."""
+    """The eval corpus family rides the same move when configured."""
     from . import self_harness as sh
     cpath = sh.settings().get("eval_corpus")
     if not cpath:

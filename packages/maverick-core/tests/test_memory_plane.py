@@ -1,6 +1,6 @@
-"""Tests for the Institutional Memory plane attestation (moonshot Bet 2).
+"""Tests for the Institutional Memory plane attestation.
 
-The cross-vendor property is the moat, and it is the easiest thing here to
+The cross-vendor property is the point, and it is the easiest thing here to
 oversell: a plane with one vendor connected has demonstrated nothing, and a
 plane whose records cannot be attributed has demonstrated less than nothing.
 Most of these tests pin the gradings that refuse to claim it.
@@ -119,7 +119,7 @@ class _World:
         return [_Episode(c, "success", float(i)) for i, c in enumerate(costs)]
 
 
-# ---- the cross-vendor claim: the moat, and the easiest thing to oversell ----
+# ---- the cross-vendor claim: the easiest thing to oversell ------------------
 
 def test_one_vendor_is_not_cross_vendor(fleet):
     """A pass here would sell the one property the model vendors structurally
@@ -185,7 +185,7 @@ def test_a_disabled_plane_reports_its_totals_as_historical(fleet):
     assert any("switched off" in n for n in claim.notes)
 
 
-# ---- the compounding claim: the un-fakeable moat proof ----------------------
+# ---- the compounding claim: it must not be fakeable --------------------------
 
 def test_too_few_runs_is_unproven_not_absent_improvement(fleet):
     claim = _claim(_verify(_bundle()), "compounding")
@@ -258,7 +258,7 @@ def test_the_tenant_root_is_published_as_a_digest_not_a_path(fleet):
     assert "/" not in json.dumps(binding)
 
 
-# ---- the shared trust anchor (Bet 1's spine) --------------------------------
+# ---- the trust anchor shared with the platform attestation -----------------
 
 def test_verification_fails_closed_without_a_trust_anchor(fleet):
     result = mp.verify(_bundle(), trusted_key_hex="")
@@ -283,7 +283,7 @@ def test_an_unsigned_bundle_is_refused(fleet):
 
 
 def test_a_foreign_kind_is_not_mistaken_for_a_memory_attestation(fleet):
-    """The Bet 1 attestation and this one share a spine, not an identity."""
+    """The platform attestation and this one share a spine, not an identity."""
     from maverick import attestation
     other = attestation.sign(attestation.build(now=1.0))
     result = mp.verify(other, trusted_key_hex=_key())
@@ -363,7 +363,7 @@ def test_a_vendor_that_is_not_on_the_roster_does_not_count(fleet):
 def test_negative_costs_cannot_manufacture_a_compounding_curve(fleet):
     """`improving` is a bare warm < cold comparison, which episodes logged at
     -$1e9 and -$1e12 satisfy beautifully. The claim's whole value is being the
-    un-fakeable half of the moat."""
+    un-fakeable half of the attestation."""
     world = _World([("finance", [-1e9] * 3 + [-1e12] * 3)])
     curves = mp.compounding_by_department(world)
     assert curves and curves[0].improving is False

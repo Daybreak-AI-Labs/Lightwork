@@ -1,4 +1,4 @@
-// Routine edits under a slow phone network (gold rubric SPD-4). A measurement,
+// Routine edits under a slow phone network. A measurement,
 // not a test: it records numbers and fails nothing. Not run by `npm test`.
 //
 //   node measure_routine_edits.js --base http://127.0.0.1:8765 [--out edits.json]

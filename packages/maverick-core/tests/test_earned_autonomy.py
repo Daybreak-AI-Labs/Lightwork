@@ -1,4 +1,4 @@
-"""Earned Autonomy (moonshot Bet 5): consequence cards, the predicted-vs-actual
+"""Earned Autonomy: consequence cards, the predicted-vs-actual
 join, evidence-driven graduation/demotion, the saga, and the agent wiring."""
 from __future__ import annotations
 

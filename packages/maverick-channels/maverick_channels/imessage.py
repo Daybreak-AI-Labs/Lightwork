@@ -12,12 +12,11 @@ Config::
     enabled = true
     poll_interval = 5
 
-v0.1.1 fix: send() previously did `osascript -e 'send "%s" to buddy "%s"'`
-with naive escaping (only replaced `"` -> `\\"`), so LLM-controlled
-message text containing `;`, `\\n`, or `$` could break out of the
-string literal and execute arbitrary AppleScript / shell. The send
-path now passes the script via stdin and the user-supplied text +
-handle as positional argv to a parameterized `on run argv` script.
+send() never interpolates message text into AppleScript source: escaping
+alone would let LLM-controlled text containing `;`, `\\n`, or `$` break out
+of a string literal and execute arbitrary AppleScript / shell. The send
+path passes the script via stdin and the user-supplied text + handle as
+positional argv to a parameterized `on run argv` script.
 AppleScript treats argv items as literal strings -- no interpolation.
 """
 from __future__ import annotations

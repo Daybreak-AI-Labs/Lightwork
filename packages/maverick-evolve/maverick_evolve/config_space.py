@@ -1,4 +1,4 @@
-"""The mutable configuration space for Stage 1 evolution.
+"""The mutable configuration space for config-only evolution.
 
 Defines which Lightwork knobs an evolution run is allowed to perturb -- and ONLY
 configuration (workflow params, thresholds, counts), never code, so a candidate

@@ -1,4 +1,4 @@
-"""Main and destructive buttons say exactly what will happen (TXT-2).
+"""Main and destructive buttons say exactly what will happen.
 
 Every ``btn--primary`` and ``btn--danger`` button or link in the dashboard
 templates is labelled with a verb and what it acts on ("Save agent", "Delete

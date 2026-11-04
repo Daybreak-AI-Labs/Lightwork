@@ -248,8 +248,8 @@ def _world():
     # Backend selection (split-brain fix): when the deployment opts into Postgres
     # ([world_model] backend = "postgres" / MAVERICK_WORLD_BACKEND=postgres), the
     # dashboard must read/write the SAME Postgres the runner, channel server and
-    # gRPC API use. Previously this always opened SQLite, so a Postgres
-    # deployment had the dashboard reading a stale local world.db. Checked before
+    # gRPC API use; always opening SQLite would leave a Postgres deployment's
+    # dashboard reading a stale local world.db. Checked before
     # the tenant floor because Postgres isolates by tenant_id at query time, not
     # by a per-tenant file. open_postgres_world() builds a fresh connection per
     # call, so cache the one backend for the process under a fixed key.

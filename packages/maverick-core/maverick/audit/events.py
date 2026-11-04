@@ -381,7 +381,7 @@ class EventKind:
     EVIDENCE_CAPTURE = "evidence_capture"
     # Human-oversight decision on a parked approval (approve/deny). Anchors the
     # who-decided-what in the signed chain so the integrity of the decision does
-    # not rest on the mutable world-model `approvals` row alone (audit H28).
+    # not rest on the mutable world-model `approvals` row alone.
     # payload: approval_event_id:str (stable transactional-outbox identity),
     # approval_id:int, status:str (approved|denied), decided_by:str,
     # occurred_at:float (when the vote and outbox row committed).

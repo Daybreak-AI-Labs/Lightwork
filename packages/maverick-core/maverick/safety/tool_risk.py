@@ -83,8 +83,8 @@ _DEFAULT_RISK: dict[str, str] = {
     # Bounded native goal-local memory/link records, without an external effect.
     "kv_memory": "medium", "remember_outcome_key": "medium",
     # high: mutate external state / money / send messages / drive infra or a
-    # device / recursively spawn. These used to fall through to the "medium"
-    # default, so a max_risk="medium" channel ceiling failed to drop them.
+    # device / recursively spawn. Listed explicitly so they do not fall through
+    # to the "medium" default, which a max_risk="medium" ceiling would admit.
     "sql_query": "high",
     "lambda": "high",
     "cloudflare": "high",

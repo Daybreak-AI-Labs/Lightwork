@@ -478,8 +478,8 @@
         field.removeAttribute('aria-invalid');
         field.setAttribute('aria-describedby', help);
       });
-      // "Stop a task when it has spent" needs an amount; empty used to fall
-      // back to the standard limits without saying so.
+      // "Stop a task when it has spent" needs an amount; an empty one would
+      // fall back to the standard limits without saying so.
       if (field.form) field.form.addEventListener('mv:validate', function (event) {
         var mode = field.form.querySelector('input[name="mode"]:checked');
         if (mode && mode.value === 'configured' && !field.value.trim()) {

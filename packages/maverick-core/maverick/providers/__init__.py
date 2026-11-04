@@ -65,8 +65,8 @@ def get_provider_client(
     AND the OpenAI-translated cloud vendors (openrouter, gemini, moonshot,
     deepseek, xai — each defaults to its vendor endpoint when unset) so a
     ``[providers.<name>] base_url`` in config actually configures the
-    endpoint — previously only the CLI preflight read that key and the client
-    silently fell back to its env var / vendor / localhost default.
+    endpoint, instead of the client silently falling back to its env var /
+    vendor / localhost default.
 
     ``default_headers`` (from ``[providers.<name>] default_headers``) is a
     data-residency / ZDR control: extra HTTP headers attached to every request
@@ -218,8 +218,8 @@ def missing_sdks(model_specs) -> list[str]:
     """Actionable messages for provider SDKs the given model specs need but
     that aren't importable. Empty list == everything resolvable.
 
-    Lets `maverick start` refuse BEFORE creating a goal row: a missing SDK
-    used to surface mid-run, orphaning a failed $0 goal per attempt.
+    Lets `maverick start` refuse BEFORE creating a goal row, so a missing SDK
+    does not surface mid-run and orphan a failed $0 goal per attempt.
     find_spec locates a package without executing it, so this is cheap and
     side-effect free. Unknown providers are skipped (get_provider_client
     raises its own clearer error later).

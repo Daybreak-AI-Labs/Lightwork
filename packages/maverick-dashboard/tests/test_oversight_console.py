@@ -286,7 +286,7 @@ def test_oversight_audit_events_are_owner_scoped(monkeypatch, tmp_path):
     text = _client().get("/oversight", headers=_as("alice")).text
 
     # Even owned audit rows are metadata; exact source-task links remain scoped.
-    # The acting agent's identifier is metadata (ADM-5); its tool stays private.
+    # The acting agent's identifier is metadata; its tool stays private.
     lowered = text.lower()
     assert "alice.agent.internal" in lowered
     assert "alice secret tool" not in lowered and "alice-secret-tool" not in lowered

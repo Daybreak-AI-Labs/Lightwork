@@ -80,15 +80,15 @@ _KEYID_BYTES = 8             # short key fingerprint embedded in v2 blobs
 # On-disk key location. ``_KEY_PATH`` is an OVERRIDE (tests pin it to a tmp
 # dir; an operator could too); ``None`` -- the production default -- means
 # "resolve <home>/keys/at_rest.key for the DEPLOYMENT when asked" via
-# :func:`_key_path`. This used to be ``_KEY_PATH = data_dir(...)`` evaluated
-# at import, which ran ``data_dir()`` DURING import: it resolves the tenant
+# :func:`_key_path`. Evaluating ``_KEY_PATH = data_dir(...)`` at import would
+# run ``data_dir()`` DURING import: it resolves the tenant
 # through the client binding, which loads config, which -- when the dashboard
 # overlay holds a sealed value -- imports THIS module to open it. With the
-# import still in progress that raised "cannot import name
+# import still in progress that raises "cannot import name
 # 'deployment_key_scope' from partially initialized module" on the very first
-# ``data_dir()`` call of a fresh process, and every production task exited
-# before it could listen (2026-09-10). Nothing may touch the data directory at
-# import time here.
+# ``data_dir()`` call of a fresh process, and every production task exits
+# before it can listen. Nothing may touch the data directory at import time
+# here.
 #
 # The key is one per deployment, not one per request tenant. The old
 # import-time binding always landed before any request scope existed, so every

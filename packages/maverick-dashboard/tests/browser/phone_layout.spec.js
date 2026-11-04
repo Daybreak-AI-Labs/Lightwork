@@ -1,12 +1,12 @@
-// Phones, zoom and covered focus (gold rubric MOB-1, MOB-2, MOB-3, A11Y-2).
-// - MOB-2: on a 375 px touch screen the primary controls are 44 x 44 px or
+// Phones, zoom and covered focus.
+// - On a 375 px touch screen the primary controls are 44 x 44 px or
 //   larger and text fields use 16 px text (so the page does not zoom on focus).
-// - MOB-1: at 320 px nothing scrolls sideways; with text alone at 200% and on
+// - At 320 px nothing scrolls sideways; with text alone at 200% and on
 //   a phone turned sideways (844 x 390) nothing scrolls sideways either, and
 //   no page locks the orientation.
-// - MOB-3: on a 390 px phone, My work shows "Decide by" and "Waiting on" for
+// - On a 390 px phone, My work shows "Decide by" and "Waiting on" for
 //   every waiting decision inside the screen.
-// - A11Y-2 (WCAG 2.4.11): moving through Tasks with Tab, no focused control is
+// - WCAG 2.4.11: moving through Tasks with Tab, no focused control is
 //   hidden behind the floating Copilot button or another fixed control.
 const {test,expect}=require('@playwright/test');
 

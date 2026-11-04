@@ -1594,7 +1594,7 @@ def test_overlapping_holdout_views_share_one_ledger_study_budget(tmp_path):
         },
     )
     # This unit test targets study/final-set identity. Docker completion is
-    # covered by the opt-in F08 isolation acceptance test.
+    # covered by the opt-in evaluator-isolation acceptance test.
     authorize._finish_pending = lambda: True
     authorize._declared_cost = lambda: EvaluationCost(provider_calls=10_000)
 

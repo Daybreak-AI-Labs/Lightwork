@@ -155,8 +155,8 @@ class Shield:
         self.fail_closed = bool(fail_closed) or profile == "strict"
         # Per-sink enable flags ([safety] scan_input/scan_tool_calls/
         # scan_output). Enforced centrally here so every call site honors the
-        # config — previously these keys existed but no consumer read them, so
-        # a user who set scan_tool_calls=false got no effect. All default True;
+        # config, so a user who sets scan_tool_calls=false gets that effect at
+        # every call site. All default True;
         # disabling a sink is the user's explicit choice on their own instance.
         self._scan_input_enabled = scan_input
         self._scan_tool_calls_enabled = scan_tool_calls
@@ -263,11 +263,11 @@ class Shield:
         return self._scan_failure(sink) if self.fail_closed else ShieldVerdict.allow()
 
     def _scan_via_backend(self, text: str) -> ShieldVerdict:
-        # Coerce non-str input to text BEFORE scanning. Previously a bytes /
-        # dict / None payload made the builtin regex `re.search` raise
-        # TypeError, which the except-clauses below swallowed into a fail-OPEN
-        # allow -- so `scan_input(b"ignore all previous instructions")` slipped
-        # a live payload straight through. Decode/stringify so the content is
+        # Coerce non-str input to text BEFORE scanning. A bytes / dict / None
+        # payload would make the builtin regex `re.search` raise TypeError,
+        # which the except-clauses below would swallow into a fail-OPEN allow
+        # -- so `scan_input(b"ignore all previous instructions")` would slip a
+        # live payload straight through. Decode/stringify so the content is
         # actually inspected.
         if not isinstance(text, str):
             if isinstance(text, (bytes, bytearray)):
@@ -293,8 +293,7 @@ class Shield:
             if not verdict.allowed:
                 return verdict
             # An SDK allow (or optional SDK outage) cannot weaken the local
-            # floor. Previously only decoded variants received this check,
-            # leaving literal attacks uncovered under an allowing SDK.
+            # floor: literal attacks get this check, not only decoded variants.
             floor = self._scan_builtin_floor(text)
             floor.scan_error = floor.scan_error or verdict.scan_error
             floor.reasons = verdict.reasons + floor.reasons
@@ -314,16 +313,15 @@ class Shield:
         if not self._scan_input_enabled:
             return self._disabled_verdict("input")
         verdict = self._apply_constitution(text, self._scan_via_backend(text))
-        # Decode pre-pass (C6): an attacker hides a payload from the literal
+        # Decode pre-pass: an attacker hides a payload from the literal
         # detectors with base64 / hex / percent-encoding / Unicode homoglyphs.
         # If the surface form was allowed, re-scan the de-obfuscated variants so
         # an encoded ``rm -rf /`` is caught. Monotonic: only an allowed verdict
         # is ever upgraded to a block, never the reverse. Runs under ANY active
         # backend -- the variant scan goes through the LOCAL builtin floor
         # (``_scan_builtin_floor``), so an SDK deployment also gets decode
-        # coverage without per-variant remote calls. (Previously skipped under
-        # the SDK backend, which left every encoding-evasion path uncovered on
-        # exactly the deployments that paid for the SDK.)
+        # coverage without per-variant remote calls. Skipping it under the SDK
+        # backend would leave every encoding-evasion path uncovered there.
         if verdict.allowed and self.backend != self.BACKEND_NONE:
             decoded = self._scan_decoded_variants(text)
             if decoded is not None:
@@ -421,7 +419,7 @@ class Shield:
         # this; omitting it here left the constitution unenforced exactly where
         # it matters most. Error policy is enforced by _apply_constitution.
         verdict = self._apply_constitution(payload, verdict)
-        # Decode pre-pass on the tool-call surface (C6): an encoded payload in a
+        # Decode pre-pass on the tool-call surface: an encoded payload in a
         # tool ARGUMENT must not bypass the detectors either. Same monotonic,
         # local-builtin-floor mechanism as scan_input; runs under any
         # active backend.
@@ -490,7 +488,7 @@ class Shield:
         else:
             final = ShieldVerdict.block(severity=extra_sev, reason="; ".join(extra_reasons))
         final.scan_error = final.scan_error or verdict.scan_error
-        # Decode pre-pass on the output surface too (C6): an encoded payload in
+        # Decode pre-pass on the output surface too: an encoded payload in
         # tool OUTPUT must not bypass the detectors. Same monotonic,
         # local-builtin-floor mechanism as scan_input; runs under any
         # active backend.

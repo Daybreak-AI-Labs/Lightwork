@@ -1,5 +1,5 @@
 "use strict";
-// The admin lists that take bulk work (ADM-7): approvals (reject or send back,
+// The admin lists that take bulk work: approvals (reject or send back,
 // never bulk approve), tool policies (block or allow, with undo) and privacy
 // requests (assign with undo, confirm receipt). Each wires window.mvBulk to the
 // page's own one-item calls. Run with: node --test tests/js/bulk_lists.test.js
@@ -46,7 +46,7 @@ test("approvals: reject several at once with one reason, then undo them all", as
     return {ok: true, status: 204, headers: new w.Headers({"X-Lightwork-Undo-Seconds": "30", "X-Lightwork-Decided-By": "you"})};
   };
   for (const marker of ["  (function() {\n    const msg = document.getElementById('approval-msg')",
-    "  // Reject or send back many requests at once (ADM-7)."]) {
+    "  // Reject or send back many requests at once."]) {
     const start = queue.indexOf(marker);
     assert.ok(start > 0, marker);
     w.eval(queue.slice(start, queue.indexOf("</script>", start)));
@@ -91,7 +91,7 @@ test("tool policies: block the filtered tools, a tool set by the organization is
   selectAll(w);
   bulkButton(w, "Block selected").click();
   await flush();
-  // The confirmation previews what blocking would have stopped (ADM-3).
+  // The confirmation previews what blocking would have stopped.
   assert.match(w.confirms[0], /^Block 2 tools\? Web fetch and Shell\. In the last 30 days they were used 42 times in 9 tasks by 3 agents and specialists for 2 people\. Tasks stop using them at once\./);
   assert.deepEqual(calls, ["/api/v1/permissions/tools/web_fetch/disable"]);
   assert.match(report(w).textContent, /Block: 1 done, 1 not changed/);
@@ -121,7 +121,7 @@ test("privacy requests: assign to a listed person, undo restores each earlier as
     const previous = before[id]; before[id] = body.assignee;
     return {id, assignee: body.assignee, previous_assignee: previous};
   };
-  const marker = "  // Many requests at once (ADM-7): filter, select all matching, then assign";
+  const marker = "  // Many requests at once: filter, select all matching, then assign";
   const start = page.indexOf(marker);
   assert.ok(start > 0);
   w.eval(page.slice(start, page.indexOf("  // Incident register: record the notification decision", start)));

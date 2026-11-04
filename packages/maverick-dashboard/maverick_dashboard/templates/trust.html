@@ -314,7 +314,7 @@
   document.querySelectorAll("[data-trust-remove]").forEach(function (b) {
     b.addEventListener("click", async function () {
       var id = b.getAttribute("data-trust-remove");
-      // One action with a way back (CTL-1): the row leaves at once and the
+      // One action with a way back: the row leaves at once and the
       // removal is sent when the Undo time is up.
       var row = b.closest("tr, li, article");
       if (row) row.hidden = true;

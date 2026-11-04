@@ -468,7 +468,7 @@
         .finally(function () { if (button.isConnected) button.disabled = false; });
     });
     document.getElementById('as-del').addEventListener('click', function () {
-      // One action with a way back (CTL-1): the assessment closes at once and
+      // One action with a way back: the assessment closes at once and
       // is deleted, at the revision shown, when the Undo time is up. A refusal
       // (for example, it changed since you opened it) puts it back with the
       // page's own explanation.

@@ -30,7 +30,7 @@
          data-api="/api/v1/public/rights/{{ slug }}/requests"
          data-form="/api/v1/public/rights/{{ slug }}/form">
   <form id="rf-form" novalidate>
-    {# CTL-3: problems are listed in a summary that takes focus and next to each field; nothing typed is cleared. #}
+    {# Problems are listed in a summary that takes focus and next to each field; nothing typed is cleared. #}
     <div class="rf-errors" id="rf-errors" tabindex="-1" aria-labelledby="rf-errors-title" hidden>
       <h2 id="rf-errors-title">{{ rf.error_summary_title }}</h2>
       <ul id="rf-errors-list"></ul>
@@ -120,7 +120,7 @@
       emailFormat: {{ rf.error_email_format | tojson }}, answerMissing: {{ rf.error_answer_missing | tojson }},
       answerFormat: {{ rf.error_answer_format | tojson }}
     };
-    // CTL-3: each problem next to its field and in a summary that takes focus;
+    // Each problem next to its field and in a summary that takes focus;
     // the page title starts with the error prefix while problems remain.
     var summary = document.getElementById('rf-errors');
     var title = document.title;

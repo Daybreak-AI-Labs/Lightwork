@@ -1,4 +1,4 @@
-"""Tests for the Agent Security Plane (moonshot Bet 4).
+"""Tests for the Agent Security Plane.
 
 Two failure modes matter more than the happy path, and most of these tests are
 about them. Reporting *no detections* from a deployment whose defenses are off

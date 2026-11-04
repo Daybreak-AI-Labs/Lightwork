@@ -1,4 +1,4 @@
-"""Every delete in the dashboard has a way back (CTL-1).
+"""Every delete in the dashboard has a way back.
 
 A delete either waits for the shared Undo toast (``window.mvUndo``: the item
 leaves the page at once and the request is sent when the Undo time is up), or

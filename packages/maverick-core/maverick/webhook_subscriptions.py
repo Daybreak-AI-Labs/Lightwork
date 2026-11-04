@@ -1,9 +1,8 @@
 """Webhook subscriptions, the delivery log and retries.
 
-Outbound webhooks used to be a list of addresses in ``[webhooks] outbound``
-that each event was posted to once: no retry, no record of what was sent.
-This module keeps that list working as a *legacy default subscription* and
-adds:
+A list of addresses in ``[webhooks] outbound`` posts each event once, with
+no retry and no record of what was sent. This module keeps that list working
+as a *legacy default subscription* and adds:
 
 * **Subscriptions as records** (``webhook_subscriptions`` table): an address,
   an event filter (``*``, ``dsar.*`` or exact names), a signing secret (sealed

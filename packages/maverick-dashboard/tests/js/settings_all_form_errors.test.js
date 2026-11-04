@@ -1,5 +1,5 @@
 "use strict";
-// CTL-3 on Settings > All settings, e.g. approval rules: a table value that
+// The shared form-field pattern on Settings > All settings, e.g. approval rules: a table value that
 // can't be saved is named next to its row and in a summary that takes focus,
 // the title starts with "Error: ", nothing is sent and nothing typed is lost.
 const {test}=require("node:test");

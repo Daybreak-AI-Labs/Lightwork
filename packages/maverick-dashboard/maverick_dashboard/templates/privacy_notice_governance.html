@@ -476,7 +476,7 @@
     } catch (error) { say(failText(error, "save the target"), true); }
   }
   function remove(target, row) {
-    // One action with a way back (CTL-1): publishing to this target stops
+    // One action with a way back: publishing to this target stops
     // when the Undo time is up.
     if (row) row.hidden = true;
     window.mvUndo("Stopped publishing approved notices to {target}.", { values: {target: window.mvHuman(target.binding_id)},

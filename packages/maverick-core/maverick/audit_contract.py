@@ -7,10 +7,9 @@ catches it and continues converts "we could not record this action" into "we
 recorded nothing and did it anyway", which is the exact failure the guarantee
 exists to prevent.
 
-That contract used to live in a docstring. A census found ~93 non-test
-``record()`` call sites, 42 wrapped in a bare ``except Exception: pass``, and
-exactly ONE that re-raised. A contract honoured at one site in ninety-three is
-not a contract. This gate makes it structural.
+A contract that lives only in a docstring is easy to break: a ``record()``
+call wrapped in a bare ``except Exception: pass`` silently drops the event.
+This gate makes the contract structural.
 
 **Preferred fix:** call :func:`maverick.audit.audit_event` instead of wrapping
 ``record()`` yourself. It applies the contract and logs other failures with a

@@ -1,8 +1,7 @@
 """FastAPI dashboard for Lightwork.
 
-v0.1.6: BackgroundTask runner moved to maverick.runner; this file just
-imports it. Eliminates the duplicate that lived in app.py + api.py +
-mcp/server.py.
+Goals run through the shared BackgroundTask runner in ``maverick.runner``,
+which the REST API and the MCP server use too.
 """
 
 from __future__ import annotations
@@ -956,8 +955,8 @@ def _warm_dashboard_caches(stop: threading.Event | None = None) -> dict[str, flo
         list_agents()
 
     def _routes() -> None:
-        # Request routing needs these contexts; the schema build used to be
-        # what materialised them (58edcc4b), at four seconds of extra CPU.
+        # Request routing needs these contexts; materialising them here avoids
+        # paying for the full schema build (seconds of extra CPU).
         from .route_identity import iter_compatible_route_contexts
 
         for _context in iter_compatible_route_contexts(app.routes):
@@ -1013,9 +1012,9 @@ def _wait_for_quiet(quiet: float, sleep, limit: float, stop: threading.Event | N
     seconds of traffic passed and before ``stop`` was set.
 
     The quiet must also last ``quiet`` seconds from the start of the wait: a
-    dashboard that has just started has served nothing yet, and its schema
-    build used to begin at once, landing four seconds of CPU on the first
-    pages someone opened."""
+    dashboard that has just started has served nothing yet, and starting its
+    schema build at once would land seconds of CPU on the first pages someone
+    opens."""
     from . import request_activity
 
     waited = 0.0
@@ -1174,9 +1173,9 @@ async def _lifespan(app: FastAPI):
     from maverick.supply_chain import startup_check
 
     startup_check()  # dependency pin check; no-op unless [safety] supply_chain_pinning
-    # Exactly one control plane may write a data root. Until now that was
-    # enforced only by a `helm template` guard, which a raw kubectl apply,
-    # `compose up --scale`, or a second local `maverick dashboard` walks past
+    # Exactly one control plane may write a data root. A `helm template` guard
+    # alone is not enough: a raw kubectl apply, `compose up --scale`, or a
+    # second local `maverick dashboard` walks past it
     # -- and the failure is silent: two writers interleave valid records into
     # hash-chained ledgers that assume one author. This raises, deliberately:
     # a replica that refuses to start is a visible outage, while a corrupted
@@ -1699,7 +1698,7 @@ templates.context_processors.append(_web_vitals_context)
 
 from . import usage_measures_api as _usage_measures_api  # noqa: E402
 
-# ONB-1 / AI-13 research measures: off unless [analytics] usage_measures.
+# Usage research measures: off unless [analytics] usage_measures.
 app.include_router(_usage_measures_api.router)
 templates.context_processors.append(_usage_measures_api.context)
 app.include_router(conversation_organization_router)
@@ -1710,7 +1709,7 @@ app.include_router(in_app_router)
 app.include_router(first_outcome_router)
 from . import practice_mode  # noqa: E402
 
-# ONB-4: a person's practice session runs in the separate practice workspace,
+# A person's practice session runs in the separate practice workspace,
 # with a marker on every screen and live changes refused until Back to live.
 app.include_router(practice_mode.router)
 app.middleware("http")(practice_mode.middleware)
@@ -3799,7 +3798,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     headers = {"Cache-Control": "private, no-store", "X-Lightwork-Failure-Reference": reference}
     from maverick.service_status import READ_ONLY_REFUSAL, is_read_only_error
 
-    # CTL-5: a write refused by a read-only database says what broke, that
+    # A write refused by a read-only database says what broke, that
     # saved work is safe and what to do, never the database error itself.
     read_only = is_read_only_error(exc)
     status = 503 if read_only else 500
@@ -4067,9 +4066,9 @@ async def tenant_pinning(request: Request, call_next):
 # in-process sliding-window limiter (no new dependency) shared by all
 # goal-creating routes. Caps are generous and configurable.
 #
-# Exposed-deployment hardening: the window used to be one process-wide
-# deque shared across every caller AND the HMAC webhooks, so a single
-# noisy client (or a webhook flood) 429'd everyone. Key the per-client
+# Exposed-deployment hardening: one process-wide deque shared across every
+# caller AND the HMAC webhooks would let a single noisy client (or a webhook
+# flood) 429 everyone. Key the per-client
 # window per principal/source (client IP, or a webhook source label) and
 # keep a separate global ceiling so the process still can't be driven to
 # spawn unbounded paid goals in aggregate.
@@ -4252,9 +4251,9 @@ def check_goal_rate_limit(request: Request | None = None, *, source: str | None 
 # ----- SSE stream concurrency cap -----
 # Exposed-deployment hardening: each open SSE
 # stream spawns a 300s task polling SQLite every 0.5s. Thousands of
-# EventSource opens exhaust file descriptors and the event loop. The cap now
-# lives in _shared so app and api share ONE process-wide semaphore (was a
-# verbatim copy in each module -> two independent caps). Imported above.
+# EventSource opens exhaust file descriptors and the event loop. The cap
+# lives in _shared so app and api share ONE process-wide semaphore rather
+# than two independent caps. Imported above.
 
 
 def _load_skills():
@@ -4442,7 +4441,7 @@ def workforce_page(request: Request) -> HTMLResponse:
 
 @app.get("/learning", response_class=HTMLResponse)
 async def learning_page(request: Request) -> HTMLResponse:
-    """The learning moat: which learning systems are on, and the durable,
+    """Accumulated learning: which learning systems are on, and the durable,
     per-tenant judgement the workforce has accumulated (Operating Record +
     grounded outcomes + self-taught capabilities). Read-only; same numbers as
     /api/v1/learning."""
@@ -7470,7 +7469,7 @@ def _global_audit_tail(request: Request, audit_log, n: int, day: str | None) -> 
 def _audit_matcher(*, kind: str, person: str, agent: str, q: str):
     """The activity log's filter: kind of event, person, agent or specialist,
     and words. Words also find an AI action by a file, address or table it
-    reached, which the row shows only as a fingerprint (ADM-5)."""
+    reached, which the row shows only as a fingerprint."""
     from . import audit_actions_api as _audit_plain
     from .content_access import resource_fingerprint
 
@@ -7895,7 +7894,7 @@ async def simulate_research_page(
     request: Request,
     component: str = Form("tabular", max_length=32),
 ) -> HTMLResponse:
-    """Run and render the actual isolated F09 synthetic research study."""
+    """Run and render the actual isolated synthetic research study."""
     from maverick.research_simulator import ResearchSimulationError
 
     from .control_plane import run_isolated_research_simulation
@@ -8210,7 +8209,7 @@ def chat_specialist_choices(
 def agents_picker(request: Request, q: str = "", setup: bool = False, limit: int = 20) -> dict:
     """Search-as-you-type for the Agent Factory picker.
 
-    The page used to ship all 2,000+ specialists as one picker list. This
+    Rather than ship all 2,000+ specialists as one picker list, this
     answers with the best matches only: ready-to-run specialists unless
     ``setup`` asks for those that need setup too, at most ``limit`` (20 by
     default, 50 at most). It sits under /agents, so the page's role visibility
@@ -10796,8 +10795,8 @@ async def run_events_firehose(
         await websocket.close(code=4404)
         return
     # Cap concurrent firehoses (shared with the SSE cap) so many open tabs can't
-    # exhaust FDs/tasks, and bound each stream's lifetime — mirrors the SSE
-    # route, which previously had both guards while this one had neither.
+    # exhaust FDs/tasks, and bound each stream's lifetime — the same two guards
+    # as the SSE route.
     sem = _get_sse_semaphore()
     if sem.locked():
         await websocket.send_json({"error": "too many concurrent streams; retry shortly"})
@@ -13735,9 +13734,8 @@ def api_goal_legacy(request: Request, goal_id: int) -> dict:
 def _build_plan_tree(world, goal_id: int, depth_cap: int = 6) -> dict:
     """Assemble the plan tree rooted at ``goal_id`` in two queries.
 
-    Previous implementation was true N+1: ``_children`` ran one query
-    per node, each with a correlated cost subquery. Depth-6 tree
-    fanned out to thousands of SQL calls. This rewrite uses a single
+    Avoids the N+1 shape (one query per node, each with a correlated cost
+    subquery, thousands of SQL calls for a depth-6 tree): a single
     recursive CTE for the descendant set + one aggregate JOIN for
     costs, then assembles the tree in Python.
     """
@@ -14089,10 +14087,9 @@ async def api_goal_events_stream(
 ) -> StreamingResponse:
     """Server-Sent Events stream of new goal events.
 
-    The client used to poll this route every 2s (visible
-    tab) / 5s (hidden tab) over the lifetime of every open goal page,
-    burning 30 req/min/tab idle on a goal that finished an hour ago.
-    SSE holds one TCP connection open, server polls SQLite at 0.5s
+    Polling every 2s (visible tab) / 5s (hidden tab) over the lifetime
+    of every open goal page would burn 30 req/min/tab idle on a goal that
+    finished an hour ago. SSE holds one TCP connection open, server polls SQLite at 0.5s
     cadence, yields ``data: {json}\\n\\n`` only when there's something
     new. EventSource on the client reconnects automatically and goes
     silent the moment status flips to done/cancelled/failed.
@@ -14182,7 +14179,7 @@ async def embed_analytics_js_legacy() -> FileResponse:
 
 @app.get("/static/lightwork.css")
 async def shell_stylesheet() -> FileResponse:
-    """The dashboard shell's design system, extracted from base.html so the
+    """The dashboard shell's design system, served apart from base.html so the
     template stays markup. Short-lived cache: the browser revalidates cheaply
     but a dashboard upgrade restyles without a hard refresh."""
     return FileResponse(
@@ -14206,7 +14203,7 @@ async def board_engine_js() -> FileResponse:
 @app.get("/static/lightwork-ui.js")
 async def shell_behaviors_js() -> FileResponse:
     """The shell behaviors (mvToast/mvConfirm/mvForm primitives, halt pill,
-    sidebar + preferences) extracted from base.html; loaded at the end of
+    sidebar + preferences), served apart from base.html; loaded at the end of
     <body> on every page."""
     return FileResponse(
         _STATIC_DIR / "lightwork-ui.js",

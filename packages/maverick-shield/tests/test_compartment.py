@@ -1,4 +1,4 @@
-"""Agent compartments: swarm-shared threat ledger + ImmunizingShield (Rung 0)."""
+"""Agent compartments: swarm-shared threat ledger + ImmunizingShield."""
 from __future__ import annotations
 
 from maverick_shield.compartment import (

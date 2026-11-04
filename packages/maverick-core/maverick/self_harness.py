@@ -198,8 +198,7 @@ def _write_addenda(addenda: dict[str, str], path: Path | None = None, *,
     # (disk full / read-only FS / target is a dir) and (b) let an UNLOCKED
     # rollback racing a locked apply collide on the shared temp -- one
     # os.replace moving the temp out from under the other. The store itself
-    # stays atomic either way, but the stray temp is real. (Found by the
-    # fault-injection battery.)
+    # stays atomic either way, but the stray temp is real.
     from .file_lock import atomic_write_text
     p = path if path is not None else _store_path()
     atomic_write_text(p, json.dumps(addenda, indent=2, sort_keys=True), mode=0o600,
@@ -1175,8 +1174,7 @@ def mine_failures(
     # recent ``limit`` (500) traces, but mine_failures is public; a direct caller
     # passing a huge list would otherwise hang the pass. Cap at a generous bound
     # (well above the runner's 500) and keep the most RECENT slice, so a runaway
-    # input is bounded without affecting any realistic call. (Found by the
-    # algorithmic-complexity battery.)
+    # input is bounded without affecting any realistic call.
     if len(mine) > _MAX_MINE_TRACES:
         log.warning("self_harness: mining %d traces capped to %d (most recent)",
                     len(mine), _MAX_MINE_TRACES)
@@ -1216,11 +1214,9 @@ def mine_failures(
         # Cache each cluster HEAD's token set (parallel to ``clusters``). The
         # head's goal text never changes, so re-tokenizing it on every
         # comparison -- as a naive ``_tokens(cluster[0][...])`` in the inner loop
-        # does -- is pure waste: it turned the greedy pass into a tokenize-bound
-        # O(n^2) that took ~69s on 8k traces. Tokenize each head once instead.
-        # Behaviour is identical: ``heads[i]`` is the token set of ``clusters[i]``'s
-        # first member, exactly what the old code recomputed. (Found by the
-        # algorithmic-complexity battery.)
+        # does -- is pure waste: it turns the greedy pass into a tokenize-bound
+        # O(n^2) (about a minute on 8k traces). Tokenize each head once instead:
+        # ``heads[i]`` is the token set of ``clusters[i]``'s first member.
         heads: list[set[str]] = []
         head_texts: list[str] = []      # parallel head goal-texts for similarity_fn
         builtin_semantic = similarity_fn is semantic_similarity
@@ -1342,8 +1338,7 @@ def _sanitize_line(text: str) -> str:
     reviews: a C1 byte injects a terminal escape when that log is cat'd, a
     zero-width char splits a trigger word past a downstream filter, and an RLO
     visually reverses the guidance an auditor reads. Zl/Zp/Zs separators are
-    Unicode whitespace, so ``split()`` below already collapses them. (Found by
-    the adversarial input-fuzzing battery.)"""
+    Unicode whitespace, so ``split()`` below already collapses them."""
     raw = str(text or "")
     cleaned = "".join(
         " " if unicodedata.category(c) in {"Cc", "Cf"} else c for c in raw)
@@ -2098,7 +2093,7 @@ def validate_proposal(  # noqa: C901 - gate remains one fail-closed evidence bou
     # A score is a success RATE in [0,1]. A buggy/hostile scorer returning a
     # non-finite (NaN/inf) or out-of-range value must NOT drive a promotion: an
     # inf candidate would otherwise sail past the gate's "candidate >= baseline"
-    # evidence check. Reject up front. (Found by the 1000-round fuzz campaign.)
+    # evidence check. Reject up front.
     scores = (in_with, in_without, out_with, out_without)
     if (not evidence_clean or not evidence_paired or not evidence_symmetric
             or not outcome_rates_match
@@ -2269,8 +2264,8 @@ def _compose_addendum(model_id: str, existing: str, line: str) -> str:
     # that normalizes to the SAME guidance as the new one, then append the new
     # one last (newest). This refreshes an exact OR trivially-reworded re-promote
     # to newest (renewed relevance) rather than leaving it where this pass's
-    # other new lines would evict it under the newest-wins cap -- which left a
-    # promoted line absent from the store (found by the 100k soak) -- and stops a
+    # other new lines would evict it under the newest-wins cap -- which would
+    # leave a promoted line absent from the store -- and stops a
     # case/whitespace variant from consuming a second of the bounded slots and
     # evicting DISTINCT guidance (the "context collapse / brevity bias" mode).
     # Normalized-EXACT, not fuzzy: templated per-class lines differ by one token,
@@ -2281,13 +2276,12 @@ def _compose_addendum(model_id: str, existing: str, line: str) -> str:
     lines = lines[-_MAX_LINES_PER_MODEL:]
 
     # Enforce the char budget by dropping WHOLE OLDEST bullets, not by slicing
-    # the rendered block. A trailing ``block[:_MAX_ADDENDUM_CHARS]`` cut the
-    # NEWEST bullets off the end (inverting the newest-wins cap) and could sever
-    # a bullet mid-line -- corrupting the last stored line so a later re-promote
-    # of it no longer dedups. Lines are <=280 chars, so ~6 max-length lines
-    # already overflow 1500: this is reachable, not theoretical. Drop from the
-    # front (oldest) until it fits; keep at least the single newest line.
-    # (Found by the stateful sequence battery.)
+    # the rendered block. A trailing ``block[:_MAX_ADDENDUM_CHARS]`` would cut
+    # the NEWEST bullets off the end (inverting the newest-wins cap) and could
+    # sever a bullet mid-line -- corrupting the last stored line so a later
+    # re-promote of it would not dedup. Lines are <=280 chars, so ~6 max-length
+    # lines already overflow 1500: this is reachable, not theoretical. Drop from
+    # the front (oldest) until it fits; keep at least the single newest line.
     def _render(ls: list[str]) -> str:
         return header + "\n" + "\n".join(f"- {x}" for x in ls) if ls else header
 

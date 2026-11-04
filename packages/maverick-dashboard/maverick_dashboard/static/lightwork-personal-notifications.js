@@ -57,7 +57,7 @@
     button.addEventListener('click', function () { request('/api/v1/notifications/personal/mute', {context:snapshot.context, item_id:item.id, scope:scope}); });
     return button;
   }
-  // A task waiting on your answer can be stopped from its alert in one action (AI-8).
+  // A task waiting on your answer can be stopped from its alert in one action.
   function stopButton(item) {
     const button = document.createElement('button'); button.type = 'button'; button.className = 'btn btn--danger';
     button.textContent = 'Stop task'; button.dataset.alertId = item.id + '-stop';

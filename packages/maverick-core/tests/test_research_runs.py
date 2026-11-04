@@ -1,4 +1,4 @@
-"""Acceptance-focused tests for governed F07 run and attempt records."""
+"""Acceptance-focused tests for governed research run and attempt records."""
 
 from __future__ import annotations
 

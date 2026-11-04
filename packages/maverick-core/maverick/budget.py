@@ -863,7 +863,7 @@ class Budget:
         ``usage.cache_creation.ephemeral_5m_input_tokens`` /
         ``ephemeral_1h_input_tokens`` as the real per-tier split, which is
         NOT recoverable from the flat ``cache_write_tok`` + one
-        ``cache_write_ttl`` this function used to take (that combination
+        ``cache_write_ttl`` arguments (that combination
         bills every write in the call at a single multiplier, e.g. the whole
         thing at the 1h 2.0x rate when only part of it wrote at 1h). Pass
         ``cache_write_5m_tok``/``cache_write_1h_tok`` when the caller has the

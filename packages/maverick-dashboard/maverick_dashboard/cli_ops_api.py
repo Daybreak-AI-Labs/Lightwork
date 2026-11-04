@@ -1,4 +1,4 @@
-"""Dashboard controls for operations that used to be command-line only.
+"""Dashboard controls for operations that also exist on the command line.
 
 One include point for the small routers that put ``maverick ...`` operations
 in the app (task file history, task export and sharing, schedules, community

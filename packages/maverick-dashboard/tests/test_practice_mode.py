@@ -1,5 +1,5 @@
 """Practice mode in the dashboard: a marker on every screen, practice work kept
-apart, live changes refused, and one action back to live (ONB-4)."""
+apart, live changes refused, and one action back to live."""
 from __future__ import annotations
 
 import pytest

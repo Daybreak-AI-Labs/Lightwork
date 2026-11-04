@@ -1,4 +1,4 @@
-// AI-13 research measure: count AI suggestions shown, used or dismissed, without
+// Usage research measure: count AI suggestions shown, used or dismissed, without
 // names. Loaded only while [analytics] usage_measures is on; pages call
 // window.mvSuggestion(kind, item, event). Nothing is sent when it is off.
 (function () {

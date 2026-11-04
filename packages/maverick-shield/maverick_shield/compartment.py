@@ -15,7 +15,7 @@ without re-deriving it. Trivial obfuscation variants (case, whitespace,
 zero-width and fullwidth tricks) normalize to the same fingerprint, so they are
 caught too.
 
-Design constraints (CLAUDE.md):
+Design constraints (kernel rules in CONTRIBUTING.md):
   * Off by default; opt in via ``[safety] compartments=true`` or
     ``MAVERICK_COMPARTMENTS=1``.
   * Fail-open. A ledger bug must never block a scan -- the base Shield is the
@@ -137,7 +137,7 @@ class ThreatLedger:
 
 @dataclass
 class ImmunizingShield:
-    """Wraps a base Shield with a swarm-shared ThreatLedger (compartment Rung 0).
+    """Wraps a base Shield with a swarm-shared ThreatLedger (the immunity compartment).
 
     Mirrors ``CascadedShield``: a thin wrapper exposing the same
     ``scan_input`` / ``scan_tool_call`` / ``scan_output`` surface plus

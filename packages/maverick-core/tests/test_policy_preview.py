@@ -1,4 +1,4 @@
-"""Previews of a policy change before it is saved (ADM-3): blocking tools,
+"""Previews of a policy change before it is saved: blocking tools,
 a shorter keep period and a data use rule. Report only, from the record."""
 from __future__ import annotations
 

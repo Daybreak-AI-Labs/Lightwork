@@ -435,9 +435,9 @@ def extract_unified_diff(text: str) -> str | None:
         Use the LAST line-start FINAL marker (models are told to end
         their turn with FINAL:, so the trailing one is canonical).
       - Fences are stripped only around the diff envelope, not inside
-        it. The previous implementation stripped EVERY line starting
-        with ``` which corrupted patches that edit Markdown files
-        containing triple-backtick code fences as context lines.
+        it. Stripping EVERY line starting with ``` would corrupt
+        patches that edit Markdown files containing triple-backtick code
+        fences as context lines.
 
     Returns None on no-valid-diff so callers can hard-reject rather
     than falling back to prose. Call sites in agent.py must NOT use
@@ -1899,13 +1899,12 @@ def run_failing_tests(
         result.pass_to_pass_passing = p_pass
         result.pass_to_pass_failing = p_fail
         result.raw_output = (f_out + "\n" + p_out)[-2000:]
-        # Both call sites
-        # previously discarded `_run`'s `failed` return, so a mid-stream
-        # parse/sandbox failure — where `_run` early-returns with the
-        # un-executed ids folded into `failed` and the rest never run —
-        # left `*_passing` reflecting only the chunks that DID run. A
-        # PASS_TO_PASS regression hidden behind an aborted chunk could
-        # then score clean. `_run` now flags the incomplete case
+        # Both call sites honour `_run`'s `failed` return: on a mid-stream
+        # parse/sandbox failure `_run` early-returns with the un-executed
+        # ids folded into `failed` and the rest never run, so `*_passing`
+        # reflects only the chunks that DID run, and a PASS_TO_PASS
+        # regression hidden behind an aborted chunk could score clean.
+        # `_run` flags the incomplete case
         # explicitly (count math is unreliable: skips/parametrization
         # make passed+failed != total on healthy runs); surface it as an
         # error so `score`/`all_pass` both treat the run as a failure.

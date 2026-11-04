@@ -1,4 +1,4 @@
-"""Trained cheap-probe seam + offline trainer (C6 increment 3a).
+"""Trained cheap-probe seam + offline trainer.
 
 Covers: the additive n-gram feature extension stays backward-compatible; the
 hashing is deterministic; the pure-Python trainer separates a clean corpus and

@@ -1,4 +1,4 @@
-"""Env-injected audit signing key (enterprise key custody, H29).
+"""Env-injected audit signing key (enterprise key custody).
 
 When ``MAVERICK_AUDIT_SIGNING_KEY`` holds a raw Ed25519 private key, that key is
 the active audit signer and is held in memory only -- never written to the local

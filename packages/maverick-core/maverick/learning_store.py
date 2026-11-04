@@ -52,7 +52,7 @@ _SQLITE_DDL = (
     " line_id TEXT PRIMARY KEY, record TEXT NOT NULL, updated_at REAL NOT NULL)",
     "CREATE TABLE IF NOT EXISTS harness_transfer_tried ("
     " line_id TEXT PRIMARY KEY, ts REAL NOT NULL)",
-    # Phase 2: the eval-corpus family. ``kind`` is live|pending|rejected plus
+    # The eval-corpus family. ``kind`` is live|pending|rejected plus
     # ``extra`` for a live file's non-list top-level entries (operator
     # annotations like "_meta"), so an export/import round-trip loses nothing.
     # ``seq`` preserves row order -- review indexes are positional.

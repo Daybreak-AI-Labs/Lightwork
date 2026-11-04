@@ -1,4 +1,4 @@
-"""LW-117/119: authored regression coverage; no live providers required."""
+"""Authored regression coverage; no live providers required."""
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor

@@ -246,7 +246,7 @@ def test_approvals_api_lists_pending(monkeypatch, tmp_path):
 
 
 def test_decision_is_anchored_in_audit_chain(monkeypatch, tmp_path):
-    # H28: a human approve/deny is recorded in the signed audit chain so its
+    # A human approve/deny is recorded in the signed audit chain so its
     # integrity doesn't rest on the mutable approvals row alone.
     _isolate(monkeypatch, tmp_path)
     w = _world(tmp_path)

@@ -1,4 +1,4 @@
-"""F08 acceptance tests for the concrete evaluator-container boundary."""
+"""Acceptance tests for the concrete evaluator-container boundary."""
 from __future__ import annotations
 
 import json
@@ -885,7 +885,7 @@ def evaluate(observations):
     reason="set LIGHTWORK_RUN_RESEARCH_CONTAINER_TESTS=1 for real Docker tests",
 )
 def test_real_docker_records_enumeration_and_socket_creation_probes(tmp_path):
-    """F08-A1: successful read-only probes remain visible in the audit receipt."""
+    """Successful read-only probes remain visible in the audit receipt."""
     image = os.environ.get("LIGHTWORK_RESEARCH_TEST_IMAGE", "python:3.12-slim")
     candidate = ResearchContainerCandidate(
         candidate_identity="enumerating-candidate",

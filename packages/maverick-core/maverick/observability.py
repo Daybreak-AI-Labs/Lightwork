@@ -81,10 +81,10 @@ _METRIC_SPECS: tuple[tuple[str, str, str, str, tuple[str, ...]], ...] = (
      "Prompt-cache input tokens", ("provider", "model", "kind")),
     ("counter", "tool_calls", "maverick_tool_calls_total", "Tool invocations",
      ("tool", "status")),
-    # Lifetime total -> a Counter (monotonic, accumulates via inc()). It used to be a
-    # Gauge fed `.set(budget.dollars)` from the per-goal Budget accumulator, so a
-    # second goal starting fresh at $0 stomped the running total back down. Callers
-    # now inc() by each call's delta, which sums to a true cross-goal lifetime spend.
+    # Lifetime total -> a Counter (monotonic, accumulates via inc()). A Gauge fed
+    # `.set(budget.dollars)` from the per-goal Budget accumulator would let a second
+    # goal starting fresh at $0 stomp the running total back down. Callers inc() by
+    # each call's delta, which sums to a true cross-goal lifetime spend.
     ("counter", "budget_dollars", "maverick_budget_dollars_spent",
      "Total dollars spent (lifetime)", ()),
     # latency_budget.note_elapsed has always called record_metric with this name,

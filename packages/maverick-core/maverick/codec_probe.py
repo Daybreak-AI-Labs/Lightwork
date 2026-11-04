@@ -1,7 +1,7 @@
-"""The codec token probe -- the kill-switch experiment for the Emergent Substrate.
+"""The codec token probe -- does the learned shorthand save model tokens?
 
-`maverick codebook` reports how many *bytes* the learned shorthand saves. But the
-moat thesis is *frontier tokens*, and bytes and tokens do not move together: a
+`maverick codebook` reports how many *bytes* the learned shorthand saves. What
+matters for cost is *model tokens*, and bytes and tokens do not move together: a
 BPE tokenizer encodes common English phrases efficiently, while the codec
 replaces them with rare sentinels (``⟦0⟧``) that may tokenize into *more* tokens
 than the words they stand for. So a corpus that is 40% smaller in bytes can be
@@ -9,9 +9,8 @@ break-even -- or *worse* -- in tokens.
 
 This module measures the truth directly: tokens of the plain English an agent
 would emit today vs. tokens of the same messages once compressed. If the encoded
-form isn't smaller in tokens, the entire token-savings case (and the Rust->WASM
-carve built on it) is moot, and the codec is at best a bytes/bandwidth/audit
-feature -- not a token moat.
+form isn't smaller in tokens, there is no token saving, and the codec is at best
+a bytes/bandwidth/audit feature.
 
 There are two regimes, and the probe reports both so the decision is honest:
 

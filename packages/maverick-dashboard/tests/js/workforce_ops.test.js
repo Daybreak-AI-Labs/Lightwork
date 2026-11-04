@@ -149,7 +149,7 @@ test("a larger saved set runs whole by default and a person can leave checks out
   select.dispatchEvent(new ui.window.Event("change"));
   await ui.settle();
   const boxes = ui.doc.querySelectorAll(".wo-test-choice");
-  // AI-14: the whole saved set (up to 20) is chosen, so it runs before publishing.
+  // The whole saved set (up to 20) is chosen, so it runs before publishing.
   assert.ok(Array.from(boxes).every((box) => box.checked));
   assert.equal(ui.doc.getElementById("wo-test-run").disabled, false);
   Array.from(boxes).forEach((box) => box.click());

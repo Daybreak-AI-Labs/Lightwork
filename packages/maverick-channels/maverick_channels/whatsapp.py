@@ -9,8 +9,8 @@ This class provides the runtime; you must expose the FastAPI app at a
 public URL and configure it in Twilio. The included Caddyfile in
 deploy/vps/ shows the reverse-proxy pattern.
 
-v0.1.1 fix: webhook now validates Twilio's X-Twilio-Signature so
-random internet POSTs can't trigger agent runs (which would cost the
+The webhook validates Twilio's X-Twilio-Signature so random internet
+POSTs can't trigger agent runs (which would cost the
 user real money for outbound Twilio replies).
 
 Config::

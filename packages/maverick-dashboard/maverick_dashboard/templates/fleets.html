@@ -312,7 +312,7 @@
       document.querySelectorAll('button.fleet-remove-btn').forEach(function(btn) {
         btn.addEventListener('click', async function() {
           const label = btn.dataset.label || btn.dataset.fleet;
-          // One action with a way back (CTL-1): the team leaves the list at
+          // One action with a way back: the team leaves the list at
           // once and is deleted when the Undo time is up.
           const row = btn.closest('.panel');
           if (row) row.hidden = true;

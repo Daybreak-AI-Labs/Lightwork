@@ -69,12 +69,11 @@ __all__ = [
 # otherwise receive ``EDEADLK`` instead of waiting for each other.  POSIX also
 # benefits because ``flock`` semantics can vary for multiple descriptors in one
 # process.  The in-process serialization is a REFCOUNTED PER-PATH registry, not
-# a fixed stripe table: this used to be 64 hash-shared stripes, and holding a
-# stripe SHARED BY UNRELATED PATHS across the whole critical section deadlocked
-# whenever two paths collided while callers nested other locks inside -- the
-# self-harness promotion path (harness lock -> addenda lock -> audit-writer
-# lock -> audit-file lock) wedged against the audit writer (writer lock ->
-# audit-file lock) about 1 run in 64, hash-salt dependent.  Entries are created
+# a fixed stripe table: holding a hash-shared stripe SHARED BY UNRELATED PATHS
+# across the whole critical section deadlocks whenever two paths collide while
+# callers nest other locks inside -- e.g. the self-harness promotion path
+# (harness lock -> addenda lock -> audit-writer lock -> audit-file lock) against
+# the audit writer (writer lock -> audit-file lock).  Entries are created
 # on acquisition and dropped when the last concurrent user releases, so memory
 # is bounded by CONCURRENT lock users -- strictly tighter than the old fixed
 # table under the same attacker-controlled-path model, with no false sharing.

@@ -218,10 +218,9 @@ def _normalise_indent(s: str) -> tuple[str, list[str]]:
     leads = [re.match(r"^[ \t]*", ln).group(0) for ln in lines]
     if not any(leads):
         return s, leads
-    # The old version used
-    # `leads.index(lead)` which returns the FIRST index of that lead
+    # `leads.index(lead)` would return the FIRST index of that lead
     # value. With two lines sharing the same indent (common: two
-    # consecutive same-level statements), the wrong source line gets
+    # consecutive same-level statements), the wrong source line would get
     # checked. A blank-line-then-code pair could wrongly drop a real
     # lead, shifting REPLACE alignment. Iterate by index instead.
     nonempty = [
@@ -608,10 +607,9 @@ def apply_blocks(blocks: list[SearchReplaceBlock], workdir: Path,
             break
 
     if rollback_needed:
-        # A failed restore write (or a
-        # failed unlink of a created file) used to be swallowed, leaving a
-        # mutated file on disk while the summary still read as a clean
-        # rollback. Collect the failures and surface them so the caller
+        # A failed restore write (or a failed unlink of a created file)
+        # must not be swallowed, which would leave a mutated file on disk
+        # while the summary read as a clean rollback. Collect the failures and surface them so the caller
         # knows the workspace is dirty.
         for target, original in snapshots.items():
             try:

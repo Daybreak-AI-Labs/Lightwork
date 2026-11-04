@@ -1,5 +1,5 @@
-"""What the in-product service banner says when an AI service is paused (HLP-4),
-a connection can't be used, or the database is read-only (CTL-5).
+"""What the in-product service banner says when an AI service is paused,
+a connection can't be used, or the database is read-only.
 
 The circuit breaker (:mod:`maverick.circuit_breaker`) pauses an AI provider
 after repeated errors (``llm:<provider>`` keys, or ``llm:<provider>:route:<hash>``
@@ -33,8 +33,8 @@ TASKS_DOWN = ("Tasks that need an AI answer now stop and show “Failed”. "
               "What they already finished is kept; run them again once the service is back.")
 TASKS_REDUCED = ("Steps that need {paused} move to a backup model where one is set up; "
                  "otherwise that task stops and shows “Failed”. Tasks that use {healthy} keep working.")
-#: Another way to get the work done meanwhile (CTL-5: the fourth thing a
-#: failure message says, after what broke, what is safe and when it returns).
+#: Another way to get the work done meanwhile: the fourth thing a failure
+#: message says, after what broke, what is safe and when it returns.
 ALTERNATIVE_DOWN = ("Meanwhile, an administrator can set up another AI service under Settings > AI models "
                     "so tasks can carry on, and urgent steps can be done by hand.")
 ALTERNATIVE_REDUCED = "Meanwhile, start new work as usual: it uses {healthy}."
@@ -121,7 +121,7 @@ def current(*, breakers: list[dict] | None = None, in_use: set[str] | None = Non
             "tasks": TASKS_DOWN, "alternative": ALTERNATIVE_DOWN, "checks": checks, "healthy": []}
 
 
-#: CTL-5 for the other two shared dependencies: a connection people's tasks
+#: The same four parts for the other two shared dependencies: a connection people's tasks
 #: use (expired sign-in, failing check) and the world database itself.
 CONNECTOR_TASKS = "Steps that need it stop and say why; everything else keeps working."
 CONNECTOR_WHEN = "It works again as soon as it is reconnected in Connections."

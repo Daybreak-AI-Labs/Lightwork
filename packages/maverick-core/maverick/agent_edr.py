@@ -84,9 +84,8 @@ _KIND_CLASS: dict[str, str] = {
     "egress_blocked": EGRESS_BREACH,
     "agent_trust_denied": TRUST_BREACH,
     "secret_redacted": EXFILTRATION,
-    # Present in threat_hunt and previously invisible here, which made a kill
-    # switch engagement and a refused destructive action unreportable by the
-    # surface that claims to be the single security view.
+    # Present in threat_hunt too, so a kill switch engagement and a refused
+    # destructive action are reportable by the single security view.
     "halt": CONTROL_EVENT,
     "consent_result": CONTROL_EVENT,
 }

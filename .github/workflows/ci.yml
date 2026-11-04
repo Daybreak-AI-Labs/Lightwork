@@ -208,11 +208,11 @@ jobs:
         # reaches. Regenerate with `--regen` after reviewing the diff.
         run: python -m maverick.reachability --ci
       - name: Tool dispatch contract (no ungated path to the registry)
-        # Agent._run_tool runs eleven gates. It was not the only way into the
-        # tool registry: a census found four dispatch sites and one gated. The
-        # live ungated one (flow/execution.py, bound at automation_queue)
-        # reached every registered connector -- stripe, gmail, s3, salesforce,
-        # sap, workday -- with a partial check and NO audit row.
+        # Agent._run_tool runs eleven gates, and it must be the only way into
+        # the tool registry: an ungated dispatch site (for example a flow step
+        # bound at automation_queue) would reach every registered connector --
+        # stripe, gmail, s3, salesforce, sap, workday -- with a partial check
+        # and NO audit row.
         #
         # The missing row is the structural problem. The attestation asserts
         # "no RECORDED action violated the policy envelope", so an unrecorded
@@ -269,8 +269,7 @@ jobs:
       - name: Async route audit (no new event-loop-blocking dashboard routes)
         # A FastAPI `async def` route runs on the single event loop thread
         # that serves every request -- unlike a plain `def` route, which
-        # FastAPI thread-pools automatically. All previously grandfathered
-        # handlers have been fixed; the empty lock makes every detected
+        # FastAPI thread-pools automatically. The lock is empty, which makes every detected
         # zero-await/blocking-call route a CI failure. Runtime regressions
         # also verify responsiveness and tenant context during slow storage.
         run: python -m maverick.async_route_audit --ci

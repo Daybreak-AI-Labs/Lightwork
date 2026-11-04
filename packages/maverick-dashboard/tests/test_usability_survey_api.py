@@ -135,7 +135,7 @@ def _measures_on(tmp_path):
 
 
 def test_suggestion_counts_and_first_results_reach_the_results_page(isolated, monkeypatch):
-    """ONB-1 and AI-13 measures: off unless turned on; then pages report
+    """Usage research measures: off unless turned on; then pages report
     suggestions, a person's first finished result is noted, and the
     administrators' page shows both without names."""
     from maverick import usage_measures

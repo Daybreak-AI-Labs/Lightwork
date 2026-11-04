@@ -934,7 +934,7 @@ class TestToolLifecycleAudit:
     async def test_the_call_record_names_the_model_and_what_it_reached(
         self, ctx, monkeypatch,
     ):
-        """ADM-5: an AI action's record says which model acted and which
+        """An AI action's record says which model acted and which
         files, addresses or tables it reached."""
         rows: list[tuple[str, dict]] = []
         monkeypatch.setattr(

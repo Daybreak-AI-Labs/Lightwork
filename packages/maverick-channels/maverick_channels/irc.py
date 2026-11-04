@@ -220,7 +220,7 @@ class IRCChannel(Channel):
         data = (line + "\r\n").encode("utf-8", errors="replace")
         if len(data) > 512:
             raise DeliveryNotSent("IRC line exceeds the wire byte bound")
-        # Construction-only test callers historically bypass __init__.
+        # Construction-only test callers may bypass __init__.
         if not hasattr(self, "_write_lock"):
             self._write_lock = asyncio.Lock()
         async with self._write_lock:

@@ -1,4 +1,4 @@
-"""Copy people read stays in short sentences (TXT-1).
+"""Copy people read stays in short sentences.
 
 Every sentence on a dashboard page, and every sentence in the browser
 scripts' copy, is at most 25 words. Long sentences were split, so this is a

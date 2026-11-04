@@ -43,7 +43,7 @@ async def suggestion_event(body: SuggestionEvent, request: Request) -> dict[str,
 
 
 def note_first_result(request: Request, goal) -> None:
-    """A person sees a finished result of their own task (ONB-1)."""
+    """A person sees a finished result of their own task."""
     try:
         from maverick import usage_measures
 

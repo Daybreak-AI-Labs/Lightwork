@@ -1,4 +1,4 @@
-"""Strict mounted-contract tests for PX-16 document access administration."""
+"""Strict mounted-contract tests for document access administration."""
 
 from __future__ import annotations
 

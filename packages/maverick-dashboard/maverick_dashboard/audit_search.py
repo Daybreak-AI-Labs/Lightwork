@@ -30,7 +30,7 @@ def search_events(events, *, matches, person_for, limit, before="", scan_limit=2
         if len(people) < 1000:
             people.add(person_for(event))
         # The agent or specialist that acted, for the "Agent or specialist"
-        # filter: an AI action is found by its actor like a person's (ADM-5).
+        # filter: an AI action is found by its actor like a person's.
         if (isinstance(event.get("agent"), str) and event["agent"] not in {"", "system"}
                 and len(agents) < 1000):
             agents.add(event["agent"])

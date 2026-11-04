@@ -7,7 +7,7 @@ persists": no network egress and a workspace that vanishes with the run. The
 kernel already has every individual seam — this module only *composes* them
 into one switchable profile; it deliberately modifies no sandbox backend.
 
-What enforces "no egress" today (found by reading the seams):
+What enforces "no egress":
 
 * **Container backends** deny at the engine level: ``DockerBackend`` /
   ``PodmanBackend`` default to ``allow_network=False`` (``--network none``)

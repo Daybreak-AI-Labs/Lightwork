@@ -1108,7 +1108,7 @@
     if (kind === 'number' && column.integer) input.step = '1';
     td.appendChild(input);
   }
-  // CTL-3: a value in a table that can't be saved (missing, out of range, not
+  // A value in a table that can't be saved (missing, out of range, not
   // a whole number) is named next to its row and in a summary at the top that
   // takes focus; the page title starts with "Error: " while it remains, and
   // nothing typed is cleared.

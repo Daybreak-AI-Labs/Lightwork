@@ -529,7 +529,7 @@ def incident_attachment_metadata_readiness(app: Any, tenant_id: str) -> bool:
             )
             if not callable(vault_enabled) or vault_enabled(tenant) is not True:
                 return False
-        # PA-24 consumes only PX-16's ephemeral document authority.  Delivery
+        # Incident attachments consume only the ephemeral document authority.  Delivery
         # grant issuance and live object-store custody remain explicitly
         # external, so their intentionally-false readiness does not prevent the
         # metadata-only authority from becoming locally ready.
@@ -587,7 +587,7 @@ def _install_default(state: Any, name: str, value: object) -> None:
 def attach_incident_attachment_metadata_composition(app: Any) -> None:
     """Attach lazy factories without enabling the feature or opening storage."""
 
-    # PA-24 depends on PX-16's governed document authority.  Attaching that
+    # Incident attachments depend on the governed document authority.  Attaching that
     # composition is configuration-neutral and performs no provider or storage
     # I/O; its own gate remains default-off.
     try:

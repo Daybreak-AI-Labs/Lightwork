@@ -2,9 +2,9 @@
 
 Both Bedrock surfaces are driven through Anthropic's own SDK, so prompt
 caching, adaptive/extended thinking, thinking-block signatures, tool_choice
-and stop reasons behave exactly as on the Claude API. (The previous adapter
-went through Bedrock's OpenAI-compatible endpoint with a hand-issued bearer
-and lost every one of those.)
+and stop reasons behave exactly as on the Claude API. (Bedrock's
+OpenAI-compatible endpoint with a hand-issued bearer would lose every one of
+those.)
 
   endpoint = "mantle"  (default) Claude in Amazon Bedrock, Opus 4.7 and later:
              https://bedrock-mantle.{region}.api.aws/anthropic. Model ids carry

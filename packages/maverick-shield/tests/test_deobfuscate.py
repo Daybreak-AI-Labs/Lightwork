@@ -1,4 +1,4 @@
-"""Decode/defang pre-pass (C6 increment 1).
+"""Decode/defang pre-pass.
 
 Two layers of test: the pure ``decoded_variants`` de-obfuscator, and the
 end-to-end guard wiring (an encoded attack the literal scan misses must now

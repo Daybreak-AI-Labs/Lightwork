@@ -1,4 +1,4 @@
-"""One form-field pattern with an error summary (CTL-3, A11Y-5, SYS-2).
+"""One form-field pattern with an error summary.
 
 templates/_form_field.html renders a label, hint, error slot and control with
 the error tied to the field; mvFieldErrors in lightwork-ui.js validates on

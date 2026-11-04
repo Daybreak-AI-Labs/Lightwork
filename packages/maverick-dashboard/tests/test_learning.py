@@ -1,5 +1,5 @@
 """The Learning surface: status of the learning systems + the accumulated,
-per-tenant moat (Operating Record + grounded outcomes + self-taught skills).
+per-tenant learning (Operating Record + grounded outcomes + self-taught skills).
 
 Read-only and owner-scoped; the numbers on /learning and /api/v1/learning match.
 """
@@ -149,7 +149,7 @@ def test_consequence_flag_flips_component_on(tmp_path, monkeypatch):
 
 
 def test_signoff_grounds_locally_without_exposing_unscoped_totals(tmp_path, monkeypatch):
-    # End-to-end moat proof: a human sign-off becomes a grounded outcome the
+    # End to end: a human sign-off becomes a grounded outcome the
     # Learning view counts -- the loop from human judgement to accumulated asset.
     monkeypatch.setenv("MAVERICK_CONSEQUENCE", "1")
     w = _isolate(tmp_path, monkeypatch)
@@ -190,7 +190,7 @@ def test_enable_all_learning_flips_every_component(tmp_path, monkeypatch):
 
 def test_flow_improvements_do_not_expose_unscoped_workspace_totals(tmp_path, monkeypatch):
     # A forward flow self-rewrite (the loop enacting a proposal) shows up as a
-    # counted moat number for an admin caller; auto-reverts don't inflate it.
+    # counted improvement for an admin caller; auto-reverts don't inflate it.
     _isolate(tmp_path, monkeypatch)
     from maverick.flow import evolution_log
     assert "flow_self_improvements" not in client.get("/api/v1/learning").json()["accumulated"]

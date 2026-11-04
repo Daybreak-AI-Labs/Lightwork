@@ -1,11 +1,9 @@
 """Filesystem tools backed by the sandbox.
 
-v0.1.1 fix: ``read_file`` / ``list_dir`` no longer interpolate the
-LLM-supplied path into a shell command. They use ``pathlib`` directly
-and verify the resolved path stays inside the sandbox workdir.
-
-``write_file`` already used pathlib; tightened the path-traversal
-check to match.
+``read_file`` / ``list_dir`` never interpolate the LLM-supplied path into
+a shell command. They use ``pathlib`` directly and verify the resolved
+path stays inside the sandbox workdir; ``write_file`` applies the same
+path-traversal check.
 
 The shell tool (`shell.py`) intentionally exposes shell execution —
 that's its purpose. Shield's `scan_tool_call` chokepoint guards it.
@@ -126,10 +124,10 @@ def _write_text_contained(sandbox, target: Path, content: str, *, legacy_journal
     ``ValueError`` on escape; ``OSError`` propagates.
     """
     workdir = Path(sandbox.workdir).resolve()
-    # Host-git hardening (see git_safety.py): `.git/` writes
-    # were previously blocked only in opaque benchmark mode (`_is_opaque_blocked`
-    # below). In ordinary operation this let write_file/str_replace_editor/
-    # ast_edit plant a `.git/config` `core.fsmonitor` hook or filter
+    # Host-git hardening (see git_safety.py): `.git/` writes are blocked in
+    # every mode, not only opaque benchmark mode (`_is_opaque_blocked` below).
+    # Otherwise write_file/str_replace_editor/ast_edit could plant a
+    # `.git/config` `core.fsmonitor` hook or filter
     # smudge/clean command that a later host-side git call
     # (edit_format.render_diff, reviewer.get_diff, coding_mode candidate
     # evaluation) would execute. Refuse unconditionally: there is no

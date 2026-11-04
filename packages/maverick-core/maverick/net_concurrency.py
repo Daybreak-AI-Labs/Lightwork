@@ -87,8 +87,8 @@ def _get_semaphore(key: str, cap: int) -> asyncio.Semaphore:
         sem = registry.get(key)
         # Recreate when the requested cap differs from the cached one so
         # MAVERICK_NET_HOST_CONCURRENCY is the live tunable the docstring
-        # promises -- the old code cached the FIRST cap seen per (loop, host)
-        # and ignored later changes for that loop's lifetime. The cap is tagged
+        # promises, rather than caching the FIRST cap seen per (loop, host)
+        # for that loop's lifetime. The cap is tagged
         # on the semaphore (registry values stay plain Semaphores). A cap change
         # is rare, so the brief window where holders of the prior semaphore
         # overlap the new one is acceptable for a per-host politeness cap.

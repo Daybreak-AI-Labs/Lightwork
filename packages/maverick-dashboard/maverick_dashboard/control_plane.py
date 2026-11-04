@@ -581,7 +581,7 @@ def run_isolated_research_simulation(
     *,
     component_name: str = "tabular",
 ) -> dict[str, Any]:
-    """Run the real F09 controller against a built-in synthetic fixture.
+    """Run the real research controller against a built-in synthetic fixture.
 
     This app path has no connector or provider adapter.  It exists so an
     operator can inspect the same process boundary, approval, lineage, oracle,

@@ -166,9 +166,8 @@ class FirecrackerBackend:
         # asked for hard microVM isolation, so silently downgrading to a Docker
         # namespace boundary defeats that choice. Fail CLOSED by default; the
         # operator must explicitly opt into the weaker fallback with
-        # MAVERICK_FIRECRACKER_STRICT=0 (previously the downgrade was the
-        # default and only STRICT=1 failed closed, so the secure posture
-        # depended on remembering to set an env var).
+        # MAVERICK_FIRECRACKER_STRICT=0, so the secure posture does not
+        # depend on remembering to set an env var.
         from ..env_setting import env_or_config
 
         strict = env_or_config("MAVERICK_FIRECRACKER_STRICT", "sandbox", "firecracker_strict", "1")

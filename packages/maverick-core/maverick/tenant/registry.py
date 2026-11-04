@@ -599,9 +599,9 @@ def create_tenant(
         )
         records[tid] = rec
         # The first roster publication turns admission from "open" to "listed
-        # tenants only". The deployment's implicit default tenant has been
-        # running every task until now; list it too, or the next task is
-        # refused as an unknown tenant.
+        # tenants only". The deployment's implicit default tenant ran every
+        # task before this; list it too, or the next task is refused as an
+        # unknown tenant.
         default = _default_record(records) if not _registry_path().exists() else None
         if default is not None:
             records[default.id] = default

@@ -1999,8 +1999,8 @@ def attach_consent_native_composition(  # noqa: C901 - explicit deployment seam 
     registry = _RegistryMultiplexer(directory, verifier, limiter)
     gateway = _GatewayMultiplexer(app, directory, public_dependencies, limiter)
 
-    # Replaying the audit chain grows with the fleet and used to run for every
-    # anonymous request; share one replay across a short window instead.
+    # Replaying the audit chain grows with the fleet, so rather than run it for
+    # every anonymous request, share one replay across a short window.
     directory_intact = _TimedVerdict(
         directory.verify_integrity,
         pass_seconds=_GATE_INTEGRITY_PASS_SECONDS,

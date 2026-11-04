@@ -1,4 +1,4 @@
-"""One date format and one money format on every page (TXT-4).
+"""One date format and one money format on every page.
 
 Dates on pages go through the shared ``|datetime`` filter (or
 ``mvTimeAbsolute``/``mvDateAbsolute`` in scripts), which the browser rewrites

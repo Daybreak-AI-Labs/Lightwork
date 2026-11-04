@@ -143,7 +143,7 @@
     }catch(error){if(started===generation){if(error.accessChanged){changed();return;}list.replaceChildren();pageStatus.textContent=error.message;}}
     finally{if(started===generation)lock(false);}
   }
-  // Retire many saved questions at once (ADM-7): filter, select all
+  // Retire many saved questions at once: filter, select all
   // matching, one counted confirmation, then a report of each question. Each
   // retirement goes through the same review and save as a single one.
   var bulkRows=new Map(),bulkModel='',bulk=null;

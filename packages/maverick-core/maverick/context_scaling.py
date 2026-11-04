@@ -1,12 +1,10 @@
 """Model-scaled context sizing.
 
-Historically every context bound in the pipeline was a fixed constant
-tuned for a ~200k-window model: the orchestrator kept the last 10 turns
-at 300 chars each, compaction targeted 1500 tokens, the long-context
-router sharded above a hard 200k, tool results were capped at ~100 KB,
-and every agent turn requested at most 4096 output tokens. Drive the
-platform with a 1M-window model and none of that grew; drive it with a
-32k model and the router never fired before overflow.
+Fixed context bounds tuned for a ~200k-window model (the last 10 turns at
+300 chars each, a 1500-token compaction target, long-context sharding above
+a hard 200k, ~100 KB tool results, 4096 output tokens per turn) would not
+grow with a 1M-window model, and with a 32k model the router would never
+fire before overflow.
 
 This module derives those bounds from the DRIVING MODEL's real context
 window (``preflight.context_limit``), so capacity is limited by the LLM

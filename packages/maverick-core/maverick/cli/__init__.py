@@ -145,7 +145,7 @@ def _warn_file_work_before_start(config: dict, backend: str | None) -> None:
 def _humanize_run_error(e: Exception) -> str:
     """Map an operational run failure to a one-line, actionable message.
 
-    Sandbox/provider errors used to reach the user as a raw traceback. The
+    Sandbox/provider errors must not reach the user as a raw traceback. The
     failures a consumer actually hits -- no Docker daemon, a rejected or
     typo'd key, a dropped connection, exhausted credits -- each get a plain
     sentence and a next step instead.
@@ -265,7 +265,7 @@ def _run_outcome_blocked(world, goal_id: int) -> bool:
     """True if the goal ended in the kernel's ``blocked`` state -- paused
     awaiting a user answer, stopped by a budget/time cap, or refused by an
     input guard. ``start`` reads this before closing the world DB so it can
-    exit nonzero for a halted/paused run (it used to always exit 0); a genuine
+    exit nonzero for a halted/paused run; a genuine
     ``done`` completion stays 0."""
     try:
         g = world.get_goal(goal_id)
@@ -1175,9 +1175,9 @@ def onboard(ctx: click.Context, name, docs, no_llm, description, industry, yes) 
     from ..intake import IntakeSpec, attach_docs_to_profile, run_intake, save_profile
 
     # Only prompt when a human is attached (a TTY). In non-interactive use (CI,
-    # piped stdin) the intake prompts used to fire and then abort even with
-    # --name/--no-llm/--yes supplied, so onboarding could not be automated
-    # (user-testing finding). Pass --name/--description/--industry/--doc instead.
+    # piped stdin) the intake prompts would fire and then abort even with
+    # --name/--no-llm/--yes supplied, so onboarding could not be automated.
+    # Pass --name/--description/--industry/--doc instead.
     interactive = sys.stdin.isatty()
     if not name:
         if not interactive:
@@ -2025,7 +2025,7 @@ def harness_migrate_store() -> None:
                    f"record(s), {learned['tried']} tried pair(s) into the world store"
                    + (f" ({merged} conflicting key(s) merged)" if merged else "")
                    + "; file stores renamed to *.migrated.")
-    # Phase 2: the corpus family rides the same migration when configured.
+    # The eval-corpus family rides the same migration when configured.
     counts = migrate_corpus()
     if counts and any(counts.values()):
         migrated_any = True
@@ -4007,9 +4007,8 @@ def start(
         click.echo(render(fc))
         return
 
-    # Refuse BEFORE creating the goal row -- both of these used to surface
-    # after `goal #N created`, leaving an orphan blocked/failed row per
-    # attempt.
+    # Refuse BEFORE creating the goal row, so neither refusal leaves an
+    # orphan blocked/failed row per attempt after `goal #N created`.
     from .. import killswitch as _ks
     try:
         _ks.check()
@@ -4075,8 +4074,8 @@ def start(
         _mark_sample(world, goal_id, sample)
         _label = f" [{_run_i + 1}/{n_runs}]" if n_runs > 1 else ""
         click.echo(f"goal #{goal_id} created{_label}: {title}")
-        # Honor [budget] in config.toml (start used to build Budget() directly,
-        # so config caps were silently ignored). Precedence: built-in defaults
+        # Honor [budget] in config.toml (building Budget() directly would
+        # silently ignore config caps). Precedence: built-in defaults
         # < config < explicit CLI flags. A None flag passes through as "unset".
         bud = budget_from_config(
             defaults=goal_budget_defaults(),
@@ -4090,8 +4089,8 @@ def start(
             max_wall_seconds=max_wall_seconds,
         )
 
-        # `maverick start "..."` used to look hung
-        # between "goal created" and the final printout. A background poller
+        # So that `maverick start "..."` does not look hung between "goal
+        # created" and the final printout, a background poller
         # streams goal_events to stderr so the user sees the swarm thinking
         # in real time. Non-tty output (e.g. piped to a file) skips the
         # poller so logs aren't littered with progress lines.
@@ -4516,10 +4515,9 @@ def config_lint_cmd() -> None:
     p = config_path()
     if not p.exists():
         # No config at all is a legitimate state (Lightwork runs on built-in
-        # defaults), but the file-less path used to fall through to
-        # load_config() == {} and print "config OK" -- as if a real config had
-        # been validated. Say plainly there's nothing to lint instead of
-        # blessing a non-existent file (user-testing finding).
+        # defaults), but falling through to load_config() == {} would print
+        # "config OK" -- as if a real config had been validated. Say plainly
+        # there's nothing to lint instead of blessing a non-existent file.
         click.echo(
             f"no config file at {p}; Lightwork is using built-in defaults. "
             "Create one with `maverick init` (nothing to lint yet)."

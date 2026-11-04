@@ -1,8 +1,8 @@
 """Process-local auth-failure counter, surfaced on ``/metrics``.
 
-Bad-token / failed-auth attempts previously produced only a 401 response and
-(sometimes) a log line — no metric, so a credential-stuffing or misconfigured-
-client flood was invisible to Prometheus and unalertable. This keeps a small
+A 401 response and (sometimes) a log line alone would leave a
+credential-stuffing or misconfigured-client flood invisible to Prometheus and
+unalertable. This keeps a small
 per-reason tally that the dashboard ``/metrics`` endpoint emits as
 ``maverick_auth_failures_total{reason="..."}``, so an alert rule can fire on a
 spike.

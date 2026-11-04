@@ -34,7 +34,7 @@
         </p>
         {% if answer_agent.history_note %}<p class="muted">{{ ui(answer_agent.history_note) }}</p>{% endif %}
         {% if answer_agent.since_last_use %}
-        {# AI-12: the first answer after a change says so, once; hiding it is remembered in this browser. #}
+        {# The first answer after a change says so, once; hiding it is remembered in this browser. #}
         <div class="answer-agent__notice" id="answer-agent-notice" role="note" data-notice-key="agent-change:{{ answer_agent.agent }}:{{ answer_agent.since_last_use[0].ts }}">
           <p>{% if answer_agent.kind == 'specialist' %}{{ ui('This specialist changed since you last used it:') }}{% else %}{{ ui('This agent changed since you last used it:') }}{% endif %}
             {% for row in answer_agent.since_last_use %}{{ row.date_text }}, {{ row.changes | join('; ') }}{% if not loop.last %} · {% endif %}{% endfor %}</p>

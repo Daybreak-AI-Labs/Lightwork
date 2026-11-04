@@ -13,7 +13,7 @@ from __future__ import annotations
 # demands a fresh human decision for every command (allow_auto_approve=False,
 # consult_ledger=False), whatever the workspace's approval mode; the test
 # suite pins that. Nothing here claims more than that.
-# AI-1: what it is and can do, how reliable it is, and two limits that are
+# What it is and can do, how reliable it is, and two limits that are
 # true in code (shell consent; the tool registry and its access list).
 CAPABILITY = ("Lightwork is an AI assistant. It plans and carries out multi-step work with "
               "Lightwork's specialists, then hands you the result to review.")

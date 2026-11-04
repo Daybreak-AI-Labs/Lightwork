@@ -1,4 +1,4 @@
-"""Sandbox evaluation harness for governed code self-modification (Phase 2).
+"""Sandbox evaluation harness for governed code self-modification.
 
 The Darwin-Gödel-Machine insight is empirical validation: compare a proposed
 change with the code it would replace on targeted work. This module produces
@@ -585,11 +585,9 @@ def git_apply(patch: str, workdir: Path, *, sandbox=None, budget=None) -> ApplyR
 def _budgeted_exec(sb, command: str, *, budget=None, timeout: float | None = None):
     """Run one sandbox command while charging the shared DGM tool budget.
 
-    The code-evaluation path used to call ``budget.check()`` before tests but
-    never increment ``tool_calls``; patch application did not consult the budget
-    at all.  A candidate could therefore perform an unbounded number of sandbox
-    executions despite ``[budget] max_tool_calls``.  Treat every sandbox exec as
-    a tool call.  The ``check`` fallback keeps compatibility with embedders and
+    Every sandbox exec (tests and patch application alike) counts as a tool
+    call, so a candidate cannot perform an unbounded number of sandbox
+    executions despite ``[budget] max_tool_calls``.  The ``check`` fallback keeps compatibility with embedders and
     tests that provide the older, minimal budget protocol.
     """
     effective_timeout = timeout

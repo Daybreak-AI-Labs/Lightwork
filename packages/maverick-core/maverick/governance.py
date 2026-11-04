@@ -135,7 +135,7 @@ def _risk_floor(value: object) -> str | None:
     resolves to a real level: ``policy.deny_min_risk and ...``. So a *present but
     unrecognized* value that resolves to ``None`` silently disables the gate --
     fail-OPEN. ``deny_min_risk = "critical"`` (a natural, stricter-sounding
-    choice) used to drop the deny floor entirely.
+    choice) must not drop the deny floor entirely.
 
     Resolution, fail-closed on misconfiguration:
       - absent / empty / explicit disable sentinel ("none"/"off"/...) -> ``None``

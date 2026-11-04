@@ -101,7 +101,7 @@ def improvement_count() -> int:
     A change the loop measured, found to regress, and undid is not an improvement,
     so it is netted out rather than counted: we tally each rewritten node whose
     latest apply is a forward one, not a revert. An honest "your workflows got
-    better and stayed better N times" moat number -- an inflated one would erode
+    better and stayed better N times" number -- an inflated one would erode
     the very trust it's meant to build."""
     latest: dict[tuple[str, str, str], dict] = {}
     forward: set[tuple[str, str, str]] = set()

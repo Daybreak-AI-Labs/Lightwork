@@ -1,8 +1,7 @@
 """Email channel: IMAP poll for incoming, SMTP for outgoing.
 
-v0.1.1 fix: both IMAP and SMTP calls now have a 30-second connect
-timeout. A wedged Gmail connection no longer pins the channel thread
-forever.
+Both IMAP and SMTP calls have a 30-second connect timeout, so a wedged
+Gmail connection cannot pin the channel thread.
 
 Set up:
   1. Use an account with an app password (Gmail / Fastmail / etc.)

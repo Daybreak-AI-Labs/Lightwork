@@ -1,1 +1,1 @@
-"""The skill module family (grouped from flat maverick/skill*.py)."""
+"""Skill modules: distillation, synthesis, search, embeddings and stats."""

@@ -1,4 +1,4 @@
-"""F09 acceptance for resettable worlds and swappable research baselines."""
+"""Acceptance tests for resettable worlds and swappable research baselines."""
 from __future__ import annotations
 
 import hashlib
@@ -113,7 +113,7 @@ def _replay_all_faults(world):
 
 
 def test_known_seed_and_fault_schedule_reset_replays_exactly_twice():
-    """F09-A1: reset makes initial, learner and oracle results deterministic."""
+    """Reset makes initial, learner and oracle results deterministic."""
     faults = (
         FaultSpec(1, "partial_commit", "upsert"),
         FaultSpec(2, "stale_read", "read"),
@@ -170,7 +170,7 @@ def test_deterministic_operation_identity_is_namespaced_by_scenario():
 
 
 def test_reset_removes_and_reports_every_cross_run_state_surface():
-    """F09-A2: hidden, external, records, clocks, RNG, files and queues reset."""
+    """Hidden, external, records, clocks, RNG, files and queues reset."""
     world = SoftwareWorldFixture(_scenario(suffix="contamination"))
     stale_worker = world.open_worker(max_operations=1)
     baseline = world.oracle_snapshot()
@@ -217,7 +217,7 @@ def test_nested_scenario_input_cannot_redefine_the_captured_reset_oracle():
 
 
 def test_swappable_components_keep_authority_budget_and_outcome_costs(tmp_path, monkeypatch):
-    """F09-A3: unchanged caller, same gates, real local accounting adapter."""
+    """Unchanged caller, same gates, real local accounting adapter."""
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_CONSENT_MODE", raising=False)
     accounting = OutcomeAccounting(
@@ -315,7 +315,7 @@ def test_swappable_components_keep_authority_budget_and_outcome_costs(tmp_path, 
 
 
 def test_withheld_generator_family_is_absent_from_development_environment():
-    """F09-A4: split whole families and retain params/answers under evaluator custody."""
+    """Split whole families and retain params/answers under evaluator custody."""
     families = (
         TaskGeneratorFamily(
             "family-public-records",
@@ -394,7 +394,7 @@ def test_family_partition_rejects_row_level_split_of_one_family():
 
 
 def test_successful_fake_external_effect_is_simulated_and_cannot_be_accepted():
-    """F09-A5 core: success remains simulation-only evidence."""
+    """Success remains simulation-only evidence."""
     world = SoftwareWorldFixture(_scenario(suffix="acceptance-boundary"))
     worker = world.open_worker(max_operations=1)
     proposal = ProposalV1("upsert", key="vendor-17", value="approved")

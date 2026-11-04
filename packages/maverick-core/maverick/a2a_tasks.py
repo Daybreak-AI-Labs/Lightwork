@@ -1228,10 +1228,9 @@ class TaskEngine:
         The operator env vars are the hard ceiling; the A2A caller may request
         *less* via its message (captured in ``task.budget_request``). We pass
         the client value as ``value`` and the operator setting as ``ceiling`` so
-        ``min(client, operator)`` clamps the request DOWN -- never up. The
-        previous code passed the same env var as both value and ceiling, so the
-        ``min`` was a tautology and the client request was ignored entirely.
-        With no client value the run defaults to the operator ceiling."""
+        ``min(client, operator)`` clamps the request DOWN -- never up. Passing
+        the same env var as both value and ceiling would make the ``min`` a
+        tautology and ignore the client request. With no client value the run defaults to the operator ceiling."""
         req = task.budget_request if task else {}
         ceil_dollars = _a2a_value("MAVERICK_A2A_MAX_DOLLARS", "max_dollars", 5.0)
         ceil_wall = _a2a_value("MAVERICK_A2A_MAX_WALL_SECONDS", "max_wall_seconds", 3600.0)

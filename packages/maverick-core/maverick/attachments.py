@@ -73,8 +73,8 @@ _REPARSE_ATTRIBUTE = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
 # 25 MiB per file, 100 MiB per goal. Tunable via env so a VPS deployment
 # can raise the cap without a code change.
 def _env_int(name: str, default: int, key: str) -> int:
-    # A non-numeric value used to raise ValueError at import time, killing the
-    # attachment path with an opaque traceback instead of using the default.
+    # A non-numeric value falls back to the default instead of raising
+    # ValueError at import time and killing the attachment path.
     # ``[attachments] <key>`` is the same limit as a setting, read once at
     # startup; the environment still wins.
     from .env_setting import env_or_config_int

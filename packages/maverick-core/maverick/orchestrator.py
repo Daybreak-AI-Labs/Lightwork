@@ -986,7 +986,7 @@ async def _apply_brief_enrichments(
     """Governed brief enrichment layers (self-learning preflight, experience,
     role-stats, skill synthesis, corrections, reflexion, dream insights,
     auto-recall, tree-of-thought). Returns (brief, planning_mode). Each layer
-    keeps its own gate and fails open; extracted from run_goal verbatim."""
+    keeps its own gate and fails open."""
     # Default-on self-learning pre-flight: analyse the goal for capability
     # gaps and pre-acquire matching catalog skills before the swarm
     # starts, so the agent's first turn already has them. Provider egress,
@@ -2109,8 +2109,8 @@ def _handle_root_error(*, result: Any, world: WorldModel, goal: Any, goal_id: in
                                 ctx=ctx)
         # A run that genuinely could not finish is real negative ground
         # truth (the work didn't get done) — the most common negative
-        # outcome, and until now invisible to the learning loop, which
-        # only saw human cancels/sign-offs. Feed it as a grounded 0.0 so
+        # outcome, and otherwise invisible to the learning loop, which
+        # would see only human cancels/sign-offs. Feed it as a grounded 0.0 so
         # the flywheel learns from organic failure, not just the proxy.
         # Same budget-cap exclusion as above; best-effort and default-on.
         # Explicitly disabling [consequence] makes this a no-op.

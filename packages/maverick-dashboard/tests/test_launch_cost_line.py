@@ -1,4 +1,4 @@
-"""The cost line beside Start on every task launch (ADM-4).
+"""The cost line beside Start on every task launch.
 
 Before, what tasks usually cost was behind "Check budget before starting".
 Now the chat composer says, under the Start button, what this person's own

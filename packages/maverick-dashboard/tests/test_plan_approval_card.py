@@ -1,4 +1,4 @@
-"""AI-3: the plan approval shows the plan's steps and its outside actions."""
+"""The plan approval shows the plan's steps and its outside actions."""
 from __future__ import annotations
 
 import re

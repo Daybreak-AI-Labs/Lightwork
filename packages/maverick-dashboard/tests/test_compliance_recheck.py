@@ -1,4 +1,4 @@
-"""ADM-6: compliance protections are re-checked at least hourly, and a
+"""Compliance protections are re-checked at least hourly, and a
 protection that breaks shows as failing at the next check, with when.
 
 The soak test breaks one control (the AI notice), runs the background

@@ -1423,7 +1423,7 @@
 
       cancelBtn.addEventListener('click', async function() {
         if (!canOperate) return;
-        // One action (AI-8): Stop acts at once. The halt card then lists the
+        // One action: Stop acts at once. The halt card then lists the
         // finished and remaining steps and offers Resume or Try again.
         cancelBtn.disabled = true;
         cgCopy(actionMsg,'Stopping. Lightwork stops after the step it is on.');

@@ -1,4 +1,4 @@
-"""The in-product service banner (HLP-4): what is affected, what happens to
+"""The in-product service banner: what is affected, what happens to
 running tasks, and when Lightwork checks again, from a faked breaker state."""
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ def test_every_service_in_use_paused_reads_down_and_says_what_happens_to_tasks()
     assert status["tasks"] == service_status.TASKS_DOWN
     assert "kept" in status["tasks"] and "run them again" in status["tasks"]
     assert [check["at"] for check in status["checks"]] == [1030.0, 1060.0]
-    # CTL-5: and another way to carry on meanwhile.
+    # And another way to carry on meanwhile.
     assert status["alternative"] == service_status.ALTERNATIVE_DOWN and "Settings > AI models" in status["alternative"]
 
 

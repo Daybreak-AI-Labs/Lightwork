@@ -68,9 +68,9 @@ def _config() -> tuple[str, str]:
 
 
 # One MongoClient is built per _run() and closed in its finally (see below).
-# The old code built a fresh MongoClient -- a connection pool plus background
-# topology-monitor threads -- on every _op_* via _db_for and never closed it,
-# leaking sockets + threads per tool call. The active client is stashed
+# Building a fresh MongoClient -- a connection pool plus background
+# topology-monitor threads -- on every _op_* would leak sockets + threads per
+# tool call. The active client is stashed
 # thread-locally so the _op_* helpers reuse it without signature changes.
 _TL = threading.local()
 

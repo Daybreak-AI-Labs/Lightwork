@@ -1,4 +1,4 @@
-"""Previews of a tool policy change before it is saved (ADM-3).
+"""Previews of a tool policy change before it is saved.
 
 ``GET /api/v1/policy-preview/tools`` says what blocking tools (for everyone,
 or for one agent or specialist) would have stopped in the last 30 days, from

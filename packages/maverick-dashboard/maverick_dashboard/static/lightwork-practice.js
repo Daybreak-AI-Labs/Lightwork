@@ -1,4 +1,4 @@
-// ONB-4 practice mode: start it, see what practice held back, and go back to live.
+// Practice mode: start it, see what practice held back, and go back to live.
 // The switch lives in this browser session; the server keeps practice tasks in
 // a separate practice workspace and records anything that would leave Lightwork.
 (function () {

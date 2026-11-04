@@ -1,4 +1,4 @@
-"""Offline trainer for the Shield cheap-probe linear model (C6 increment 3a).
+"""Offline trainer for the Shield cheap-probe linear model.
 
 Produces the JSON artifact ``probe_model.py`` already loads --
 ``{bias, weights, threshold, ngram_buckets, ngram_sizes}`` -- by fitting an

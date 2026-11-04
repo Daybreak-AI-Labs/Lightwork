@@ -110,7 +110,7 @@ def _matching_run(world, goal):
 
 
 def _since_last_use(world, goal, started: float) -> list[dict]:
-    """AI-12: changes to this agent between the person's previous task with it
+    """Changes to this agent between the person's previous task with it
     and this run, newest first, so the next answer says the agent changed."""
     from . import agent_changelog
 

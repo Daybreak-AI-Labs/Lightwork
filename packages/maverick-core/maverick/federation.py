@@ -20,7 +20,7 @@ compares the presented token against each configured peer's token, and the
 matching ``[federation]`` entry *identifies* the caller — audit rows name the
 peer from local config, never from the wire. Missing/unknown token = refused.
 
-**Signed identity (Phase 2).** When the Agent Trust Plane is engaged and a peer
+**Signed identity.** When the Agent Trust Plane is engaged and a peer
 has a pinned Ed25519 key in ``[agent_trust]``, the shared token is no longer
 sufficient: the caller signs the canonical delegation envelope
 (:data:`DELEGATE_SCHEMA`) with its audit key and the receiver verifies it
@@ -79,7 +79,7 @@ from .constant_time import text_equals
 log = logging.getLogger(__name__)
 
 PROTOCOL = "maverick-federation/1"
-# Schema of the signed delegation envelope (Phase 2 signed-identity). The caller
+# Schema of the signed delegation envelope (signed identity). The caller
 # signs it with its audit Ed25519 key; the receiver verifies against the pinned
 # key in [agent_trust]. Possession of a leaked shared token alone no longer
 # impersonates a peer that has a pinned key.
@@ -669,7 +669,7 @@ def _shield_block(text: str) -> str | None:
     return scan_block(text)
 
 
-# -- signed-identity (Phase 2) ---------------------------------------------
+# -- signed identity -------------------------------------------------------
 
 def require_signed() -> bool:
     """Must inbound delegations carry a valid signature against the peer's

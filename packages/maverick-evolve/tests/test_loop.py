@@ -8,7 +8,7 @@ from maverick_evolve.archive import Archive, Candidate
 from maverick_evolve.loop import evolve_continuous
 
 
-# ---- archive persistence (Stage 2: accumulate across rounds/runs) ----
+# ---- archive persistence (accumulate across rounds/runs) ----
 def test_archive_save_load_roundtrip(tmp_path):
     a = Archive(capacity=10)
     a.add(Candidate(config={"k": 1}, score=0.5))

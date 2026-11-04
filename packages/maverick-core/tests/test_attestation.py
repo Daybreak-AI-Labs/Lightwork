@@ -246,7 +246,7 @@ def test_an_unreadable_governance_policy_is_not_an_empty_one(audit_dir, monkeypa
     assert "malformed" in bundle["envelope"]["policy_error"]
 
 
-# ---- claim 2: bounded self-improvement (Bet 1's distinctive claim) ----------
+# ---- claim 2: bounded self-improvement --------------------------------------
 
 def test_no_promotions_is_inapplicable_not_a_pass(audit_dir):
     result = av.verify(_bundle(audit_dir), trusted_key_hex=_key())

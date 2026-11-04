@@ -42,7 +42,7 @@ def _learning_components(subsystems: list[dict], on_by_key: dict) -> list[dict]:
 
 
 def learning_snapshot(request, *, world_factory, owner_filter, permission_check) -> dict:
-    """Learning-engine status + accumulated moat. Shared by the JSON endpoint
+    """Learning-engine status + accumulated learning. Shared by the JSON endpoint
     and the /learning page so both render identical numbers."""
     from maverick import (
         consequence,
@@ -125,21 +125,21 @@ def learning_snapshot(request, *, world_factory, owner_filter, permission_check)
             # Count the ledger directly -- _learned_snapshot would also build
             # the whole harness/provenance/pending view just to be discarded.
             # The stat is a TOTAL, so don't inherit the page's display limit
-            # (the old path silently capped the count at 50).
+            # (which would silently cap the count at 50).
             from maverick import self_learning
 
             learned_n = len(self_learning.history(limit=1_000_000, path=self_learning.LEARNED_PATH, owner=owner_filter(request)))
-        except Exception:  # pragma: no cover - the moat view never 500s on a sub-read
+        except Exception:  # pragma: no cover - the learning view never 500s on a sub-read
             learned_n = 0
         accumulated["grounded_outcomes"] = consequence.count()
         accumulated["learned_capabilities"] = learned_n
         # Flows that improved themselves -- forward self-rewrites the loop enacted,
-        # a tangible "your automations got better on their own" moat number.
+        # a tangible "your automations got better on their own" number.
         try:
             from maverick.flow import evolution_log
 
             improvements = evolution_log.improvement_count()
-        except Exception:  # pragma: no cover -- the moat view never 500s on a sub-read
+        except Exception:  # pragma: no cover -- the learning view never 500s on a sub-read
             improvements = 0
         if improvements:
             accumulated["flow_self_improvements"] = improvements
@@ -158,7 +158,7 @@ def learning_snapshot(request, *, world_factory, owner_filter, permission_check)
                 "auto_evolve": _flow_mod.auto_evolve_enabled(),  # revert regressions
                 "auto_apply": _flow_mod.auto_apply_enabled(),  # apply improvements
             }
-        except Exception:  # pragma: no cover -- the moat view never 500s on a sub-read
+        except Exception:  # pragma: no cover -- the learning view never 500s on a sub-read
             flow_autonomy = None
     dgm = None
     if can_manage:

@@ -1,4 +1,4 @@
-"""Ctrl+K finds people, agents and specialists, waiting approvals and help (NAV-3, HLP-2).
+"""Ctrl+K finds people, agents and specialists, waiting approvals and help.
 
 Each kind follows its own page's permission on the server, for each request:
 no shared index, nothing cached across people.

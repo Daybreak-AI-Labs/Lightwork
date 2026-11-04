@@ -57,9 +57,9 @@ function Ensure-RepoSlug {
 function Refresh-Path {
   # Merge the live machine + user PATH from the registry into this
   # session WITHOUT dropping entries already added here (a freshly
-  # installed Python dir, or pipx's bin dir below). The old version
-  # overwrote $env:Path, which silently undid those additions -- which is
-  # why `maverick init` often failed to launch in the same window.
+  # installed Python dir, or pipx's bin dir below). Overwriting $env:Path
+  # would silently undo those additions, and `maverick init` would then fail
+  # to launch in the same window.
   $parts = @(
     [Environment]::GetEnvironmentVariable('Path', 'Machine'),
     [Environment]::GetEnvironmentVariable('Path', 'User'),

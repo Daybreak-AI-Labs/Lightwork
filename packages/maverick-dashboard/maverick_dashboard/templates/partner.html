@@ -126,7 +126,7 @@
       rm.style.marginInlineStart = '6px';
       rm.setAttribute('aria-label', 'Remove ' + t.name);
       rm.addEventListener('click', function () {
-        // One action with a way back (CTL-1): the client leaves the list at
+        // One action with a way back: the client leaves the list at
         // once; its saved address and access key are deleted when Undo ends.
         tr.hidden = true;
         window.mvUndo('{name} removed from your client list. The client’s own setup is not touched.', { values: {name: t.name},

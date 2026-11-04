@@ -128,7 +128,7 @@ def test_goal_destructive_actions_and_attachment_failures_recover():
 
 
 def test_webhook_deletion_offers_undo_and_surfaces_server_failure():
-    # One action with a way back (CTL-1): the start leaves the list with an
+    # One action with a way back: the start leaves the list with an
     # Undo toast naming the consequence; a refused delete puts it back and
     # says why (window.mvUndo reports it with its action words).
     source = (TEMPLATES / "workflow_builder.html").read_text(encoding="utf-8")

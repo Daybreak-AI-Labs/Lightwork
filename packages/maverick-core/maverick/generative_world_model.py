@@ -3,8 +3,9 @@
 The tabular :class:`~maverick.counterfactual_rollout.TransitionModel` only knows
 ``(state, action)`` pairs it has observed; in a state it has never seen it
 returns no support, so rehearsal escalates and g-computation can't roll forward.
-That's honest but it never *generalises* -- the moat needs a model that gets more
-useful as the Operating Record grows, including for novel-but-similar contexts.
+That's honest but it never *generalises*; accumulated learning needs a model that
+gets more useful as the Operating Record grows, including for novel-but-similar
+contexts.
 
 ``BackoffTransitionModel`` is that generative step, kept dependency-free (no
 torch): it represents a state as an ordered tuple of features from **general to

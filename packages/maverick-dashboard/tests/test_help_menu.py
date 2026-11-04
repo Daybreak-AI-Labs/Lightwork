@@ -1,5 +1,5 @@
-"""Help on every page: the AI service banner (HLP-4), a person to ask with the
-context filled in (HLP-3), and "How this works" for the page's task (HLP-2)."""
+"""Help on every page: the AI service banner, a person to ask with the
+context filled in, and "How this works" for the page's task."""
 from __future__ import annotations
 
 import html

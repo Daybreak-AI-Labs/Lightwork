@@ -1,1 +1,1 @@
-"""The replay module family (grouped from flat maverick/replay_*.py)."""
+"""Replay modules: run traces, exports and video renders."""

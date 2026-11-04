@@ -1,4 +1,4 @@
-"""Previews of a policy change before it is saved (ADM-3).
+"""Previews of a policy change before it is saved.
 
 Every policy type now shows, before anything is enforced, who and what it
 would have affected: blocking tools (for everyone or for one agent or

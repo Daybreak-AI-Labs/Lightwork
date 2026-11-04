@@ -233,7 +233,7 @@
   }
 
   function forget(g) {
-    // One action with a way back (CTL-1): deleted when the Undo time is up.
+    // One action with a way back: deleted when the Undo time is up.
     var pick = document.querySelector('.ic-pick[value="' + String(Number(g.id)) + '"]');
     var row = pick ? pick.closest("tr") : null;
     if (row) { row.hidden = true; }

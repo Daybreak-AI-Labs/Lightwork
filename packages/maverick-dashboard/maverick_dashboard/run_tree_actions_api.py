@@ -1,4 +1,4 @@
-"""Branch or rewind a task from the dashboard (previously command-line only).
+"""Branch or rewind a task from the dashboard (also available on the command line).
 
 * ``POST /run-tree/{goal_id}/fork`` records a new branch of a task that starts
   from a chosen step (``maverick run-tree fork``). Nothing is re-executed.

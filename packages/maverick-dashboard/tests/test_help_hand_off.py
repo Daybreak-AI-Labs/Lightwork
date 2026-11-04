@@ -1,4 +1,4 @@
-"""HLP-3: when the AI has not resolved something, a person is one step away
+"""When the AI has not resolved something, a person is one step away
 with the task attached -- after a second rejected answer from the same agent
 or specialist, and on every task that stopped or did not finish."""
 from __future__ import annotations

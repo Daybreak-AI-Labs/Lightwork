@@ -1,5 +1,5 @@
 "use strict";
-// Bulk work on an admin list (window.mvBulk in lightwork-ui.js, ADM-7):
+// Bulk work on an admin list (window.mvBulk in lightwork-ui.js):
 // filter, select all matching, act with a counted confirmation, then undo or
 // read a change report. Everything is a native control, so it works by
 // keyboard; Ctrl+A in the list selects every matching row.

@@ -17,8 +17,7 @@ deps beyond stdlib" design): a route-decorated ``async def`` with zero
 ``await``/``async for``/``async with`` anywhere in its body, whose body calls
 something that looks like synchronous DB/file/config/store work.
 
-The previously grandfathered handlers have been moved to worker threads.
-``async_route_audit_grandfathered.json`` is now empty, so every detected
+``async_route_audit_grandfathered.json`` is empty, so every detected
 zero-await blocking handler fails CI. The two-sided ratchet also rejects
 stale lock entries; fixing a handler cannot silently leave an exemption.
 This static check is a regression guard, not proof that every async path

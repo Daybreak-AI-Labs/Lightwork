@@ -18,9 +18,9 @@ log = logging.getLogger(__name__)
 
 
 # Non-revealing preview persisted in the audit log. PIIMatch previews are
-# written to disk, so they must NOT embed any raw PII (the old code stored the
-# first 4 chars of the value -- leaking SSN area numbers, partial phones/emails/
-# IPs into the very log the redactor is meant to protect).
+# written to disk, so they must NOT embed any raw PII (even the first 4 chars
+# of the value would leak SSN area numbers, partial phones/emails/IPs into the
+# very log the redactor is meant to protect).
 _MASK = "[…]"
 
 

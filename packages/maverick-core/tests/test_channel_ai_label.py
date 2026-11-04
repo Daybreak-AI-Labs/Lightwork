@@ -1,4 +1,4 @@
-"""Agent-written answers sent to Slack, Teams or email say so, with the way into "why" (AI-2)."""
+"""Agent-written answers sent to Slack, Teams or email say so, with the way into "why"."""
 from __future__ import annotations
 
 import asyncio

@@ -192,7 +192,7 @@ test('actions confirm in the page dialog and failures read as plain sentences', 
     .find(button => button.textContent === 'Stage candidate').click();
   await settle();
   assert.equal(ui.prompts.length, 1);
-  // CTL-2: the confirm button repeats the chosen action, not a generic word.
+  // The confirm button repeats the chosen action, not a generic word.
   assert.equal(ui.prompts[0].options.okText, 'Stage candidate');
   const shown = ui.document.getElementById('research-promotions').textContent;
   assert.match(shown, /Could not update this candidate\. This was changed since you opened it/);

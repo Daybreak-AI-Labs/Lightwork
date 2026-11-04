@@ -1,4 +1,4 @@
-"""Isolated JSON worker for the F09 research-component contract.
+"""Isolated JSON worker for the research-component contract.
 
 The controller starts this file with ``python -I`` and a scrubbed environment.
 Only a bounded component descriptor plus the permitted learner observation enter

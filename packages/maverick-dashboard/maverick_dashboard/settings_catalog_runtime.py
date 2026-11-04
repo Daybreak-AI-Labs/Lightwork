@@ -1015,7 +1015,7 @@ def _diagnostics(S, C) -> tuple:  # noqa: ARG001 -- same signature as the others
 
 
 def _switches(S) -> tuple:
-    """Settings that used to be server environment variables only. The
+    """Settings that are also server environment variables. The
     variable named in ``env`` still wins when it is set."""
     return (
         # --------------------------------------------------- how agents work
@@ -1403,7 +1403,7 @@ _CONSENT = (("ask", "Ask a person each time"), ("dashboard", "Wait on the Approv
 
 
 def _wired(S, C) -> tuple:
-    """Settings whose code already existed but that nothing used to call."""
+    """Settings that switch on code paths which are otherwise unused."""
     return (
         S("memory", "learning_cache", "Reuse checked answers to repeated tasks",
           "When the same person gives exactly the same task again, start from the answer an "

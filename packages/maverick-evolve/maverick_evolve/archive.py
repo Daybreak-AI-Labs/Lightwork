@@ -1,4 +1,4 @@
-"""Stage 2: a diverse archive of high-performing agent configs.
+"""A diverse archive of high-performing agent configs.
 
 Naive self-improvement converges to a local optimum and stalls (the "plateau
 problem"). The published fix (Darwin Gödel Machine, quality-diversity methods)

@@ -1,4 +1,4 @@
-"""AI-3: with [autonomy] confirm_plan on, a person confirms the plan before a
+"""With [autonomy] confirm_plan on, a person confirms the plan before a
 task's first action that could reach outside Lightwork."""
 from __future__ import annotations
 

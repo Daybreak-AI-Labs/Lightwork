@@ -1,4 +1,4 @@
-"""Practice mode keeps practised work apart and lets nothing leave Lightwork (ONB-4)."""
+"""Practice mode keeps practised work apart and lets nothing leave Lightwork."""
 from __future__ import annotations
 
 import asyncio

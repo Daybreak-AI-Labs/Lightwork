@@ -1,11 +1,9 @@
 """Tool server settings: a ``MAVERICK_MCP_*`` environment variable or ``[mcp] <key>``.
 
-Every limit and switch of the tool server for outside apps used to be an
-environment variable only. Each now also has a key in the ``[mcp]`` section,
-which Settings > All settings writes, read at exactly the moment the variable
-was read before. The environment variable, when set, still wins; with neither
-set the built-in default applies, so an untouched installation behaves as it
-always did. (``[mcp] elicit_allowed_hosts`` was already a setting and is read
+Every limit and switch of the tool server for outside apps has an environment
+variable and a key in the ``[mcp]`` section, which Settings > All settings
+writes. Precedence: the environment variable when set, then the ``[mcp]`` key,
+then the built-in default. (``[mcp] elicit_allowed_hosts`` was already a setting and is read
 in :mod:`maverick_mcp.server`.)
 """
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""In-app F05 outcome-accounting projection boundaries."""
+"""In-app outcome-accounting projection boundaries."""
 from __future__ import annotations
 
 from copy import deepcopy

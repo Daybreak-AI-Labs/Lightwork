@@ -172,8 +172,8 @@ def write_lock(path: Path | None = None) -> dict[str, str]:
 
     Returns the version pins. The content hash (where introspectable) lets
     enforce mode detect a tampered-but-same-version plugin, not just a version
-    bump. Additive: a lockfile from before this change has no ``hashes`` block
-    and simply keeps version-only semantics."""
+    bump. Additive: a lockfile without a ``hashes`` block simply keeps
+    version-only semantics."""
     pins = _active_plugin_dists()
     hashes = {n: h for n in pins if (h := _dist_content_hash(n)) is not None}
     p = Path(path) if path else lock_path()

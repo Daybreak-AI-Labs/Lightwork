@@ -113,10 +113,9 @@ def scrub_env(source: dict | None = None) -> dict:
     The default LocalBackend runs model-driven shell commands on the host,
     so a prompt-injected agent can ``printenv`` / ``echo $STRIPE_API_KEY``
     and the value lands in stdout -> back to the model -> out via any
-    channel. The old code stripped only 5 named vars while the ~70-tool
-    suite reads 40+ other secret vars; this strips by name pattern so new
-    credentials are covered by default (deny-by-pattern, not an ad-hoc
-    name list). Tools that legitimately need a credential run in-process
+    channel. The tool suite reads dozens of secret vars, so this strips by
+    name pattern and new credentials are covered by default
+    (deny-by-pattern, not an ad-hoc name list). Tools that legitimately need a credential run in-process
     (Python), not through this shell, so aggressive stripping is safe.
     """
     src = os.environ if source is None else source

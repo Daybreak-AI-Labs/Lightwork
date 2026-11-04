@@ -97,9 +97,9 @@ class Template:
             meta, body = {}, text
 
         def _num(key: str) -> float | None:
-            # A user-authored template with a non-numeric budget used to raise a
-            # raw ValueError traceback out of float() (user-testing finding);
-            # give a clear, catchable message the CLI can surface instead.
+            # A user-authored template with a non-numeric budget must not raise a
+            # raw ValueError traceback out of float(); give a clear, catchable
+            # message the CLI can surface instead.
             raw = meta.get(key)
             if raw is None:
                 return None

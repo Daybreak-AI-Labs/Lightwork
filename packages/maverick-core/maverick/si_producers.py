@@ -1,23 +1,23 @@
-"""Per-rung producers -- every self-improvement phase, one governed gate.
+"""Per-rung producers -- every self-improvement rung, one governed gate.
 
 The :mod:`maverick.self_improvement` controller owns the safety spine (beats
 baseline, never widens capability, human-gated at high rungs, reversible, frozen
 on verifier drift, signed + audited). This module is the set of *producers* that
-turn each phase's work into a :class:`~maverick.self_improvement.Candidate` and
+turn each rung's work into a :class:`~maverick.self_improvement.Candidate` and
 push it through that one gate, so no rung re-invents its own safety:
 
-* ``propose_prompt`` / ``propose_policy`` -- Phase 4 (strategy: prompts,
-  playbooks, routing policies) and Phase 2 (a trained policy/adapter, once the
-  caller's RL seam has produced one).
-* ``propose_tool`` -- Phase 3 (a synthesized tool earns promotion only when its
+* ``propose_prompt`` / ``propose_policy`` -- strategy (prompts, playbooks,
+  routing policies) and a trained policy/adapter, once the caller's RL seam
+  has produced one.
+* ``propose_tool`` -- a synthesized tool earns promotion only when its
   measured success rate beats the baseline; the :class:`ToolOutcomeTracker`
-  supplies that evidence).
-* ``propose_verifier`` -- Phase 1 (a retrained verifier head is adopted only if
-  it discriminates better than the incumbent).
-* ``propose_code`` -- Phase 5 (a code self-modification must pass an
-  out-of-process ``validate`` seam *before* it can even reach the gate, which
-  then forces human approval + non-escalation + reversibility).
-* ``propose_weights`` -- Phase 6 (a fine-tuned checkpoint, human-gated).
+  supplies that evidence.
+* ``propose_verifier`` -- a retrained verifier head is adopted only if it
+  discriminates better than the incumbent.
+* ``propose_code`` -- a code self-modification must pass an out-of-process
+  ``validate`` seam *before* it can even reach the gate, which then forces
+  human approval + non-escalation + reversibility.
+* ``propose_weights`` -- a fine-tuned checkpoint, human-gated.
 
 The GPU/codegen work (RL training, head training, diff generation, fine-tuning)
 is always an injected seam supplied by the caller -- this module never fakes a
@@ -50,7 +50,7 @@ from .self_improvement import (
 log = logging.getLogger(__name__)
 
 
-# -- Phase 3 evidence: did a synthesized tool actually help? ----------------
+# -- tool evidence: did a synthesized tool actually help? -------------------
 
 @dataclass
 class ToolOutcomeTracker:
@@ -164,14 +164,14 @@ def _propose(rung: str, summary: str, baseline: float, candidate: float, samples
 
 def propose_prompt(summary, baseline, candidate, samples, *, rollback,
                    controller=None, **prov) -> Verdict:
-    """Phase 4: a new prompt/playbook variant (no capability surface)."""
+    """A new prompt/playbook variant (no capability surface)."""
     return _propose("prompt", summary, baseline, candidate, samples,
                     controller=controller, rollback=rollback, provenance=prov)
 
 
 def propose_policy(summary, baseline, candidate, samples, *, rollback,
                    capability_widens=False, approved=False, controller=None, **prov) -> Verdict:
-    """Phase 2/4: a trained routing/decision policy or strategy change."""
+    """A trained routing/decision policy or strategy change."""
     return _propose("policy", summary, baseline, candidate, samples,
                     controller=controller, capability_widens=capability_widens,
                     approved=approved, rollback=rollback, provenance=prov)
@@ -179,7 +179,7 @@ def propose_policy(summary, baseline, candidate, samples, *, rollback,
 
 def propose_tool(name, tracker: ToolOutcomeTracker, baseline_success, *, rollback,
                  capability_widens=None, controller=None, **prov) -> Verdict:
-    """Phase 3: promote a synthesized tool only if its measured success beats baseline.
+    """Promote a synthesized tool only if its measured success beats baseline.
 
     ``capability_widens`` defaults to ``None`` (UNPROVEN), not ``False``. A new
     tool is a capability surface by definition, so asserting non-escalation by
@@ -239,7 +239,7 @@ def propose_with_effect(rung, summary, effect: EffectEstimate, *, rollback,
 
 def propose_verifier(summary, baseline_discrimination, candidate_discrimination, samples,
                      *, rollback, controller=None, approve=None, **prov) -> Verdict:
-    """Phase 1: adopt a retrained verifier head only if it discriminates better.
+    """Adopt a retrained verifier head only if it discriminates better.
 
     A better *judge* doesn't widen authority, so capability is bounded by
     construction. It uses the dedicated evaluator rung: by default that sits
@@ -265,7 +265,7 @@ def propose_code(summary, *, validate: Callable[[], tuple[bool, str]],
                  eval_before: float, eval_after: float, samples: int, rollback,
                  approved: bool = False, capability_widens: bool | None = None,
                  controller=None, **prov) -> Verdict:
-    """Phase 5: a code self-modification. Must pass an out-of-process ``validate``
+    """A code self-modification. Must pass an out-of-process ``validate``
     seam (sandboxed import/shape/safety check) BEFORE the gate; then the
     controller forces human approval + non-escalation + reversibility.
     """
@@ -285,7 +285,7 @@ def propose_code(summary, *, validate: Callable[[], tuple[bool, str]],
 
 def propose_weights(summary, *, eval_before: float, eval_after: float, samples: int,
                     rollback, approved: bool = False, controller=None, **prov) -> Verdict:
-    """Phase 6: adopt a fine-tuned checkpoint (human-gated, reversible)."""
+    """Adopt a fine-tuned checkpoint (human-gated, reversible)."""
     return _propose("weights", summary, eval_before, eval_after, samples,
                     controller=controller, capability_widens=False,
                     approved=approved, rollback=rollback, provenance={"kind": "weights", **prov})

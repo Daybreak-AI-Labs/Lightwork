@@ -1,4 +1,4 @@
-"""Lazy composition/readiness tests for PX-16 document access."""
+"""Lazy composition/readiness tests for document access."""
 
 from __future__ import annotations
 

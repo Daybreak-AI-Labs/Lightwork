@@ -406,7 +406,7 @@ def test_headless_assume_writes_and_is_read(tmp_path, monkeypatch):
 
 
 def test_confirm_plan_writes_and_is_read(tmp_path, monkeypatch):
-    """Rule-6 loop (AI-3): the wizard's show-the-plan toggle writes [autonomy]
+    """Rule-6 loop: the wizard's show-the-plan toggle writes [autonomy]
     confirm_plan, and the kernel reads it back independently of the gate."""
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_AUTONOMY_GATE", raising=False)

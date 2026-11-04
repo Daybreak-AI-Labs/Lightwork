@@ -1,4 +1,4 @@
-/* Lightwork dashboard shell behaviors. Extracted from templates/base.html;
+/* Lightwork dashboard shell behaviors, kept apart from templates/base.html;
    served by GET /static/lightwork-ui.js. Loaded at the end of <body>, so
    the DOM is ready without defer. First section: reusable feedback
    primitives (mvToast/mvConfirm/mvForm/mvCopy). Second: halt pill, goal
@@ -2374,7 +2374,7 @@
       });
     })();
 
-// Bulk work on an admin list (ADM-7): filter the list, select every matching
+// Bulk work on an admin list: filter the list, select every matching
 // row, act on all of them after one confirmation that states the count, then
 // read a change report row by row and undo it when each change can be undone.
 // All controls are native checkboxes, inputs and buttons, so it works by
@@ -2560,7 +2560,7 @@ window.mvBulk = function (opts) {
     if (busy) return;
     var items = selected().map(itemOf);
     if (!items.length) return;
-    // action.preview(items): what the change would affect, from the record (ADM-3).
+    // action.preview(items): what the change would affect, from the record.
     var foresee = '';
     if (action.preview) { try { foresee = (await action.preview(items)) || ''; } catch (_) { foresee = ''; } }
     var message = action.verb + ' ' + counted(items.length) + '? ' + joined(items.map(function (i) { return i.label; })) + '.' +

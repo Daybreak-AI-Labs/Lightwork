@@ -1,7 +1,7 @@
 "use strict";
 // Settings > All settings: a shorter keep period for records shows, before
 // saving, how many records the next clean-up would delete (a trial run), and
-// that nothing changes until Save (ADM-3).
+// that nothing changes until Save.
 // Run with: node --test tests/js/settings_all_retention_preview.test.js
 const {test} = require("node:test");
 const assert = require("node:assert/strict");

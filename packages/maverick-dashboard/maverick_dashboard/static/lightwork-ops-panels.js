@@ -1,4 +1,4 @@
-// Buttons for operations that used to need the terminal: activity log
+// Buttons for operations that also exist on the command line: activity log
 // checkpoints, security checks on Lightwork's own activity, privacy tools, a
 // person's uploaded documents, AI governance checks and downloads, regulatory
 // alerts, and reviewer tests. Each panel is wired only when its markup is on

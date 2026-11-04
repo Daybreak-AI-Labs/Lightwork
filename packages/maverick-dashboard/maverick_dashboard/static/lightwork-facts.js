@@ -154,7 +154,7 @@
       document.getElementById('fact-cancel').hidden = false; document.getElementById('fact-editor-title').textContent = 'Edit fact'; conflict.hidden = true; detail.focus(); return;
     }
     if (button.hasAttribute('data-remove-fact')) {
-      // One action with a way back (CTL-1): the fact leaves new recall when
+      // One action with a way back: the fact leaves new recall when
       // the Undo time is up. This is not erasure; history follows retention.
       var url = '/api/v1/facts/' + encodeURIComponent(key) + '?' + new URLSearchParams({expected_revision:row.dataset.revision,context:context});
       row.hidden = true;

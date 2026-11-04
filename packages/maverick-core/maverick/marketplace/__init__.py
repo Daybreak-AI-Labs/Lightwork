@@ -1,1 +1,1 @@
-"""The marketplace module family (grouped from flat maverick/marketplace_*.py)."""
+"""Marketplace modules: storefront, ratings, moderation and usage stats."""

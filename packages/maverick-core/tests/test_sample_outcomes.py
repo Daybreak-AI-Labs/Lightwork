@@ -185,7 +185,7 @@ def fresh_install(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("department", DEPARTMENTS)
 def test_every_offered_sample_specialist_can_start_on_a_fresh_install(fresh_install, department):
-    """LW-146: the kernel refuses to start a specialist whose workflow needs a
+    """The kernel refuses to start a specialist whose workflow needs a
     tool the install lacks (an AP connector, web search). Every sample runs
     its pack exactly as the orchestrator builds it, on a default install."""
     from maverick.domain import agent_from_profile, enabled_domains

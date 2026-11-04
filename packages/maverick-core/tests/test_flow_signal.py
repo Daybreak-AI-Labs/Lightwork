@@ -151,7 +151,7 @@ def test_top_level_approval_is_fine():
     assert f.validate() == []
 
 
-# ---- flow self-improvement count (moat number) -----------------------------
+# ---- flow self-improvement count -------------------------------------------
 
 def test_improvement_count_nets_out_reverted_rewrites(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))

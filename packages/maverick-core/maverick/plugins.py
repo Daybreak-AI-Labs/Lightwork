@@ -106,8 +106,8 @@ def _config_allowed_plugin_names() -> set[str] | None:
     if raw is not None and not raw.strip():
         raw = None
     if raw is None:
-        # A bare except here used to swallow TOML parse errors,
-        # silently disabling every plugin with no diagnostic. _plugins_config
+        # A bare except here would swallow TOML parse errors, silently
+        # disabling every plugin with no diagnostic. _plugins_config
         # logs + returns {} on failure, so a misconfigured user has something
         # to grep and we fall through to the empty (no-plugins) default.
         enabled = _plugins_config().get("enabled")

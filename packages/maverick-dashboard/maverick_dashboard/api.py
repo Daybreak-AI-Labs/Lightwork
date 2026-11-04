@@ -1,6 +1,6 @@
 """REST API for Lightwork (mounted at /api/v1).
 
-v0.1.6: BackgroundTask runner moved to maverick.runner.
+Goals run through the shared BackgroundTask runner in ``maverick.runner``.
 """
 
 from __future__ import annotations
@@ -190,7 +190,7 @@ from .api_schemas import (
     WorkflowSaveIn,
 )
 
-# The flow handlers moved to flows_api, but sibling modules still reach these
+# The flow handlers live in flows_api, but sibling modules reach these
 # schemas as ``api.<name>`` (product_operations_workflows uses FlowRetireIn and
 # FlowApplyIn), so they stay re-exported from here.
 from .api_schemas import (
@@ -2567,7 +2567,7 @@ async def import_onetrust_vendors(request: Request,
     imported = result["imported"]
     # ``skipped`` is structured (row, name, reason, detail) so the operator
     # can tell an already-registered vendor from a rejected or dropped row;
-    # a 1,500-row export that silently lost rows used to look like success.
+    # a large export that silently lost rows must not look like success.
     return {"imported": len(imported),
             "vendors": [e["name"] for e in imported],
             "skipped": result["skipped"]}
@@ -6364,10 +6364,9 @@ _configure_flow_dependencies(FlowDependencies(
 ))
 
 
-# flows_api: these routes moved out of this module. The router is included
-# HERE, where the handlers used to be, so route precedence is unchanged, and
-# every name is re-exported so ``maverick_dashboard.api.<name>`` keeps working
-# for sibling modules and tests.
+# flows_api: the flow routes live in their own module. The router is included
+# HERE so route precedence is fixed, and every name is re-exported so
+# ``maverick_dashboard.api.<name>`` works for sibling modules and tests.
 # isort: off
 from .flows_api import (  # noqa: E402
     _FLOW_DRAFT_TOOLS as _FLOW_DRAFT_TOOLS,
@@ -6630,7 +6629,7 @@ def get_flywheel_state(request: Request) -> dict:
         out["habits"] = [m.to_dict() for m in _memory().recall(top_k=20)]
     except Exception:  # pragma: no cover
         pass
-    # The grounded signal accumulating under the moat: how many real outcomes
+    # The grounded signal accumulating over time: how many real outcomes
     # (failures, sign-offs, feedback, system-of-record results) and human verdicts
     # have landed. Makes "the workforce is learning from reality" a live number.
     try:
@@ -12085,7 +12084,7 @@ async def simulate_research(
     request: Request,
     component: str = Query(default="tabular", max_length=32),
 ) -> dict:
-    """Run the actual isolated F09 synthetic study under named-human approval."""
+    """Run the actual isolated synthetic research study under named-human approval."""
     from maverick.research_simulator import ResearchSimulationError
 
     from .control_plane import run_isolated_research_simulation
@@ -12225,8 +12224,7 @@ def list_approvals(request: Request, response: Response) -> dict:
     This is the operators' collaborative supervision queue (an approval has no
     per-user owner and may carry another user's goal content in ``detail``), so
     listing it requires the ``operate`` permission — the same gate as
-    approve/deny/claim. Previously any authenticated caller, including a
-    view-only user, could read every parked action.
+    approve/deny/claim, so a view-only user cannot read every parked action.
     """
     require_permission(request, "operate")
     response.headers["Cache-Control"] = "private, no-store"
@@ -14356,7 +14354,7 @@ async def learning_api(request: Request) -> dict:
     """Learning-engine status + the durable, per-tenant value it has accumulated.
 
     ``components`` reflect each subsystem's own ``enabled()`` (the source of
-    truth). ``accumulated`` is the non-portable moat: decisions and human
+    truth). ``accumulated`` is the tenant's accumulated learning: decisions and human
     judgements on the Operating Record, capabilities the workforce taught
     itself, and the grounded outcomes it has learned from -- what a customer
     would forfeit by leaving. The technical control snapshot requires an

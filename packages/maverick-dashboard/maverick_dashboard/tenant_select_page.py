@@ -1,9 +1,9 @@
 """Workspace tenant picker: choose the tenant every workbench runs as.
 
 Dozens of tenant-scoped workbenches refuse to run unbound (their APIs 409
-with "select an active tenant ..."). Historically the only bindings were the
-``MAVERICK_TENANT`` environment variable or an enterprise client binding --
-both config-file/environment steps. This page is the in-app path: it lists
+with "select an active tenant ..."). Besides the ``MAVERICK_TENANT``
+environment variable or an enterprise client binding -- both
+config-file/environment steps -- this page is the in-app path: it lists
 the registry's tenants, lets an admin pick (or create) one, and the
 ``bind_active_tenant`` middleware scopes every later request to it.
 

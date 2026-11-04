@@ -1,4 +1,4 @@
-"""Re-anchoring the signed audit chain after a GDPR erase (SEC-002).
+"""Re-anchoring the signed audit chain after a GDPR erase.
 
 A scrub/delete tombstones or removes audit rows but does NOT recompute the
 Ed25519 prev_hash/hash/sig chain, so `maverick audit verify` then reports

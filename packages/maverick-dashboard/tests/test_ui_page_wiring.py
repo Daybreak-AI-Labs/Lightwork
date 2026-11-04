@@ -40,8 +40,8 @@ def test_audit_page_has_instant_filter():
     html = client.get("/audit").text
     assert 'id="aud-q"' in html and 'id="aud-kind"' in html and 'id="aud-person"' in html
     assert 'id="audit-table"' in html and "Tool call" in html
-    # The acting agent or specialist is an identifier the log filters by
-    # (ADM-5), but free-form tool payloads stay private content.
+    # The acting agent or specialist is an identifier the log filters by,
+    # but free-form tool payloads stay private content.
     assert 'id="aud-agent"' in html and ">Pia analyst</option>" in html
     assert "Private quarterly forecast" not in html
 

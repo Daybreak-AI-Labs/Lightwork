@@ -748,7 +748,7 @@
 </script>
 
 <script nonce="{{ csp_script_nonce }}">
-  // Reject or send back many requests at once (ADM-7). Approving stays one
+  // Reject or send back many requests at once. Approving stays one
   // request at a time: each approval needs its own reading of what it does.
   (function wireBulk() {
     const queue = document.getElementById('approval-queue');

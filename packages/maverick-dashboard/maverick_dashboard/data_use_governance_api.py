@@ -396,7 +396,7 @@ class PolicyPreviewIn(BaseModel):
 @router.post("/policies/preview")
 async def preview_policy(request: Request, body: PolicyPreviewIn) -> dict:
     """Which recorded requests to use data a rule would have covered in the
-    last 30 days. Report only: nothing is saved or switched on (ADM-3)."""
+    last 30 days. Report only: nothing is saved or switched on."""
     require_permission(request, "operate")
     from maverick import policy_preview
 

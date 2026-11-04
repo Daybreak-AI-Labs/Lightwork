@@ -5,10 +5,8 @@ completion." The dashboard's BackgroundTask, the REST API, the MCP
 server's maverick_start tool, and any future channel adapter all funnel
 through here.
 
-The previous implementation was duplicated across
-``dashboard/app.py``, ``dashboard/api.py``, and ``mcp/server.py`` with
-three different hardcoded budgets and divergent error handling.
-Extracting once means every adapter inherits the same concurrency cap,
+The dashboard app, the REST API and the MCP server all run goals here,
+so every adapter inherits the same concurrency cap,
 spend cap, error logging, and goal-status finalization.
 
 Usage::

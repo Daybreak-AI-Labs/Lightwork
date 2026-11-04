@@ -1,6 +1,7 @@
-"""DGM research-cycle driver + proof-gated surface widening (Phase 4).
+"""DGM research-cycle driver + proof-gated surface widening.
 
-This ties Phases 1-3 into a governed Darwin-Gödel-Machine research loop:
+This ties the editable-surface boundary, the sandbox evaluation harness and the
+lineage archive into a governed Darwin-Gödel-Machine research loop:
 **propose → evaluate → archive**, run under the reference monitor, with the editable
 surface WIDENING only as the system earns trust.
 

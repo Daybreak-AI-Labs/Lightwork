@@ -1,4 +1,4 @@
-"""ADM-5's measurement as a test: seed 20 known events (10 by people, 10 by
+"""Audit search by actor, measured as a test: seed 20 known events (10 by people, 10 by
 agents and specialists) and find each one with the activity log's own
 filters -- actor (a person, or an agent or specialist), kind of event and
 words. Each search must return exactly the seeded event. The export offers

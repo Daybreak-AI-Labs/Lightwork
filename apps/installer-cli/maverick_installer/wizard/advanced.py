@@ -2450,7 +2450,7 @@ def _cfg_advanced_autonomy_and_workforce(advanced: dict[str, Any]) -> list[str]:
         lines.append("[autonomy]")
         if advanced.get("autonomy_gate"):
             lines.append("enable = true")
-        # AI-3: a person confirms the plan before the first outside action.
+        # A person confirms the plan before the first outside action.
         if advanced.get("confirm_plan"):
             lines.append("confirm_plan = true")
         # Independent axis: assume-and-proceed instead of blocking on ask_user.

@@ -15,7 +15,7 @@ test('keyboard submission cannot default a fresh role grant to admin and an expl
     await form.getByRole('button',{name:'Give role',exact:true}).focus();
     await page.keyboard.press('Enter');
     // The shared error pattern: focus moves to the summary, whose link puts
-    // focus in the role field (CTL-3); nothing is sent.
+    // focus in the role field; nothing is sent.
     const summary=form.locator('[data-mv-error-summary]');
     await expect(summary).toBeFocused();
     await expect(summary.getByRole('link',{name:'Choose the role to give them.',exact:true})).toBeVisible();

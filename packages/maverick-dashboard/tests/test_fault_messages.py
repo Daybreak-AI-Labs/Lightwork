@@ -1,4 +1,4 @@
-"""CTL-5 fault injection: when an AI service fails, every page says what broke,
+"""Fault injection: when an AI service fails, every page says what broke,
 whether work is safe, when Lightwork tries again and another way to carry on,
 and never shows a raw code as the main text."""
 from __future__ import annotations

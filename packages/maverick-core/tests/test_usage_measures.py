@@ -1,5 +1,5 @@
 """Name-free usage measures for the research kit: first result in the first
-session (ONB-1) and AI suggestions shown, used or dismissed (AI-13)."""
+session and AI suggestions shown, used or dismissed."""
 from __future__ import annotations
 
 import json

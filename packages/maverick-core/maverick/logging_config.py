@@ -248,10 +248,9 @@ class JsonFormatter(logging.Formatter):
                 continue
             try:
                 json.dumps(v)
-                # Scrub RECURSIVELY (and preserve shape): the old code probed
-                # serializability with json.dumps(v) but then scrubbed the
-                # original object -- and _scrub_value leaves non-strings
-                # untouched, so a secret inside a dict/list extra slipped past.
+                # Scrub RECURSIVELY (and preserve shape): _scrub_value leaves
+                # non-strings untouched, so scrubbing only the top-level object
+                # would let a secret inside a dict/list extra slip past.
                 out[k] = _scrub_deep(v)
             except (TypeError, ValueError):
                 out[k] = _scrub_value(str(v))

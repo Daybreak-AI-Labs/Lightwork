@@ -931,7 +931,7 @@ def attach_privacy_data_discovery_adapters(app: Any) -> None:
 
 
 # Backwards-compatible root integration name.  This attaches lazy factories;
-# it no longer installs one global, cross-tenant provider map.
+# it does not install a global, cross-tenant provider map.
 install_privacy_data_discovery_adapters = attach_privacy_data_discovery_adapters
 
 

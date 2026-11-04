@@ -1,4 +1,4 @@
-"""CTL-2 ratchet: every confirmation names its action on its button.
+"""Ratchet: every confirmation names its action on its button.
 
 No OK, Yes, Confirm, Continue or Submit on a confirming button, no "Yes, …"
 prefix, and no ``mvConfirm`` call that falls back to the shared helper's

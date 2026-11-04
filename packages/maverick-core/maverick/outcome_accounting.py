@@ -1648,7 +1648,7 @@ class OutcomeAccounting:
         current_costs: list[dict[str, Any]],
         current_time: float,
     ) -> dict[str, Any]:
-        """Project the domain ledger through the shared F02 outcome contract."""
+        """Project the domain ledger through the shared outcome contract."""
         business_status = report["business_outcome"]["status"]
         verdict = (
             "accepted" if business_status == "accepted" else

@@ -99,7 +99,7 @@
       if (canAdmin) {
         var del = el('button', { type: 'button', class: 'btn btn--danger', text: 'Delete' });
         del.addEventListener('click', function () {
-          // One action with a way back (CTL-1): the form's page keeps working
+          // One action with a way back: the form's page keeps working
           // until the Undo time is up, then the form is deleted.
           var card = del.closest('.panel');
           if (card) card.hidden = true;

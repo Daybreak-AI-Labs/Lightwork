@@ -1,4 +1,4 @@
-"""Stage 0: the trusted fitness function.
+"""The trusted fitness function.
 
 You cannot safely evolve an agent without a metric you believe. This scores an
 agent (any ``async (prompt) -> str``) against a held-out set of cases. A case

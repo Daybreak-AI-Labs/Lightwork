@@ -1,4 +1,4 @@
-/* One-tap feedback on a finished result outside the task page (AI-10), and on
+/* One-tap feedback on a finished result outside the task page, and on
    flow run results (/api/v1/flows/runs/{id}/feedback, see bindRun). It
    saves through the task page's own saved-answer feedback
    (/api/v1/goals/{id}/answer-feedback), so the same owner check, receipt and

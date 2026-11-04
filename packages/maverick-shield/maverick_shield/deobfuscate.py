@@ -1,4 +1,4 @@
-"""Obfuscation-decode pre-pass for the Shield (C6, increment 1).
+"""Obfuscation-decode pre-pass for the Shield.
 
 The cheap probe and ``builtin_rules`` match attack signatures (``rm -rf /``,
 ``ignore previous instructions``, ``.ssh/id_rsa`` ...) against the *literal*

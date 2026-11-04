@@ -1,4 +1,4 @@
-"""The wizard's practice-mode question (rule-6 loop, ONB-4): the default
+"""The wizard's practice-mode question (rule-6 loop): the default
 offers practice and writes nothing; turning it off writes [practice]
 enable = false and the kernel reads it back."""
 from __future__ import annotations
@@ -20,7 +20,7 @@ def _write(cfg_dir, monkeypatch, capabilities):
 
 
 def test_practice_mode_question_defaults_to_on_and_off_writes_the_knob(tmp_path, monkeypatch):
-    """Rule-6 loop for [practice] enable (ONB-4)."""
+    """Rule-6 loop for [practice] enable."""
     from maverick_installer import wizard
     captured = {}
 

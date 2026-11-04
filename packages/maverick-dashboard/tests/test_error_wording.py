@@ -1,4 +1,4 @@
-"""Error messages say what happened and how to move on (TXT-3).
+"""Error messages say what happened and how to move on.
 
 GOV.UK's error message rules: describe what happened, tell people how to fix
 it, and leave out "please", "sorry", "oops" and "invalid". Four checks over
