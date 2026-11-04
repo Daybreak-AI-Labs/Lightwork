@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import json
 import os
 import subprocess
 import sys
@@ -470,7 +468,7 @@ assert calls == 2
     assert result.returncode == 0, result.stderr
 
 
-def test_app_engine_and_manifest_preserve_standalone_boundary():
+def test_app_and_engine_preserve_standalone_boundary():
     app_source = (HERE / "app.py").read_text(encoding="utf-8")
     engine_source = (HERE / "assurance_engine.py").read_text(encoding="utf-8")
     backend_source = (HERE / "backend.py").read_text(encoding="utf-8")
@@ -479,34 +477,3 @@ def test_app_engine_and_manifest_preserve_standalone_boundary():
         assert "from maverick" not in source
     assert "/api/dgm/promote" not in app_source
     assert "/api/dgm/deploy" not in app_source
-    manifest = json.loads((HERE / "release-manifest.json").read_text(encoding="utf-8"))
-    assert manifest["artifact_name"] == "lightwork-model-risk-ai-assurance-officer"
-    expected_files = set(manifest["files"])
-    if (HERE / "RELEASE-METADATA.json").is_file():
-        metadata = json.loads((HERE / "RELEASE-METADATA.json").read_text(encoding="utf-8"))
-        metadata_files = {
-            "release-manifest.json",
-            *manifest["files"],
-            *(Path(path).name for path in manifest["shared_files"]),
-        }
-        assert set(metadata["files"]) == metadata_files
-        assert metadata["entrypoint"] == manifest["entrypoint"]
-        assert metadata["authority_boundary"].startswith("unsigned local")
-        for relative, binding in metadata["files"].items():
-            payload = (HERE / relative).read_bytes()
-            assert binding == {
-                "sha256": hashlib.sha256(payload).hexdigest(),
-                "size": len(payload),
-            }
-        assert (HERE / "LICENSE").is_file()
-        assert (HERE / "TRADEMARK.md").is_file()
-        expected_files.update(Path(path).name for path in manifest["shared_files"])
-        expected_files.add("RELEASE-METADATA.json")
-    assert expected_files == {
-        path.relative_to(HERE).as_posix()
-        for path in HERE.rglob("*")
-        if path.is_file()
-        and path.name not in {"release-manifest.json", ".gitignore"}
-        and "__pycache__" not in path.parts
-        and ".pytest_cache" not in path.parts
-    }

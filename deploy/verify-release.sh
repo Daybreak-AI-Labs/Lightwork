@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Verify a Lightwork release artifact's Sigstore (cosign keyless) signature.
 #
-# Every release binary, standalone source archive, checksum manifest, and SBOM
+# Every release binary, checksum manifest, and SBOM
 # ships with a detached `.sig` (signature) and `.pem` (signing certificate).
 # The signature is keyless: it was produced by the
 # release workflow's OIDC identity and logged to the public Rekor transparency
@@ -10,7 +10,7 @@
 # trust on faith.
 #
 #   deploy/verify-release.sh maverick-linux-x86_64 v1.2.3
-#   deploy/verify-release.sh lightwork-grc-concierge-1.2.3.zip v1.2.3
+#   deploy/verify-release.sh maverick-sbom-v1.2.3.cdx.json v1.2.3
 #   deploy/verify-release.sh maverick-linux-x86_64 v1.2.3 maverick-linux-x86_64.sig maverick-linux-x86_64.pem
 #
 # Pass the release tag you intend to install (for example, v1.2.3). Verification

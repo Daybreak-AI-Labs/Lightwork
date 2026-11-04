@@ -5550,7 +5550,7 @@ tested without spawning py-spy.
 
 - **Packaging** — release tooling for an 8-package lockstep cohort (public PyPI
   publishing remains disabled until every name is reserved), a GHCR image,
-  PyInstaller binaries, reduced standalone source archives, checksums, SBOMs,
+  PyInstaller binaries, checksums, SBOMs,
   and Sigstore material. None of these artifacts is published yet; see
   [DISTRIBUTION.md](./DISTRIBUTION.md). Existing source-bootstrap Tauri/MSI
   outputs retain their engineering boundary; the separate MSI candidate and its

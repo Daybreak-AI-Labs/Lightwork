@@ -16,19 +16,6 @@ The standalone requirements intentionally do not install `maverick`. Finding
 the core detector changes only analysis; signed-chain input, monitoring, audit,
 and response authority remain in `/security/threats`.
 
-The release workflow attaches a versioned
-`lightwork-platform-threat-hunter-<version>.zip` to each tagged release (none
-has been published yet), with an embedded release manifest, file hashes, the
-Apache-2.0 `LICENSE`, `NOTICE` and `TRADEMARK.md`, an aggregate CycloneDX SBOM of the
-standalone demo archives, SHA-256 checksums, and Sigstore signature/certificate files. This is a
-**source archive**, not a wheel or PyPI package. The same archive can be
-reproduced from a tagged checkout by running this at the repository root:
-
-```bash
-python scripts/build_standalone_skus.py --version <version> \
-  --source-revision "$(git rev-parse HEAD)"
-```
-
 If the Lightwork detector library is importable, this demo can reuse that
 deterministic engine. Its HTTP input and local JSON store remain unsigned and
 outside the integrated platform trust boundary; the capability page says so.

@@ -70,16 +70,3 @@ Key local endpoints:
 
 There are intentionally no discovery, certification, promotion, deployment,
 rollback, connector, filing, policy-mutation, or provider-effect routes.
-
-## Source release
-
-The release workflow packages this directory as the
-`lightwork-model-risk-ai-assurance-officer-<version>.zip` source archive using
-the explicit release manifest (no release has been published yet). It is not a
-wheel or PyPI distribution. From a
-tagged checkout at the repository root:
-
-```bash
-python scripts/build_standalone_skus.py --version <version> \
-  --source-revision "$(git rev-parse HEAD)"
-```

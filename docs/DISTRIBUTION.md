@@ -18,20 +18,11 @@ One tagged `release.yml` run produces the artifacts below for
 |---|---|---|---|
 | **Single-file binary** | `maverick-macos-arm64`, `maverick-windows-x86_64.exe`, `maverick-linux-x86_64` | technical users / CI / servers | No — PyInstaller bundles Python bytecode |
 | **Container image** | `ghcr.io/daybreak-ai-labs/lightwork:<ver>` | **Azure / AWS / GCP**, k8s, on-prem Docker | **Yes** — installed Python remains readable |
-| **Standalone demo archive** | `lightwork-<demo>-<ver>.zip` | local evaluation of the GRC, platform threat hunter, environment threat hunter and model-risk assurance demos | **Yes** — versioned source archive |
-| Supply-chain | Sigstore material for `release.yml` binaries, standalone archives, manifests, SBOMs, and the immutable container digest; `publish.yml` separately signs Python distributions/manifests | security review | n/a |
+| Supply-chain | Sigstore material for `release.yml` binaries, manifests, SBOMs, and the immutable container digest; `publish.yml` separately signs Python distributions/manifests | security review | n/a |
 
-The four standalone demo archives are source archives of four demo
-applications (`demo/grc-concierge`, `demo/platform-threat-hunter`,
-`demo/environment-threat-hunter` and `demo/model-risk-ai-assurance-officer`).
-They are **not PyPI packages** and not a full-platform source distribution.
-Their release manifests drive deterministic ZIP builds, and each release
-carries SHA-256 checksums, a CycloneDX SBOM, and Sigstore signature and
-certificate files for them. Their combined checksum and SBOM files are
-named `lightwork-standalone-skus-<ver>.sha256` and
-`lightwork-standalone-skus-<ver>.cdx.json`. `publish.yml` separately contains an opt-in,
-allowlisted Trusted Publishing path for the eight workspace Python
-distributions; the standalone archives never enter it.
+`publish.yml` separately contains an opt-in, allowlisted Trusted Publishing
+path for the eight workspace Python distributions. The example agents under
+`demo/` are not release artifacts; run them from a checkout.
 
 `desktop.yml` separately builds an **unsigned source-bootstrap shell** (Tauri)
 as a workflow artifact. It needs network access to clone a pinned commit and
@@ -42,7 +33,7 @@ releases.
 
 ## Verifying a release artifact
 
-Each binary, standalone archive, checksum manifest and SBOM is published with a
+Each binary, checksum manifest and SBOM is published with a
 detached `.sig` and `.pem`. `deploy/verify-release.sh` checks the keyless
 Sigstore signature and pins the signing identity to the release tag you expect:
 
@@ -179,8 +170,7 @@ gh workflow run release.yml --ref v0.1.7 -f tag=v0.1.7
 ```
 
 `release.yml` then builds the 3-OS binaries, stages the GHCR image by immutable
-commit, builds the four versioned standalone source archives, generates
-checksums and SBOMs, keyless-signs the container digest and release artifacts,
+commit, generates checksums and SBOMs, keyless-signs the container digest and release artifacts,
 and creates a draft GitHub Release. It does not dispatch or attach the
 engineering Tauri source-bootstrap bundles. `publish.yml` starts when Release
 completes. It builds and signs the Python distributions, publishes them to PyPI
@@ -222,7 +212,7 @@ may show an unknown-developer warning.
 - **Windows:** platform signing needs an Authenticode code-signing certificate
   to sign the `.msi`/`.exe`.
 - Already in place: **Sigstore** keyless signatures (`.sig`/`.pem`) on the raw
-  release binaries, standalone archives, checksums, and SBOMs — verifiable with
+  release binaries, checksums, and SBOMs — verifiable with
   `cosign verify-blob` (`deploy/verify-release.sh`). The container digest is
   signed with `cosign sign`; the engineering Tauri bundles are not covered.
 

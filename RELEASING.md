@@ -97,8 +97,6 @@ overlap.
      tag `ghcr.io/<owner>/lightwork:sha-<commit>` with provenance and an SBOM;
    - single-file `maverick` binaries built with PyInstaller for Linux x86_64,
      macOS arm64 and Windows x86_64, each smoke-tested before upload;
-   - deterministic source archives of four demo applications from `demo/`
-     (`scripts/build_standalone_skus.py`), with their own SBOM and checksums;
    - a CycloneDX SBOM of the release runtime.
 4. **Assemble, sign and draft.** The `release` job checks that each build
    produced exactly the expected files, writes a container promotion plan
