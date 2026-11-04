@@ -3,7 +3,7 @@
   "counts": {
     "CI_ONLY": 14,
     "CLI_ONLY": 33,
-    "PRODUCTION": 2253,
+    "PRODUCTION": 2252,
     "TEST_ONLY": 21,
     "UNREACHED": 2
   },
@@ -1800,7 +1800,6 @@
     "maverick_dashboard.learning_test_cases_api": "PRODUCTION",
     "maverick_dashboard.learning_transfers": "PRODUCTION",
     "maverick_dashboard.learning_transfers_api": "PRODUCTION",
-    "maverick_dashboard.license_ops_api": "PRODUCTION",
     "maverick_dashboard.load_harness": "CLI_ONLY",
     "maverick_dashboard.local_flow_comparisons": "PRODUCTION",
     "maverick_dashboard.local_flow_promotions": "PRODUCTION",

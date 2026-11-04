@@ -142,7 +142,6 @@ _TEXT = {
     "queue.namespace": "acme-fleet",
     "grpc_dispatch.target": "worker.example.com:50051",
     "federation.node": "east-1",
-    "license.api_url": "https://license.example.com/v1/license",
     "external_agents.approval_webhook": "https://hooks.example.com/approvals",
     "a2a.base_url": "https://agents.example.com",
 }
@@ -377,7 +376,7 @@ def test_a_link_cannot_lead_outside_the_allowed_places(
             pytest.skip("This Windows account cannot create symbolic links")
         raise
     monkeypatch.setenv("MAVERICK_SETTINGS_PATH_ROOTS", str(tmp_path))
-    r = _save([{"id": "license.license_file", "value": str(link)}], confirm=True)
+    r = _save([{"id": "queue.redis_ca_certs", "value": str(link)}], confirm=True)
     assert r.status_code == 400 and "only uses locations" in r.json()["message"]
 
 
@@ -396,19 +395,22 @@ def test_the_check_button_checks_a_location_without_saving(tmp_path, audit_rows)
 def test_checks_answer_in_one_sentence_and_never_echo_secrets(monkeypatch, audit_rows):
     seen = {}
 
-    def fake_fetch(url, headers=None):
-        seen["url"], seen["headers"] = url, dict(headers or {})
-        return 401, b"denied: " + _SECRET.encode()
+    def fake_resolve(host):
+        seen["host"] = host
+        raise OSError("refused: " + _SECRET)
 
-    monkeypatch.setattr(settings_tests, "fetch", fake_fetch)
-    assert _save([{"id": "license.api_url", "value": _TEXT["license.api_url"]}]).status_code == 200
-    r = client.post(CHECK, json={"id": "license.api_token", "value": _SECRET})
+    from maverick.tools import _ssrf
+
+    monkeypatch.setattr(_ssrf, "resolve_pinned_ip", fake_resolve)
+    dsn = f"postgres://lw:{_SECRET}@db.example.com:5432/lightwork"
+    r = client.post(CHECK, json={"id": "world_model.dsn", "value": dsn})
     assert r.status_code == 200
-    assert r.json() == {"ok": False, "message": "Lightwork reached your license service, "
-                                                "but it did not accept the access key."}
+    body = r.json()
+    assert body["ok"] is False and body["message"].endswith(".")
+    assert "\n" not in body["message"]
     assert _SECRET not in r.text
-    assert seen["headers"]["Authorization"] == "Bearer " + _SECRET
-    assert "license" not in _loaded() or "api_token" not in _loaded()["license"]
+    assert seen["host"] == "db.example.com"
+    assert "world_model" not in _loaded() or "dsn" not in _loaded()["world_model"]
 
 
 def test_checks_refuse_private_addresses_through_the_network_guard(audit_rows):
@@ -428,7 +430,8 @@ def test_check_validates_the_entered_value_first(audit_rows):
 
 
 def test_checks_are_admin_same_origin_bounded_and_only_where_offered(monkeypatch, audit_rows):
-    assert TestClient(app, base_url="http://127.0.0.1").post(CHECK, json={"id": "license.api_url"}).status_code == 403
+    assert TestClient(app, base_url="http://127.0.0.1").post(
+        CHECK, json={"id": "external_agents.approval_webhook"}).status_code == 403
     r = client.post(CHECK, json={"id": "safety.profile"})
     assert r.status_code == 404 and r.json()["message"] == "This setting has nothing to test."
     monkeypatch.setattr(page, "_CHECK_LIMIT", 2)
@@ -444,7 +447,7 @@ def test_checks_are_admin_same_origin_bounded_and_only_where_offered(monkeypatch
     rbac.set_role("user:vera", "viewer")
     monkeypatch.setattr(auth, "caller_principal", lambda request: "user:vera")
     monkeypatch.setattr(page, "_CHECK_TIMES", [])
-    assert client.post(CHECK, json={"id": "license.api_url"}).status_code == 403
+    assert client.post(CHECK, json={"id": "external_agents.approval_webhook"}).status_code == 403
 
 
 def _oidc_fetch(issuer="https://login.example.com/realm", keys=True):

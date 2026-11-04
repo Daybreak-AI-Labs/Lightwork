@@ -74,7 +74,7 @@ def test_settings_page_reads_as_plain_language(client, monkeypatch):
     assert "set on the computer running Lightwork" in text
     # Buttons for everything the page describes.
     for label in ("Test connection", "Refresh status", "Apply change", "Check readiness", "Run health check",
-                  "Check installation settings", "Show license", "Show background work",
+                  "Check installation settings", "Show background work",
                   "Check encryption", "Check services"):
         assert label in text, label
     assert "Where do I get a key?" in text
@@ -134,7 +134,7 @@ def test_task_limit_standard_choice(client):
 
 def test_system_checks_require_admin(client, monkeypatch):
     _as_viewer(monkeypatch)
-    for path in ("readiness", "settings-check", "license", "queue", "encryption", "diagnostics"):
+    for path in ("readiness", "settings-check", "queue", "encryption", "diagnostics"):
         assert client.get(f"/api/v1/admin/system/{path}").status_code == 403, path
     assert client.post("/api/v1/admin/system/health-check").status_code == 403
     assert client.post("/api/v1/admin/system/encryption/new-key").status_code == 403
@@ -144,7 +144,7 @@ def test_system_checks_require_admin(client, monkeypatch):
 def test_readiness_rows_are_plain_with_fix_links(client):
     data = client.get("/api/v1/admin/system/readiness").json()
     keys = {row["key"] for row in data["checks"]}
-    assert keys == {"spending", "separation", "license", "encryption", "provider"}
+    assert keys == {"spending", "separation", "encryption", "provider"}
     provider = next(r for r in data["checks"] if r["key"] == "provider")
     assert provider["ok"] is False and provider["fix_href"].startswith("/settings")
     for row in data["checks"]:
@@ -167,12 +167,6 @@ def test_settings_check_reports_problems_in_words(client):
     assert data["file_present"] is True
     assert data["errors"] >= 1 and "cannot be used" in data["summary"]
     assert data["technical"]  # exact findings kept for the collapsed details
-
-
-def test_license_summary_without_a_license(client):
-    data = client.get("/api/v1/admin/system/license").json()
-    assert data["status_label"] == "No license"
-    assert data["features"] and all("_" not in f["label"] for f in data["features"])
 
 
 def test_health_check_collects_rows_without_printing(client, monkeypatch):

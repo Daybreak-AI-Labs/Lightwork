@@ -286,7 +286,6 @@ def search(request: Request, q: str = Query('', max_length=200)):
         add('Your page spacing', '/settings?focus=settings-density', 'appearance density compact display', scope='Personal / device')
         add('Your font', '/settings?focus=settings-font', 'appearance accessibility dyslexic font display', scope='Personal / device')
         add('Task spending cap', '/settings?focus=settings-task-budget', 'budget spending per task cost')
-        add('License', '/settings?focus=maintenance-license', 'license subscription install')
         add('Page visibility', '/settings?focus=ui-visibility', 'roles navigation visibility')
         for href, title, aliases in [('/channels','Chat channels','slack teams telegram whatsapp'),
                                      ('/connections','Connected accounts','oauth connectors integrations'),

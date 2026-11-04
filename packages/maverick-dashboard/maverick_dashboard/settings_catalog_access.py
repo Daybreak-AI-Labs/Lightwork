@@ -4,7 +4,7 @@ Sign-in (company sign-in, single sign-on, the company proxy), dashboard
 access (administrators, roles, invitations, sessions), workspaces and client
 binding, sharing, encryption and the key service, custody of the activity
 record, and the server-side plumbing a deployment chooses (record stores,
-the work queue, remote workers, linked servers, the license).
+the work queue, remote workers, linked servers, trusted update publishers).
 
 Kept apart from settings_catalog.py so each group can be extended without
 editing the shared catalog. entries receives the catalog's own row and
@@ -965,7 +965,7 @@ def _journal(S) -> tuple:  # noqa: N803 -- the catalog's row type
 def _server(S) -> tuple:  # noqa: N803 -- the catalog's row type
     grp = "Server & deployment"
     store, queue, grpc = "Record store", "Shared work queue", "Remote workers"
-    fed, lic, upd, ent = "Linked Lightwork servers", "License", "Updates", "Enterprise boundary"
+    fed, upd, ent = "Linked Lightwork servers", "Updates", "Enterprise boundary"
     return (
         S("governed_records", "backend", "Where governed records are kept",
           "Governed records (approvals, receipts and other records that need an owner) can be "
@@ -1232,34 +1232,6 @@ def _server(S) -> tuple:  # noqa: N803 -- the catalog's row type
           env=("MAVERICK_RELEASE_PUBKEYS",), weaker="grow",
           warning="Update bundles from another publisher will be accepted.",
           aliases="publisher keys update bundle release"),
-        # ------------------------------------------------------ license
-        S("license", "enforce", "Limit features to the license",
-          "Turn off the features your license does not include. Off: every feature works.",
-          "toggle", grp, False, "maverick.entitlements", subgroup=lic,
-          env=("MAVERICK_LICENSE_ENFORCE",), aliases="license entitlements"),
-        S("license", "license_file", "License file",
-          "Where the signed license file is on the server.",
-          "path", grp, "", "maverick.entitlements", subgroup=lic, path_kind="file",
-          max_length=400, env=("MAVERICK_LICENSE_FILE",)),
-        S("license", "publisher_pubkeys", "Trusted license publishers",
-          "Only licenses signed by one of these publishers are accepted.",
-          "keys", grp, [], "maverick.entitlements", subgroup=lic,
-          env=("MAVERICK_LICENSE_PUBKEYS",), weaker="grow",
-          warning="Licenses from another publisher will be accepted.",
-          aliases="publisher keys"),
-        S("license", "api_url", "License service address",
-          "Where Lightwork fetches a renewed license. Use Test connection to check it.",
-          "text", grp, "", "maverick.entitlements", subgroup=lic, pattern=_HTTPS,
-          max_length=300, test="license", env=("MAVERICK_LICENSE_API",)),
-        S("license", "api_token", "License service access key",
-          "The access key for the license service. Stored sealed and never shown again.",
-          "secret", grp, "", "maverick.entitlements", subgroup=lic, max_length=512,
-          test="license", env=("MAVERICK_LICENSE_API_TOKEN",)),
-        S("license", "refresh_interval_seconds", "Check for a renewed license every",
-          "How often Lightwork asks the license service for a renewed license.",
-          "number", grp, 60, "maverick.entitlements", subgroup=lic, minimum=30,
-          maximum=86400, integer=True, unit="seconds", restart=True,
-          env=("MAVERICK_LICENSE_REFRESH_INTERVAL",)),
         # ----------------------------------------------- enterprise boundary
         S("profile", "name", "Deployment profile",
           "Enterprise turns on the stricter enterprise protections whenever the Enterprise "

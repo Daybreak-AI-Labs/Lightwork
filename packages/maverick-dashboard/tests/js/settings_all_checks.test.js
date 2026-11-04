@@ -27,7 +27,7 @@ const HTML=`<!doctype html><main>
   <strong data-value-text>Off</strong><span data-source-text>Default</span>
   <input type="checkbox" data-input>
   <button data-save>Save</button><button data-test>Test connection</button><button data-reset>Reset to default</button><p data-row-status></p></div>
- <div class="settings-all-row" data-setting-id="license.api_token" data-control="secret" data-source="default" data-search="license key">
+ <div class="settings-all-row" data-setting-id="world_model.dsn" data-control="secret" data-source="default" data-search="shared database connection">
   <span data-secret-state>Not set</span><button data-secret-replace>Add</button><input type="password" data-input hidden>
   <button data-save>Save</button><button data-test>Test connection</button><button data-reset>Reset to default</button><p data-row-status></p></div>
 </section></div><p id="settings-all-empty" hidden></p></main>`;
@@ -81,13 +81,13 @@ test("testing a switch tests what is saved; a secret is sent only after Replace"
     await click(row(ui,"auth.oidc.enabled").querySelector("[data-test]"));
     assert.deepEqual(ui.calls[0].body,{id:"auth.oidc.enabled",value:null});
     assert.match(row(ui,"auth.oidc.enabled").querySelector("[data-row-status]").textContent,/reached your sign-in provider/);
-    const secret=row(ui,"license.api_token");
+    const secret=row(ui,"world_model.dsn");
     await click(secret.querySelector("[data-test]"));
     assert.equal(ui.calls[1].body.value,null);
     await click(secret.querySelector("[data-secret-replace]"));
-    secret.querySelector("[data-input]").value="new-access-key"; // pragma: allowlist secret
+    secret.querySelector("[data-input]").value="postgres://db.example.com/lightwork";
     await click(secret.querySelector("[data-test]"));
-    assert.equal(ui.calls[2].body.value,"new-access-key");
+    assert.equal(ui.calls[2].body.value,"postgres://db.example.com/lightwork");
   }finally{ui.dom.window.close();}
 });
 

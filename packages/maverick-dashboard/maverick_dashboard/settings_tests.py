@@ -318,20 +318,6 @@ def _check_server(value: object, values: Mapping[str, object]) -> Outcome:
     return Outcome(True, "Lightwork reached this server.")
 
 
-def _check_license(value: object, values: Mapping[str, object]) -> Outcome:
-    url = _address(values.get("license.api_url"))
-    token = str(values.get("license.api_token") or "").strip()
-    headers = {"Accept": "application/json"}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    status, body = fetch(url, headers=headers)
-    if status in {401, 403}:
-        return Outcome(False, "Lightwork reached your license service, but it did not accept the access key.")
-    if status != 200 or not isinstance(_json(body), dict):
-        return Outcome(False, "Lightwork reached the address, but it did not answer like a license service.")
-    return Outcome(True, "Lightwork reached your license service and it answered.")
-
-
 _KMS_KEYS = ("provider", "key_id", "region", "address", "mount")
 
 
@@ -408,7 +394,6 @@ TESTERS: dict[str, Callable[[object, Mapping[str, object]], Outcome]] = {
     "saml": _check_saml,
     "siem": _check_siem,
     "server": _check_server,
-    "license": _check_license,
     "kms": _check_kms,
 }
 

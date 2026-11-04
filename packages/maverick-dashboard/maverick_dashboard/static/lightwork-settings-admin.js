@@ -93,26 +93,6 @@
       document.querySelector('[data-maintenance-details="settings"]').hidden = !data.technical.length;
       return data.summary;
     },
-    license: function (data) {
-      var box = out('license'); box.textContent = '';
-      var dl = el('dl', 'maintenance-facts');
-      function fact(label, value) { if (!value) return; dl.appendChild(el('dt', null, label)); dl.appendChild(el('dd', null, value)); }
-      fact('Status', data.status_label);
-      fact('Plan', data.plan);
-      fact('Licensed to', data.customer);
-      fact('Renews or ends', data.expires ? (window.mvDateAbsolute ? window.mvDateAbsolute(data.expires) : new Date(data.expires + 'T00:00:00').toLocaleDateString()) : '');
-      fact('Add-ons', data.add_ons.join(', '));
-      box.appendChild(dl);
-      var list = el('ul', 'maintenance-list');
-      data.features.forEach(function (f) {
-        var li = el('li');
-        li.appendChild(el('span', 'maintenance-label', f.label));
-        li.appendChild(badge(f.included, 'Included', 'Not included'));
-        list.appendChild(li);
-      });
-      box.appendChild(list);
-      return data.summary;
-    },
     queue: function (data) {
       var box = out('queue'); box.textContent = '';
       if (!data.counts.length) return 'There is no background work.';
@@ -428,11 +408,11 @@
     return data.summary;
   };
   var paths = {readiness: ['/readiness', 'GET'], health: ['/health-check', 'POST'], settings: ['/settings-check', 'GET'],
-    license: ['/license', 'GET'], queue: ['/queue', 'GET'], encryption: ['/encryption', 'GET'], diagnostics: ['/diagnostics', 'GET'],
+    queue: ['/queue', 'GET'], encryption: ['/encryption', 'GET'], diagnostics: ['/diagnostics', 'GET'],
     enterprise: ['/enterprise-check', 'GET'], offline: ['/offline-check', 'GET'], hardware: ['/hardware-check', 'GET'],
     plugins: ['/plugin-check', 'GET'], client: ['/client', 'GET']};
   var actions = {readiness: 'check readiness', health: 'run the health check', settings: 'check the installation settings',
-    license: 'show the license', queue: 'show background work', encryption: 'check encryption', diagnostics: 'check services',
+    queue: 'show background work', encryption: 'check encryption', diagnostics: 'check services',
     enterprise: 'check the protections', offline: 'check connections', hardware: 'check the hardware',
     plugins: 'check add-ons', client: 'show the data status'};
 

@@ -229,7 +229,7 @@ def test_whole_configuration_shows_sources_links_and_hides_secrets(client, monke
 _LINKED = {
     "grpc.max_workers": "/settings/all#group-", "logging.level": "/settings/all#group-",
     "observability.prometheus_port": "/settings/all#group-", "queue.backend": "/settings/all#group-",
-    "embedded.allow_flash": "/settings/all#group-", "license.enforce": "/settings/all#group-",
+    "embedded.allow_flash": "/settings/all#group-", "release.publisher_pubkeys": "/settings/all#group-",
     "world_model.dsn": "/settings/all#group-", "lsp.servers": "/settings/all#group-",
     "ai_bank_mrm.enable": "/settings/all#group-modules",
     "rehearsal.enable": "/settings/all#group-safety",

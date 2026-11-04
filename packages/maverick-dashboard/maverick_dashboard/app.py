@@ -1318,18 +1318,6 @@ async def _lifespan(app: FastAPI):
             log.exception("background programs not started")
         await _start_privacy_discovery_remediation_scheduler()
         await _start_privacy_notice_publication_scheduler()
-        # Connected-entitlement auto-refresh: a deployment with [license] api_url
-        # configured polls that license service so a license re-issued there
-        # lands within ~a minute — no redeploy, no manual refresh. No-op (returns
-        # None) without an API URL or with refresh_interval_seconds = 0, so tests
-        # and offline/air-gapped boxes are untouched. Fail-open by construction:
-        # the loop never raises and a failed poll leaves the license file in charge.
-        try:
-            from maverick.entitlements import start_refresher
-
-            await run_in_threadpool(start_refresher)
-        except Exception:  # pragma: no cover - never block startup
-            log.exception("license auto-refresh not started")
         # Load installed voice weights without delaying startup. Downloads require
         # explicit persisted opt-in, or the separately reviewed Settings action.
         try:
@@ -2262,10 +2250,6 @@ from .permission_requests_api import router as permission_requests_router  # noq
 
 app.include_router(permission_requests_router)
 app.include_router(personal_data_router)
-# Settings > License (/settings/license + its install, sign and key-pair API).
-from .license_ops_api import router as license_ops_router  # noqa: E402
-
-app.include_router(license_ops_router)
 # Finance operations that were terminal-only (the separation-of-duties check).
 from .finance_ops_api import router as finance_ops_router  # noqa: E402
 

@@ -27,7 +27,7 @@ Deliberately NOT in the catalog:
   settings_catalog_learning.py, off by default and confirmed before they widen;
   the code-experiment on/off switch itself stays on the Learning page.
 * Sign-in, workspaces, key custody, record stores, the work queue, remote
-  workers, linked servers and the license settings ARE here
+  workers, linked servers and trusted update publishers ARE here
   (settings_catalog_access), behind the lock-out guard in
   ``settings_access_guard``: a change that would lock the person saving (or
   saved records) out is refused until its check passes. Still
@@ -43,8 +43,7 @@ Deliberately NOT in the catalog:
   folders, and the privacy modules' key names, as sealed rows restricted to
   their own module's names (settings_catalog_privacy).
 * Settings that already have a dedicated control elsewhere: provider keys,
-  models, installing and issuing licenses (Settings > License), the per-task
-  spending cap, capabilities, the chat
+  models, the per-task spending cap, capabilities, the chat
   channels on the Channels page (their sign-in fields and on/off), plugins,
   connections (the account-connection and desktop-return switches are on
   the Connections page, vendor onboarding's connections and owner on its
@@ -131,7 +130,7 @@ GROUP_INTROS: dict[str, str] = {
     "Security suite": "How the environment hunter gathers security events and how often the hunters run.",
     "AI governance": "Detailed policies for the AI governance modules, the AI gateway and outbound GRC records.",
     "People & access": "How people sign in, who administers Lightwork, and which departments people can use.",
-    "Server & deployment": "Where Lightwork keeps its records, how its servers work together, and its license. Most of these take effect after a restart.",
+    "Server & deployment": "Where Lightwork keeps its records, how its servers work together, and which update publishers it trusts. Most of these take effect after a restart.",
 }
 
 CONTROLS = frozenset({

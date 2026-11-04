@@ -2,8 +2,8 @@
 
 Buttons for the operator tasks that were only reachable from a terminal:
 the installation health check, the go-live readiness check, the settings-file
-check, the license summary, the background work queue with native schedule
-review links, at-rest encryption maintenance and live diagnostics. Every
+check, the background work queue with native schedule review links, at-rest
+encryption maintenance and live diagnostics. Every
 route calls the same kernel functions the terminal commands call and answers in
 plain sentences; the exact technical rows are returned separately so the page
 can keep them inside a collapsed "Technical details" section.
@@ -101,17 +101,6 @@ def _readiness() -> list[dict[str, Any]]:
     except Exception:  # noqa: BLE001
         rows.append(_row("separation", "Each person's work kept separate", False,
                          "This setting could not be read.", "Manage workspaces", "/tenants"))
-    try:
-        from maverick.entitlements import _trusted_pubkeys
-        keys = _trusted_pubkeys()
-        rows.append(_row("license", "License can be checked", bool(keys),
-                         "Lightwork can confirm your license is genuine." if keys
-                         else "No trusted license keys are set, so a license cannot be confirmed. They are "
-                              "needed only when “Limit features to the license” is on.",
-                         "See license", "#maintenance-license"))
-    except Exception:  # noqa: BLE001
-        rows.append(_row("license", "License can be checked", False,
-                         "The license setting could not be read.", "See license", "#maintenance-license"))
     try:
         from maverick.crypto_at_rest import at_rest_enabled
         on = bool(at_rest_enabled())
@@ -284,54 +273,6 @@ def _config_check() -> dict[str, Any]:
 async def settings_check(request: Request) -> dict:
     _admin(request)
     return await run_in_threadpool(_config_check)
-
-
-# ---- license (maverick license show) ---------------------------------------
-
-_LICENSE_STATUS = {
-    "licensed": ("Active", "Your license is active."),
-    "grace": ("Renewal due", "Your license has expired but still works for a short time. Renew it soon."),
-    "expired": ("Expired", "Your license has expired. While “Limit features to the license” is on, "
-                           "the features it grants are off; everything else still works."),
-    "invalid": ("Not accepted", "The license file could not be confirmed. While “Limit features to the "
-                                "license” is on, the features a license controls are off."),
-    "unverified": ("Not confirmed", "The license could not be confirmed yet. While “Limit features to "
-                                    "the license” is on, the features a license controls are off."),
-    "unlicensed": ("No license", "No license is installed. Every feature works unless “Limit features "
-                                 "to the license” is on."),
-}
-_FEATURE_NAMES = {
-    "external_agents": "Outside agents",
-    "fleet_governance": "Agent fleet governance",
-    "fleet_memory": "Shared fleet memory",
-    "siem_export": "Security log export",
-    "advanced_evolve": "Advanced self-improvement",
-    "custom_pack_factory": "Custom agents",
-    "multi_tenant": "Multiple workspaces",
-}
-
-
-def _license() -> dict[str, Any]:
-    from maverick.entitlements import GATED_FEATURES, load_entitlements
-    ent = load_entitlements()
-    label, sentence = _LICENSE_STATUS.get(ent.status, ("Unknown", "The license state is unknown."))
-    return {
-        "status": ent.status,
-        "status_label": label,
-        "summary": sentence,
-        "plan": (ent.tier or "basic").capitalize(),
-        "customer": ent.customer or "",
-        "expires": ent.expires_at.date().isoformat() if ent.expires_at else "",
-        "add_ons": [s.replace("_", " ").capitalize() for s in ent.suites],
-        "features": [{"label": _FEATURE_NAMES.get(f, f.replace("_", " ").capitalize()),
-                      "included": bool(ent.allows(f))} for f in sorted(GATED_FEATURES)],
-    }
-
-
-@router.get("/license")
-async def license_summary(request: Request) -> dict:
-    _admin(request)
-    return await run_in_threadpool(_license)
 
 
 # ---- background work queue (maverick queue status/failed/reconcile) --------
