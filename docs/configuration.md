@@ -297,20 +297,6 @@ token = "${MAVERICK_DASHBOARD_TOKEN}"
 # [dashboard.group_suites]
 # "Finance Team" = ["finance", "tax"]
 
-[license]
-# Optional signed-license feature gate for operators (gated tier features and
-# add-on suites). Off by default: every feature runs unless you turn enforcement
-# on. Set the trust anchor to the publisher PUBLIC key(s) so a signed license
-# grants its gated features. The matching PRIVATE key is a secret supplied only
-# via MAVERICK_LICENSE_PRIVATE_KEY (never here). Issue/inspect with
-# `maverick license issue|set|show`; `maverick license keygen` mints a keypair.
-enforce           = false                 # or MAVERICK_LICENSE_ENFORCE=1
-# publisher_pubkeys = ["<publisher public key hex>"]  # or MAVERICK_LICENSE_PUBKEYS
-# license_file      = "~/.maverick/license.json"      # where the signed license lives
-# api_url           = "https://api.example/license"   # optional connected refresh
-# api_token         = "${MAVERICK_LICENSE_API_TOKEN}"
-# refresh_interval_seconds = 60
-
 [release]
 # Publisher PUBLIC keys whose signed update bundles `python -m
 # maverick.release_update verify-bundle|apply|rollback` accepts (also
@@ -1151,14 +1137,11 @@ row reads real config/env:
 - a workspace or everyone limit in **Admin > Spending limits**, or
   `[quotas] enforce = true` with at least one non-zero cap (cost governance);
 - `[tenancy] by_user = true` (per-user tenant isolation);
-- a license trust anchor present (`[license] publisher_pubkeys` /
-  `MAVERICK_LICENSE_PUBKEYS`);
 - at-rest encryption on (`[encryption] at_rest` / `MAVERICK_ENCRYPT_AT_REST`);
 - a provider credential resolvable (an API key or a `[providers.<name>]` table).
 
 Onboard a tenant and mint its first admin in one step with
-`maverick tenant onboard <id> --admin-email <email> --plan <plan>`; manage the
-optional signed license with `maverick license issue|set|show`.
+`maverick tenant onboard <id> --admin-email <email> --plan <plan>`.
 
 ## Environment variables
 

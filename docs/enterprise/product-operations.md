@@ -22,9 +22,17 @@ audit it.
 
 A **release manifest** is an Ed25519-signed document listing the `version`,
 the `artifacts` (name, sha256 and size), the `min_from` version, and the
-ordered **governed migrations** a release introduces.
+ordered **governed migrations** a release introduces. Manifests are signed and
+verified by
+[`maverick/release_manifest_signing.py`](https://github.com/Daybreak-AI-Labs/LightworkOS/blob/main/packages/maverick-core/maverick/release_manifest_signing.py)
+(tests: `tests/test_release_manifest_signing.py`).
 
-- `verify_manifest()` authenticates a release.
+- `verify_manifest()` authenticates a release against the trusted publisher
+  keys: `MAVERICK_RELEASE_PUBKEYS`, `[release] publisher_pubkeys` (also on
+  **Settings > All settings > Server & deployment > Updates**) and any keys
+  built into the release; the offline CLI's `--pubkey` replaces that set for
+  one command. With no trusted key, every manifest is refused
+  (`no_trust_anchor`).
 - `verify_bundle()` verifies an **offline update bundle**: the manifest
   signature **and** every artifact's sha256, so a swapped binary is caught even
   if the manifest is authentic.
@@ -71,7 +79,7 @@ channel configuration.
 [`maverick/support_bundle.py`](https://github.com/Daybreak-AI-Labs/LightworkOS/blob/main/packages/maverick-core/maverick/support_bundle.py)
 builds a **redacted** support bundle: versions, runtime, readiness checks,
 providers, recent failures, and secret-scrubbed configuration, keyed by a
-`correlation_id` and carrying the deployment's license status (see §3).
+`correlation_id`.
 
 - **Air-gapped / regulated:** the operator runs `maverick support`, reviews the
   redacted bundle, and delivers it out of band. There is no silent telemetry.
@@ -92,38 +100,18 @@ providers, recent failures, and secret-scrubbed configuration, keyed by a
 **Not built yet:** a bridge from `ticket_summary()` into a ticketing system,
 and the round trip from a support ticket to a hotfix release (§1).
 
-## 3. Optional signed-license feature gate
-
-[`maverick/entitlements.py`](https://github.com/Daybreak-AI-Labs/LightworkOS/blob/main/packages/maverick-core/maverick/entitlements.py)
-is an optional feature gate for operators who want to control which
-capabilities a deployment runs through an Ed25519-signed license file. It is
-**off by default**: `entitlements.enforcing()` is false unless
-`MAVERICK_LICENSE_ENFORCE` or `[license] enforce = true` is set, so every
-feature works in a default installation. When enforcement is on, the core
-kernel still never stops on a missing, expired or invalid license; only the
-capabilities listed in `GATED_FEATURES` and `GATED_SUITES` gate off. Licenses
-verify offline against the deployment's trusted public keys
-(`MAVERICK_LICENSE_PUBKEYS` / `[license] publisher_pubkeys`), and a license
-signed by an untrusted key grants nothing beyond the base set.
-
 ---
 
 ## Publisher keys
 
-Updates and licenses both reduce to **signed, offline-verifiable documents
-against a publisher trust anchor**, the same Ed25519 substrate as the proof
-pack and the audit chain. Manage that keypair carefully, because it is the root
-of trust for both: generate it offline, store it in an HSM or KMS, rotate with
-an overlap window, and distribute only the public key(s).
+Updates reduce to **signed, offline-verifiable documents against a publisher
+trust anchor**, the same Ed25519 substrate as the proof pack and the audit
+chain. Manage that keypair carefully, because it is the root of trust for
+updates: generate it offline, store it in an HSM or KMS, rotate with an overlap
+window, and distribute only the public key(s).
 
 ### Known limitations
 
-- **No hardware or deployment binding on a license.** A validly signed license
-  grants its entitlements on any host, and `seats` is declared but not
-  enforced in code; this follows from the offline-verifiable design (a license
-  must verify with no network or callback). The connected refresh path
-  **refuses a rollback**: an older or different-subject license replayed over
-  the installed one is rejected.
 - **Migration linkage is caller-wired** (see §1): `apply_bundle` gates on
   signature, hash and version, then delegates each migration to the injected
   `migrate` hook. Wiring that hook to `schema_migrations` is the deployment's

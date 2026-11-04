@@ -145,7 +145,7 @@ public with sharing class LightworkGateway {
         if (code == 401) {
             hint = ' (rest bearer missing, rotated, or revoked — mint a new credential on /external-agents and update the External Credential header)';
         } else if (code == 403) {
-            hint = ' (license lacks the external_agents entitlement, or the agent hit a governance refusal)';
+            hint = ' (the agent hit a governance refusal)';
         } else if (code == 404) {
             hint = ' (the external-agents plane is off — enable [external_agents] on the Lightwork deployment)';
         } else if (code == 429) {

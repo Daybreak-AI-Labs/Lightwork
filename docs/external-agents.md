@@ -31,10 +31,7 @@ enable = true
 ```
 
 or `MAVERICK_EXTERNAL_AGENTS=1`. While off, the `/api/v1/external/*` routes
-**404** (they don't exist for this deployment). The gateway is also one of the
-features covered by the optional signed-license gate: if an operator turns
-license enforcement on (`[license] enforce = true`, off by default), the routes
-**403** unless the installed license grants the `external_agents` entitlement.
+**404** (they don't exist for this deployment).
 
 ## Enrolling an agent
 
@@ -661,7 +658,7 @@ The external boundary fails closed throughout:
 | Symptom | Meaning | Fix |
 | --- | --- | --- |
 | `404` on `/api/v1/external/*` | Plane is off | Enable `[external_agents]` and restart the dashboard |
-| `403` | License enforcement is on and the installed license does not grant the `external_agents` entitlement | Install a license that grants it, or turn enforcement off |
+| `403` | A governance refusal; the response `detail` gives the reason | Act on the reason, for example on the agent's row on **/external-agents** |
 | `401` | Missing, wrong, rotated, or revoked rest token (the reply never says which) | Mint a new rest credential; minting replaces the old token immediately |
 | `401` with a native credential | Generic by design — the server log names the rule: `external gateway: <scheme> auth refused (<rule>)` | Match the log rule against the rows below |
 | log rule `stale` / `future_ts` | Timestamp outside the freshness window (300 s age, 60 s forward skew) | Sync clocks (NTP) and sign at send time, not enqueue time |

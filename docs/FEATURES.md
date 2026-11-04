@@ -3404,8 +3404,7 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   shared-bearer caller) — so every external ingress (federation, A2A, fleet,
   channel, marketplace, gRPC, MCP) is default-denied at the boundary.
 - **Bring-your-own-agent gateway** (`external_agents.py`, opt-in
-  `[external_agents] enable` / `MAVERICK_EXTERNAL_AGENTS=1`; also gated by the
-  `external_agents` entitlement when license enforcement is on) — agents built
+  `[external_agents] enable` / `MAVERICK_EXTERNAL_AGENTS=1`) — agents built
   on *other* runtimes (Agentforce, Bedrock Agents, Copilot Studio, OpenAI,
   LangChain/LangGraph, custom) enroll into the governed workforce: they run on their runtime,
   governed on ours. Four verbs: **enroll** (one call writes the inbound Agent
@@ -4706,20 +4705,20 @@ opt-in; single-tenant/self-hosted deployments are unaffected):
   restores it on payment. The `stripe` SDK is an optional extra
   (`maverick-core[stripe]`), lazily imported; the module and its gate report
   "disabled" cleanly without it. (Distinct from the agent-facing `stripe` tool.)
-- **Signed-license feature control** (optional; enforcement is off by
-  default) — `entitlements.py` + `maverick license issue|set|show|keygen`:
-  sign a deployment license declaring its tier and enabled add-on suites,
-  resolve the installed one, or mint a publisher keypair. The signing key is a
-  secret sourced only from `MAVERICK_LICENSE_PRIVATE_KEY` (never config, never
-  the repo, never printed). Every feature runs unless an operator sets
-  `[license] enforce = true` or `MAVERICK_LICENSE_ENFORCE=1`; with enforcement
-  on, gated features activate only against the configured trust anchor
-  (`[license] publisher_pubkeys`).
 - **Go-live readiness gate** — `maverick launch-check` (`health.py:
   run_launch_check`): PASS/FAIL for each production switch — cost-cap
-  enforcement, per-user tenancy, a license trust anchor, at-rest encryption,
-  and a resolvable provider credential — each reading real config/env, exiting
-  non-zero if any is off so a deploy pipeline can gate on it.
+  enforcement, per-user tenancy, at-rest encryption, and a resolvable provider
+  credential — each reading real config/env, exiting non-zero if any is off so
+  a deploy pipeline can gate on it.
+- **Signed offline update bundles** — `release_update.py` +
+  `release_manifest_signing.py` (`python -m maverick.release_update
+  verify-bundle|plan|apply|rollback`): an Ed25519-signed release manifest lists
+  the version, each artifact's sha256 and size, the oldest version it upgrades
+  from and its governed migrations. A bundle verifies offline against the
+  trusted publisher keys (`MAVERICK_RELEASE_PUBKEYS` / `[release]
+  publisher_pubkeys`, also under All settings > Server & deployment > Updates)
+  and every artifact hash before a version-gap-checked plan runs. The
+  per-deployment install hooks that swap the running binary are not built.
 - **Per-tenant envelope encryption** — `tenant/kms.py` (fleet KEK rotation in
   `tenant/kms_fleet.py`): a DEK per tenant, wrapped by a KMS KEK (LocalKMS
   default; cloud KMS is a drop-in `wrap`/`unwrap`); one tenant's DEK can't open
@@ -5910,10 +5909,8 @@ freshness unknown. Failed documents do not contribute an epoch date to usable
 source freshness. API reference pages package their fixed Swagger distribution
 and notices locally, retaining the ordinary endpoints and sign-in behavior.
 
-The installer explains license enforcement in plain language and points to the
-existing License and All settings pages for later review instead of requiring
-configuration-file edits. Native scheduled skill retirement was also confirmed
-to stay within its current tenant and configured skills directory.
+Native scheduled skill retirement was also confirmed to stay within its
+current tenant and configured skills directory.
 
 ### Correct task setup and routing feedback
 

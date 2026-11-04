@@ -21,9 +21,7 @@ instead.
 ## Before either sample: enroll → mint → import
 
 1. **Enable the plane** — `[external_agents] enable = true` and restart the
-   dashboard; while off, `/api/v1/external/*` 404s. When license enforcement
-   is on (off by default), the installed license must also grant the
-   `external_agents` entitlement.
+   dashboard; while off, `/api/v1/external/*` 404s.
 2. **Enroll** the agent on the **/external-agents** dashboard page:
    stable `agent_id`, platform (`agentforce` / `bedrock`), tool + risk +
    budget ceilings, expiry. The agent becomes principal `agent:<id>` on

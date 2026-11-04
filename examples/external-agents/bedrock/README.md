@@ -114,9 +114,9 @@ aws lambda invoke --function-name <ForwarderFunctionArn> --payload '{
   --secret-string 'lw-rest-EXAMPLE'`. The forwarder's cache refreshes
   within ~5 minutes and immediately on the first `401`.
 - A `404` from the gateway means the external-agents plane is off; `403`
-  means the license lacks the entitlement or a governance refusal; `429`
-  is the per-agent rate limit (honor `Retry-After`). The full rule table
-  is in the [platform docs](../../../docs/external-agents.md).
+  means a governance refusal; `429` is the per-agent rate limit (honor
+  `Retry-After`). The full rule table is in the
+  [platform docs](../../../docs/external-agents.md).
 - Prefer *return of control*? Skip the Lambda and let your orchestrating
   app forward operations itself — the schema and route table stay
   identical.
