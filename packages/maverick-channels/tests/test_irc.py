@@ -156,3 +156,36 @@ def test_ping_is_answered_in_loop():
     ch._send_line = fake_send  # type: ignore[assignment]
     asyncio.run(ch._handle_raw("PING :TOKEN42\r\n"))
     assert sent == ["PONG :TOKEN42"]
+
+
+class _FakeWriter:
+    def __init__(self):
+        self.data = b""
+
+    def write(self, b):
+        self.data += b
+
+    async def drain(self):
+        pass
+
+
+def test_format_privmsg_splits_on_bare_cr():
+    lines = format_privmsg("#chan", "hello\rJOIN #evil")
+    # No raw CR/LF survives into any wire line...
+    assert all("\r" not in ln and "\n" not in ln for ln in lines)
+    # ...and the injected command is now PRIVMSG *text*, not a second command.
+    assert lines == ["PRIVMSG #chan :hello", "PRIVMSG #chan :JOIN #evil"]
+
+
+def test_format_privmsg_handles_crlf_and_lf():
+    assert format_privmsg("#c", "a\r\nb\nc") == [
+        "PRIVMSG #c :a", "PRIVMSG #c :b", "PRIVMSG #c :c",
+    ]
+
+
+def test_send_line_strips_embedded_crlf():
+    ch = IRCChannel.__new__(IRCChannel)  # bypass __init__ (needs server config)
+    ch._writer = _FakeWriter()
+    asyncio.run(ch._send_line("PRIVMSG #c :hi\r\nQUIT"))
+    # Exactly one wire line (single trailing CRLF); the embedded CRLF is gone.
+    assert ch._writer.data == b"PRIVMSG #c :hiQUIT\r\n"

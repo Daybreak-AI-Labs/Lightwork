@@ -264,3 +264,15 @@ class TestCascadeScanOutputKnownPrompt:
         c = CascadedShield(base=b)
         c.scan_output("a perfectly ordinary answer")
         assert b.calls == [None]  # base called (with no known_prompt)
+
+
+class TestScanOutputSignature:
+    def test_base_and_cascade_accept_known_prompt(self):
+        from maverick_shield.cascade import CascadedShield
+        from maverick_shield.guard import Shield
+        base = Shield(backend="builtin")
+        # Must not raise TypeError on known_prompt: the cascade override
+        # keeps the base signature.
+        base.scan_output("hello", known_prompt="sys")
+        casc = CascadedShield(base)
+        casc.scan_output("hello", known_prompt="sys")

@@ -187,3 +187,13 @@ class TestVerdictFactories:
         assert not v.allowed
         assert v.severity == "high"
         assert "prompt injection" in v.reasons
+
+
+class TestThresholdNormalization:
+    def test_mixed_case_threshold_matches(self):
+        from maverick_shield.builtin_rules import (
+            SEVERITY_ORDER,
+            _threshold_to_min_severity,
+        )
+        assert _threshold_to_min_severity("Medium") == SEVERITY_ORDER["medium"]
+        assert _threshold_to_min_severity(" HIGH ") == SEVERITY_ORDER["high"]

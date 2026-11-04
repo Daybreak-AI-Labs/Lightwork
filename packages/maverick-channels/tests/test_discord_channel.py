@@ -1,13 +1,12 @@
-"""Channel regressions: Discord dispatch wiring + IRC CRLF injection."""
+"""Discord channel adapter: message dispatch, author authorization and reply hygiene."""
+
 from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
 
 from maverick_channels import discord as dmod
-from maverick_channels.irc import IRCChannel, format_privmsg
 
-# --- Discord: CRITICAL -- on_message hit AttributeError on every message ------
 
 class _Author:
     def __init__(self, id_):
@@ -119,38 +118,3 @@ def test_discord_handler_error_does_not_leak_internals():
 
     assert chan.sent == ["⚠ An internal error occurred."]
     assert "secret internal detail" not in chan.sent[0]
-
-
-# --- IRC: HIGH -- bare \r injected an IRC command ----------------------------
-
-def test_format_privmsg_splits_on_bare_cr():
-    lines = format_privmsg("#chan", "hello\rJOIN #evil")
-    # No raw CR/LF survives into any wire line...
-    assert all("\r" not in ln and "\n" not in ln for ln in lines)
-    # ...and the injected command is now PRIVMSG *text*, not a second command.
-    assert lines == ["PRIVMSG #chan :hello", "PRIVMSG #chan :JOIN #evil"]
-
-
-def test_format_privmsg_handles_crlf_and_lf():
-    assert format_privmsg("#c", "a\r\nb\nc") == [
-        "PRIVMSG #c :a", "PRIVMSG #c :b", "PRIVMSG #c :c",
-    ]
-
-
-class _FakeWriter:
-    def __init__(self):
-        self.data = b""
-
-    def write(self, b):
-        self.data += b
-
-    async def drain(self):
-        pass
-
-
-def test_send_line_strips_embedded_crlf():
-    ch = IRCChannel.__new__(IRCChannel)  # bypass __init__ (needs server config)
-    ch._writer = _FakeWriter()
-    asyncio.run(ch._send_line("PRIVMSG #c :hi\r\nQUIT"))
-    # Exactly one wire line (single trailing CRLF); the embedded CRLF is gone.
-    assert ch._writer.data == b"PRIVMSG #c :hiQUIT\r\n"
