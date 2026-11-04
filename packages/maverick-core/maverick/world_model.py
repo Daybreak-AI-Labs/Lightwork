@@ -511,10 +511,10 @@ MIGRATIONS: dict[int, list[str]] = {
     6: [],  # processed_messages table is in SCHEMA (idempotent CREATE)
     # episodes.ended_at + goal_events.ts indexes.
     # list_episodes() does `ORDER BY ended_at DESC LIMIT N` which is a
-    # full table scan without the index — visible above ~5k episodes;
-    # SWE-bench Pro creates ~7500 episodes per sweep (1865 instances ×
-    # best-of-4 attempts) so the dashboard's recent-episodes query
-    # was painful. prune_goal_events queries by ts < cutoff.
+    # full table scan without the index once a workspace holds thousands
+    # of episodes (a large evaluation sweep easily does), which slows the
+    # dashboard's recent-episodes query. prune_goal_events queries by
+    # ts < cutoff.
     7: [
         "CREATE INDEX IF NOT EXISTS idx_episodes_ended_at "
         "ON episodes(ended_at)",

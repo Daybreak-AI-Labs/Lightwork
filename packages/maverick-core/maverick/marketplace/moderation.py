@@ -26,7 +26,7 @@ and a human-readable reason so the moderator (or the author) sees exactly why.
 Pure + offline: no network, no install, no code execution -- it only reads and
 pattern-matches the submitted files. CLI::
 
-    python -m maverick.marketplace_moderation path/to/skill-or-plugin
+    python -m maverick.marketplace.moderation path/to/skill-or-plugin
 """
 from __future__ import annotations
 
@@ -403,7 +403,7 @@ def main(argv: list[str] | None = None) -> int:
     review needed), 2 reject.
     """
     ap = argparse.ArgumentParser(
-        prog="python -m maverick.marketplace_moderation",
+        prog="python -m maverick.marketplace.moderation",
         description="Static pre-publication moderation for a marketplace skill/plugin submission.",
     )
     ap.add_argument("path", help="path to a SKILL.md, a skill dir, or a plugin package dir")

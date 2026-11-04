@@ -12,7 +12,7 @@ Substrate, per the [platform overview](../index.md):
 - **OpenTelemetry traces, Prometheus `/metrics`, Sentry** — all opt-in,
   off by default (`observability.py`).
 - **OpenRouter** is one of 15 routable providers, with cost-aware routing
-  (`cost_router.py`) and provider failover (`provider_failover.py`,
+  (`cost/router.py`) and provider failover (`provider_failover.py`,
   `failover_policy.py`) layered on top, all opt-in.
 - **Generic OpenAI-compatible endpoints via `base_url`** — the mechanism
   behind the TGI / vLLM / `openai_compatible` providers.
@@ -40,7 +40,7 @@ Roles are independent — mix OpenRouter workers with an Anthropic orchestrator
 freely (see [Configuration](../configuration.md)). On top of the static picks,
 two opt-in layers apply:
 
-- **Cost-aware routing** (`cost_router.py`; enable via `[routing] cost_aware`
+- **Cost-aware routing** (`cost/router.py`; enable via `[routing] cost_aware`
   or `MAVERICK_COST_ROUTING`) with per-role policies
   (`[routing.roles.<role>]`: provider allow/deny, cost ceiling, tier floor).
 - **Provider failover** (`provider_failover.py`) with a policy engine

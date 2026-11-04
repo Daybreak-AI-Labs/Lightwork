@@ -28,8 +28,8 @@ Two pieces, each independently useful:
 
 CLI::
 
-    python -m maverick.skill_search "research and summarize"
-    python -m maverick.skill_search --export skills.jsonl
+    python -m maverick.skill.search "research and summarize"
+    python -m maverick.skill.search --export skills.jsonl
 """
 from __future__ import annotations
 
@@ -536,7 +536,7 @@ def _cmd_import(repo_id: str, dest: str) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
-        prog="python -m maverick.skill_search",
+        prog="python -m maverick.skill.search",
         description="Search the local skill library (BM25-lite) and publish/pull HF datasets.",
     )
     ap.add_argument("query", nargs="?", help="search the local skill library for this text")

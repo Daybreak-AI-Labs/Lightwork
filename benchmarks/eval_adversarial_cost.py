@@ -13,7 +13,7 @@ Scenarios (each returns ``{"scenario", "clamped", "detail"}``):
 
   * ``tool-loop``           a scripted agent re-calls the same read tool
                             100x; with the tool-output cache on
-                            (``maverick.tool_cache``) paid executions must
+                            (``maverick.cache.tool``) paid executions must
                             stay <= 1 -- the cache absorbs the repeats.
   * ``token-bomb``          a tool returns a multi-megabyte string; the
                             agent loop's ``_cap_tool_output`` hook must

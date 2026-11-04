@@ -45,7 +45,7 @@ STEP_OVERHEAD_TOKENS = 2_000
 
 # Default expected OUTPUT tokens per role when ``expected_output_tokens`` is
 # not given. The output-heavy set (writer/coder/revisor — the same roles
-# cost_router weights output rates for) defaults ~3x the base because their
+# cost.router weights output rates for) defaults ~3x the base because their
 # value is long completions; a summarizer's whole job is being short.
 ROLE_OUTPUT_TOKENS: dict[str, int] = {
     "writer":       3_000,

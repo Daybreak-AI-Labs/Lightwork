@@ -1,16 +1,16 @@
 """Distributed tool-output cache backend on Redis.
 
-:mod:`maverick.tool_cache` memoizes side-effect-free tool results per
+:mod:`maverick.cache.tool` memoizes side-effect-free tool results per
 *process*: every worker in a fleet pays its own cold start for the same
 repo_map / read_file / dep_graph calls. This backend gives the cache
 cross-process and cross-host reach by keeping entries in Redis, so the second
 worker on a repo starts warm.
 
-It deliberately mirrors ``tool_cache``'s semantics rather than inventing new
+It deliberately mirrors the local cache's semantics rather than inventing new
 ones: only string values; ``ERROR:``-prefixed results are never stored (a
 transient failure must not be pinned); TTL bounds staleness (``SETEX`` when a
 TTL is set, plain ``SET`` otherwise); and — crucially — the *same key
-canonicalization*: ``tool_cache._key`` is imported and reused, so the local
+canonicalization*: ``cache.tool._key`` is imported and reused, so the local
 and distributed caches agree on call identity. Keys live under a namespace
 prefix (default ``mvk:toolcache``) so :meth:`purge` and :meth:`stats` can
 SCAN only our keys on a shared Redis.
@@ -21,7 +21,7 @@ package missing — logs at debug and behaves as a miss / no-op; the tool just
 runs. The client import is lazy and comes from the existing ``redis`` extra:
 ``python -m pip install -e './packages/maverick-core[redis]'``.
 
-Default OFF and never auto-imported by ``tool_cache`` — the caller wires it::
+Default OFF and never auto-imported by ``cache.tool`` — the caller wires it::
 
     [tools]
     output_cache_backend = "redis"            # env MAVERICK_TOOL_CACHE_BACKEND wins
@@ -53,7 +53,7 @@ _SCAN_COUNT = 500  # SCAN hint / DEL chunk size: bounded round-trips on big cach
 
 
 class RedisToolCache:
-    """Tool-output cache entries in Redis; same semantics as ``tool_cache``.
+    """Tool-output cache entries in Redis; same semantics as ``cache.tool``.
 
     ``ttl_s=None`` (or 0) means no expiry, matching the local cache's
     ``output_cache_ttl_s = 0``. ``namespace`` prefixes every key.
@@ -124,7 +124,7 @@ class RedisToolCache:
         trouble is a logged no-op.
         """
         if not isinstance(value, str) or value.startswith("ERROR:"):
-            return  # mirror tool_cache: never pin a failure
+            return  # mirror cache.tool: never pin a failure
         try:
             key = self._redis_key(tool_name, args, scope)
             if self.ttl_s:
