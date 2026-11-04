@@ -43,7 +43,7 @@ running dashboard.
 ## Run
 
 The dashboard is installed by
-[Install from source](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/source-install.md).
+[Install from source](https://github.com/Daybreak-AI-Labs/LightworkOS/blob/main/docs/source-install.md).
 
 ```bash
 maverick-dashboard          # listens on http://127.0.0.1:8765

@@ -4,7 +4,7 @@
 
 # Lightwork
 
-[![CI](https://github.com/Daybreak-AI-Labs/Lightwork/actions/workflows/ci.yml/badge.svg)](https://github.com/Daybreak-AI-Labs/Lightwork/actions/workflows/ci.yml)
+[![CI](https://github.com/Daybreak-AI-Labs/LightworkOS/actions/workflows/ci.yml/badge.svg)](https://github.com/Daybreak-AI-Labs/LightworkOS/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Python 3.11 | 3.12](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)](docs/source-install.md)
 
@@ -23,7 +23,7 @@ Lightwork is alpha software. The eight Python packages on `main` are version
 GitHub release, PyPI package or container image is currently published, so
 installing from source is the supported path. Published releases will be
 listed on the
-[releases page](https://github.com/Daybreak-AI-Labs/Lightwork/releases).
+[releases page](https://github.com/Daybreak-AI-Labs/LightworkOS/releases).
 Configuration and APIs can change between versions; [CHANGELOG.md](CHANGELOG.md)
 records notable changes. Supported Python versions are 3.11 and 3.12, the
 versions tested in CI.
@@ -33,8 +33,8 @@ versions tested in CI.
 Requires Git and Python 3.11 or 3.12.
 
 ```bash
-git clone https://github.com/Daybreak-AI-Labs/Lightwork
-cd Lightwork
+git clone https://github.com/Daybreak-AI-Labs/LightworkOS
+cd LightworkOS
 python3 -m venv .venv
 . .venv/bin/activate            # Windows: .venv\Scripts\activate
 python -m pip install --upgrade pip
@@ -186,7 +186,7 @@ list its tools and call one. Short client programs:
 action in `deploy/github-action`. Pin it to a reviewed full commit SHA:
 
 ```yaml
-- uses: Daybreak-AI-Labs/Lightwork/deploy/github-action@<reviewed-full-40-character-commit-sha>
+- uses: Daybreak-AI-Labs/LightworkOS/deploy/github-action@<reviewed-full-40-character-commit-sha>
   with:
     goal: "Summarize this PR and flag anything risky."
     max-dollars: "0.50"
@@ -248,8 +248,8 @@ development setup, tests, lint and CI gates, and how changes reach `main`. In
 short:
 
 ```bash
-git clone https://github.com/Daybreak-AI-Labs/Lightwork
-cd Lightwork
+git clone https://github.com/Daybreak-AI-Labs/LightworkOS
+cd LightworkOS
 bash .devcontainer/post-create.sh       # editable installs plus dev tools in .venv
 . .venv/bin/activate
 python -m pytest -q -n auto --dist loadfile

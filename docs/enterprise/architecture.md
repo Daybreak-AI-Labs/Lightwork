@@ -168,7 +168,7 @@ auditable.
   durable control-plane stores are still file-backed. Run one
   dashboard/control-plane replica and scale only the worker tier; see
   [Operations](../operations.md) and the
-  [deployment playbook](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/enterprise/deployment-playbook.md)
+  [deployment playbook](https://github.com/Daybreak-AI-Labs/LightworkOS/blob/main/docs/enterprise/deployment-playbook.md)
   for the runtime lock and
   Helm guard that enforce this.
 

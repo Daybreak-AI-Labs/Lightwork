@@ -9,7 +9,7 @@ copyright in everything you contribute.
 The agreement follows the structure of the Apache Software Foundation's
 Individual Contributor License Agreement, version 2.2. Lightwork is distributed
 under the
-[Apache License, Version 2.0](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/LICENSE).
+[Apache License, Version 2.0](https://github.com/Daybreak-AI-Labs/LightworkOS/blob/main/LICENSE).
 
 If you are contributing on behalf of a company or other organization, ask for
 the corporate CLA as described in [How to sign](#how-to-sign).
@@ -38,7 +38,7 @@ Contributions.
 
    "Work" means the Lightwork software, documentation and other material
    maintained by the Steward at
-   https://github.com/Daybreak-AI-Labs/Lightwork.
+   https://github.com/Daybreak-AI-Labs/LightworkOS.
 
    "Contribution" means any original work of authorship, including any
    modifications or additions to an existing work, that You intentionally submit

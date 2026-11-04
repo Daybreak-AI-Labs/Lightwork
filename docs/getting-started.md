@@ -10,7 +10,7 @@ Linux and Windows PowerShell, and the checks to run afterwards.
 
 No prebuilt binary, PyPI package or container image is currently published,
 so install from `main`. Published releases will be listed on the
-[releases page](https://github.com/Daybreak-AI-Labs/Lightwork/releases).
+[releases page](https://github.com/Daybreak-AI-Labs/LightworkOS/releases).
 
 Run `lightwork dashboard` and open <http://127.0.0.1:8765>. The dashboard
 guides owner sign-in and provider setup. A provider account, credentials, API

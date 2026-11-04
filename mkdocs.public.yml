@@ -1,6 +1,6 @@
 INHERIT: mkdocs.yml
 
-repo_url: https://github.com/Daybreak-AI-Labs/Lightwork
+repo_url: https://github.com/Daybreak-AI-Labs/LightworkOS
 # Some pages are renamed when they are staged (security-policy.md, license.md,
 # trademark.md, benchmarks/governance-frontier.md), so per-page edit links
 # would point at paths that do not exist. The public site leaves them out.
@@ -87,7 +87,7 @@ nav:
       - Observability integrations: integrations/observability-partners.md
   - Community:
       - Contributing: CONTRIBUTING.md
-      - Governance: https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/GOVERNANCE.md
+      - Governance: https://github.com/Daybreak-AI-Labs/LightworkOS/blob/main/GOVERNANCE.md
       - Contributor License Agreement: CLA.md
       - Code of Conduct: CODE_OF_CONDUCT.md
       - Security policy: security-policy.md

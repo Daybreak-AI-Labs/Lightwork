@@ -5,7 +5,7 @@ development environment, the rules the code follows, and how changes are
 reviewed and merged.
 
 Lightwork is licensed under the
-[Apache License, Version 2.0](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/LICENSE).
+[Apache License, Version 2.0](https://github.com/Daybreak-AI-Labs/LightworkOS/blob/main/LICENSE).
 Everyone taking part is expected to follow the
 [Code of Conduct](CODE_OF_CONDUCT.md), and contributions are accepted under the
 [Contributor License Agreement](CLA.md).
@@ -19,13 +19,13 @@ Everyone taking part is expected to follow the
   clarifications are always welcome.
 - **Fix a bug or build a feature.** See [Where to start](#where-to-start).
 - **Review pull requests** and help answer questions in
-  [GitHub Discussions](https://github.com/Daybreak-AI-Labs/Lightwork/discussions).
+  [GitHub Discussions](https://github.com/Daybreak-AI-Labs/LightworkOS/discussions).
 - **Extend Lightwork** with a model provider, a channel adapter or a skill (see
   [Extending Lightwork](#extending-lightwork)).
 
 Security vulnerabilities are the exception: do not report them in a public
 issue. Follow the
-[security policy](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/SECURITY.md)
+[security policy](https://github.com/Daybreak-AI-Labs/LightworkOS/blob/main/SECURITY.md)
 instead.
 
 ## Where to start
@@ -38,25 +38,25 @@ instead.
   maintainer before you write the code.
 - Significant changes, such as a new public API, a breaking change or a change
   to how the project works, go through an RFC. The process is described in
-  [docs/rfcs/README.md](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/rfcs/README.md).
+  [docs/rfcs/README.md](https://github.com/Daybreak-AI-Labs/LightworkOS/blob/main/docs/rfcs/README.md).
 
 ## Development setup
 
 This section sets up a development environment. To install Lightwork to use
 it, follow the
-[source installation guide](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/source-install.md)
+[source installation guide](https://github.com/Daybreak-AI-Labs/LightworkOS/blob/main/docs/source-install.md)
 instead.
 
 You need git, bash and Python 3.11 or 3.12 (the versions CI tests).
 Docker or Podman is optional; the container sandbox backends use it. Node.js
 and npm are needed for the TypeScript SDK and for the dashboard, desktop and
 mobile JavaScript tests. The UI regression workflow uses Node.js 22.23.1;
-see the [browser test guide](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/packages/maverick-dashboard/tests/browser/README.md)
+see the [browser test guide](https://github.com/Daybreak-AI-Labs/LightworkOS/blob/main/packages/maverick-dashboard/tests/browser/README.md)
 for its additional Chromium setup.
 
 ```bash
-git clone https://github.com/Daybreak-AI-Labs/Lightwork
-cd Lightwork
+git clone https://github.com/Daybreak-AI-Labs/LightworkOS
+cd LightworkOS
 bash .devcontainer/post-create.sh
 . .venv/bin/activate
 lightwork version
@@ -112,8 +112,8 @@ extensions/            Browser extension and embeddable widgets
 demo/                  Runnable example agents and their shared support code
 ```
 
-[ARCHITECTURE.md](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/ARCHITECTURE.md)
-describes how the pieces fit together. The [dashboard service boundaries](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/operations/dashboard-architecture.md) describe shared policies, configuration contracts, and where request authorization belongs.
+[ARCHITECTURE.md](https://github.com/Daybreak-AI-Labs/LightworkOS/blob/main/ARCHITECTURE.md)
+describes how the pieces fit together. The [dashboard service boundaries](https://github.com/Daybreak-AI-Labs/LightworkOS/blob/main/docs/operations/dashboard-architecture.md) describe shared policies, configuration contracts, and where request authorization belongs.
 
 ### Demos
 
@@ -321,7 +321,7 @@ Further rules:
   system in `static/lightwork.css`), and make it reachable through the
   dashboard Copilot (the in-product assistant panel) with the same permission
   checks as the direct UI. See the
-  [customer experience contract](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/customer-experience-contract.md).
+  [customer experience contract](https://github.com/Daybreak-AI-Labs/LightworkOS/blob/main/docs/customer-experience-contract.md).
 
 ## Extending Lightwork
 
@@ -395,7 +395,7 @@ first.
 
 Do not open a public issue for a security vulnerability. Report it privately
 as described in the
-[security policy](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/SECURITY.md).
+[security policy](https://github.com/Daybreak-AI-Labs/LightworkOS/blob/main/SECURITY.md).
 
 ## Code of Conduct
 
@@ -405,6 +405,6 @@ unacceptable behavior to chris@daybreakailabs.com.
 ## License
 
 By contributing, you agree that your contributions are licensed under the
-[Apache License, Version 2.0](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/LICENSE)
+[Apache License, Version 2.0](https://github.com/Daybreak-AI-Labs/LightworkOS/blob/main/LICENSE)
 and under the terms of the [Contributor License Agreement](CLA.md). You keep
 the copyright in your contributions.

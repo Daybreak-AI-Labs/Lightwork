@@ -129,7 +129,7 @@ hardened: runAsNonRoot, drop ALL caps, fsGroup, seccomp RuntimeDefault).
 ```bash
 LIGHTWORK_REF=<lowercase-full-40-character-commit-sha>
 curl -fsSLo /tmp/lightwork-install.sh \
-  "https://raw.githubusercontent.com/Daybreak-AI-Labs/Lightwork/${LIGHTWORK_REF}/deploy/vps/install.sh"
+  "https://raw.githubusercontent.com/Daybreak-AI-Labs/LightworkOS/${LIGHTWORK_REF}/deploy/vps/install.sh"
 sudo MAVERICK_REF="$LIGHTWORK_REF" bash /tmp/lightwork-install.sh
 ```
 Creates a dedicated `maverick` user, pipx install, a hardened systemd unit

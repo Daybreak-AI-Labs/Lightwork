@@ -201,4 +201,4 @@ to hold a second factor.
   refused rather than skipped. Changes are audited like every other setting.
 
 > Licensing: Lightwork is licensed under the Apache License 2.0
-> ([`LICENSE`](https://daybreak-ai-labs.github.io/Lightwork/license/)).
+> ([`LICENSE`](https://daybreak-ai-labs.github.io/LightworkOS/license/)).

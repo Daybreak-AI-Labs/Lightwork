@@ -1731,7 +1731,7 @@ Settings and the installation wizard.
   dashboard seed performs no network access, requires an empty/dedicated demo
   tenant, and forces a visible readiness gap. See
   [`AI_EVIDENCE_GATEWAY.md`](./AI_EVIDENCE_GATEWAY.md) and the
-  [governance benchmark report](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/benchmarks/GOVERNANCE_FRONTIER_RESULTS.md).
+  [governance benchmark report](https://github.com/Daybreak-AI-Labs/LightworkOS/blob/main/benchmarks/GOVERNANCE_FRONTIER_RESULTS.md).
   Runtime delivery consumers use the `maverick.ai_evidence.delivery` boundary;
   the `maverick.ai_evidence_gateway` import remains supported.
 - **Four reduced standalone security agents** (`demo/grc-concierge/`,

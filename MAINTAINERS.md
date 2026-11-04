@@ -19,8 +19,8 @@ each area a pull request touches.
 
 | Topic | Where |
 | --- | --- |
-| Questions and ideas | [GitHub Discussions](https://github.com/Daybreak-AI-Labs/Lightwork/discussions) |
-| Bugs and feature requests | [GitHub issues](https://github.com/Daybreak-AI-Labs/Lightwork/issues), using the templates |
+| Questions and ideas | [GitHub Discussions](https://github.com/Daybreak-AI-Labs/LightworkOS/discussions) |
+| Bugs and feature requests | [GitHub issues](https://github.com/Daybreak-AI-Labs/LightworkOS/issues), using the templates |
 | Security vulnerabilities | Privately, as described in [SECURITY.md](SECURITY.md) |
 | Code of Conduct reports | chris@daybreakailabs.com |
 | Licensing, the CLA and trademarks | chris@daybreakailabs.com |

@@ -10,7 +10,7 @@ maverick skill install ./benchmarks/example-skills/web-research.md
 Or point at the GitHub raw URL:
 
 ```bash
-maverick skill install gh:Daybreak-AI-Labs/Lightwork:benchmarks/example-skills/web-research.md
+maverick skill install gh:Daybreak-AI-Labs/LightworkOS:benchmarks/example-skills/web-research.md
 ```
 
 ## Catalog

@@ -18,7 +18,7 @@ Lightwork in via MCP, you get:
 ## Install
 
 Installed by
-[Install from source](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/source-install.md).
+[Install from source](https://github.com/Daybreak-AI-Labs/LightworkOS/blob/main/docs/source-install.md).
 For development on this package alone:
 
 ```bash

@@ -5,7 +5,7 @@ trademarks of Christopher Day / Day AI Labs (the "Licensor"). All rights
 reserved.
 
 The Lightwork source code is open source, licensed under the
-[Apache License, Version 2.0](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/LICENSE).
+[Apache License, Version 2.0](https://github.com/Daybreak-AI-Labs/LightworkOS/blob/main/LICENSE).
 That license covers the code and documentation; like every Apache-2.0 project,
 it does not grant permission to use the Marks (section 6 of the license). This
 policy explains what you may do with the Marks.

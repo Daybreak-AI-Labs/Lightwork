@@ -15,7 +15,7 @@ install until a release is published.
   file changes and program execution off when Docker is not running, and the
   dashboard's initial settings start with them off. If you skip both, the
   default `local` sandbox backend runs commands directly on this computer; read
-  the [execution posture](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/SECURITY.md#execution-posture) before running
+  the [execution posture](https://github.com/Daybreak-AI-Labs/LightworkOS/blob/main/SECURITY.md#execution-posture) before running
   untrusted goals.
 
 Lightwork requires Python 3.11 or 3.12. If an existing virtual environment was
@@ -29,8 +29,8 @@ against the pinned constraints in `requirements/ci.txt`.
 ## macOS and Linux
 
 ```bash
-git clone https://github.com/Daybreak-AI-Labs/Lightwork
-cd Lightwork
+git clone https://github.com/Daybreak-AI-Labs/LightworkOS
+cd LightworkOS
 python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install --upgrade pip
@@ -42,8 +42,8 @@ lightwork dashboard
 ## Windows (PowerShell)
 
 ```powershell
-git clone https://github.com/Daybreak-AI-Labs/Lightwork
-Set-Location Lightwork
+git clone https://github.com/Daybreak-AI-Labs/LightworkOS
+Set-Location LightworkOS
 py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\python.exe scripts/install_release_cohort.py --core-extra release-runtime,evidence-analysis

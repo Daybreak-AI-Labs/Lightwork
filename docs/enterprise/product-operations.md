@@ -17,7 +17,7 @@ audit it.
 
 ## 1. Updates
 
-[`maverick/release_update.py`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/packages/maverick-core/maverick/release_update.py)
+[`maverick/release_update.py`](https://github.com/Daybreak-AI-Labs/LightworkOS/blob/main/packages/maverick-core/maverick/release_update.py)
 (tests: `tests/test_release_update.py`).
 
 A **release manifest** is an Ed25519-signed document listing the `version`,
@@ -68,7 +68,7 @@ channel configuration.
 
 ## 2. Support
 
-[`maverick/support_bundle.py`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/packages/maverick-core/maverick/support_bundle.py)
+[`maverick/support_bundle.py`](https://github.com/Daybreak-AI-Labs/LightworkOS/blob/main/packages/maverick-core/maverick/support_bundle.py)
 builds a **redacted** support bundle: versions, runtime, readiness checks,
 providers, recent failures, and secret-scrubbed configuration, keyed by a
 `correlation_id` and carrying the deployment's license status (see §3).
@@ -94,7 +94,7 @@ and the round trip from a support ticket to a hotfix release (§1).
 
 ## 3. Optional signed-license feature gate
 
-[`maverick/entitlements.py`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/packages/maverick-core/maverick/entitlements.py)
+[`maverick/entitlements.py`](https://github.com/Daybreak-AI-Labs/LightworkOS/blob/main/packages/maverick-core/maverick/entitlements.py)
 is an optional feature gate for operators who want to control which
 capabilities a deployment runs through an Ed25519-signed license file. It is
 **off by default**: `entitlements.enforcing()` is false unless

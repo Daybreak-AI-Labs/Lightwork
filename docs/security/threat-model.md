@@ -242,5 +242,5 @@ point.
 - Reviewed at every minor release.
 - Reviewed when a new tool, provider, sandbox, or channel ships.
 - No external penetration test has been published yet;
-  [`audit-readiness.md`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/security/audit-readiness.md)
+  [`audit-readiness.md`](https://github.com/Daybreak-AI-Labs/LightworkOS/blob/main/docs/security/audit-readiness.md)
   defines the scope for one.

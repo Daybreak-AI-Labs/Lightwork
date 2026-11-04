@@ -16,7 +16,7 @@ evaluate an arbitrary third-party subject.
 | `vendor_risk` | A third-party vendor | TPRM |
 
 New assessment types are added as data (a list of questions), not code.
-The [security framework catalog reference](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/security-framework-catalog.md)
+The [security framework catalog reference](https://github.com/Daybreak-AI-Labs/LightworkOS/blob/main/docs/security-framework-catalog.md)
 lists the pinned sources, practice counts, and license terms for the expanded
 security questionnaires. Run `maverick assess templates` for the full list.
 

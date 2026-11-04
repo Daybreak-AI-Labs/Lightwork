@@ -12,7 +12,7 @@ handled.
 1. **GitHub private vulnerability reporting** (preferred): open the
    repository's **Security** tab and choose **Report a vulnerability**, or go
    directly to
-   https://github.com/Daybreak-AI-Labs/Lightwork/security/advisories/new.
+   https://github.com/Daybreak-AI-Labs/LightworkOS/security/advisories/new.
 2. **Email**, if you cannot use GitHub: chris@daybreakailabs.com.
 
 Include:
@@ -30,7 +30,7 @@ For unpatched critical issues we may extend by mutual agreement.
 Public disclosure (advisory, and a CVE where one is assigned) happens after a
 fix is available. We credit reporters in the advisory unless they prefer to
 stay anonymous. Disclosed issues are also recorded in the
-[disclosure log](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/DISCLOSURES.md).
+[disclosure log](https://github.com/Daybreak-AI-Labs/LightworkOS/blob/main/docs/DISCLOSURES.md).
 
 ## Supported versions
 

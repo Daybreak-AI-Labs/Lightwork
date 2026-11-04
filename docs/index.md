@@ -57,7 +57,7 @@ commands for macOS, Linux and Windows.
 
 No prebuilt binary, PyPI package or container image is currently published,
 so install from `main`. Published releases will be listed on the
-[releases page](https://github.com/Daybreak-AI-Labs/Lightwork/releases).
+[releases page](https://github.com/Daybreak-AI-Labs/LightworkOS/releases).
 
 When setup finds no running Docker daemon, it switches off file changes and
 program execution, because the fallback `local` backend runs commands directly
@@ -82,10 +82,10 @@ recorded and when a price may affect a budget.
 ## License
 
 Lightwork is licensed under the Apache License 2.0 (see
-[`LICENSE`](https://daybreak-ai-labs.github.io/Lightwork/license/)). It is self-hostable: the runtime executes entirely
+[`LICENSE`](https://daybreak-ai-labs.github.io/LightworkOS/license/)). It is self-hostable: the runtime executes entirely
 in your own environment. Contributions are accepted under the
 [Contributor License Agreement](CLA.md). The Lightwork name and logo are
-covered by the [trademark policy](https://daybreak-ai-labs.github.io/Lightwork/trademark/),
+covered by the [trademark policy](https://daybreak-ai-labs.github.io/LightworkOS/trademark/),
 not by the Apache License.
 
 ## Where to go next
@@ -101,7 +101,7 @@ not by the Apache License.
 - [Plugins](plugins.md) — extending the tool / channel / skill surface
 - [Governed model improvement](MODEL_IMPROVEMENT_PLATFORM.md) — the learning lifecycle, regression detection, and promotion controls
 - [Starter goals](starter-goals.md) — ready-to-run examples for common workflows
-- [Feature catalogue](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/FEATURES.md) — every shipped capability, by area
+- [Feature catalogue](https://github.com/Daybreak-AI-Labs/LightworkOS/blob/main/docs/FEATURES.md) — every shipped capability, by area
 - [Contributing](CONTRIBUTING.md) — how to send PRs
 - [Code of Conduct](CODE_OF_CONDUCT.md) — expected behavior in project spaces
-- [Security policy](https://daybreak-ai-labs.github.io/Lightwork/security-policy/) — how to report a vulnerability
+- [Security policy](https://daybreak-ai-labs.github.io/LightworkOS/security-policy/) — how to report a vulnerability

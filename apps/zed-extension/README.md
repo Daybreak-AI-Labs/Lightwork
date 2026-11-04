@@ -1,6 +1,6 @@
 # maverick-zed-extension
 
-Drive the [Lightwork](https://github.com/Daybreak-AI-Labs/Lightwork) agent runtime
+Drive the [Lightwork](https://github.com/Daybreak-AI-Labs/LightworkOS) agent runtime
 from the [Zed](https://zed.dev) editor. Two surfaces:
 
 1. **Assistant context server (MCP).** The extension registers

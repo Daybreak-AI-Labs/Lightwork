@@ -9,7 +9,7 @@ falls back to an unqualified public-index install of a Lightwork
 distribution.
 
 ```yaml
-- uses: Daybreak-AI-Labs/Lightwork/deploy/github-action@<full-40-character-commit-sha>
+- uses: Daybreak-AI-Labs/LightworkOS/deploy/github-action@<full-40-character-commit-sha>
   with:
     goal: "Summarize the changes in this PR and flag anything risky."
     max-dollars: "0.50"
@@ -102,7 +102,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           persist-credentials: false
-      - uses: Daybreak-AI-Labs/Lightwork/deploy/github-action@<full-40-character-commit-sha>
+      - uses: Daybreak-AI-Labs/LightworkOS/deploy/github-action@<full-40-character-commit-sha>
         with:
           template: code-review
           params: |
@@ -117,7 +117,7 @@ jobs:
 
 ```yaml
       - id: maverick
-        uses: Daybreak-AI-Labs/Lightwork/deploy/github-action@<full-40-character-commit-sha>
+        uses: Daybreak-AI-Labs/LightworkOS/deploy/github-action@<full-40-character-commit-sha>
         with:
           goal: "Review the diff on this PR and list concrete risks."
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -145,7 +145,7 @@ composite-action steps inherit it:
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
     steps:
-      - uses: Daybreak-AI-Labs/Lightwork/deploy/github-action@<full-40-character-commit-sha>
+      - uses: Daybreak-AI-Labs/LightworkOS/deploy/github-action@<full-40-character-commit-sha>
         with:
           goal: "..."
           model: gpt-4.1

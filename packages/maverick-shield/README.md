@@ -7,7 +7,7 @@ the agent loop wraps around:
 - `Shield.scan_tool_call(name, args)` — before any tool executes
 - `Shield.scan_output(text)` — before the final answer reaches the user
 
-See [docs/safety.md](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/safety.md)
+See [docs/safety.md](https://github.com/Daybreak-AI-Labs/LightworkOS/blob/main/docs/safety.md)
 for profiles and threat coverage.
 
 ## Roster-wide governance invariants

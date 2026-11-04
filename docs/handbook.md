@@ -108,7 +108,7 @@ Install from a clone of the repository with the
 and finish owner and provider setup before starting work. No prebuilt binary,
 PyPI package or container image is currently published, so install from
 `main`; published releases will be listed on the
-[releases page](https://github.com/Daybreak-AI-Labs/Lightwork/releases).
+[releases page](https://github.com/Daybreak-AI-Labs/LightworkOS/releases).
 [Getting started](getting-started.md) walks through the first run.
 
 The dashboard is the main entry point for starting and supervising work. The
@@ -147,7 +147,7 @@ maverick mcp                   # MCP server: drive Lightwork from Claude Code,
 Extend it:
 
 ```bash
-maverick skill install gh:Daybreak-AI-Labs/Lightwork:benchmarks/example-skills/web-research.md
+maverick skill install gh:Daybreak-AI-Labs/LightworkOS:benchmarks/example-skills/web-research.md
 maverick skills                # list installed + distilled skills
 maverick template browse       # community goal templates
 maverick plugin list           # installed plugins + permissions
@@ -294,7 +294,7 @@ screened by the same shield/budget/sandbox machinery:
 - **Skills** — markdown procedures (`SKILL.md`: name, triggers, steps)
   the agent applies when a goal matches. `maverick skill install / browse /
   validate`, schema in
-  [`benchmarks/example-skills/README.md`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/benchmarks/example-skills/README.md).
+  [`benchmarks/example-skills/README.md`](https://github.com/Daybreak-AI-Labs/LightworkOS/blob/main/benchmarks/example-skills/README.md).
   Lightwork can also *learn* skills from its own successful runs, opt-in
   (`[self_learning]`, [`self-learning.md`](./self-learning.md)).
 - **Plugins** — Python entry points under plugin API v2
@@ -359,9 +359,9 @@ haven't installed yet.
 | Extend it | [`plugins.md`](./plugins.md), [`plugin-api-v2.md`](./plugin-api-v2.md), [`self-learning.md`](./self-learning.md), [`embedding.md`](./embedding.md), [`connectors.md`](./connectors.md) |
 | Drive it from outside | [`api.md`](./api.md), [`grpc.md`](./grpc.md), [`a2a.md`](./a2a.md), [`clients/`](./clients/README.md), [`integrations/`](./integrations/) |
 | Task recipes | [`cookbook/`](./cookbook/) (30 recipes), [`starter-goals.md`](./starter-goals.md) |
-| Benchmarks | [`benchmarks/`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/benchmarks/) (`EVAL.md`, `RESULTS.md`) |
+| Benchmarks | [`benchmarks/`](https://github.com/Daybreak-AI-Labs/LightworkOS/blob/main/benchmarks/) (`EVAL.md`, `RESULTS.md`) |
 | Naming | [`TRADEMARK.md`](TRADEMARK.md) |
-| Contribute | [`CONTRIBUTING.md`](CONTRIBUTING.md), [`CLA.md`](CLA.md), [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md), [`MAINTAINERS.md`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/MAINTAINERS.md) |
+| Contribute | [`CONTRIBUTING.md`](CONTRIBUTING.md), [`CLA.md`](CLA.md), [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md), [`MAINTAINERS.md`](https://github.com/Daybreak-AI-Labs/LightworkOS/blob/main/MAINTAINERS.md) |
 | Licensing | [`LICENSE`](../LICENSE) |
 
 ### Scope and limits

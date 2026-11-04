@@ -107,7 +107,7 @@ On a GPU pod (RunPod / Lambda / Vast / any GPU VM):
 
 ```bash
 LIGHTWORK_REF=<full-40-character-commit-sha>
-git clone https://github.com/Daybreak-AI-Labs/Lightwork lightwork
+git clone https://github.com/Daybreak-AI-Labs/LightworkOS lightwork
 git -C lightwork checkout --detach "$LIGHTWORK_REF"
 
 # cheap proof run (default base model, full-parameter, any GPU):
