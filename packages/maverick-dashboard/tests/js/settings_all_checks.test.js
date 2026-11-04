@@ -85,7 +85,7 @@ test("testing a switch tests what is saved; a secret is sent only after Replace"
     await click(secret.querySelector("[data-test]"));
     assert.equal(ui.calls[1].body.value,null);
     await click(secret.querySelector("[data-secret-replace]"));
-    secret.querySelector("[data-input]").value="postgres://db.example.com/lightwork";
+    secret.querySelector("[data-input]").value="postgres://db.example.com/lightwork"; // pragma: allowlist secret
     await click(secret.querySelector("[data-test]"));
     assert.equal(ui.calls[2].body.value,"postgres://db.example.com/lightwork");
   }finally{ui.dom.window.close();}
