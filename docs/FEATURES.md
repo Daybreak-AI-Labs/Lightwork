@@ -2664,8 +2664,7 @@ Built-in tool modules. Highlights by group (all under `tools/`):
 - **Code & files** — `fs`, `str_edit`, `ast_edit` (tree-sitter), `apply_patch`
   (atomic multi-file), `repo_map`, `dep_graph`, `test_impact` (coverage-guided),
   `reviewer` (diff review), `file_watcher`, `notebook_exec` (run a .ipynb's code
-  cells in the sandbox), `self_edit` (human-gated, path-confined edits to
-  Lightwork's own code/config), `html_to_app` (scaffold a starter app from an HTML
+  cells in the sandbox), `html_to_app` (scaffold a starter app from an HTML
   mockup).
 - **Data** — `sql_query` (read-only by default), `pandas_query`, `spreadsheet`
   (CSV/XLSX, write-capable), `compute` (SymPy), `embeddings`.
