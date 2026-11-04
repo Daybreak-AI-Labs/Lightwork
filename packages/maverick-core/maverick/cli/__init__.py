@@ -4020,10 +4020,10 @@ def start(
         )
         sys.exit(3)  # distinct from misuse (2) so scripts can tell "refused"
     # Refuse a SUSPENDED tenant here too. The channel/HTTP server path enforces
-    # assert_tenant_active (server.py), but the CLI `start` path never did, so
-    # `maverick start` ran goals freely for a suspended tenant (user-testing
-    # finding). No-op for None tenant / no registry, so single-tenant flows are
-    # unchanged. Same pre-goal-creation chokepoint as the killswitch above.
+    # assert_tenant_active (server.py); without this check `maverick start`
+    # would run goals freely for a suspended tenant. No-op for None tenant / no
+    # registry, so single-tenant flows are unchanged. Same pre-goal-creation
+    # chokepoint as the killswitch above.
     from ..paths import current_tenant_id as _ctid
     from ..tenant.registry import TenantSuspended, assert_tenant_active
     try:

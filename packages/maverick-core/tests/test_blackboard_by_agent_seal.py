@@ -1,9 +1,9 @@
 """by_agent() must withhold a sealed agent's posts atomically.
 
-User-testing finding: by_agent() checked _is_sealed() OUTSIDE the lock and read
-the entries INSIDE it, so a concurrent seal() (e.g. from a FastAPI threadpool)
-could slip between the check and the read and leak a just-sealed agent's posts.
-The check now happens under the same lock as the read.
+If by_agent() checked _is_sealed() OUTSIDE the lock and read the entries INSIDE
+it, a concurrent seal() (e.g. from a FastAPI threadpool) could slip between the
+check and the read and leak a just-sealed agent's posts. The check happens
+under the same lock as the read.
 """
 from __future__ import annotations
 

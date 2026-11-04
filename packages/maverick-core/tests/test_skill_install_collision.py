@@ -1,9 +1,9 @@
 """Installing a skill must not silently clobber a different skill.
 
-User-testing finding: two different frontmatter names can sanitize to the same
-filename (e.g. "..." and "....." both -> "skill"), and the second install
-silently overwrote the first with no warning -- data loss. A colliding install
-is now refused; a same-name re-install (an update) still succeeds.
+Two different frontmatter names can sanitize to the same filename (e.g. "..."
+and "....." both -> "skill"), and a second install that silently overwrote the
+first would lose data. A colliding install is refused; a same-name re-install
+(an update) still succeeds.
 """
 from __future__ import annotations
 

@@ -1,10 +1,10 @@
 """Anonymization must be salted and tenant-scoped.
 
-User-testing finding: anonymize_field used sha256(value)[:12] with no salt, so
-a hash was rainbow-tableable for common identifiers, and the SAME id under two
-tenants produced identical hashes (cross-tenant correlation in anonymized
-logs). The mapping is now an HMAC keyed with a persistent per-deployment salt
-and mixed with the active tenant -- still deterministic within a deployment.
+An unsalted sha256(value)[:12] would be rainbow-tableable for common
+identifiers, and the SAME id under two tenants would produce identical hashes
+(cross-tenant correlation in anonymized logs). anonymize_field is an HMAC keyed
+with a persistent per-deployment salt and mixed with the active tenant -- still
+deterministic within a deployment.
 """
 from __future__ import annotations
 

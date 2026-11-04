@@ -1,4 +1,4 @@
-"""Issue-webhook replay dedup: in-process window + shared store under HA (audit H17)."""
+"""Issue-webhook replay dedup: in-process window + shared store under HA."""
 from __future__ import annotations
 
 import maverick_dashboard.app as app_mod

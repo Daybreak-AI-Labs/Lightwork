@@ -77,8 +77,8 @@ class TestClassifyExtract:
 
 
 class TestExtractionHardening:
-    """Regression tests for silent-wrong-number extraction failures found in
-    user testing -- each one previously corrupted a return without erroring."""
+    """Regression tests for silent-wrong-number extraction failures -- each
+    would corrupt a return without erroring."""
 
     def test_title_line_year_is_not_read_as_the_amount(self):
         # "Form 1099-INT Interest Income 2025" must not yield 2025 as interest;

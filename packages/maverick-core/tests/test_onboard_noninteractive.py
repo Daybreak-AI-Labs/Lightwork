@@ -1,10 +1,10 @@
 """`maverick onboard` must be automatable.
 
-User-testing finding: onboard prompted for the business description and
-industry unconditionally -- so even `onboard --name X --no-llm --yes` fired the
-prompts and aborted on non-interactive stdin, making CI/scripted onboarding
-impossible. Prompts now fire only on a TTY; --description/--industry supply the
-values otherwise, and a missing --name errors cleanly instead of hanging.
+Unconditional prompts for the business description and industry would make
+even `onboard --name X --no-llm --yes` abort on non-interactive stdin, so
+CI/scripted onboarding would be impossible. Prompts fire only on a TTY;
+--description/--industry supply the values otherwise, and a missing --name
+errors cleanly instead of hanging.
 """
 from __future__ import annotations
 

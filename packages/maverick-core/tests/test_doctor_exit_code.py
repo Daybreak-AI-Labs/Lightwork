@@ -1,10 +1,10 @@
 """`maverick doctor` must exit nonzero when a check fails, and report the
 world DB the runtime actually opens.
 
-User-testing findings: (1) doctor printed red ✗ rows but always exited 0, so
-`maverick doctor && deploy` and CI health gates could not detect a broken
-install; (2) the world-db row used the frozen ~/.maverick/world.db, so under
-MAVERICK_HOME or a tenant it reported a path the runtime never touches.
+(1) Red ✗ rows must make doctor exit nonzero, so `maverick doctor && deploy`
+and CI health gates can detect a broken install; (2) the world-db row must not
+use a frozen ~/.maverick/world.db, or under MAVERICK_HOME or a tenant it would
+report a path the runtime never touches.
 """
 from __future__ import annotations
 

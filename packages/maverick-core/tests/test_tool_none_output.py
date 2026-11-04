@@ -1,10 +1,10 @@
 """A tool that returns None must not crash the agent turn.
 
-User-testing finding: a tool fn returning None (a latent bug in tool code)
-propagated None into agent._cap_tool_output, which did ``len(text)`` and raised
-``TypeError: object of type 'NoneType' has no len()`` -- crashing the whole
-tool-call. The fn contract is ``-> str``; the framework now coerces a non-str
-result to a stable string at both the execution boundary and the cap.
+A tool fn returning None (a latent bug in tool code) would propagate None into
+agent._cap_tool_output, whose ``len(text)`` raises ``TypeError: object of type
+'NoneType' has no len()`` -- crashing the whole tool-call. The fn contract is
+``-> str``; the framework coerces a non-str result to a stable string at both
+the execution boundary and the cap.
 """
 from __future__ import annotations
 

@@ -1,10 +1,10 @@
 """whatsapp/sms must import and refuse cleanly when fastapi/twilio are absent.
 
-User-testing finding: ``Form(...)`` as a method DEFAULT ARGUMENT is evaluated
-at class-definition (import) time. When fastapi/twilio were missing, ``Form``
-was ``None``, so importing the module raised ``TypeError: 'NoneType' object is
-not callable`` -- defeating the ``_HAVE_DEPS`` guard in ``__init__`` and giving
-the operator a cryptic error instead of the actionable "pip install" message.
+``Form(...)`` as a method DEFAULT ARGUMENT is evaluated at class-definition
+(import) time. With fastapi/twilio missing, ``Form`` is ``None``, so an
+unguarded default would raise ``TypeError: 'NoneType' object is not callable``
+on import -- defeating the ``_HAVE_DEPS`` guard in ``__init__`` and giving the
+operator a cryptic error instead of the actionable "pip install" message.
 """
 from __future__ import annotations
 

@@ -65,8 +65,8 @@ def test_persona_audits_and_never_certifies():
 
 
 def test_pii_redaction_control_reflects_real_posture(monkeypatch):
-    # User-testing finding: the report hardcoded "Secret/PII redaction" as
-    # active, but PII (email/SSN/phone) is redacted only under anon mode. At-rest
+    # The report must not claim "Secret/PII redaction" is active by default:
+    # PII (email/SSN/phone) is redacted only under anon mode. At-rest
     # encryption is reported separately and must not satisfy live log redaction.
     from maverick.compliance import compliance_report
 

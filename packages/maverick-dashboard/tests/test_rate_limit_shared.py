@@ -1,4 +1,4 @@
-"""Cross-replica goal-creation rate limit via the shared store (audit H16)."""
+"""Cross-replica goal-creation rate limit via the shared store."""
 from __future__ import annotations
 
 import maverick_dashboard.app as app_mod

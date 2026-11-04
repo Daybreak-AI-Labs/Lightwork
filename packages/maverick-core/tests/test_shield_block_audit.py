@@ -1,10 +1,10 @@
 """A Shield block must leave a tamper-evident audit trail.
 
-User-testing finding: when Shield blocked a goal's input/brief (orchestrator)
-or a tool call (agent), the run was stopped but NO ``shield_block`` audit event
-was recorded -- a safety denial that left no trace in the tamper-evident log,
-even though ``EventKind.SHIELD_BLOCK`` exists and is documented. This pins that
-the orchestrator input chokepoint now records it.
+When Shield blocks a goal's input/brief (orchestrator) or a tool call
+(agent), the run stops and a ``shield_block`` audit event
+(``EventKind.SHIELD_BLOCK``) must be recorded, so a safety denial leaves a
+trace in the tamper-evident log. This pins that the orchestrator input
+chokepoint records it.
 """
 from __future__ import annotations
 

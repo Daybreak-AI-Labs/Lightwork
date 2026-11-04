@@ -1,10 +1,10 @@
 """The computer tool must RETURN an error string when pyautogui is missing,
 not raise ImportError.
 
-User-testing finding: only the screenshot path caught the missing-dep
-ImportError; every other action called ``_ensure_pyautogui()`` unguarded, so a
-raised ImportError crashed direct callers and broke the ``fn -> str`` contract
-(the browser tool returns a string in the same situation).
+Every action, not only the screenshot path, catches the missing-dep
+ImportError from ``_ensure_pyautogui()``. A raised ImportError would crash
+direct callers and break the ``fn -> str`` contract (the browser tool returns
+a string in the same situation).
 """
 from __future__ import annotations
 

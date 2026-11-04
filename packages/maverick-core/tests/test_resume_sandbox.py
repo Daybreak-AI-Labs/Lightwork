@@ -1,9 +1,9 @@
 """`maverick resume` must accept a --sandbox override.
 
-User-testing finding: resume honored only the [sandbox] config backend and had
-no --sandbox flag, so an operator who ran `start --sandbox docker` silently
-resumed on the config default (often local) -- running shell on the host after
-they believed they were in Docker isolation.
+Without a --sandbox flag, resume would honor only the [sandbox] config
+backend, so an operator who ran `start --sandbox docker` would silently resume
+on the config default (often local) -- running shell on the host while
+believing they were in Docker isolation.
 """
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""URL-mode elicitation host allowlist (audit L10).
+"""URL-mode elicitation host allowlist.
 
 The elicitation URL is model-influenced, so a prompt injection could aim the
 user at an attacker site to harvest the credential the flow protects. When

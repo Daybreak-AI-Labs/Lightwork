@@ -1,10 +1,9 @@
 """`maverick start` must exit nonzero when the run did not complete.
 
-User-testing finding: start exited 0 for EVERY outcome -- a run paused awaiting
-a user answer, stopped by a budget/time cap, or refused by an input guard
-looked identical to a clean success by exit code, so scripts and CI could not
-tell them apart. start now exits 2 when the kernel marks the goal ``blocked``;
-a genuinely completed (``done``) goal still exits 0.
+A run paused awaiting a user answer, stopped by a budget/time cap, or refused
+by an input guard must not look like a clean success by exit code, or scripts
+and CI cannot tell them apart. start exits 2 when the kernel marks the goal
+``blocked``; a genuinely completed (``done``) goal exits 0.
 """
 from __future__ import annotations
 

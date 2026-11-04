@@ -1,5 +1,5 @@
 """dashboard main() routes uvicorn logs through the JSON root handler in JSON
-mode (audit M4): uvicorn's own plaintext access/error formatters otherwise made
+mode: uvicorn's own plaintext access/error formatters otherwise made
 a mixed JSON+text stream that breaks strict log ingestion.
 """
 from __future__ import annotations

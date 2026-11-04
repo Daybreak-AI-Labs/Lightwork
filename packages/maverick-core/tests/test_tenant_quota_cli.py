@@ -1,9 +1,9 @@
 """`maverick tenant quota` input validation and display consistency.
 
-User-testing findings: (1) a negative cap was silently clamped to 0 -- i.e.
-UNLIMITED -- so a typo'd `-5` quietly removed the cap; (2) setting the cap to 0
-printed "$0/day" while `tenant list` rendered the same value as "unlimited",
-a contradiction in one operation.
+(1) A negative cap is refused rather than clamped to 0 -- i.e. UNLIMITED --
+so a typo'd `-5` cannot quietly remove the cap; (2) a cap of 0 reads
+"unlimited" both when it is set and in `tenant list`, not "$0/day" in one place
+and "unlimited" in the other.
 """
 from __future__ import annotations
 

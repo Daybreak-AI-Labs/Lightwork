@@ -208,8 +208,8 @@ class Blackboard:
         # Check sealed-ness AND read the entries atomically under the lock. With
         # the check outside the lock, a concurrent seal() could slip between it
         # and the read and leak a just-sealed agent's posts wholesale
-        # (compartment Rung 1); a FastAPI threadpool caller makes the window real
-        # (user-testing race). _is_sealed does not take this lock, so no deadlock.
+        # (compartment Rung 1); a FastAPI threadpool caller makes the window
+        # real. _is_sealed does not take this lock, so no deadlock.
         with self._lock:
             if self._is_sealed(agent):
                 return []

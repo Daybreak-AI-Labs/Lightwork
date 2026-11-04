@@ -1,12 +1,12 @@
 """Erase and retention must act on the audit dir the writer actually uses.
 
-User-testing finding (critical): ``scrub_user``/``delete_user`` (erase) and
+The writer resolves ``data_dir("audit")`` at call time (home- and
+tenant-aware). If ``scrub_user``/``delete_user`` (erase) and
 ``purge_audit_files``/``enforce`` (retention) defaulted ``audit_dir`` to a
-module-import-time ``~/.maverick/audit``. The writer, by contrast, resolves
-``data_dir("audit")`` at call time (home- and tenant-aware). So whenever
-``MAVERICK_HOME`` or an active tenant moved the real audit files elsewhere,
-erase reported success while scrubbing nothing (an Art. 17 gap) and retention
-reported "no audit dir". These pin that both now resolve the writer's dir.
+module-import-time ``~/.maverick/audit``, then whenever ``MAVERICK_HOME`` or an
+active tenant moved the real audit files elsewhere, erase would report success
+while scrubbing nothing (an Art. 17 gap) and retention would report "no audit
+dir". These pin that both resolve the writer's dir.
 """
 from __future__ import annotations
 

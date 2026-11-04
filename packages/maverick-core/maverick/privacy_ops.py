@@ -1,4 +1,4 @@
-"""Privacy operations record types: the "nimble OneTrust" data plane.
+"""Privacy operations record types: the privacy operations data plane.
 
 Four privacy record types over one tenant-scoped JSON store, each pairing a
 deterministic, explainable engine with a lifecycle the Privacy workspace can
