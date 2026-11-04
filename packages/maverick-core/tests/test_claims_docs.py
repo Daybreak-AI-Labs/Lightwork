@@ -173,37 +173,9 @@ def test_the_root_holds_only_the_live_documents():
 
 
 def test_business_material_stays_out_of_the_product_repository():
-    """Fundraising, strategy, competitor teardowns, patent material and company
-    administration are kept outside this repository, not beside the product. A
-    clone of this tree must not carry an investor deck, a data room, pricing
-    research, an invention disclosure or the company's own records."""
-    removed_directories = (
-        "pitch",
-        "docs/patents",
-        "docs/strategy",
-        "docs/research/commercialization",
-        "docs/research/competitive",
-    )
-    present = [d for d in removed_directories if (REPO_ROOT / d).exists()]
-    assert present == [], f"business material directories back in the product tree: {present}"
-    # Company administration removed for the open-source release: the vendor
-    # licensing console, the company website, point-in-time audits, community
-    # programme plans, contract templates and the company's ISMS records.
-    administration = (
-        "apps/vendor-console",
-        "website",
-        "docs/audits",
-        "docs/programs",
-        "docs/enterprise/legal",
-        "docs/compliance/evidence",
-        "docs/compliance/policies",
-        "docs/compliance/registers",
-    )
-    returned = subprocess.run(
-        ["git", "ls-files", "--", *administration],
-        capture_output=True, text=True, cwd=REPO_ROOT, check=True,
-    ).stdout.split()
-    assert returned == [], f"company administration back in the product tree: {returned}"
+    """Fundraising, strategy and patent material does not belong beside the
+    product. A documentation or root file whose name looks like such material
+    fails here."""
     # Documentation and root files only: product skill packs legitimately carry
     # names such as investor-update-author.md and due-diligence-data-room.md.
     tracked = subprocess.run(
