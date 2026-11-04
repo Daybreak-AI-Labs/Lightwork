@@ -6,7 +6,7 @@ import time
 
 from maverick import reflexion
 
-# --- Task 3: reflexion recall prefers recent + dedups --------------------
+# --- reflexion recall prefers recent + dedups --------------------
 
 def test_recall_prefers_recent_on_equal_similarity(tmp_path):
     path = tmp_path / "reflexions.ndjson"

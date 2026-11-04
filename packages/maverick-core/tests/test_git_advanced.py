@@ -110,7 +110,7 @@ def test_git_advanced_unknown_op(tmp_path):
     assert "unknown op" in out
 
 
-# ---------- 2. git option injection ----------
+# ---------- git option injection ----------
 
 class _FakeSandbox:
     def __init__(self, workdir):

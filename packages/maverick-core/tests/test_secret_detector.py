@@ -100,7 +100,7 @@ def test_secret_detector_empty():
     assert redact("") == ("", [])
 
 
-# ---------- 3. secret_detector generic env secret ----------
+# ---------- secret_detector generic env secret ----------
 
 @pytest.mark.parametrize("text", [
     "INTERNAL_API_TOKEN=zzz-internal-token-value-1234",

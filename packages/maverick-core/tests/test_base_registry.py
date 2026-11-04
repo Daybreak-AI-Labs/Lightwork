@@ -3,7 +3,6 @@ opt-in is enabled.
 """
 from __future__ import annotations
 
-# ---------- registry includes new tools ----------
 
 def test_base_registry_excludes_web_search_by_default_but_keeps_recall():
     """web_search is opt-in; recall remains enabled by default."""
@@ -39,8 +38,6 @@ def test_base_registry_can_enable_web_search_explicitly():
     assert "web_search" in names
 
 
-# ---------- new tools registered ----------
-
 def test_fetch_pdf_and_image_tools_register_by_default():
     """http_fetch, read_pdf, view_image must register by default."""
     from maverick.tools import base_registry
@@ -58,8 +55,6 @@ def test_fetch_pdf_and_image_tools_register_by_default():
     assert "view_image" in names
 
 
-# ---------- dep_graph + ast_edit registered ----------
-
 def test_dep_graph_and_ast_edit_register():
     from maverick.tools import base_registry
 
@@ -75,10 +70,8 @@ def test_dep_graph_and_ast_edit_register():
     assert "ast_edit" in names
 
 
-# ---------- tool registry ----------
-
 def test_clipboard_diff_arxiv_and_voice_tools_register():
-    """All Q2 batch tools must appear in the default registry."""
+    """The clipboard, preview_diff, arxiv and voice tools register by default."""
     from maverick.tools import base_registry
 
     class _FakeSandbox:
@@ -110,8 +103,6 @@ def test_semantic_scholar_in_registry():
     names = {t.name for t in reg.all()}
     assert "semantic_scholar" in names
 
-
-# ---------- registry ----------
 
 def test_patch_compute_email_pandas_and_git_tools_register():
     from maverick.tools import base_registry
@@ -145,8 +136,6 @@ def test_calendar_in_registry():
     assert "calendar" in names
 
 
-# ---------- registration smoke ----------
-
 def test_linear_and_jira_register(tmp_path):
     """Both tools register cleanly via base_registry."""
     from maverick.sandbox.local import LocalBackend
@@ -162,8 +151,6 @@ def test_linear_and_jira_register(tmp_path):
     assert "jira" in names
 
 
-# ---------- registration smoke ----------
-
 def test_mongodb_redis_and_sentry_register(tmp_path):
     from maverick.sandbox.local import LocalBackend
     from maverick.tools import base_registry
@@ -177,8 +164,6 @@ def test_mongodb_redis_and_sentry_register(tmp_path):
     for n in ("mongodb", "redis", "sentry"):
         assert n in names, f"{n} not registered"
 
-
-# ---------- registration smoke (all 8 tools land) ----------
 
 def test_ops_crm_and_cloud_tools_register(tmp_path):
     from maverick.sandbox.local import LocalBackend
@@ -194,8 +179,6 @@ def test_ops_crm_and_cloud_tools_register(tmp_path):
               "hubspot", "twilio", "s3", "elasticsearch", "github_actions"):
         assert n in names, f"{n} not registered"
 
-
-# ---------- registration smoke ----------
 
 def test_credentialed_tools_not_registered_by_default(tmp_path):
     from maverick.sandbox.local import LocalBackend
@@ -228,8 +211,6 @@ def test_credentialed_tools_register_when_enabled(tmp_path, monkeypatch):
         assert n in names, f"{n} not registered"
 
 
-# ---------- registration smoke ----------
-
 def test_saas_and_media_tools_register(tmp_path):
     from maverick.sandbox.local import LocalBackend
     from maverick.tools import base_registry
@@ -249,8 +230,6 @@ def test_saas_and_media_tools_register(tmp_path):
     assert not missing, f"unregistered: {missing}"
 
 
-# ---------- registration smoke ----------
-
 def test_productivity_and_api_tools_register(tmp_path):
     from maverick.sandbox.local import LocalBackend
     from maverick.tools import base_registry
@@ -266,8 +245,6 @@ def test_productivity_and_api_tools_register(tmp_path):
         assert n in names, f"{n} not registered"
 
 
-# ---------- registry ----------
-
 def test_view_video_registered_by_default():
     from maverick.tools import base_registry
 
@@ -281,8 +258,6 @@ def test_view_video_registered_by_default():
     names = {t.name for t in reg.all()}
     assert "view_video" in names
 
-
-# ---------- registration smoke ----------
 
 def test_gitlab_and_embeddings_register(tmp_path):
     from maverick.sandbox.local import LocalBackend
@@ -298,8 +273,6 @@ def test_gitlab_and_embeddings_register(tmp_path):
     assert "embeddings" in names
 
 
-# ---------- registration smoke ----------
-
 def test_notify_and_diagnose_register(tmp_path):
     from maverick.sandbox.local import LocalBackend
     from maverick.tools import base_registry
@@ -314,8 +287,6 @@ def test_notify_and_diagnose_register(tmp_path):
     assert "diagnose" in names
 
 
-# ---------- registration smoke ----------
-
 def test_huggingface_registers(tmp_path):
     from maverick.sandbox.local import LocalBackend
     from maverick.tools import base_registry
@@ -328,8 +299,6 @@ def test_huggingface_registers(tmp_path):
     names = {t.name for t in reg.all()}
     assert "huggingface" in names
 
-
-# ---------- registration smoke ----------
 
 def test_mobile_tools_register_only_when_enabled(tmp_path):
     from maverick.sandbox.local import LocalBackend
@@ -355,8 +324,6 @@ def test_mobile_tools_register_only_when_enabled(tmp_path):
     assert "ios_sim" in names_mobile
 
 
-# ---------- registration smoke ----------
-
 def test_youtube_notion_translate_slack_bot_and_test_impact_register(tmp_path):
     from maverick.sandbox.local import LocalBackend
     from maverick.tools import base_registry
@@ -370,8 +337,6 @@ def test_youtube_notion_translate_slack_bot_and_test_impact_register(tmp_path):
     for n in ("test_impact", "youtube", "notion", "translate", "slack_bot"):
         assert n in names, f"{n} not registered"
 
-
-# ---------- registration smoke ----------
 
 def test_stripe_currency_and_a11y_register(tmp_path):
     from maverick.sandbox.local import LocalBackend
@@ -387,8 +352,6 @@ def test_stripe_currency_and_a11y_register(tmp_path):
         assert n in names, f"{n} not registered"
 
 
-# ---------- registration smoke ----------
-
 def test_discord_hackernews_dns_and_geocode_register(tmp_path):
     from maverick.sandbox.local import LocalBackend
     from maverick.tools import base_registry
@@ -402,8 +365,6 @@ def test_discord_hackernews_dns_and_geocode_register(tmp_path):
     for n in ("discord_bot", "hackernews", "dns_lookup", "geocode"):
         assert n in names, f"{n} not registered"
 
-
-# ---------- registration smoke ----------
 
 def test_openapi_ocr_posthog_and_shopify_register(tmp_path):
     from maverick.sandbox.local import LocalBackend
@@ -434,8 +395,6 @@ def test_voice_grammar_digest_gui_memory_and_adversarial_eval_register():
         assert name in names
 
 
-# ---- registration ----
-
 def test_knowledge_graph_citation_repo_deps_and_test_gen_register(tmp_path):
     from maverick.tools import base_registry
 
@@ -453,8 +412,6 @@ def test_knowledge_graph_citation_repo_deps_and_test_gen_register(tmp_path):
     assert tools["cross_repo_deps"].parallel_safe is False
 
 
-# ---- registration ----
-
 def test_code_search_mutation_and_constrained_output_register():
     from maverick.tools import base_registry
 
@@ -469,8 +426,6 @@ def test_code_search_mutation_and_constrained_output_register():
     for n in ("semantic_code_search", "mutation_test", "constrained_output"):
         assert n in names, f"{n} not registered"
 
-
-# ---- registration ----
 
 def test_model3d_and_synthetic_data_register():
     from maverick.tools import base_registry

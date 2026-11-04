@@ -158,7 +158,7 @@ def test_web_archive_routes_through_guarded_urlopen(monkeypatch):
     assert data == {"archived_snapshots": {}}
 
 
-# ---------- 1. SSRF redirect revalidation ----------
+# ---------- SSRF redirect revalidation ----------
 
 def test_guarded_urlopen_revalidates_redirect_to_metadata(monkeypatch):
     from maverick.tools import http_fetch

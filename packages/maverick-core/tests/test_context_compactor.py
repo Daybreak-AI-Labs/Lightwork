@@ -6,7 +6,7 @@ import types
 
 from maverick import context_compactor as cc
 
-# --- Task 1: embedding ranking keeps head turns on vector shortfall ------
+# --- embedding ranking keeps head turns on vector shortfall ------
 
 class _ShortEmbedder:
     """Embedder that yields a query vector but FEWER doc vectors than asked,
@@ -48,7 +48,7 @@ def test_embedding_shortfall_keeps_all_head_turns(monkeypatch):
     assert last == float("inf")
 
 
-# --- Task 2: budget exhaustion drops tail turns, never blanks them -------
+# --- budget exhaustion drops tail turns, never blanks them -------
 
 def test_fit_recent_to_budget_drops_rather_than_blanks():
     # Three turns, each ~5 tokens; budget only fits the newest one.
