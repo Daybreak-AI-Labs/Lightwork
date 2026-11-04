@@ -12,7 +12,14 @@ improvement, deployment acceptance, or benchmark validity.
 
 ## In-app workflow and installation setup
 
-The visible **Research lab** navigation entry opens `/research`. Researchers can:
+The **Research lab** page is `/research`. It is not a navigation entry:
+`ui_visibility.py` registers it with `ready: False`, so it keeps its route and
+permission gate but is not offered in the sidebar, the page finder or the
+Settings visibility matrix. People reach it from links on other pages: the
+release-decision links in Workflow pilots, the release-review links in flow
+comparisons and flow requalification, the Research lab step of the
+installation setup guide, and the product-operations Copilot actions that open
+it. On the page, researchers can:
 
 - select up to 64 UTF-8 source files totaling at most 256 KiB;
 - choose a supplied Python entrypoint and an installation-owned evaluator;
