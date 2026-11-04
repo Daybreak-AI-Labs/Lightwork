@@ -439,9 +439,9 @@ def test_test_case_check_runs_in_the_background_and_removal_needs_confirmation(c
         {"goal": "hard task", "discriminative": True, "baseline_rate": 0.5, "age_days": 3.0}])
     removed: list = []
     monkeypatch.setattr(ev, "retire_corpus_cases", lambda path, key, goals: removed.append((key, goals)) or len(goals))
-    # Checking now runs from Check saved learning questions on Learned, after a
-    # complete review; checking never
-    # removes a question. The old check-and-delete shortcut refuses every form.
+    # Checking runs from Check saved learning questions on Learned, after a
+    # complete review; checking never removes a question. A check-and-delete
+    # shortcut refuses every form.
     for body in ({}, {"remove_weak": True}, {"remove_weak": True, "confirm": True}):
         refused = client.post(API + "/corpus-quality", json=body)
         assert refused.status_code == 409

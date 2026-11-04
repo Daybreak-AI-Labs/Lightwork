@@ -4229,12 +4229,12 @@ def check_goal_rate_limit(request: Request | None = None, *, source: str | None 
             )
 
         # Sweep EVERY other key's window of expired entries, then drop the ones
-        # that became empty. The old check only collected ALREADY-empty deques,
-        # but a key whose lone entry expired and whose IP/principal never recurs
-        # was never pruned (its deque kept len 1, so `not w` stayed False) -- so
-        # a stream of distinct one-shot keys (many principals / direct client
-        # IPs) grew the dict without bound. Bounded by the number of keys active
-        # within the window now.
+        # that became empty. Collecting only ALREADY-empty deques would never
+        # prune a key whose lone entry expired and whose IP/principal never
+        # recurs (its deque keeps len 1, so `not w` stays False) -- so a stream
+        # of distinct one-shot keys (many principals / direct client IPs) would
+        # grow the dict without bound. The dict stays bounded by the number of
+        # keys active within the window.
         for stale_key in list(_goal_times):
             if stale_key == key:
                 continue

@@ -120,7 +120,7 @@ class TestGitDirDiscovery:
     """The guard must read the settings git will actually use, not just
     `<wd>/.git/config`: a `.git` pointer file, a symlinked
     `.git`, a linked worktree's common dir, `config.worktree` and a bare layout
-    each put the filter somewhere the old check never looked."""
+    each put the filter somewhere a `.git/config`-only check never looks."""
 
     def _repo(self, tmp_path: Path) -> Path:
         repo = tmp_path / "repo"

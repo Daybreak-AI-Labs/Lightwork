@@ -505,7 +505,7 @@ def test_concurrent_set_trigger_does_not_lose_triggers(monkeypatch, tmp_path):
 
 def test_webhook_run_honors_template_budget(monkeypatch, tmp_path):
     # A trigger fire must run the goal under the template's own budget/wall caps
-    # (previously dropped -- the run fell back to the global default).
+    # rather than falling back to the global default.
     _isolate(monkeypatch, tmp_path)
     _configured(monkeypatch)
     import maverick.templates as tpl

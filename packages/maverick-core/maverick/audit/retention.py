@@ -94,9 +94,9 @@ def _purge_audit_files(
     if days is None or int(days) <= 0:
         return {"removed": [], "kept": 0, "reason": "disabled"}
     if audit_dir is None:
-        # Match the writer's (home + active-tenant) audit dir; the old frozen
-        # ~/.maverick/audit default made enforce() report "no audit dir" and
-        # purge nothing whenever MAVERICK_HOME / a tenant moved the real files.
+        # Match the writer's (home + active-tenant) audit dir; a frozen
+        # ~/.maverick/audit default would make enforce() report "no audit dir"
+        # and purge nothing whenever MAVERICK_HOME / a tenant moved the files.
         from ..paths import data_dir
         audit_dir = data_dir("audit")
     if not audit_dir.exists():

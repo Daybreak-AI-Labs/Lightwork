@@ -218,10 +218,10 @@ class Relay:
         """
         ack = self.config.ack_template.format(channel=self.config.secondary_channel)
         # Protected keys are set AFTER the context spread so inbound data can
-        # never override them. The old order spread `context` last, so a context
-        # carrying `deliver_to`/`goal` overwrote them -- letting inbound request
+        # never override them. Spreading `context` last would let a context
+        # carrying `deliver_to`/`goal` overwrite them -- letting inbound request
         # data redirect a finished long-task result to an attacker-chosen channel
-        # or decouple the acked goal from what runs. Only `source` was guarded.
+        # or decouple the acked goal from what runs.
         _protected = ("goal", "deliver_to", "source")
         payload = {
             **{k: v for k, v in context.items() if k not in _protected},

@@ -140,8 +140,8 @@ def _op_history(args: dict) -> str:
     if not _safe_seg(eid):
         return "ERROR: history requires a valid entity_id"
     # Honor the advertised ``hours`` window: HA takes the window START as a path
-    # timestamp (it otherwise defaults to the last 24h). Was previously parsed
-    # and ignored, so the documented parameter did nothing.
+    # timestamp (it otherwise defaults to the last 24h), so the documented
+    # parameter takes effect.
     try:
         hours = max(1, int(args.get("hours") or 24))
     except (TypeError, ValueError):

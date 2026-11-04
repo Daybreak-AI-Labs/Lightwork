@@ -550,7 +550,7 @@ def _safe_relay_state(value: str | None, default: str) -> str:
     Matches the OIDC sibling's open-redirect filter: besides the ``/`` prefix /
     ``//`` protocol-relative checks, also reject a backslash (``/\\evil.com`` is
     treated as ``//`` by some browsers) and any control character (CR/LF/NUL
-    header-splitting), which the old check let through.
+    header-splitting).
     """
     if (not value or not value.startswith("/") or value.startswith("//")
             or "\\" in value
