@@ -28,9 +28,9 @@ http = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Daybreak-AI-Labs/Lightwork"
-Repository = "https://github.com/Daybreak-AI-Labs/Lightwork"
-Issues = "https://github.com/Daybreak-AI-Labs/Lightwork/issues"
+Homepage = "https://github.com/Daybreak-AI-Labs/LightworkOS"
+Repository = "https://github.com/Daybreak-AI-Labs/LightworkOS"
+Issues = "https://github.com/Daybreak-AI-Labs/LightworkOS/issues"
 
 [project.scripts]
 maverick-mcp = "maverick_mcp.server:main"

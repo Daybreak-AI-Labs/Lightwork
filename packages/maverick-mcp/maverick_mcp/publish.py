@@ -20,7 +20,7 @@ import json
 # newer registry schema revision.
 SCHEMA_URL = ("https://static.modelcontextprotocol.io/schemas/"
               "2025-09-29/server.schema.json")
-DEFAULT_REPO_URL = "https://github.com/Daybreak-AI-Labs/Lightwork"
+DEFAULT_REPO_URL = "https://github.com/Daybreak-AI-Labs/LightworkOS"
 DEFAULT_MANIFEST_OWNER = "daybreak-ai-labs"
 PACKAGE_NAME = "maverick-mcp-server"
 

@@ -67,7 +67,7 @@ def provenance(value):
         "conclusion": "success",
         "status": "completed",
         "path": ".github/workflows/windows-customer.yml",
-        "repository": {"full_name": "Daybreak-AI-Labs/Lightwork"},
+        "repository": {"full_name": "Daybreak-AI-Labs/LightworkOS"},
     }
     artifact = {
         "id": 4,
@@ -175,10 +175,10 @@ def test_same_runtime_relabel_and_invalid_plan_are_refused(mutation):
 def test_original_immutable_release_and_protected_signing_provenance_required(index, mutation):
     value = plan()
     rows = provenance(value)
-    gate.validate_provenance(value, *rows, "Daybreak-AI-Labs/Lightwork")
+    gate.validate_provenance(value, *rows, "Daybreak-AI-Labs/LightworkOS")
     mutation(rows[index])
     with pytest.raises(ValueError):
-        gate.validate_provenance(value, *rows, "Daybreak-AI-Labs/Lightwork")
+        gate.validate_provenance(value, *rows, "Daybreak-AI-Labs/LightworkOS")
 
 
 def test_contract_only_preserves_original_bundle_and_rejects_runtime_fixture(tmp_path):

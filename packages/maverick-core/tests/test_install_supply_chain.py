@@ -108,7 +108,7 @@ def _desktop_verifier_fixture(tmp_path: Path) -> tuple[Path, str]:
         "remote",
         "add",
         "origin",
-        "https://github.com/Daybreak-AI-Labs/Lightwork.git",
+        "https://github.com/Daybreak-AI-Labs/LightworkOS.git",
     )
     _git(repository, "add", ".")
     _git(repository, "commit", "--quiet", "-m", "fixture")
@@ -188,7 +188,7 @@ def test_reusable_pr_workflow_requires_immutable_runtime_source():
 
     assert "lightwork_ref:" in text
     assert "Full 40-character commit SHA" in text
-    assert "repository: Daybreak-AI-Labs/Lightwork" in text
+    assert "repository: Daybreak-AI-Labs/LightworkOS" in text
     assert "persist-credentials: false" in text
     assert '"$source_root/packages/maverick-core[all]"' in text
     assert "pip install 'maverick-agent[all]'" not in text
@@ -404,7 +404,7 @@ def test_native_installer_build_ref_is_a_full_commit():
     assert '"deploy/desktop/install.ps1"' in workflow
     assert '"deploy/desktop/install.sh"' in workflow
     assert "--canonicalize-checkout" in workflow
-    assert "github.repository == 'Daybreak-AI-Labs/Lightwork'" in workflow
+    assert "github.repository == 'Daybreak-AI-Labs/LightworkOS'" in workflow
     assert "pnpm tauri icon" not in workflow
     assert '--target "$BUNDLE_TARGET"' in workflow
     assert '--config "$TAURI_BUILD_CONFIG"' in workflow
@@ -828,7 +828,7 @@ def test_install_guides_use_the_source_install_path():
     The README carries that quickstart, every install guide links the source
     install guide, and none tells users to install a Lightwork package from
     public PyPI."""
-    clone = "git clone https://github.com/Daybreak-AI-Labs/Lightwork"
+    clone = "git clone https://github.com/Daybreak-AI-Labs/LightworkOS"
     cohort_installer = "scripts/install_release_cohort.py"
     source_install = (REPO_ROOT / "docs" / "source-install.md").read_text(encoding="utf-8")
     assert clone in source_install

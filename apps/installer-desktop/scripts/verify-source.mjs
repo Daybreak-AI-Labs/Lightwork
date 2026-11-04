@@ -5,12 +5,12 @@ import { lstatSync, readFileSync, readdirSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const CANONICAL_REPOSITORY = "Daybreak-AI-Labs/Lightwork";
+const CANONICAL_REPOSITORY = "Daybreak-AI-Labs/LightworkOS";
 const CANONICAL_REMOTE_URLS = new Set([
-  "https://github.com/Daybreak-AI-Labs/Lightwork",
-  "https://github.com/Daybreak-AI-Labs/Lightwork.git",
-  "git@github.com:Daybreak-AI-Labs/Lightwork.git",
-  "ssh://git@github.com/Daybreak-AI-Labs/Lightwork.git",
+  "https://github.com/Daybreak-AI-Labs/LightworkOS",
+  "https://github.com/Daybreak-AI-Labs/LightworkOS.git",
+  "git@github.com:Daybreak-AI-Labs/LightworkOS.git",
+  "ssh://git@github.com/Daybreak-AI-Labs/LightworkOS.git",
 ]);
 const VERIFIED_ROOTS = ["apps/installer-desktop", "apps/desktop-runtime"];
 const VERIFIED_FILES = [

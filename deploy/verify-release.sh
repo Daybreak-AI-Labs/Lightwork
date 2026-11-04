@@ -41,10 +41,9 @@ esac
 # OIDC issuer is GitHub. Escape regex metacharacters in the user-supplied tag so
 # the certificate identity is anchored to the literal tag value.
 ESCAPED_TAG="$(printf '%s' "$TAG" | sed -e 's/[.[\\*^$()+?{}|]/\\&/g')"
-# Daybreak-AI-Labs/Lightwork is canonical. The two Day-AI-Labs identities are
-# historical. Alternate complete owner/repository pairs so the regex cannot
-# accidentally trust the never-valid Daybreak-AI-Labs/Maverick cross-product.
-IDENTITY_REGEXP="^https://github.com/([Dd]aybreak-[Aa][Ii]-[Ll]abs/[Ll]ightwork|[Dd]ay-[Aa][Ii]-[Ll]abs/([Ll]ightwork|[Mm]averick))/\.github/workflows/release\.yml@refs/tags/${ESCAPED_TAG}$"
+# Daybreak-AI-Labs/LightworkOS is the only trusted signing repository. Its
+# owner and name match without regard to letter case, as GitHub resolves them.
+IDENTITY_REGEXP="^https://github.com/[Dd]aybreak-[Aa][Ii]-[Ll]abs/[Ll]ightwork[Oo][Ss]/\.github/workflows/release\.yml@refs/tags/${ESCAPED_TAG}$"
 OIDC_ISSUER="${OIDC_ISSUER:-https://token.actions.githubusercontent.com}"
 
 command -v cosign >/dev/null 2>&1 || {

@@ -87,7 +87,7 @@ jobs:
   bundle:
     if: >-
       github.event_name != 'pull_request' &&
-      github.repository == 'Daybreak-AI-Labs/Lightwork'
+      github.repository == 'Daybreak-AI-Labs/LightworkOS'
     permissions:
       contents: read
     env:
@@ -266,7 +266,7 @@ jobs:
           const path = require('path');
           const { execFileSync } = require('child_process');
 
-          const canonicalRepository = 'Daybreak-AI-Labs/Lightwork';
+          const canonicalRepository = 'Daybreak-AI-Labs/LightworkOS';
           const fullSha = /^[0-9a-f]{40}$/;
           const digits = /^[1-9][0-9]*$/;
           const required = (name) => {

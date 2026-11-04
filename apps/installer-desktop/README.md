@@ -191,7 +191,7 @@ artifact SHA-256. It neither extracts nor executes the selected artifact, and it
 never generates signing keys or changes credentials.
 
 The signed manifest schema is `lightwork.signed-engineering-artifact.v1`, with
-`repository: Daybreak-AI-Labs/Lightwork`, full lowercase `commit`, exact `version`,
+`repository: Daybreak-AI-Labs/LightworkOS`, full lowercase `commit`, exact `version`,
 `target`, `support_channel: engineering`, `artifact_filename`, `artifact_sha256`
 and integer `size_bytes`. Sign that manifest through the release owner's existing
 approved process; no signing automation or release credentials are introduced here.

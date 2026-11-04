@@ -74,7 +74,7 @@ def verify(*, manifest: Path, signature: Path, artifact: Path, public_key: str,
     row = json.loads(payload)
     if not isinstance(row, dict) or row.get("schema") != "lightwork.signed-engineering-artifact.v1":
         raise ValueError("The authenticated manifest has an unsupported schema.")
-    expected = {"repository": "Daybreak-AI-Labs/Lightwork", "commit": expected_commit, "version": expected_version, "target": target, "support_channel": "engineering", "artifact_filename": artifact.name}
+    expected = {"repository": "Daybreak-AI-Labs/LightworkOS", "commit": expected_commit, "version": expected_version, "target": target, "support_channel": "engineering", "artifact_filename": artifact.name}
     if any(row.get(key) != value for key, value in expected.items()):
         raise ValueError("The authenticated artifact is not the exact reviewed repository/release/target/channel/file.")
     digest = sha256(artifact)

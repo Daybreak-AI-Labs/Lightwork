@@ -17,7 +17,7 @@ One tagged `release.yml` run produces the artifacts below for
 | Channel | Artifact | Typical use | Readable Python source? |
 |---|---|---|---|
 | **Single-file binary** | `maverick-macos-arm64`, `maverick-windows-x86_64.exe`, `maverick-linux-x86_64` | technical users / CI / servers | No — PyInstaller bundles Python bytecode |
-| **Container image** | `ghcr.io/daybreak-ai-labs/lightwork:<ver>` | **Azure / AWS / GCP**, k8s, on-prem Docker | **Yes** — installed Python remains readable |
+| **Container image** | `ghcr.io/daybreak-ai-labs/lightworkos:<ver>` | **Azure / AWS / GCP**, k8s, on-prem Docker | **Yes** — installed Python remains readable |
 | Supply-chain | Sigstore material for `release.yml` binaries, manifests, SBOMs, and the immutable container digest; `publish.yml` separately signs Python distributions/manifests | security review | n/a |
 
 `publish.yml` separately contains an opt-in, allowlisted Trusted Publishing
@@ -103,7 +103,7 @@ push it to a registry your cloud can pull from, and substitute that name.
 
 ```bash
 # the release image (staged by release.yml, promoted to :<version> by publish.yml)
-docker pull ghcr.io/daybreak-ai-labs/lightwork:<version>
+docker pull ghcr.io/daybreak-ai-labs/lightworkos:<version>
 ```
 
 **AWS** — ECS/Fargate task, or plain EC2. For remote access, put the EC2
@@ -114,7 +114,7 @@ docker run -d -p 127.0.0.1:8765:8765 \
   -e MAVERICK_DASHBOARD_TOKEN=... \
   -e ANTHROPIC_API_KEY=... \
   -v /srv/maverick:/home/maverick/.maverick \
-  ghcr.io/daybreak-ai-labs/lightwork:<version> \
+  ghcr.io/daybreak-ai-labs/lightworkos:<version> \
   dashboard --host 0.0.0.0 --port 8765
 # Fargate: same image in a task definition.
 ```
@@ -122,7 +122,7 @@ docker run -d -p 127.0.0.1:8765:8765 \
 **Azure** — Container Apps (serverless) or AKS:
 ```bash
 az containerapp create -n lightwork -g <rg> --environment <env> \
-  --image ghcr.io/daybreak-ai-labs/lightwork:<version> \
+  --image ghcr.io/daybreak-ai-labs/lightworkos:<version> \
   --target-port 8765 --ingress internal \
   --command maverick \
   --args dashboard --host 0.0.0.0 --port 8765 \
@@ -136,7 +136,7 @@ az containerapp create -n lightwork -g <rg> --environment <env> \
 **GCP** — Cloud Run:
 ```bash
 gcloud run deploy lightwork \
-  --image ghcr.io/daybreak-ai-labs/lightwork:<version> \
+  --image ghcr.io/daybreak-ai-labs/lightworkos:<version> \
   --port 8765 --cpu 1 --memory 2Gi --no-allow-unauthenticated \
   --command=maverick \
   --args=dashboard,--host,0.0.0.0,--port,8765 \
@@ -176,7 +176,7 @@ engineering Tauri source-bootstrap bundles. `publish.yml` starts when Release
 completes. It builds and signs the Python distributions, publishes them to PyPI
 only when enabled, promotes and verifies the exact-version GHCR tag, and then
 publishes the verified draft (see
-[RELEASING.md](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/RELEASING.md)).
+[RELEASING.md](https://github.com/Daybreak-AI-Labs/LightworkOS/blob/main/RELEASING.md)).
 
 The Release includes `maverick-container-v<version>.json`, which binds the
 image, immutable digest, source revision, staging tag, and target-tag promotion
@@ -186,11 +186,11 @@ the draft Release.
 Verify that digest without trusting a mutable tag:
 
 ```bash
-IMAGE=ghcr.io/daybreak-ai-labs/lightwork
+IMAGE=ghcr.io/daybreak-ai-labs/lightworkos
 DIGEST=sha256:<digest-from-maverick-container-v0.1.7.json>
 cosign verify "$IMAGE@$DIGEST" \
   --certificate-identity-regexp \
-  '^https://github.com/Daybreak-AI-Labs/Lightwork/\.github/workflows/release\.yml@refs/tags/v0\.1\.7$' \
+  '^https://github.com/Daybreak-AI-Labs/LightworkOS/\.github/workflows/release\.yml@refs/tags/v0\.1\.7$' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 

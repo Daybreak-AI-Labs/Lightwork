@@ -7,7 +7,7 @@ name: Lightwork agent on PR (reusable)
 #
 #     jobs:
 #       review:
-#         uses: Daybreak-AI-Labs/Lightwork/.github/workflows/agent-on-pr.yml@<full-40-character-commit-sha>
+#         uses: Daybreak-AI-Labs/LightworkOS/.github/workflows/agent-on-pr.yml@<full-40-character-commit-sha>
 #         with:
 #           goal: "Review this PR for logic bugs and missing edge cases."
 #           # Must match the immutable SHA in `uses:` above.
@@ -175,7 +175,7 @@ jobs:
             echo "::error::GitHub did not provide an immutable reusable-workflow SHA."
             exit 1
           fi
-          if [ "$WORKFLOW_REPOSITORY" != "Daybreak-AI-Labs/Lightwork" ]; then
+          if [ "$WORKFLOW_REPOSITORY" != "Daybreak-AI-Labs/LightworkOS" ]; then
             echo "::error::unexpected reusable-workflow repository identity."
             exit 1
           fi
@@ -187,7 +187,7 @@ jobs:
       - name: Checkout pinned Lightwork runtime source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          repository: Daybreak-AI-Labs/Lightwork
+          repository: Daybreak-AI-Labs/LightworkOS
           ref: ${{ job.workflow_sha }}
           path: .lightwork-runtime-${{ github.run_id }}
           fetch-depth: 1

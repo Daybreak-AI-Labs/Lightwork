@@ -178,7 +178,7 @@ jobs:
         name: Define the immutable staging image
         shell: bash
         run: |
-          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/lightwork"
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/lightworkos"
           echo "image=$image" >> "$GITHUB_OUTPUT"
           echo "tag=$image:sha-$GITHUB_SHA" >> "$GITHUB_OUTPUT"
       - id: build
@@ -411,7 +411,7 @@ jobs:
             "$GITHUB_WORKSPACE/deploy/verify-release.sh" \
               "$checksum" "$RELEASE_TAG"
           )
-          identity='^https://github.com/[Dd]aybreak-[Aa][Ii]-[Ll]abs/[Ll]ightwork/\.github/workflows/publish\.yml@refs/heads/main$'
+          identity='^https://github.com/[Dd]aybreak-[Aa][Ii]-[Ll]abs/[Ll]ightwork[Oo][Ss]/\.github/workflows/publish\.yml@refs/heads/main$'
           shopt -s nullglob
           bundles=("$assets"/*.cosign.bundle)
           if [ "${#bundles[@]}" -ne 18 ]; then

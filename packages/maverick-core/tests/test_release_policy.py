@@ -191,9 +191,9 @@ def test_github_release_state_distinguishes_draft_and_published(monkeypatch):
         return _Response(json.dumps(next(payloads)).encode())
 
     monkeypatch.setattr(policy.urllib.request, "urlopen", urlopen)
-    draft = policy.fetch_release_state("Daybreak-AI-Labs/Lightwork", "v1.2.3", "x")
+    draft = policy.fetch_release_state("Daybreak-AI-Labs/LightworkOS", "v1.2.3", "x")
     published = policy.fetch_release_state(
-        "Daybreak-AI-Labs/Lightwork",
+        "Daybreak-AI-Labs/LightworkOS",
         "v1.2.3",
         "x",
     )
@@ -211,7 +211,7 @@ def test_github_release_state_maps_graphql_null_to_absent(monkeypatch):
 
     monkeypatch.setattr(policy.urllib.request, "urlopen", missing)
     result = policy.fetch_release_state(
-        "Daybreak-AI-Labs/Lightwork",
+        "Daybreak-AI-Labs/LightworkOS",
         "v1.2.3",
         "x",
     )
@@ -228,7 +228,7 @@ def test_github_release_state_fails_closed_on_http_error(monkeypatch):
     monkeypatch.setattr(policy.urllib.request, "urlopen", forbidden)
     with pytest.raises(RuntimeError, match="HTTP 403"):
         policy.fetch_release_state(
-            "Daybreak-AI-Labs/Lightwork",
+            "Daybreak-AI-Labs/LightworkOS",
             "v1.2.3",
             "x",
         )
@@ -257,7 +257,7 @@ def test_github_release_state_rejects_mismatched_metadata(monkeypatch):
     monkeypatch.setattr(policy.urllib.request, "urlopen", urlopen)
     with pytest.raises(RuntimeError, match="different release tag"):
         policy.fetch_release_state(
-            "Daybreak-AI-Labs/Lightwork",
+            "Daybreak-AI-Labs/LightworkOS",
             "v1.2.3",
             "x",
         )

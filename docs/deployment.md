@@ -9,7 +9,7 @@ Install Lightwork from a clone of the repository with the
 complete setup in the dashboard. No prebuilt binary, PyPI package or container
 image is currently published, so install from `main`; published releases will
 be listed on the
-[releases page](https://github.com/Daybreak-AI-Labs/Lightwork/releases). The
+[releases page](https://github.com/Daybreak-AI-Labs/LightworkOS/releases). The
 eight-package cohort is not on PyPI, so do not install Lightwork distribution
 names from a public package index.
 
@@ -44,14 +44,14 @@ are separate paths. The MSI candidate includes the frozen runtime and offline
 WebView2 installer, but still requires publisher signing and clean-machine
 acceptance before release. Engineering bootstrap packages are
 not attached to product releases. See
-[`docs/DISTRIBUTION.md`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/DISTRIBUTION.md) for
+[`docs/DISTRIBUTION.md`](https://github.com/Daybreak-AI-Labs/LightworkOS/blob/main/docs/DISTRIBUTION.md) for
 the full artifact list and verification steps.
 
 ## Docker
 
 No container image is published yet. Build one from a clone of the
 repository with `docker build -f deploy/docker/Dockerfile -t lightwork:local .`
-and use that tag in place of `ghcr.io/daybreak-ai-labs/lightwork:<version>`
+and use that tag in place of `ghcr.io/daybreak-ai-labs/lightworkos:<version>`
 in this example. Once release images are published, use the exact version tag
 of a published release.
 
@@ -61,7 +61,7 @@ docker run -it --rm \
   -v ~/.maverick/config.toml:/home/maverick/.maverick/config.toml:ro \
   -e MAVERICK_WORKDIR=/workspace \
   -e ANTHROPIC_API_KEY=... \
-  ghcr.io/daybreak-ai-labs/lightwork:<version> \
+  ghcr.io/daybreak-ai-labs/lightworkos:<version> \
   start "..."
 ```
 
@@ -98,7 +98,7 @@ the service account can use it. It does not assume that every setup selected
 
 The VPS installer is `deploy/vps/install.sh`; its usage notes are at the top
 of the script, and
-[`deploy/vps/README.md`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/deploy/vps/README.md)
+[`deploy/vps/README.md`](https://github.com/Daybreak-AI-Labs/LightworkOS/blob/main/deploy/vps/README.md)
 describes how it renders the service. Fetch the script and check out the
 repository at the same full commit SHA, as the script's header shows. Confirm
 the generated service and reverse proxy before exposing the dashboard to users.

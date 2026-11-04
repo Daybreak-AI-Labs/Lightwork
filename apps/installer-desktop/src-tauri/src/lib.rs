@@ -30,7 +30,7 @@ use tokio::sync::watch;
 
 // Source repository the bootstrap pulls from. The bundle pins the checkout to
 // the commit captured at build time.
-const REPO: &str = "Daybreak-AI-Labs/Lightwork";
+const REPO: &str = "Daybreak-AI-Labs/LightworkOS";
 const GIT_REF: &str = env!("MAVERICK_INSTALL_REF");
 #[cfg(windows)]
 const INSTALL_SCRIPT_SHA256: &str = env!("MAVERICK_INSTALL_PS1_SHA256");

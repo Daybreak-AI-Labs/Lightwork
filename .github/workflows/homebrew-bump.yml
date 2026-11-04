@@ -115,7 +115,7 @@ jobs:
             --pattern SHA256SUMS.cosign.bundle
           git show "$tag_sha:release-cohort.toml" > "$evidence/release-cohort.toml"
 
-          identity='^https://github.com/[Dd]aybreak-[Aa][Ii]-[Ll]abs/[Ll]ightwork/\.github/workflows/publish\.yml@refs/heads/main$'
+          identity='^https://github.com/[Dd]aybreak-[Aa][Ii]-[Ll]abs/[Ll]ightwork[Oo][Ss]/\.github/workflows/publish\.yml@refs/heads/main$'
           cosign verify-blob \
             --bundle "$evidence/release-manifest.json.cosign.bundle" \
             --certificate-identity-regexp "$identity" \

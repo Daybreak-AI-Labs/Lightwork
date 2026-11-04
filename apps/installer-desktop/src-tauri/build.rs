@@ -4,12 +4,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-const CANONICAL_REPOSITORY: &str = "Daybreak-AI-Labs/Lightwork";
+const CANONICAL_REPOSITORY: &str = "Daybreak-AI-Labs/LightworkOS";
 const CANONICAL_REMOTE_URLS: &[&str] = &[
-    "https://github.com/Daybreak-AI-Labs/Lightwork",
-    "https://github.com/Daybreak-AI-Labs/Lightwork.git",
-    "git@github.com:Daybreak-AI-Labs/Lightwork.git",
-    "ssh://git@github.com/Daybreak-AI-Labs/Lightwork.git",
+    "https://github.com/Daybreak-AI-Labs/LightworkOS",
+    "https://github.com/Daybreak-AI-Labs/LightworkOS.git",
+    "git@github.com:Daybreak-AI-Labs/LightworkOS.git",
+    "ssh://git@github.com/Daybreak-AI-Labs/LightworkOS.git",
 ];
 const INSTALLER_ROOT: &str = "apps/installer-desktop";
 const RUNTIME_ROOT: &str = "apps/desktop-runtime";

@@ -94,7 +94,7 @@ overlap.
    verifies its assets and signatures, and changes nothing.
 3. **Otherwise it builds, in parallel:**
    - the container image from `deploy/docker/Dockerfile`, pushed to a staging
-     tag `ghcr.io/<owner>/lightwork:sha-<commit>` with provenance and an SBOM;
+     tag `ghcr.io/<owner>/lightworkos:sha-<commit>` with provenance and an SBOM;
    - single-file `maverick` binaries built with PyInstaller for Linux x86_64,
      macOS arm64 and Windows x86_64, each smoke-tested before upload;
    - a CycloneDX SBOM of the release runtime.
@@ -127,7 +127,7 @@ repository, and the tag still resolves to the commit that was built.
 3. **Publish to PyPI**, only when enabled (see below).
 4. **Finalize.** Downloads every asset of the release and verifies its bytes and
    signatures, verifies the container signature, and promotes the staged image
-   digest to `ghcr.io/<owner>/lightwork:<version>` (the version without the
+   digest to `ghcr.io/<owner>/lightworkos:<version>` (the version without the
    leading `v`). It refuses to move an existing tag to a different digest. It
    then publishes the GitHub release and verifies the published bytes and
    signatures again.
@@ -162,7 +162,7 @@ to match the release manifest. To enable it:
   each; plus the eight wheels, eight sdists,
   `SHA256SUMS`, `release-manifest.json` and a `.cosign.bundle` for each of
   those.
-- The container image `ghcr.io/<owner>/lightwork:<version>`.
+- The container image `ghcr.io/<owner>/lightworkos:<version>`.
 - When PyPI publishing is enabled, the eight distributions on PyPI.
 
 Users can verify a downloaded binary, checksum manifest or SBOM with

@@ -431,7 +431,7 @@ def test_public_python_release_cohort_is_complete_and_lockstep():
 
     assert cohort["schema_version"] == 1
     assert release_version == "0.1.7"
-    assert cohort["repository"] == "Daybreak-AI-Labs/Lightwork"
+    assert cohort["repository"] == "Daybreak-AI-Labs/LightworkOS"
     assert len(packages) == 8
     assert len({item["distribution"] for item in packages}) == len(packages)
     assert len({item["path"] for item in packages}) == len(packages)
@@ -829,7 +829,7 @@ def test_frozen_platforms_use_available_python_and_nonpublishing_checks():
     assert "timeout=120" in probe
 
 
-def test_release_verifier_accepts_canonical_and_historical_signers():
+def test_release_verifier_accepts_only_the_release_workflow_signer():
     verifier = (REPO_ROOT / "deploy" / "verify-release.sh").read_text(
         encoding="utf-8"
     )
@@ -839,37 +839,61 @@ def test_release_verifier_accepts_canonical_and_historical_signers():
     template = identity_assignment.partition("=")[2]
     assert template.startswith('"') and template.endswith('"')
     pattern = template[1:-1].replace("${ESCAPED_TAG}", re.escape("v1.2.3"))
+    workflow = "/.github/workflows/release.yml@refs/tags/v1.2.3"
 
     assert re.fullmatch(
-        pattern,
-        "https://github.com/Daybreak-AI-Labs/Lightwork/"
-        ".github/workflows/release.yml@refs/tags/v1.2.3",
+        pattern, "https://github.com/Daybreak-AI-Labs/LightworkOS" + workflow
     )
     assert re.fullmatch(
-        pattern,
-        "https://github.com/Day-AI-Labs/Lightwork/"
-        ".github/workflows/release.yml@refs/tags/v1.2.3",
+        pattern, "https://github.com/daybreak-ai-labs/lightworkos" + workflow
     )
-    assert re.fullmatch(
-        pattern,
-        "https://github.com/Day-AI-Labs/Maverick/"
-        ".github/workflows/release.yml@refs/tags/v1.2.3",
-    )
+    for repository in (
+        "Daybreak-AI-Labs/Lightwork",
+        "Daybreak-AI-Labs/LightworkOS-fork",
+        "Daybreak-AI-Labs/Maverick",
+        "Day-AI-Labs/Lightwork",
+        "Day-AI-Labs/Maverick",
+        "attacker/LightworkOS",
+    ):
+        assert not re.fullmatch(
+            pattern, f"https://github.com/{repository}" + workflow
+        ), repository
     assert not re.fullmatch(
         pattern,
-        "https://github.com/Daybreak-AI-Labs/Maverick/"
-        ".github/workflows/release.yml@refs/tags/v1.2.3",
-    )
-    assert not re.fullmatch(
-        pattern,
-        "https://github.com/attacker/Lightwork/"
-        ".github/workflows/release.yml@refs/tags/v1.2.3",
-    )
-    assert not re.fullmatch(
-        pattern,
-        "https://github.com/Daybreak-AI-Labs/Lightwork/"
+        "https://github.com/Daybreak-AI-Labs/LightworkOS/"
         ".github/workflows/release.yml@refs/heads/main",
     )
+    assert not re.fullmatch(
+        pattern,
+        "https://github.com/Daybreak-AI-Labs/LightworkOS/"
+        ".github/workflows/release.yml@refs/tags/v1.2.3-rc1",
+    )
+
+
+def test_workflow_signer_identities_name_the_cohort_repository():
+    cohort = tomllib.loads(
+        (REPO_ROOT / "release-cohort.toml").read_text(encoding="utf-8")
+    )
+    publish_signer = (
+        f"https://github.com/{cohort['repository']}"
+        "/.github/workflows/publish.yml@refs/heads/main"
+    )
+    patterns = {}
+    for workflow in sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml")):
+        for line in workflow.read_text(encoding="utf-8").splitlines():
+            match = re.fullmatch(r"\s*identity='(\^https://github\.com/.+)'", line)
+            if match:
+                patterns.setdefault(workflow.name, []).append(match.group(1))
+
+    assert {"homebrew-bump.yml", "publish.yml", "release.yml"} <= set(patterns)
+    for name, workflow_patterns in patterns.items():
+        for pattern in workflow_patterns:
+            assert re.fullmatch(pattern, publish_signer), (name, pattern)
+            assert not re.fullmatch(
+                pattern,
+                "https://github.com/Daybreak-AI-Labs/Lightwork"
+                "/.github/workflows/publish.yml@refs/heads/main",
+            ), (name, pattern)
 
 
 def test_manual_release_signing_requires_the_exact_tag_run_identity():
@@ -1152,7 +1176,7 @@ def test_release_container_namespace_matches_the_product_cohort():
     assert canonical_image in distribution_docs
 
 
-def test_customer_surfaces_do_not_reference_the_retired_repository_owner():
+def test_customer_surfaces_name_only_the_canonical_repository():
     """Keep public docs and active delivery paths on the canonical repository."""
     public_sources: list[Path] = []
     for raw in (REPO_ROOT / "docs" / "public-docs.txt").read_text(
@@ -1229,10 +1253,6 @@ def test_customer_surfaces_do_not_reference_the_retired_repository_owner():
                 for filename in filenames
                 if Path(filename).suffix.lower() in customer_suffixes
             )
-    # The verifier is the sole intentional compatibility boundary: old signed
-    # releases must remain verifiable after the organization rename.
-    checked.discard(REPO_ROOT / "deploy" / "verify-release.sh")
-
     cohort = tomllib.loads((REPO_ROOT / "release-cohort.toml").read_text(encoding="utf-8"))
     checked.update(
         REPO_ROOT / item["path"] / "pyproject.toml"
@@ -1242,10 +1262,12 @@ def test_customer_surfaces_do_not_reference_the_retired_repository_owner():
         REPO_ROOT / "packages" / "maverick-mcp" / "maverick_mcp" / "publish.py"
     ).read_text(encoding="utf-8")
     assert (
-        'DEFAULT_REPO_URL = "https://github.com/Daybreak-AI-Labs/Lightwork"'
+        'DEFAULT_REPO_URL = "https://github.com/Daybreak-AI-Labs/LightworkOS"'
         in mcp_publish
     )
 
+    # The retired owner, and the repository's previous name.
+    retired = re.compile(r"day-ai-labs|daybreak-ai-labs/lightwork(?!os)")
     legacy_hits = {
         path.relative_to(REPO_ROOT).as_posix(): [
             line_number
@@ -1253,11 +1275,12 @@ def test_customer_surfaces_do_not_reference_the_retired_repository_owner():
                 path.read_text(encoding="utf-8", errors="replace").splitlines(),
                 start=1,
             )
-            if "day-ai-labs" in line.casefold()
+            if retired.search(line.casefold())
         ]
         for path in checked
-        if "day-ai-labs"
-        in path.read_text(encoding="utf-8", errors="replace").casefold()
+        if retired.search(
+            path.read_text(encoding="utf-8", errors="replace").casefold()
+        )
     }
     assert not legacy_hits, legacy_hits
 
