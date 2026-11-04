@@ -1,8 +1,7 @@
 """Finance platform controls — the governance wrapper for the CFO-office suite.
 
-Per ``docs/proposals/finance-agent-suite.md``, the product is *not* the finance
-agents (competent finance models are commodity) — it is the **governance
-wrapper**: segregation of duties, maker-checker / dollar-threshold approvals, and
+The product is *not* the finance agents (competent finance models are
+commodity) — it is the **governance wrapper**: segregation of duties, maker-checker / dollar-threshold approvals, and
 a tamper-evident book of record, enforced by the platform. This subpackage holds
 the finance-specific platform pieces that sit on top of the already-shipped
 primitives (``governance``, ``capability``, ``audit``, ``assessment``):

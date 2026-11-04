@@ -181,7 +181,7 @@ def _build_shield() -> Any | None:
     shield = _with_cascade(shield)
     # Agent compartments: wrap the single swarm-shared shield with a run-scoped
     # threat ledger so a block by any agent immunizes the rest of the swarm for
-    # the run (docs/proposals/agent-compartments.md). Opt-in, fail-open.
+    # the run. Opt-in, fail-open.
     try:
         from maverick_shield.compartment import (
             ImmunizingShield,

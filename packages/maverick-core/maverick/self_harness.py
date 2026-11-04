@@ -138,8 +138,8 @@ def _store_path() -> Path:
 
 def _world_routed(p: Path) -> bool:
     """True when ``p`` is the DEFAULT store location and the operator selected
-    the world learning store (``[self_harness] store = "world"`` -- phase 1 of
-    docs/proposals/fleet-learning-state.md). An EXPLICIT non-default path
+    the world learning store (``[self_harness] store = "world"``). An EXPLICIT
+    non-default path
     always means the file store at that path, so tests and tenant redirection
     are byte-for-byte unchanged."""
     try:

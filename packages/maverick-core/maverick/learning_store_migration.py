@@ -1,8 +1,7 @@
 """One-way move of this host's FILE learning stores into the shared WORLD store.
 
 The work behind ``maverick self-harness migrate-store`` (for
-``[self_harness] store = "world"``; docs/proposals/fleet-learning-state.md,
-phase 1), shared with the dashboard's Settings > Maintenance control.
+``[self_harness] store = "world"``), shared with the dashboard's Settings > Maintenance control.
 Idempotent and fleet-safe: existing world entries win, file-only keys import,
 and a conflicting addenda block merges line-by-line under the normal cap. The
 routed store is verified to serve every imported key before the files are

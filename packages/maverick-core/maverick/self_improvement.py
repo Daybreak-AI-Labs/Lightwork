@@ -235,7 +235,7 @@ class PromotionRecord:
     rolled_back: bool = False
     rolled_back_at: float | None = None
     # Signature material so a THIRD PARTY can re-verify the promotion from the
-    # ledger file alone (see benchmarks/audit_ledger.py). All default to None so
+    # ledger file alone. All default to None so
     # a ledger written before this field existed still loads, and a promotion
     # with no cryptographic approval (dev/community path) records them as None --
     # i.e. this is purely additive and backward-compatible.

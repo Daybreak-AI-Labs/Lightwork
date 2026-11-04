@@ -514,8 +514,7 @@ _FACTS_TRUST_MIGRATION: list[str] = [
     "ALTER TABLE facts ADD COLUMN IF NOT EXISTS sensitivity TEXT NOT NULL DEFAULT 'internal';",
 ]
 
-# v25 fleet learning store (docs/proposals/fleet-learning-state.md, phase 1):
-# the self-harness learning stores as shared tables so a multi-host fleet
+# v25 fleet learning store: the self-harness learning stores as shared tables so a multi-host fleet
 # learns as one. Additive CREATE IF NOT EXISTS -- passes the
 # migration-governance additive-only gate.
 _HARNESS_STORE_MIGRATION: list[str] = [

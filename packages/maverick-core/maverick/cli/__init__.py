@@ -2000,8 +2000,7 @@ def harness_transfer(source: str, targets: tuple[str, ...], force: bool) -> None
 @harness.command("migrate-store")
 def harness_migrate_store() -> None:
     """Import this host's FILE learning stores into the shared WORLD database
-    — the one-way migration for [self_harness] store = "world"
-    (docs/proposals/fleet-learning-state.md, phase 1). Idempotent and
+    — the one-way migration for [self_harness] store = "world". Idempotent and
     fleet-safe: existing world entries win, file-only keys import, and a
     conflicting addenda block merges line-by-line under the normal cap.
     Verifies the routed store serves every imported key, then renames the

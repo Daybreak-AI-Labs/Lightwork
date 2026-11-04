@@ -65,9 +65,9 @@ log = logging.getLogger(__name__)
 # v1 plugins remain loadable through the deprecation window below.
 MAVERICK_API_VERSION = "2"
 
-# Majors the kernel still loads. v1 stays supported for one minor release
-# (the RFC 0001 deprecation window) — a v1 plugin loads with a warning, a
-# declared v3+ plugin is refused (forward-incompatible).
+# Majors the kernel loads. v1 manifests are deprecated (see
+# maverick.deprecations) — a v1 plugin loads with a warning, a declared v3+
+# plugin is refused (forward-incompatible).
 SUPPORTED_API_MAJORS = (1, 2)
 
 

@@ -91,11 +91,8 @@ The local archive confirmation marker is checksummed and durably revoked before
 resumed revalidation, but it is not a signed, externally anchored, expiring
 promotion receipt. Adoption therefore remains an explicit operator action.
 
-These controls establish protocol behavior. They do not establish a
-"beyond-SOTA" result. That claim requires an equal-budget, multi-seed comparison
-against the strongest applicable baselines on a temporal sealed holdout, with a
-pre-registered margin and no safety regression. See
-`docs/research/2026-07-14-risk-limited-dgm-self-learning.md`.
+These controls establish protocol behavior, not a measured improvement over
+other methods.
 
 ## Evaluation execution evidence
 

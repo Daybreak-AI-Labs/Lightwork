@@ -1,7 +1,6 @@
 """World-DB backend for the self-harness learning stores (fleet-shared state).
 
-Phase 1 of ``docs/proposals/fleet-learning-state.md``: the three LEARNING
-stores -- the addenda map, the provenance/outcome line-meta sidecar, and the
+The three LEARNING stores -- the addenda map, the provenance/outcome line-meta sidecar, and the
 transfer tried-memory -- can live as world-database tables instead of per-host
 JSON files, so a fleet spanning hosts shares one learning state (transfer
 sweeps see every host's guidance, outcome evidence aggregates, and two hosts

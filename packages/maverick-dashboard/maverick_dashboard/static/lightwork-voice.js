@@ -11,8 +11,7 @@
  *   3. DELIVERY — speak sentence-by-sentence (also dodges Chrome's
  *      long-utterance cutoff) at a slightly brisk, natural rate.
  *
- * Twin of the concierge's concierge-voice.js — the standalone agents ship
- * their own copy so each SKU stays self-contained. Vanilla JS, no deps.
+ * Vanilla JS, no deps.
  */
 window.lwVoice = (function () {
   'use strict';

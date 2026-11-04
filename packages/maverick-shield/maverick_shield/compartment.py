@@ -6,8 +6,7 @@ Lightwork runs many agents off ONE shared Shield instance
 function -- so a payload one agent's scan blocked is re-derived from scratch by
 the next agent, and nothing carries "I already caught this" across the swarm.
 
-This module adds the first compartment mechanism: *immunity* (Rung 0 of the
-containment ladder; see ``docs/proposals/agent-compartments.md``). When any
+This module adds the first compartment mechanism: *immunity*. When any
 agent's scan BLOCKS, the offending payload's normalized fingerprint is recorded
 in a run-scoped ``ThreatLedger``. Because the ledger lives inside the single
 shared shield, every later scan -- by any agent, including ones spawned

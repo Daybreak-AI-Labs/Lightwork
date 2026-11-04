@@ -73,8 +73,8 @@ def _redact_provider_text(value: object) -> str | None:
 
 def _world_corpus_kind(path: str | Path) -> str | None:
     """Which world-corpus family a path denotes when the operator selected
-    the world learning store (``[self_harness] store = "world"`` -- phase 2 of
-    docs/proposals/fleet-learning-state.md): the configured ``eval_corpus``
+    the world learning store (``[self_harness] store = "world"``): the
+    configured ``eval_corpus``
     path is ``"live"``, its harvest sidecars ``"pending"``/``"rejected"``.
     ``None`` (file semantics, byte-identical) for any other path or when the
     store is files -- so tests and ad-hoc paths are unchanged."""

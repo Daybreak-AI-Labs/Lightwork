@@ -2,8 +2,7 @@
 
 The data half of a watch complication/glance: one **tiny, fixed-shape**
 payload sized for a watch face — active/today counts, today's spend, and the
-last terminal result — computed in one cheap pass. The watchOS client
-(``apps/watch-glance/``, SwiftUI scaffold) renders exactly this shape from
+last terminal result — computed in one cheap pass and served at
 ``GET /api/v1/glance``; anything fancier belongs on the phone/dashboard.
 
 Pure over an injected world (+ the usage ledger for spend); every field is

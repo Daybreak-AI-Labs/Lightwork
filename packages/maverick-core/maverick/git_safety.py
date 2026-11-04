@@ -26,8 +26,8 @@ on the host with none of these protections, which allowed host-side code
 execution through git and secret leakage into the child environment.
 
 Known limits: this is a static scan of what git will read, not a sandbox. The
-real fix is to run these git calls through `sandbox.exec()` (see
-docs/proposals/coding-mode-sandbox-routing.md). Until then a workdir whose git
+real fix is to run these git calls through `sandbox.exec()`. Until then a
+workdir whose git
 settings define a filter at all -- git-lfs included -- is refused, because the
 host cannot tell a legitimate clean/smudge command from a planted one.
 """

@@ -267,17 +267,17 @@ class IncomingMessage:
 Handler = Callable[[IncomingMessage], Awaitable[str]]
 """A handler takes a normalized message and returns the agent's reply.
 
-SDK v2: a handler may instead return a :class:`Reply` (structured text +
-attachments + thread ref). Bare ``str`` returns stay supported through the
-:func:`as_reply` shim for one minor release (RFC 0001 C2); adapters route
-results through :meth:`Channel.dispatch` / :meth:`Channel.dispatch_text`
-so both contracts work everywhere.
+A handler returns a :class:`Reply` (structured text + attachments + thread
+ref). A bare ``str`` return is deprecated (see ``maverick.deprecations``,
+``channels.str_handler``) and is still wrapped by :func:`as_reply`; adapters
+route results through :meth:`Channel.dispatch` / :meth:`Channel.dispatch_text`
+so both forms work everywhere.
 """
 
 
 @dataclass
 class Reply:
-    """SDK v2 structured handler reply (RFC 0001 C2).
+    """Structured handler reply.
 
     ``attachments`` are local file paths the adapter may ship when its
     platform can (adapters without a file API drop them with a debug note —
@@ -291,10 +291,10 @@ class Reply:
 
 
 def as_reply(result: Reply | str) -> Reply:
-    """Normalize a handler result to :class:`Reply` (the v1->v2 shim).
+    """Normalize a handler result to :class:`Reply`.
 
-    Bare ``str`` is the v1 contract; it remains accepted (wrapped into a
-    text-only Reply) for the RFC 0001 deprecation window.
+    A bare ``str`` is the deprecated form; it is wrapped into a text-only
+    Reply until its removal version in ``maverick.deprecations``.
     """
     if isinstance(result, Reply):
         return result

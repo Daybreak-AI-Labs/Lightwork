@@ -3,8 +3,7 @@
 Each `*.ndjson` file here is the fixed, held-out **anchor** for one evaluator
 role (the file stem is the role, e.g. `paper_reviewer.ndjson`). It is the
 ground truth a learned evaluator must agree with before it can be promoted over
-the incumbent — see `maverick.evaluator_evolution` and the design note in
-[`docs/proposals/evaluator-co-evolution.md`](../../../../docs/proposals/evaluator-co-evolution.md).
+the incumbent — see `maverick.evaluator_evolution`.
 
 One JSON object per line:
 
@@ -35,7 +34,7 @@ Missing locks, malformed or empty anchor files, unregistered roles, and edits to
 any released evaluator-visible field fail closed before anchor scoring.
 
 The repository ships `self_harness_protocol_v1.ndjson`, a balanced synthetic
-regression anchor for the F08 evaluator-boundary protocol. It makes the lock and
+regression anchor for the self-harness evaluator boundary. It makes the lock and
 CI path non-vacuous and reproducible in every checkout. It is not customer,
 provider, regulator, or independently administered ground truth, and passing it
 does not qualify a production evaluator. Deployment-specific final anchors must

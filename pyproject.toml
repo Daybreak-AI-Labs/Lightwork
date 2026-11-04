@@ -122,7 +122,7 @@ markers = [
     "heavy_concurrency: throughput/contention tests (queue soak, discovery estate runner) that must not share the box with a second xdist worker -- CI runs them in a serial phase after the parallel pass",
 ]
 # Put the repo root (rootdir) on sys.path so cross-package test imports like
-# `from benchmarks.swe_bench import ...` resolve regardless of the invocation
-# cwd. Without this the maverick-core suite only collected from the repo root
-# and ModuleNotFound'd when run from inside packages/maverick-core (#599).
+# `from test_support import ...` resolve regardless of the invocation cwd, so
+# the maverick-core suite also collects when run from inside
+# packages/maverick-core.
 pythonpath = ["."]

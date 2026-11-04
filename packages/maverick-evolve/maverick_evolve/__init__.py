@@ -1,7 +1,7 @@
-"""Governed self-evolution for Lightwork (Stages 0-2: eval, archive, search).
+"""Governed self-evolution for Lightwork: evaluation, archive and search.
 
-Code self-modification is deliberately NOT here -- see the package README and
-docs/research/. Everything in this package is opt-in and pure/DI so it is
+Code self-modification is deliberately NOT here -- see the package README.
+Everything in this package is opt-in and pure/DI so it is
 testable without a live model.
 """
 from __future__ import annotations

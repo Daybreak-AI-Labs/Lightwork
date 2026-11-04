@@ -8,8 +8,7 @@ L2-regularised logistic regression over :func:`maverick_shield.probe_model.probe
 Deliberately pure-Python / stdlib-only: this is an OFFLINE dev tool, never
 imported by the kernel at runtime, and the project ships no numpy/sklearn. It is
 fast enough for the in-repo corpora and a worked example; a production run over
-the large public corpora (see ``docs/research/shield-model-recommendation.md``)
-can reuse this exact code or export the same JSON shape from a heavier trainer.
+the large public corpora can reuse this exact code or export the same JSON shape from a heavier trainer.
 
 Nothing here ships a model ON by default -- the artifact is only loaded when an
 operator points ``[shield] probe_model`` at it. The cascade still ensembles it
