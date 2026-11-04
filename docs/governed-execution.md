@@ -151,13 +151,13 @@ If the carried namespace would grow past `max_state_bytes`, the statement is
 refused *after* it ran (the effect already happened, and the record says so)
 and the previous state is left unchanged.
 
-### No tool bridge in v1
+### No tool bridge
 
 The kernel gets plain Python and nothing else. A kernel that could reach the
 `ToolRegistry` would dispatch tools outside `tool_authz.authorize` —
 unauthorized, unpriced, and invisible to the dispatch-contract CI gate that
-fails the build on exactly that pattern. Tool bridging is future work, and it
-has to route every call *through* the authorization seam, not around it.
+fails the build on exactly that pattern. Any tool bridge would have to route
+every call *through* the authorization seam, not around it.
 
 ### Where it lands on disk
 

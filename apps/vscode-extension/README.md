@@ -72,8 +72,8 @@ If local commands fail, verify the selected folder and CLI installation, then
 inspect recent runs before restarting paid work. If dashboard access fails, test
 or repair its connection; denied or changed connections discard private views.
 SSE streams drain replay history, reconnect from the last accepted cursor, and
-require terminal acknowledgement. Streaming is implemented; plan-tree and inline
-approval interfaces remain future work.
+require terminal acknowledgement. The extension has no plan-tree or inline
+approval interface.
 
 Python/TypeScript syntax and static review do not qualify VS Code extension-host
 behavior; the regression tests need a VS Code extension host to run. See the

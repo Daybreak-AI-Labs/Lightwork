@@ -333,10 +333,9 @@ tenant's data cannot leak to another. When enabled, each channel user is
 isolated into their own tenant. Tenant `t`'s data lives under
 `~/.maverick/tenants/<t>/...` instead of the legacy `~/.maverick/...` root.
 
-This increment routes the **cross-session memory** store, the **usage ledger**
-(quotas), and other tenant-aware stores through the tenant-aware path resolver.
-(The `maverick.paths` docstring notes the world model and audit log are migrated
-in follow-on increments — see *Gotchas*.)
+The **cross-session memory** store, the **usage ledger** (quotas), the world
+model, the audit log and other tenant-aware stores resolve their paths through
+the tenant-aware path resolver.
 
 **config.toml**
 

@@ -7872,7 +7872,7 @@
       "path": "packages/maverick-core/maverick/paths.py",
       "contract": "storage_primitive",
       "owner": "packages/maverick-core/maverick/paths.py",
-      "purpose": "Tenant-aware data paths \u2014 the P1 multi-tenancy primitive.",
+      "purpose": "Tenant-aware data paths \u2014 the multi-tenancy primitive.",
       "referenced_store_owners": [],
       "review": "module purpose and persistence seam read; contract-family classification (not every operation tested) Tenant lifecycle recovery review: installation-wide immutable claims and deletion tombstones are protected anti-reuse authority, outside purged tenant directories. Exact snapshot comparison, atomic no-replace restore publication and monotonic rollback preserve current barriers; bootstrap retains bytes under startup hold. No restored absence grants current admission.",
       "governed_namespaces": [],

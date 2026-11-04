@@ -51,7 +51,7 @@ xAI also publishes short- and long-context standard rates. The same rate card
 uses each model's documented 200K-or-more tier as its flat billing ceiling and
 retains both source tiers in the evidence pack.
 
-## Verification status as of 2026-07-29
+## Verified rows in rate card 2026-07-29.2
 
 Direct current rows are verified for Anthropic Opus 4.5-4.8, Opus 4.8 fast,
 Sonnet 4.6, Haiku 4.5; OpenAI GPT-5.5, GPT-5.4, GPT-5.4 Pro, Mini, and Nano;

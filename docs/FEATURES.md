@@ -71,8 +71,9 @@ catalogue of built features and tools.
   No agent tools execute; request receipts prevent automatic paid replay, and
   authority is rechecked before dispatch/publication. History retention is optional
   and encrypted; connector retrieval,
-  learned memory, actions and voice are unavailable. This increment is untested
-  and does not change legacy administrator access to ordinary task/chat content.
+  learned memory, actions and voice are unavailable. The preview is not
+  qualified for production and does not change legacy administrator access to
+  ordinary task/chat content.
   See [scope and qualification gaps](employee-companions.md).
 
 - **Guided restored-connection review** — recovery uses ordinary outcome,
@@ -372,10 +373,10 @@ Settings and the installation wizard.
   re-dumps the serializable globals), so a side-effecting statement runs
   exactly once — no prelude replay — and values that cannot cross that
   boundary (modules, callables, arbitrary objects) are dropped and **named**
-  in the result and the ledger. No tool bridge in v1, deliberately: a kernel
-  that reached the registry would dispatch outside `tool_authz.authorize`.
+  in the result and the ledger. There is no tool bridge, deliberately: a
+  kernel that reached the registry would dispatch outside `tool_authz.authorize`.
   The module API (`open_session` / `execute` / `transcript` / `close_session`)
-  is the entry point in v1 — no CLI verb, no dashboard page. Documented in
+  is the entry point — no CLI verb, no dashboard page. Documented in
   [`governed-execution.md`](./governed-execution.md).
 - **Governed learning defaults on** — the in-process learning loops are enabled
   on a clean install and can be disabled individually or together from the
@@ -903,8 +904,8 @@ Settings and the installation wizard.
   delivery state with reads used against the cap. Neither page can render
   a questionnaire form token or a response-link token — tests assert it.
 - **Privacy ops record types** (`privacy_ops.py`, `/api/v1/privacy/*`,
-  tabs on `/privacy`; `[privacy_ops] enable`, wizard step) — the "nimble
-  OneTrust" data plane, every engine deterministic and explainable:
+  tabs on `/privacy`; `[privacy_ops] enable`, wizard step) — the privacy
+  operations data plane, every engine deterministic and explainable:
   - *DPA reviews* — clause-by-clause GDPR Art. 28(3) verdicts
     (present/unclear/missing) where every call quotes its matched excerpt;
     inherent risk from the document's declared exposure, residual falls as
@@ -4390,7 +4391,7 @@ and a `maverick_llm_cache_tokens_total` hit-rate metric.
   dashboard runtime overlay (`styles.active`, like plugin toggles — not
   config.toml), set on the page (operator role, validated against the registry).
   Injected in `agent.py` beside the persona block, additive and fail-open.
-  Per-conversation selection + custom styles are the planned follow-ons.
+  There is no per-conversation selection or custom style.
 - **Share links (`/share/<token>`)** — a revocable, expiring, read-only link to a
   goal's deliverable for someone without a dashboard login. v20 `share_links`
   stores only the token's SHA-256 (like a password-reset token), so the DB never
@@ -5086,7 +5087,7 @@ tested without spawning py-spy.
   how much went to **failed** work (effort with no delivered result), how
   concentrated spend is (a Pareto signal), and rule-based observations to act
   on. Deterministic over the world model; read-only.
-- **UX cluster (2028-H1)** — **plan-tree minimap** (`plan_minimap.py` +
+- **Dashboard views and personalization** — **plan-tree minimap** (`plan_minimap.py` +
   `GET /api/v1/goals/{id}/minimap`): a compact glyph-per-node subtree render
   with a depth budget; **multi-tenant overview** (`/tenants/overview`,
   admin-only like `/tenants`): per-tenant goal rollups + today's spend +

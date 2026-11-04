@@ -56,7 +56,7 @@ an RFC link to it.
 | Accepted | Approved for implementation. |
 | Implemented | Shipped; the design moves to [`docs/contracts/`](../contracts/README.md) as a contract document. |
 | Declined | Considered and not adopted. |
-| Closed | Not pursued for now; the RFC records why and when to reopen it. |
+| Closed | Not pursued; the RFC records why and when to reopen it. |
 | Superseded | Replaced by a later RFC, which the status line names. |
 
 Each RFC states its status at the top of the file.
