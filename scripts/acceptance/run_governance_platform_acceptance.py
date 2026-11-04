@@ -80,7 +80,7 @@ SUITES: tuple[AcceptanceSuite, ...] = (
             "packages/maverick-core/tests/test_durable_checkpoint.py",
             "packages/maverick-core/tests/test_orphan_reclaim_tenants.py",
             "packages/maverick-core/tests/test_job_reclaim.py",
-            "packages/maverick-dashboard/tests/test_external_gateway_runtime_pilot.py",
+            "packages/maverick-dashboard/tests/test_external_gateway_runtime.py",
         ),
     ),
     AcceptanceSuite(

@@ -1,3 +1,8 @@
+"""The external runtime gateway's evaluate and execute flows against the real
+dashboard app: runtime allow/deny, immediate reads, previews without effect,
+denied changes without effect, exactly-once parking, human approval, commit,
+commit replay without a second effect, compensation, an outage after the
+effect, and the runtime policy and context binding at commit."""
 from __future__ import annotations
 
 import json
@@ -7,48 +12,12 @@ from fastapi.testclient import TestClient
 from maverick import ai_runtime_guardrails as runtime
 from maverick import external_agents
 from maverick import model_risk_assurance as assurance
-from maverick.external_gateway_runtime_pilot import (
-    READ_RESULT_DIGEST_CONTRACT,
-    ExternalGatewayPilotClient,
-    FaultInjectingPilotTransport,
-    PilotAmbiguousEffect,
-    PilotFaultRule,
-    PilotHTTPResponse,
-    PilotProtocolError,
-    RuntimePolicyAcceptancePilot,
-    RuntimePolicyPilotScenario,
-    read_result_digest,
-)
 from maverick_dashboard.app import app
 
 ASSET_ID = "MAA-" + ("4" * 32)
 ASSET_DIGEST = "5" * 64
 ALLOW_PROBE = "pilot-allow-private-canary"
 DENY_PROBE = "pilot-deny-private-canary"
-
-
-class _ASGITransport:
-    def __init__(self, client: TestClient):
-        self.client = client
-
-    def request(
-        self,
-        method,
-        url,
-        *,
-        headers,
-        body,
-        timeout,
-        max_response_bytes,
-    ):
-        del timeout
-        response = self.client.request(method, url, headers=dict(headers), content=body)
-        assert len(response.content) <= max_response_bytes
-        return PilotHTTPResponse(
-            status_code=response.status_code,
-            headers=dict(response.headers),
-            body=response.content,
-        )
 
 
 class _PilotConnector:
@@ -201,30 +170,6 @@ def pilot_estate(tmp_path, monkeypatch):
     config.reset_config_cache()
 
 
-def _scenario(prefix="acceptance"):
-    return RuntimePolicyPilotScenario(
-        asset_id=ASSET_ID,
-        asset_revision=1,
-        asset_version_digest=ASSET_DIGEST,
-        allow_probe=ALLOW_PROBE,
-        deny_probe=DENY_PROBE,
-        read_request={"connector": "pilot", "op": "get", "path": "/state"},
-        change_request={
-            "connector": "pilot",
-            "op": "patch",
-            "path": "/state",
-            "body": {"state": "changed", "private_marker": "raw-body-canary"},
-        },
-        compensation_request={
-            "connector": "pilot",
-            "op": "patch",
-            "path": "/state",
-            "body": {"state": "baseline", "private_marker": "rollback-canary"},
-        },
-        operation_prefix=prefix,
-    )
-
-
 def _approve(approval_id, _label):
     from maverick.world_model import open_world
 
@@ -236,90 +181,123 @@ def _approve(approval_id, _label):
     )
 
 
-def test_read_result_digest_is_typed_and_canonical():
-    distinct_json_values = ({}, [], False, 0, None, "")
-    digests = {read_result_digest(value) for value in distinct_json_values}
-
-    assert len(digests) == len(distinct_json_values)
-    assert read_result_digest({"a": 1, "b": {"c": [False, None]}}) == (
-        read_result_digest({"b": {"c": [False, None]}, "a": 1})
-    )
+def _gateway(token):
+    return TestClient(app, base_url="http://127.0.0.1"), {"Authorization": f"Bearer {token}"}
 
 
-@pytest.mark.parametrize(
-    "unsupported",
-    (float("nan"), float("inf"), ("not", "json"), object(), {1: "bad-key"}),
-)
-def test_read_result_digest_rejects_non_json_and_non_finite_values(unsupported):
-    with pytest.raises(PilotProtocolError):
-        read_result_digest(unsupported)
+_RUNTIME = {
+    "runtime_asset_id": ASSET_ID,
+    "runtime_asset_revision": 1,
+    "runtime_asset_version_digest": ASSET_DIGEST,
+}
+_READ = {"connector": "pilot", "op": "get", "path": "/state", "detail": ALLOW_PROBE, **_RUNTIME}
+_COMMIT_FIELDS = ("connector", "op", "path", "body", "detail", "runtime_asset_id",
+                  "runtime_asset_revision", "runtime_asset_version_digest")
 
 
-def test_real_gateway_pilot_exercises_retry_ambiguity_idempotency_and_rollback(
-    pilot_estate,
-):
-    admin, connector, token, _ = pilot_estate
-    transport = FaultInjectingPilotTransport(
-        _ASGITransport(TestClient(app, base_url="http://127.0.0.1")),
-        (
-            PilotFaultRule(
-                name="evaluate-outage",
-                method="POST",
-                path_match="/api/v1/external/runtime/evaluate",
-                timing="before",
-            ),
-            PilotFaultRule(
-                name="commit-response-loss",
-                method="POST",
-                path_match="/commit",
-                match_mode="suffix",
-                timing="after",
-            ),
-        ),
-    )
-    client = ExternalGatewayPilotClient(
-        origin="http://localhost",
-        bearer_token=token,
-        transport=transport,
-        sleeper=lambda _seconds: None,
-    )
-    report = RuntimePolicyAcceptancePilot(
-        client,
-        approval_callback=_approve,
-        sleeper=lambda _seconds: None,
-    ).run(_scenario())
+def _change(state, key):
+    return {"connector": "pilot", "op": "patch", "path": "/state",
+            "body": {"state": state, "private_marker": "raw-body-canary"},
+            "detail": ALLOW_PROBE, "idempotency_key": key, **_RUNTIME}
 
-    assert report["summary"] == {
-        "passed": 14,
-        "failed": 0,
-        "pending": 0,
-        "indeterminate": 0,
-    }, json.dumps(report, sort_keys=True)
-    assert report["coverage"] == {
-        "safe_retry_exercised": True,
-        "ambiguous_commit_recovered": True,
-        "exact_park_idempotency_exercised": True,
-        "compensation_exercised": True,
-    }
-    assert report["read_result_digest_contract"] == READ_RESULT_DIGEST_CONTRACT
-    assert transport.triggered == ["evaluate-outage", "commit-response-loss"]
-    assert connector.state == "baseline"
-    assert len(connector.writes) == 2
-    assert [item["body"]["state"] for item in connector.writes] == [
-        "changed",
-        "baseline",
-    ]
-    rendered = json.dumps(report, sort_keys=True)
-    for raw in (
-        token,
-        ALLOW_PROBE,
-        DENY_PROBE,
-        "raw-body-canary",
-        "rollback-canary",
-        "http://localhost",
-    ):
-        assert raw not in rendered
-    assert admin.get("/api/v1/external-agents/pilot-agent").status_code == 200
+
+def _commit(bare, headers, execution_id, request):
+    return bare.post(f"/api/v1/external/executions/{execution_id}/commit", headers=headers,
+                     json={key: request[key] for key in _COMMIT_FIELDS}).json()
+
+
+def _read_state(bare, headers):
+    read = bare.post("/api/v1/external/execute", headers=headers, json=_READ).json()
+    assert read["allowed"] is True and read["status"] == "executed", read
+    return json.loads(read["result"])["state"]
+
+
+def test_runtime_evaluate_follows_the_current_policy(pilot_estate):
+    _, _, token, _ = pilot_estate
+    bare, headers = _gateway(token)
+
+    def evaluate(content):
+        return bare.post("/api/v1/external/runtime/evaluate", headers=headers, json={
+            "stage": "prompt", "content": content, "asset_id": ASSET_ID,
+            "asset_revision": 1, "asset_version_digest": ASSET_DIGEST,
+        }).json()
+
+    assert evaluate(ALLOW_PROBE)["decision"] == "allow"
+    # Evaluation has no effect, so asking again gives the same answer.
+    assert evaluate(ALLOW_PROBE)["decision"] == "allow"
+    assert evaluate(DENY_PROBE)["decision"] != "allow"
+
+
+def test_reads_run_now_while_previews_and_denied_changes_have_no_effect(pilot_estate):
+    _, connector, token, _ = pilot_estate
+    bare, headers = _gateway(token)
+    assert _read_state(bare, headers) == "baseline"
+
+    preview = bare.post("/api/v1/external/execute", headers=headers,
+                        json={**_change("changed", "preview-change"), "preview": True}).json()
+    assert preview["allowed"] is True and preview["rule"] == "preview"
+
+    blocked = bare.post("/api/v1/external/execute", headers=headers,
+                        json={**_change("changed", "blocked-change"), "detail": DENY_PROBE}).json()
+    assert blocked["allowed"] is False and blocked["rule"] == "runtime_guardrail"
+    assert blocked["runtime_guardrail"]["decision"] == "block"
+
+    assert connector.writes == []
+    assert _read_state(bare, headers) == "baseline"
+
+
+def test_a_change_parks_once_commits_once_after_approval_and_can_be_undone(pilot_estate):
+    _, connector, token, _ = pilot_estate
+    bare, headers = _gateway(token)
+    change = _change("changed", "acceptance-change")
+
+    parked = bare.post("/api/v1/external/execute", headers=headers, json=change).json()
+    replay = bare.post("/api/v1/external/execute", headers=headers, json=change).json()
+    assert parked["rule"] == "approval_required" and parked["execution_id"]
+    assert replay["execution_id"] == parked["execution_id"] and replay["duplicate"] is True
+    status = bare.get(f"/api/v1/external/executions/{parked['execution_id']}",
+                      headers=headers).json()
+    assert status["status"] == "pending" and status["approval_status"] == "pending"
+    assert connector.writes == []
+
+    assert _approve(parked["approval_id"], "change") is True
+    status = bare.get(f"/api/v1/external/executions/{parked['execution_id']}",
+                      headers=headers).json()
+    assert status["approval_status"] == "approved"
+    assert _commit(bare, headers, parked["execution_id"], change)["status"] == "executed"
+    # A caller that lost the commit response reads the outcome from the status
+    # route, and committing the same execution again never repeats the effect.
+    status = bare.get(f"/api/v1/external/executions/{parked['execution_id']}",
+                      headers=headers).json()
+    assert status["status"] == "executed"
+    again = _commit(bare, headers, parked["execution_id"], change)
+    assert again["rule"] == "already_finished" and again["status"] == "executed"
+    assert len(connector.writes) == 1
+    assert _read_state(bare, headers) == "changed"
+
+    undo = _change("baseline", "acceptance-compensate")
+    compensation = bare.post("/api/v1/external/execute", headers=headers, json=undo).json()
+    assert compensation["rule"] == "approval_required"
+    assert compensation["execution_id"] != parked["execution_id"]
+    assert _approve(compensation["approval_id"], "compensation") is True
+    assert _commit(bare, headers, compensation["execution_id"], undo)["status"] == "executed"
+    assert [item["body"]["state"] for item in connector.writes] == ["changed", "baseline"]
+    assert _read_state(bare, headers) == "baseline"
+
+
+def test_a_change_waits_for_a_person_and_is_never_approved_for_them(pilot_estate):
+    _, connector, token, _ = pilot_estate
+    bare, headers = _gateway(token)
+    change = _change("changed", "human-boundary-change")
+
+    parked = bare.post("/api/v1/external/execute", headers=headers, json=change).json()
+    assert parked["rule"] == "approval_required"
+    refused = _commit(bare, headers, parked["execution_id"], change)
+    assert refused.get("status") != "executed"
+    status = bare.get(f"/api/v1/external/executions/{parked['execution_id']}",
+                      headers=headers).json()
+    assert status["approval_status"] == "pending"
+    assert connector.writes == []
 
 
 def test_connector_outage_after_effect_stays_indeterminate_and_is_not_retried(
@@ -329,27 +307,19 @@ def test_connector_outage_after_effect_stays_indeterminate_and_is_not_retried(
     _, old_connector, token, governed_rest = pilot_estate
     connector = _PilotConnector(fail_after_change=True)
     monkeypatch.setitem(governed_rest.GOVERNED_REST_FACTORIES, "pilot", lambda: connector)
-    client = ExternalGatewayPilotClient(
-        origin="http://localhost",
-        bearer_token=token,
-        transport=_ASGITransport(TestClient(app, base_url="http://127.0.0.1")),
-        sleeper=lambda _seconds: None,
-    )
-    report = RuntimePolicyAcceptancePilot(
-        client,
-        approval_callback=_approve,
-        sleeper=lambda _seconds: None,
-    ).run(_scenario(prefix="connector-outage"))
+    bare, headers = _gateway(token)
+    change = _change("changed", "connector-outage-change")
 
-    assert old_connector.writes == []
-    assert connector.state == "changed", json.dumps(report, sort_keys=True)
-    assert len(connector.writes) == 1
-    assert report["summary"]["indeterminate"] == 1
-    change = next(item for item in report["events"] if item["name"] == "change_commit")
-    assert change["verdict"] == "indeterminate"
+    parked = bare.post("/api/v1/external/execute", headers=headers, json=change).json()
+    assert _approve(parked["approval_id"], "change") is True
+    committed = _commit(bare, headers, parked["execution_id"], change)
+
     # The gateway records an outage after the effect as indeterminate, not failed.
-    assert change["observed"]["status"] == "indeterminate"
-    assert not any(item["name"].startswith("compensation") for item in report["events"])
+    assert committed["status"] == "indeterminate", committed
+    assert _commit(bare, headers, parked["execution_id"], change).get("status") != "executed"
+    assert old_connector.writes == []
+    assert connector.state == "changed"
+    assert len(connector.writes) == 1
 
 
 def test_commit_rebinds_current_runtime_policy_before_external_effect(
@@ -454,103 +424,3 @@ def test_commit_cannot_swap_the_runtime_context_that_was_approved(pilot_estate):
     assert refused["allowed"] is False
     assert refused["rule"] == "digest_mismatch"
     assert connector.writes == []
-
-
-def test_pilot_stops_pending_without_impersonating_a_human_approver(pilot_estate):
-    _, connector, token, _ = pilot_estate
-    client = ExternalGatewayPilotClient(
-        origin="http://localhost",
-        bearer_token=token,
-        transport=_ASGITransport(TestClient(app, base_url="http://127.0.0.1")),
-        sleeper=lambda _seconds: None,
-    )
-    report = RuntimePolicyAcceptancePilot(client).run(
-        _scenario(prefix="human-boundary")
-    )
-
-    assert report["summary"]["pending"] == 1
-    assert connector.writes == []
-    approval = next(item for item in report["events"] if item["name"] == "change_approval")
-    assert approval["verdict"] == "pending"
-
-
-def test_commit_and_status_outage_remains_ambiguous_without_blind_retry():
-    class OutageTransport:
-        def __init__(self):
-            self.calls = []
-
-        def request(self, method, url, **_kwargs):
-            self.calls.append((method, url))
-            raise ConnectionError("unavailable")
-
-    transport = OutageTransport()
-    client = ExternalGatewayPilotClient(
-        origin="http://localhost",
-        bearer_token="opaque-pilot-token",
-        transport=transport,
-        max_attempts=2,
-        sleeper=lambda _seconds: None,
-    )
-    with pytest.raises(PilotAmbiguousEffect):
-        client.commit(
-            "execution-1",
-            {"connector": "pilot", "op": "patch", "path": "/state", "body": {}},
-        )
-
-    commit_calls = [url for method, url in transport.calls if method == "POST"]
-    status_calls = [url for method, url in transport.calls if method == "GET"]
-    assert len(commit_calls) == 1
-    assert len(status_calls) == 2
-
-
-@pytest.mark.parametrize("execution_id", ("_leading-symbol", "-leading-symbol"))
-def test_client_accepts_every_urlsafe_execution_id_the_gateway_can_generate(
-    execution_id,
-):
-    class StatusTransport:
-        def __init__(self):
-            self.urls = []
-
-        def request(self, method, url, **_kwargs):
-            self.urls.append((method, url))
-            payload = (
-                {"execution_id": execution_id, "status": "executed"}
-                if method == "POST"
-                else {
-                    "execution_id": execution_id,
-                    "status": "pending",
-                    "approval_status": "pending",
-                }
-            )
-            return PilotHTTPResponse(
-                status_code=200,
-                headers={"content-type": "application/json"},
-                body=json.dumps(payload).encode("utf-8"),
-            )
-
-    transport = StatusTransport()
-    client = ExternalGatewayPilotClient(
-        origin="http://localhost",
-        bearer_token="opaque-pilot-token",
-        transport=transport,
-        sleeper=lambda _seconds: None,
-    )
-
-    status = client.execution_status(execution_id)
-    committed = client.commit(
-        execution_id,
-        {"connector": "pilot", "op": "patch", "path": "/state", "body": {}},
-    )
-
-    assert status.value["execution_id"] == execution_id
-    assert committed.value["status"] == "executed"
-    assert transport.urls == [
-        (
-            "GET",
-            f"http://localhost/api/v1/external/executions/{execution_id}",
-        ),
-        (
-            "POST",
-            f"http://localhost/api/v1/external/executions/{execution_id}/commit",
-        ),
-    ]

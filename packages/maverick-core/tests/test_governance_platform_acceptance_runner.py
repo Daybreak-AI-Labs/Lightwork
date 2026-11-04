@@ -106,7 +106,7 @@ def test_allowlist_resolves_inside_the_repository_and_rejects_unknown_category()
     assert all(len(digest) == 64 for digest in manifests.values())
     recovery = next(suite for suite in runner.SUITES if suite.category == "recovery")
     assert (
-        "packages/maverick-dashboard/tests/test_external_gateway_runtime_pilot.py"
+        "packages/maverick-dashboard/tests/test_external_gateway_runtime.py"
         in recovery.test_paths
     )
 

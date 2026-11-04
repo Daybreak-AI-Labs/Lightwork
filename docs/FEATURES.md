@@ -1568,12 +1568,12 @@ Settings and the installation wizard.
   composes operational policy, Shield, secret/PII inspection and exact approved
   asset context into allow/review/restrict/block decisions. Raw prompt and
   output content stays transient; durable receipts are digest-only and feed
-  normalized violations into dynamic risk. The executable
-  `external_gateway_runtime_pilot.py` exercises authenticated allow/deny,
-  preview/enforced no-change, human approval, retry, response-loss recovery,
-  indeterminate after-effect outages and separately approved compensation.
-  Its shipped acceptance estate is isolated and local; a live third-party
-  gateway, agent, MCP or Copilot pilot remains deployment work.
+  normalized violations into dynamic risk. The dashboard tests exercise the
+  authenticated evaluate and execute routes for allow/deny, preview and
+  enforced no-change, human approval, exactly-once commit, indeterminate
+  after-effect outages and separately approved compensation against a local
+  connector; a live third-party gateway, agent, MCP or Copilot deployment is
+  not tested.
 - **AI explanation review** (`ai_explainability.py`, assurance API/cockpit,
   opt-in `[ai_explainability] enable`) — admits closed native, SHAP, LIME,
   Captum, Alibi and counterfactual explanation receipts with exact model/input

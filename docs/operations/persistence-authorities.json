@@ -183,7 +183,7 @@
   },
   "counts": {
     "governed": 141,
-    "artifact": 52,
+    "artifact": 51,
     "a2a": 4,
     "preferences": 7,
     "learning": 60,
@@ -5689,46 +5689,6 @@
           "function": "_sidecar_locked",
           "kind": "cross_process_lock",
           "expression": "cross_process_lock(registry_path())"
-        }
-      ]
-    },
-    {
-      "path": "packages/maverick-core/maverick/external_gateway_runtime_pilot.py",
-      "contract": "artifact",
-      "owner": "packages/maverick-core/maverick/external_gateway_runtime_pilot.py",
-      "purpose": "Executable acceptance pilot for the authenticated external runtime gateway.",
-      "referenced_store_owners": [],
-      "review": "module purpose and persistence seam read; contract-family classification (not every operation tested)",
-      "governed_namespaces": [],
-      "literal_path_hints": [],
-      "observed_mechanism_markers": {
-        "atomic_replace": 2,
-        "revision": 1
-      },
-      "source_sites": [
-        {
-          "line": 1217,
-          "function": "run",
-          "kind": "commit",
-          "expression": "self._client.commit(execution_id, change_request)"
-        },
-        {
-          "line": 1196,
-          "function": "run",
-          "kind": "commit",
-          "expression": "self._client.commit(execution_id, change_request)"
-        },
-        {
-          "line": 1309,
-          "function": "run",
-          "kind": "commit",
-          "expression": "self._client.commit(compensation_execution, compensation_request)"
-        },
-        {
-          "line": 1422,
-          "function": "main",
-          "kind": "atomic_write_text",
-          "expression": "atomic_write_text(args.evidence, rendered)"
         }
       ]
     },
