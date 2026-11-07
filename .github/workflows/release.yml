@@ -413,7 +413,7 @@ jobs:
         with:
           ref: ${{ needs.validate-release-tag.outputs.sha }}
           persist-credentials: false
-      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
       - name: Verify the published release without mutating it
         env:
           GH_TOKEN: ${{ github.token }}
@@ -720,7 +720,7 @@ jobs:
           PY
           (cd dist && sha256sum --check "maverick-release-${RELEASE_TAG}.sha256")
       - name: Install cosign
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
       - name: Sign the immutable container digest (keyless, Sigstore)
         env:
           CONTAINER_DIGEST: ${{ needs.docker-image.outputs.digest }}
